@@ -472,3 +472,17 @@ async def _seed_vessel_type_data(db):
         res = await db.execute(select(VesselTypeDict).where(VesselTypeDict.code == td["code"]))
         if not res.scalar_one_or_none():
             db.add(VesselTypeDict(**td, status=1, audit_status=1))
+
+
+# ── IDE Debug 入口 ──────────────────────────────────────────────────────────
+# PyCharm / VSCode 直接运行 main.py 时走这里
+# 等价于: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,           # 修改代码自动重载
+        log_level="debug",     # 详细日志，方便 debug
+    )
