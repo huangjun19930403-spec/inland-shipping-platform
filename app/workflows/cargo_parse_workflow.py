@@ -1,0 +1,138 @@
+"""
+货源解析工作流
+职责：端到端编排货运文本解析的完整流程
+包括：调用Agent解析 → 持久化AI结果 → 更新原始消息状态
+"""
+import logging
+from dataclasses import asdict
+from typing import Any, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.ai.base import BaseWorkflow, WorkflowResult
+from app.agents.cargo_agent import CargoAgent, CargoParseOutput
+from app.models.cargo import CargoAiParseResult, CargoRawMessage
+from app.repositories.cargo_repository import CargoRepository
+
+logger = logging.getLogger(__name__)
+
+
+class CargoParseWorkflow(BaseWorkflow):
+    """
+    货源解析工作流
+
+    Stage 1: 更新原始消息状态为 PARSING
+    Stage 2: 调用 CargoAgent 执行AI解析和实体匹配
+    Stage 3: 将解析结果写入 CargoAiParseResult
+    Stage 4: 更新原始消息状态为 PARSED 或 PARSE_FAILED
+
+    此Workflow是系统中AI与持久化层的唯一交汇点。
+    """
+
+    name = "cargo_parse_workflow"
+    description = "端到端货运文本解析工作流"
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+        self._cargo_repo = CargoRepository(db)
+        self._cargo_agent = CargoAgent(db)
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowResult:
+        """
+        Args:
+            context: {
+                "raw_message_id": int,
+                "raw_text": str
+            }
+
+        Returns:
+            WorkflowResult.result = {"parse_result_id": int, "overall_confidence": int}
+        """
+        raw_message_id = context.get("raw_message_id")
+        raw_text = context.get("raw_text", "")
+        stage_results: dict[str, Any] = {}
+
+        # Stage 1: 标记解析中
+        logger.info(f"[CargoParseWorkflow] START msg_id={raw_message_id}")
+        await self._cargo_repo.update_parse_status(raw_message_id, "PARSING")
+        await self._cargo_repo.save()
+        stage_results["stage1"] = "status → PARSING"
+
+        # Stage 2: AI Agent解析
+        agent_result = await self._cargo_agent.run({"raw_text": raw_text})
+        stage_results["stage2"] = {
+            "success": agent_result.success,
+            "steps": agent_result.steps,
+        }
+
+        if not agent_result.success:
+            await self._cargo_repo.update_parse_status(raw_message_id, "PARSE_FAILED")
+            await self._cargo_repo.save()
+            return WorkflowResult(
+                success=False,
+                error=agent_result.error,
+                stage_results=stage_results,
+            )
+
+        output: CargoParseOutput = agent_result.output
+
+        # Stage 3: 持久化AI解析结果
+        candidates_data = {
+            "origin_candidates": [
+                {"id": c.entity_id, "name": c.entity_name, "score": c.match_score}
+                for c in output.origin_candidates
+            ],
+            "dest_candidates": [
+                {"id": c.entity_id, "name": c.entity_name, "score": c.match_score}
+                for c in output.dest_candidates
+            ],
+            "commodity_candidates": [
+                {"id": c.entity_id, "name": c.entity_name, "score": c.match_score}
+                for c in output.commodity_candidates
+            ],
+        }
+
+        import json
+        parse_result = CargoAiParseResult(
+            raw_message_id=raw_message_id,
+            origin_text=output.origin_text,
+            destination_text=output.destination_text,
+            commodity_text=output.commodity_text,
+            tonnage=output.tonnage,
+            loading_date=output.loading_date,
+            freight_price=output.freight_price,
+            contact=output.contact,
+            remarks=output.remarks,
+            origin_node_id=output.origin_node_id,
+            dest_node_id=output.dest_node_id,
+            commodity_standard_id=output.commodity_standard_id,
+            origin_confidence=output.origin_confidence,
+            dest_confidence=output.dest_confidence,
+            commodity_confidence=output.commodity_confidence,
+            overall_confidence=output.overall_confidence,
+            candidates_json=json.dumps(candidates_data, ensure_ascii=False),
+            status="PENDING_CONFIRM",
+        )
+
+        saved = await self._cargo_repo.create_parse_result(parse_result)
+
+        # Stage 4: 更新状态为已解析
+        await self._cargo_repo.update_parse_status(raw_message_id, "PARSED")
+        await self._cargo_repo.save()
+
+        stage_results["stage3"] = f"parse_result_id={saved.id}"
+        stage_results["stage4"] = "status → PARSED"
+
+        logger.info(
+            f"[CargoParseWorkflow] DONE msg_id={raw_message_id} "
+            f"result_id={saved.id} confidence={output.overall_confidence}"
+        )
+
+        return WorkflowResult(
+            success=True,
+            result={
+                "parse_result_id": saved.id,
+                "overall_confidence": output.overall_confidence,
+            },
+            stage_results=stage_results,
+        )

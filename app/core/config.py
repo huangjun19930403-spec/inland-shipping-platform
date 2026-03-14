@@ -6,7 +6,7 @@ import os
 class Settings(BaseSettings):
     # 应用基础配置
     APP_NAME: str = "中国内河航运数据采集与分析平台"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "2.0.0"
     DEBUG: bool = True
 
     # 数据库配置
@@ -22,8 +22,14 @@ class Settings(BaseSettings):
     AI_MODEL: str = "claude-sonnet-4-6"
     AI_CONFIDENCE_THRESHOLD: int = 60  # AI解析置信度阈值
 
-    # 定时任务配置
-    STATS_CRON_HOUR: int = 2  # 每日凌晨2点执行统计聚合
+    # Celery配置（生产环境需Redis）
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+
+    # 定时任务配置（Celery Beat crontab格式）
+    STATS_CRON_SCHEDULE: str = "0 2 * * *"  # 每日凌晨2点
+    # 兼容旧版APScheduler配置
+    STATS_CRON_HOUR: int = 2
     STATS_CRON_MINUTE: int = 0
 
     # CORS配置

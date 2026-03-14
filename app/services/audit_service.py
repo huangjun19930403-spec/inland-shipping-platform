@@ -1,323 +1,163 @@
-"""审核服务 - 统一处理所有审核流程"""
-from typing import Optional, List
-from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
-from fastapi import HTTPException, status
+"""
+审核业务服务层
+职责：统一审核流程、审批/驳回逻辑编排
+规则：通过Repository访问数据，不直接操作SQLAlchemy Session
+"""
+import logging
+from typing import Optional
 
-from app.models.audit import AuditRecord
-from app.schemas.common import PageResult
+from app.core.exceptions import NotFoundError, ValidationError, PermissionError
+from app.repositories.audit_repository import AuditRepository
+from app.repositories.cargo_repository import CargoRepository
+from app.repositories.address_repository import AddressRepository
 
-
-async def create_audit_record(
-    db: AsyncSession,
-    target_type: str,
-    target_id: int,
-    target_name: str,
-    action: str,
-    before_data: Optional[dict],
-    after_data: Optional[dict],
-    submitter_id: int,
-    submitter_name: str,
-) -> AuditRecord:
-    """创建一条审核记录"""
-    record = AuditRecord(
-        target_type=target_type,
-        target_id=target_id,
-        target_name=target_name,
-        action=action,
-        before_data=before_data,
-        after_data=after_data,
-        audit_result="PENDING",
-        submitter_id=submitter_id,
-        submitter_name=submitter_name,
-        submitted_at=datetime.utcnow(),
-    )
-    db.add(record)
-    await db.flush()
-    return record
+logger = logging.getLogger(__name__)
 
 
-async def check_can_audit(submitter_id: int, auditor_id: int, user_roles: List[str]) -> bool:
-    """检查是否可以审核：SUPER_ADMIN 可以自审，其他人不能审核自己提交的"""
-    if "SUPER_ADMIN" in user_roles:
-        return True
-    if submitter_id == auditor_id:
-        return False
-    return True
+class AuditService:
+    """审核业务服务"""
 
+    def __init__(
+        self,
+        audit_repo: AuditRepository,
+        cargo_repo: CargoRepository,
+        address_repo: AddressRepository,
+    ) -> None:
+        self._audit = audit_repo
+        self._cargo = cargo_repo
+        self._address = address_repo
 
-async def approve(
-    db: AsyncSession,
-    audit_record_id: int,
-    auditor_id: int,
-    auditor_name: str,
-    remark: str = "",
-) -> AuditRecord:
-    """审批通过"""
-    result = await db.execute(select(AuditRecord).where(AuditRecord.id == audit_record_id))
-    record = result.scalar_one_or_none()
-    if not record:
-        raise HTTPException(status_code=404, detail="审核记录不存在")
-    if record.audit_result != "PENDING":
-        raise HTTPException(status_code=400, detail="该审核记录已处理")
+    # ─────────────────────────────────────────────────
+    # 审核列表
+    # ─────────────────────────────────────────────────
 
-    record.audit_result = "APPROVED"
-    record.auditor_id = auditor_id
-    record.auditor_name = auditor_name
-    record.audit_remark = remark
-    record.audited_at = datetime.utcnow()
-
-    # 根据审核类型更新对应实体
-    await _apply_approval(db, record)
-
-    await db.flush()
-    return record
-
-
-async def reject(
-    db: AsyncSession,
-    audit_record_id: int,
-    auditor_id: int,
-    auditor_name: str,
-    remark: str,
-) -> AuditRecord:
-    """审批驳回"""
-    result = await db.execute(select(AuditRecord).where(AuditRecord.id == audit_record_id))
-    record = result.scalar_one_or_none()
-    if not record:
-        raise HTTPException(status_code=404, detail="审核记录不存在")
-    if record.audit_result != "PENDING":
-        raise HTTPException(status_code=400, detail="该审核记录已处理")
-
-    record.audit_result = "REJECTED"
-    record.auditor_id = auditor_id
-    record.auditor_name = auditor_name
-    record.audit_remark = remark
-    record.audited_at = datetime.utcnow()
-
-    # 根据类型更新对应实体的审核状态
-    await _apply_rejection(db, record)
-
-    await db.flush()
-    return record
-
-
-async def _apply_approval(db: AsyncSession, record: AuditRecord) -> None:
-    """审批通过后更新对应实体，并执行附加操作（自动建别名等）"""
-    target_type = record.target_type
-    target_id = record.target_id
-
-    if target_type == "TRANSPORT_NODE":
-        from app.models.address import TransportNode, NodeAlias
-        res = await db.execute(select(TransportNode).where(TransportNode.id == target_id))
-        node = res.scalar_one_or_none()
-        if node:
-            node.audit_status = 1
-            node.auditor_id = record.auditor_id
-            # 自动创建标准名别名（如不存在）
-            alias_res = await db.execute(
-                select(NodeAlias).where(
-                    and_(NodeAlias.node_id == target_id, NodeAlias.alias_name == node.name)
-                )
-            )
-            if not alias_res.scalar_one_or_none():
-                alias = NodeAlias(
-                    node_id=target_id,
-                    alias_name=node.name,
-                    alias_type="SYSTEM",
-                    priority=100,
-                    status=1,
-                )
-                db.add(alias)
-
-    elif target_type == "COMMODITY_STANDARD":
-        from app.models.cargo import CommodityStandard, CommodityAlias
-        res = await db.execute(select(CommodityStandard).where(CommodityStandard.id == target_id))
-        commodity = res.scalar_one_or_none()
-        if commodity:
-            commodity.audit_status = 1
-            commodity.auditor_id = record.auditor_id
-            # 自动创建标准名别名
-            alias_res = await db.execute(
-                select(CommodityAlias).where(
-                    and_(
-                        CommodityAlias.commodity_id == target_id,
-                        CommodityAlias.alias_name == commodity.name,
-                    )
-                )
-            )
-            if not alias_res.scalar_one_or_none():
-                alias = CommodityAlias(
-                    commodity_id=target_id,
-                    alias_name=commodity.name,
-                    alias_type="SYSTEM",
-                    priority=100,
-                    status=1,
-                )
-                db.add(alias)
-
-    elif target_type == "COMMODITY_CATEGORY":
-        from app.models.cargo import CommodityCategory
-        res = await db.execute(select(CommodityCategory).where(CommodityCategory.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.audit_status = 1
-            obj.auditor_id = record.auditor_id
-
-    elif target_type == "COMMODITY_TYPE":
-        from app.models.cargo import CommodityType
-        res = await db.execute(select(CommodityType).where(CommodityType.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.audit_status = 1
-            obj.auditor_id = record.auditor_id
-
-    elif target_type == "VESSEL":
-        from app.models.vessel import Vessel
-        res = await db.execute(select(Vessel).where(Vessel.id == target_id))
-        vessel = res.scalar_one_or_none()
-        if vessel:
-            vessel.audit_status = 1
-            vessel.auditor_id = record.auditor_id
-
-    elif target_type == "VESSEL_TYPE_DICT":
-        from app.models.vessel import VesselTypeDict
-        res = await db.execute(select(VesselTypeDict).where(VesselTypeDict.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.audit_status = 1
-            obj.auditor_id = record.auditor_id
-
-    elif target_type == "WATERWAY":
-        from app.models.address import Waterway
-        res = await db.execute(select(Waterway).where(Waterway.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.status = 1  # waterway doesn't have audit_status, enable on approve
-
-    elif target_type == "REGION":
-        from app.models.address import Region
-        res = await db.execute(select(Region).where(Region.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.status = 1
-
-    elif target_type == "NODE_TYPE":
-        from app.models.address import NodeType
-        res = await db.execute(select(NodeType).where(NodeType.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.status = 1
-
-
-async def _apply_rejection(db: AsyncSession, record: AuditRecord) -> None:
-    """审批驳回后更新对应实体的审核状态"""
-    target_type = record.target_type
-    target_id = record.target_id
-
-    if target_type == "TRANSPORT_NODE":
-        from app.models.address import TransportNode
-        res = await db.execute(select(TransportNode).where(TransportNode.id == target_id))
-        node = res.scalar_one_or_none()
-        if node:
-            node.audit_status = 2
-            node.audit_remark = record.audit_remark
-            node.auditor_id = record.auditor_id
-
-    elif target_type == "COMMODITY_STANDARD":
-        from app.models.cargo import CommodityStandard
-        res = await db.execute(select(CommodityStandard).where(CommodityStandard.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.audit_status = 2
-            obj.audit_remark = record.audit_remark
-            obj.auditor_id = record.auditor_id
-
-    elif target_type == "COMMODITY_CATEGORY":
-        from app.models.cargo import CommodityCategory
-        res = await db.execute(select(CommodityCategory).where(CommodityCategory.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.audit_status = 2
-            obj.auditor_id = record.auditor_id
-
-    elif target_type == "COMMODITY_TYPE":
-        from app.models.cargo import CommodityType
-        res = await db.execute(select(CommodityType).where(CommodityType.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.audit_status = 2
-            obj.auditor_id = record.auditor_id
-
-    elif target_type == "VESSEL":
-        from app.models.vessel import Vessel
-        res = await db.execute(select(Vessel).where(Vessel.id == target_id))
-        vessel = res.scalar_one_or_none()
-        if vessel:
-            vessel.audit_status = 2
-            vessel.audit_remark = record.audit_remark
-            vessel.auditor_id = record.auditor_id
-
-    elif target_type == "VESSEL_TYPE_DICT":
-        from app.models.vessel import VesselTypeDict
-        res = await db.execute(select(VesselTypeDict).where(VesselTypeDict.id == target_id))
-        obj = res.scalar_one_or_none()
-        if obj:
-            obj.audit_status = 2
-            obj.auditor_id = record.auditor_id
-
-
-async def get_pending_audits(
-    db: AsyncSession,
-    target_type: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
-) -> PageResult:
-    """获取待审核列表"""
-    query = select(AuditRecord).where(AuditRecord.audit_result == "PENDING")
-    count_query = select(func.count(AuditRecord.id)).where(AuditRecord.audit_result == "PENDING")
-
-    if target_type:
-        query = query.where(AuditRecord.target_type == target_type)
-        count_query = count_query.where(AuditRecord.target_type == target_type)
-
-    total_res = await db.execute(count_query)
-    total = total_res.scalar_one()
-
-    query = query.order_by(AuditRecord.submitted_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    items = result.scalars().all()
-
-    return PageResult(total=total, items=list(items), page=page, page_size=page_size)
-
-
-async def get_audit_history(
-    db: AsyncSession,
-    target_type: str,
-    target_id: int,
-) -> List[AuditRecord]:
-    """获取特定对象的审核历史"""
-    result = await db.execute(
-        select(AuditRecord)
-        .where(
-            and_(
-                AuditRecord.target_type == target_type,
-                AuditRecord.target_id == target_id,
-            )
+    async def list_pending(
+        self,
+        target_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._audit.list_records(
+            status="PENDING",
+            target_type=target_type,
+            offset=offset,
+            limit=page_size,
         )
-        .order_by(AuditRecord.created_at.desc())
-    )
-    return list(result.scalars().all())
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
 
+    async def list_all(
+        self,
+        status: Optional[str] = None,
+        target_type: Optional[str] = None,
+        operator_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._audit.list_records(
+            status=status,
+            target_type=target_type,
+            operator_id=operator_id,
+            offset=offset,
+            limit=page_size,
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-async def get_pending_counts_by_type(db: AsyncSession) -> dict:
-    """按类型统计待审核数量"""
-    result = await db.execute(
-        select(AuditRecord.target_type, func.count(AuditRecord.id))
-        .where(AuditRecord.audit_result == "PENDING")
-        .group_by(AuditRecord.target_type)
-    )
-    rows = result.fetchall()
-    return {row[0]: row[1] for row in rows}
+    # ─────────────────────────────────────────────────
+    # 审批操作
+    # ─────────────────────────────────────────────────
+
+    async def approve(
+        self,
+        record_id: int,
+        auditor_id: int,
+        auditor_role: str,
+        comment: Optional[str] = None,
+    ) -> dict:
+        """审批通过"""
+        record = await self._audit.get_record(record_id)
+        if not record:
+            raise NotFoundError("AuditRecord", record_id)
+
+        if record.audit_status != "PENDING":
+            raise ValidationError(
+                f"Record status is '{record.audit_status}', expected PENDING"
+            )
+
+        # 权限检查：SUPER_ADMIN可自审，ADMIN审其他
+        if auditor_role not in ("SUPER_ADMIN", "ADMIN"):
+            raise PermissionError("Only ADMIN or SUPER_ADMIN can approve records")
+
+        if auditor_role != "SUPER_ADMIN" and record.operator_id == auditor_id:
+            raise PermissionError("Cannot approve your own submissions")
+
+        approved = await self._audit.approve_record(
+            record_id=record_id,
+            auditor_id=auditor_id,
+            comment=comment,
+        )
+
+        # 触发审批后业务动作
+        await self._post_approve_action(approved)
+        await self._audit.save()
+
+        logger.info(
+            f"[AuditService] approved record_id={record_id} by auditor={auditor_id}"
+        )
+        return {"record_id": record_id, "status": "APPROVED"}
+
+    async def reject(
+        self,
+        record_id: int,
+        auditor_id: int,
+        auditor_role: str,
+        reason: str,
+    ) -> dict:
+        """驳回"""
+        record = await self._audit.get_record(record_id)
+        if not record:
+            raise NotFoundError("AuditRecord", record_id)
+
+        if record.audit_status != "PENDING":
+            raise ValidationError(
+                f"Record status is '{record.audit_status}', expected PENDING"
+            )
+
+        if auditor_role not in ("SUPER_ADMIN", "ADMIN"):
+            raise PermissionError("Only ADMIN or SUPER_ADMIN can reject records")
+
+        rejected = await self._audit.reject_record(
+            record_id=record_id,
+            auditor_id=auditor_id,
+            reason=reason,
+        )
+
+        # 触发驳回后业务动作
+        await self._post_reject_action(rejected)
+        await self._audit.save()
+
+        logger.info(
+            f"[AuditService] rejected record_id={record_id} reason={reason}"
+        )
+        return {"record_id": record_id, "status": "REJECTED", "reason": reason}
+
+    # ─────────────────────────────────────────────────
+    # 审批后动作（内部方法）
+    # ─────────────────────────────────────────────────
+
+    async def _post_approve_action(self, record) -> None:
+        """审批通过后的业务联动"""
+        target_type = record.target_type
+        target_id = record.target_id
+
+        if target_type == "CARGO_OPPORTUNITY":
+            await self._cargo.update_parse_result(
+                target_id  # 更新关联货源状态
+            )
+        elif target_type == "TRANSPORT_NODE":
+            pass  # 节点审批通过后可触发地图更新等
+
+    async def _post_reject_action(self, record) -> None:
+        """驳回后的业务联动"""
+        pass  # 可扩展：发送通知、更新状态等

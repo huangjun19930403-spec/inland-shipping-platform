@@ -1,530 +1,326 @@
-"""货品和货源服务"""
-import uuid
-from typing import Optional, List
-from datetime import datetime, date
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
-from fastapi import HTTPException
+"""
+货物业务服务层
+职责：货物/商品相关业务逻辑编排
+规则：只调用Repository，不直接操作SQLAlchemy Session
+"""
+import json
+import logging
+from typing import Optional
 
+from app.core.exceptions import NotFoundError, ValidationError
 from app.models.cargo import (
-    CommodityCategory, CommodityType, CommodityStandard, CommodityAlias,
-    CargoRawMessage, CargoAiParseResult, CargoOpportunity,
+    CommodityCategory,
+    CommodityType,
+    CommodityStandard,
+    CargoRawMessage,
+    CargoAiParseResult,
+    CargoOpportunity,
 )
-from app.models.address import TransportNode
-from app.models.route import ShippingRoute
-from app.schemas.cargo import (
-    CommodityCategoryCreate, CommodityCategoryUpdate,
-    CommodityTypeCreate, CommodityTypeUpdate,
-    CommodityStandardCreate, CommodityStandardUpdate,
-    CommodityAliasCreate,
-    CargoManualInput, CargoRawMessageCreate, CargoConfirmRequest,
-)
-from app.schemas.common import PageResult
-from app.services import audit_service
+from app.models.audit import AuditRecord
+from app.repositories.cargo_repository import CargoRepository
+from app.repositories.address_repository import AddressRepository
+from app.repositories.audit_repository import AuditRepository
+
+logger = logging.getLogger(__name__)
 
 
-def _generate_opportunity_no() -> str:
-    return f"CO{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
+class CargoService:
+    """
+    货物业务服务
 
+    依赖注入：CargoRepository + AddressRepository + AuditRepository
+    不持有SQLAlchemy Session，通过Repository间接访问数据库
+    """
 
-# ===== CommodityCategory =====
+    def __init__(
+        self,
+        cargo_repo: CargoRepository,
+        address_repo: AddressRepository,
+        audit_repo: AuditRepository,
+    ) -> None:
+        self._cargo = cargo_repo
+        self._address = address_repo
+        self._audit = audit_repo
 
-async def get_categories(db: AsyncSession) -> List[CommodityCategory]:
-    result = await db.execute(select(CommodityCategory).order_by(CommodityCategory.sort_order))
-    return list(result.scalars().all())
+    # ─────────────────────────────────────────────────
+    # 商品分类
+    # ─────────────────────────────────────────────────
 
+    async def list_categories(self):
+        return await self._cargo.categories.get_all_with_types()
 
-async def get_category(db: AsyncSession, category_id: int) -> CommodityCategory:
-    result = await db.execute(select(CommodityCategory).where(CommodityCategory.id == category_id))
-    obj = result.scalar_one_or_none()
-    if not obj:
-        raise HTTPException(status_code=404, detail="货品大类不存在")
-    return obj
-
-
-async def create_category(
-    db: AsyncSession, data: CommodityCategoryCreate, submitter_id: int, submitter_name: str
-) -> CommodityCategory:
-    obj = CommodityCategory(**data.model_dump(), audit_status=0, submitter_id=submitter_id)
-    db.add(obj)
-    await db.flush()
-    await audit_service.create_audit_record(
-        db=db,
-        target_type="COMMODITY_CATEGORY",
-        target_id=obj.id,
-        target_name=obj.name,
-        action="CREATE",
-        before_data=None,
-        after_data=data.model_dump(),
-        submitter_id=submitter_id,
-        submitter_name=submitter_name,
-    )
-    return obj
-
-
-async def update_category(
-    db: AsyncSession, category_id: int, data: CommodityCategoryUpdate
-) -> CommodityCategory:
-    obj = await get_category(db, category_id)
-    for field, value in data.model_dump(exclude_none=True).items():
-        setattr(obj, field, value)
-    await db.flush()
-    return obj
-
-
-async def delete_category(db: AsyncSession, category_id: int) -> None:
-    obj = await get_category(db, category_id)
-    await db.delete(obj)
-    await db.flush()
-
-
-# ===== CommodityType =====
-
-async def get_types(
-    db: AsyncSession, category_id: Optional[int] = None
-) -> List[CommodityType]:
-    query = select(CommodityType)
-    if category_id:
-        query = query.where(CommodityType.category_id == category_id)
-    query = query.order_by(CommodityType.sort_order)
-    result = await db.execute(query)
-    return list(result.scalars().all())
-
-
-async def get_type(db: AsyncSession, type_id: int) -> CommodityType:
-    result = await db.execute(select(CommodityType).where(CommodityType.id == type_id))
-    obj = result.scalar_one_or_none()
-    if not obj:
-        raise HTTPException(status_code=404, detail="货品类型不存在")
-    return obj
-
-
-async def create_type(
-    db: AsyncSession, data: CommodityTypeCreate, submitter_id: int, submitter_name: str
-) -> CommodityType:
-    obj = CommodityType(**data.model_dump(), audit_status=0, submitter_id=submitter_id)
-    db.add(obj)
-    await db.flush()
-    await audit_service.create_audit_record(
-        db=db,
-        target_type="COMMODITY_TYPE",
-        target_id=obj.id,
-        target_name=obj.name,
-        action="CREATE",
-        before_data=None,
-        after_data=data.model_dump(),
-        submitter_id=submitter_id,
-        submitter_name=submitter_name,
-    )
-    return obj
-
-
-async def update_type(
-    db: AsyncSession, type_id: int, data: CommodityTypeUpdate
-) -> CommodityType:
-    obj = await get_type(db, type_id)
-    for field, value in data.model_dump(exclude_none=True).items():
-        setattr(obj, field, value)
-    await db.flush()
-    return obj
-
-
-async def delete_type(db: AsyncSession, type_id: int) -> None:
-    obj = await get_type(db, type_id)
-    await db.delete(obj)
-    await db.flush()
-
-
-# ===== CommodityStandard =====
-
-async def get_standards(
-    db: AsyncSession,
-    type_id: Optional[int] = None,
-    audit_status: Optional[int] = None,
-    keyword: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
-) -> PageResult:
-    query = select(CommodityStandard)
-    count_query = select(func.count(CommodityStandard.id))
-    conditions = []
-    if type_id:
-        conditions.append(CommodityStandard.type_id == type_id)
-    if audit_status is not None:
-        conditions.append(CommodityStandard.audit_status == audit_status)
-    if keyword:
-        conditions.append(CommodityStandard.name.ilike(f"%{keyword}%"))
-    if conditions:
-        query = query.where(and_(*conditions))
-        count_query = count_query.where(and_(*conditions))
-
-    total_res = await db.execute(count_query)
-    total = total_res.scalar_one()
-    query = query.order_by(CommodityStandard.sort_order).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    return PageResult(total=total, items=list(result.scalars().all()), page=page, page_size=page_size)
-
-
-async def get_standard(db: AsyncSession, standard_id: int) -> CommodityStandard:
-    result = await db.execute(select(CommodityStandard).where(CommodityStandard.id == standard_id))
-    obj = result.scalar_one_or_none()
-    if not obj:
-        raise HTTPException(status_code=404, detail="标准货品不存在")
-    return obj
-
-
-async def create_standard(
-    db: AsyncSession, data: CommodityStandardCreate, submitter_id: int, submitter_name: str
-) -> CommodityStandard:
-    obj = CommodityStandard(**data.model_dump(), audit_status=0, submitter_id=submitter_id)
-    db.add(obj)
-    await db.flush()
-    await audit_service.create_audit_record(
-        db=db,
-        target_type="COMMODITY_STANDARD",
-        target_id=obj.id,
-        target_name=obj.name,
-        action="CREATE",
-        before_data=None,
-        after_data=data.model_dump(),
-        submitter_id=submitter_id,
-        submitter_name=submitter_name,
-    )
-    return obj
-
-
-async def update_standard(
-    db: AsyncSession, standard_id: int, data: CommodityStandardUpdate
-) -> CommodityStandard:
-    obj = await get_standard(db, standard_id)
-    for field, value in data.model_dump(exclude_none=True).items():
-        setattr(obj, field, value)
-    await db.flush()
-    return obj
-
-
-async def delete_standard(db: AsyncSession, standard_id: int) -> None:
-    obj = await get_standard(db, standard_id)
-    await db.delete(obj)
-    await db.flush()
-
-
-async def approve_commodity(
-    db: AsyncSession, standard_id: int, auditor_id: int, auditor_name: str, remark: str = ""
-) -> CommodityStandard:
-    from app.models.audit import AuditRecord
-    res = await db.execute(
-        select(AuditRecord).where(
-            and_(
-                AuditRecord.target_type == "COMMODITY_STANDARD",
-                AuditRecord.target_id == standard_id,
-                AuditRecord.audit_result == "PENDING",
-            )
-        ).order_by(AuditRecord.id.desc())
-    )
-    record = res.scalar_one_or_none()
-    if not record:
-        obj = await get_standard(db, standard_id)
-        obj.audit_status = 1
-        obj.auditor_id = auditor_id
-        await db.flush()
-        return obj
-    await audit_service.approve(db, record.id, auditor_id, auditor_name, remark)
-    return await get_standard(db, standard_id)
-
-
-async def reject_commodity(
-    db: AsyncSession, standard_id: int, auditor_id: int, auditor_name: str, remark: str
-) -> CommodityStandard:
-    from app.models.audit import AuditRecord
-    res = await db.execute(
-        select(AuditRecord).where(
-            and_(
-                AuditRecord.target_type == "COMMODITY_STANDARD",
-                AuditRecord.target_id == standard_id,
-                AuditRecord.audit_result == "PENDING",
-            )
-        ).order_by(AuditRecord.id.desc())
-    )
-    record = res.scalar_one_or_none()
-    if not record:
-        obj = await get_standard(db, standard_id)
-        obj.audit_status = 2
-        obj.audit_remark = remark
-        obj.auditor_id = auditor_id
-        await db.flush()
-        return obj
-    await audit_service.reject(db, record.id, auditor_id, auditor_name, remark)
-    return await get_standard(db, standard_id)
-
-
-# ===== CommodityAlias =====
-
-async def add_commodity_alias(db: AsyncSession, data: CommodityAliasCreate) -> CommodityAlias:
-    alias = CommodityAlias(**data.model_dump())
-    db.add(alias)
-    await db.flush()
-    return alias
-
-
-async def delete_commodity_alias(db: AsyncSession, alias_id: int) -> None:
-    result = await db.execute(select(CommodityAlias).where(CommodityAlias.id == alias_id))
-    obj = result.scalar_one_or_none()
-    if not obj:
-        raise HTTPException(status_code=404, detail="别名不存在")
-    await db.delete(obj)
-    await db.flush()
-
-
-# ===== CargoOpportunity =====
-
-async def _resolve_region_and_route(
-    db: AsyncSession, origin_node_id: int, dest_node_id: int
-) -> tuple:
-    """Resolve origin_region_id, dest_region_id, route_id from nodes"""
-    origin_res = await db.execute(select(TransportNode).where(TransportNode.id == origin_node_id))
-    origin_node = origin_res.scalar_one_or_none()
-    dest_res = await db.execute(select(TransportNode).where(TransportNode.id == dest_node_id))
-    dest_node = dest_res.scalar_one_or_none()
-
-    origin_region_id = origin_node.region_id if origin_node else None
-    dest_region_id = dest_node.region_id if dest_node else None
-
-    route_id = None
-    if origin_region_id and dest_region_id:
-        route_res = await db.execute(
-            select(ShippingRoute).where(
-                and_(
-                    ShippingRoute.origin_region_id == origin_region_id,
-                    ShippingRoute.dest_region_id == dest_region_id,
-                    ShippingRoute.status == 1,
-                )
-            )
+    async def create_category(
+        self, name: str, code: str, description: Optional[str], operator_id: int
+    ) -> CommodityCategory:
+        category = CommodityCategory(
+            name=name,
+            code=code,
+            description=description,
         )
-        route = route_res.scalar_one_or_none()
-        if route:
-            route_id = route.id
+        saved = await self._cargo.categories.create(category)
+        await self._record_audit(
+            operator_id=operator_id,
+            action="CREATE",
+            target_type="COMMODITY_CATEGORY",
+            target_id=saved.id,
+            after_data={"name": saved.name, "code": saved.code},
+        )
+        await self._cargo.save()
+        logger.info(f"[CargoService] category created id={saved.id}")
+        return saved
 
-    return origin_region_id, dest_region_id, route_id
+    # ─────────────────────────────────────────────────
+    # 商品类型
+    # ─────────────────────────────────────────────────
 
+    async def list_types_by_category(self, category_id: int):
+        return await self._cargo.types.get_by_category(category_id)
 
-async def create_cargo_manual(
-    db: AsyncSession, data: CargoManualInput, collector_id: int
-) -> CargoOpportunity:
-    """手动录入货源 - 直接进入 CONFIRMED 状态"""
-    origin_region_id, dest_region_id, route_id = await _resolve_region_and_route(
-        db, data.origin_node_id, data.dest_node_id
-    )
-    cargo = CargoOpportunity(
-        opportunity_no=_generate_opportunity_no(),
-        origin_node_id=data.origin_node_id,
-        dest_node_id=data.dest_node_id,
-        commodity_id=data.commodity_id,
-        tonnage=data.tonnage,
-        origin_region_id=origin_region_id,
-        dest_region_id=dest_region_id,
-        route_id=route_id,
-        loading_date=data.loading_date,
-        freight_price=data.freight_price,
-        price_type=data.price_type,
-        price_unit=data.price_unit,
-        contact_person=data.contact_person,
-        contact_phone=data.contact_phone,
-        source_type=data.source_type,
-        remark=data.remark,
-        status="CONFIRMED",
-        input_type="MANUAL",
-        collector_id=collector_id,
-    )
-    db.add(cargo)
-    await db.flush()
-    return cargo
+    async def create_type(
+        self, category_id: int, name: str, code: str, operator_id: int
+    ) -> CommodityType:
+        category = await self._cargo.categories.get_by_id(category_id)
+        if not category:
+            raise NotFoundError("CommodityCategory", category_id)
 
+        cargo_type = CommodityType(
+            category_id=category_id,
+            name=name,
+            code=code,
+        )
+        saved = await self._cargo.types.create(cargo_type)
+        await self._record_audit(
+            operator_id=operator_id,
+            action="CREATE",
+            target_type="COMMODITY_TYPE",
+            target_id=saved.id,
+            after_data={"name": saved.name, "category_id": category_id},
+        )
+        await self._cargo.save()
+        return saved
 
-async def create_cargo_text(
-    db: AsyncSession,
-    data: CargoRawMessageCreate,
-    collector_id: int,
-) -> CargoRawMessage:
-    """粘贴文本创建原始货源记录，触发 AI 解析"""
-    raw_msg = CargoRawMessage(
-        raw_text=data.raw_text,
-        source_type=data.source_type,
-        group_name=data.group_name,
-        sender_name=data.sender_name,
-        collector_id=collector_id,
-        status="PENDING",
-        message_time=datetime.utcnow(),
-    )
-    db.add(raw_msg)
-    await db.flush()
+    # ─────────────────────────────────────────────────
+    # 商品标准
+    # ─────────────────────────────────────────────────
 
-    # Trigger async AI parse (actual AI call handled separately)
-    # Mark as parsing
-    raw_msg.status = "PARSING"
-    await db.flush()
+    async def list_standards_by_type(self, type_id: int):
+        return await self._cargo.standards.get_by_type(type_id)
 
-    return raw_msg
+    async def create_standard(
+        self, type_id: int, name: str, description: Optional[str], operator_id: int
+    ) -> CommodityStandard:
+        cargo_type = await self._cargo.types.get_by_id(type_id)
+        if not cargo_type:
+            raise NotFoundError("CommodityType", type_id)
 
+        standard = CommodityStandard(
+            commodity_type_id=type_id,
+            name=name,
+            description=description,
+        )
+        saved = await self._cargo.standards.create(standard)
+        await self._record_audit(
+            operator_id=operator_id,
+            action="CREATE",
+            target_type="COMMODITY_STANDARD",
+            target_id=saved.id,
+            after_data={"name": saved.name, "type_id": type_id},
+        )
+        await self._cargo.save()
+        return saved
 
-async def confirm_cargo_ai(
-    db: AsyncSession,
-    parse_result_id: int,
-    confirm_data: CargoConfirmRequest,
-    user_id: int,
-) -> CargoOpportunity:
-    """确认 AI 解析结果，创建正式货源记录"""
-    res = await db.execute(select(CargoAiParseResult).where(CargoAiParseResult.id == parse_result_id))
-    parse_result = res.scalar_one_or_none()
-    if not parse_result:
-        raise HTTPException(status_code=404, detail="解析结果不存在")
-    if parse_result.parse_status != "PENDING_CONFIRM":
-        raise HTTPException(status_code=400, detail="该解析结果已处理")
+    # ─────────────────────────────────────────────────
+    # 货源原始消息
+    # ─────────────────────────────────────────────────
 
-    # Override with confirmed data
-    origin_node_id = confirm_data.origin_node_id or parse_result.origin_node_id
-    dest_node_id = confirm_data.dest_node_id or parse_result.dest_node_id
-    commodity_id = confirm_data.commodity_id or parse_result.commodity_id
-    tonnage = confirm_data.tonnage or parse_result.tonnage
+    async def submit_cargo_text(
+        self, raw_text: str, source: Optional[str], operator_id: int
+    ) -> CargoRawMessage:
+        """提交原始货运文本，创建待解析记录"""
+        raw_msg = CargoRawMessage(
+            raw_text=raw_text,
+            source=source,
+            operator_id=operator_id,
+            parse_status="PENDING",
+        )
+        saved = await self._cargo.create(raw_msg)
+        await self._cargo.save()
+        logger.info(f"[CargoService] raw_message submitted id={saved.id}")
+        return saved
 
-    if not all([origin_node_id, dest_node_id, commodity_id, tonnage]):
-        raise HTTPException(status_code=400, detail="必填字段缺失：起点、终点、货品、吨位")
+    async def get_raw_message(self, msg_id: int) -> CargoRawMessage:
+        msg = await self._cargo.get_raw_message(msg_id)
+        if not msg:
+            raise NotFoundError("CargoRawMessage", msg_id)
+        return msg
 
-    origin_region_id, dest_region_id, route_id = await _resolve_region_and_route(
-        db, origin_node_id, dest_node_id
-    )
+    async def list_raw_messages(
+        self,
+        status: Optional[str] = None,
+        operator_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._cargo.list_raw_messages(
+            status=status, operator_id=operator_id, offset=offset, limit=page_size
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    cargo = CargoOpportunity(
-        opportunity_no=_generate_opportunity_no(),
-        origin_node_id=origin_node_id,
-        dest_node_id=dest_node_id,
-        commodity_id=commodity_id,
-        tonnage=tonnage,
-        origin_region_id=origin_region_id,
-        dest_region_id=dest_region_id,
-        route_id=route_id,
-        loading_date=confirm_data.loading_date or parse_result.loading_date,
-        freight_price=confirm_data.freight_price or parse_result.freight_price,
-        price_type=confirm_data.price_type or parse_result.price_type,
-        contact_person=confirm_data.contact_person or parse_result.contact_person,
-        contact_phone=confirm_data.contact_phone or parse_result.contact_phone,
-        remark=confirm_data.remark,
-        raw_message_id=parse_result.raw_message_id,
-        parse_result_id=parse_result.id,
-        status="CONFIRMED",
-        input_type="AI_PARSE",
-        collector_id=user_id,
-    )
-    db.add(cargo)
+    # ─────────────────────────────────────────────────
+    # AI解析结果
+    # ─────────────────────────────────────────────────
 
-    # Update parse result status
-    parse_result.parse_status = "CONFIRMED"
-    parse_result.confirmed_by = user_id
-    parse_result.confirmed_at = datetime.utcnow()
+    async def get_parse_result(self, msg_id: int) -> CargoAiParseResult:
+        result = await self._cargo.get_parse_result(msg_id)
+        if not result:
+            raise NotFoundError("CargoAiParseResult for message", msg_id)
+        return result
 
-    await db.flush()
-    return cargo
+    async def confirm_parse_result(
+        self,
+        result_id: int,
+        operator_id: int,
+        overrides: Optional[dict] = None,
+    ) -> CargoOpportunity:
+        """确认AI解析结果，创建最终货源机会记录"""
+        from sqlalchemy import select
+        from app.models.cargo import CargoAiParseResult as ParseModel
 
+        # 直接查询parseResult（因cargo_repo.update_parse_result已支持）
+        parse_result = await self._cargo.update_parse_result(result_id)
+        if not parse_result:
+            raise NotFoundError("CargoAiParseResult", result_id)
 
-async def discard_cargo_ai(
-    db: AsyncSession, parse_result_id: int, reason: Optional[str], user_id: int
-) -> CargoAiParseResult:
-    res = await db.execute(select(CargoAiParseResult).where(CargoAiParseResult.id == parse_result_id))
-    parse_result = res.scalar_one_or_none()
-    if not parse_result:
-        raise HTTPException(status_code=404, detail="解析结果不存在")
-    if parse_result.parse_status != "PENDING_CONFIRM":
-        raise HTTPException(status_code=400, detail="该解析结果已处理")
-    parse_result.parse_status = "DISCARDED"
-    parse_result.discard_reason = reason
-    parse_result.confirmed_by = user_id
-    parse_result.confirmed_at = datetime.utcnow()
-    await db.flush()
-    return parse_result
+        if parse_result.status != "PENDING_CONFIRM":
+            raise ValidationError(
+                f"Cannot confirm: status is '{parse_result.status}'"
+            )
 
+        # 合并人工修正
+        ov = overrides or {}
+        origin_node_id = ov.get("origin_node_id") or parse_result.origin_node_id
+        dest_node_id = ov.get("dest_node_id") or parse_result.dest_node_id
+        commodity_id = ov.get("commodity_standard_id") or parse_result.commodity_standard_id
 
-async def get_cargo_opportunities(
-    db: AsyncSession,
-    status: Optional[str] = None,
-    origin_region_id: Optional[int] = None,
-    dest_region_id: Optional[int] = None,
-    commodity_id: Optional[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    page: int = 1,
-    page_size: int = 20,
-) -> PageResult:
-    query = select(CargoOpportunity)
-    count_query = select(func.count(CargoOpportunity.id))
-    conditions = []
-    if status:
-        conditions.append(CargoOpportunity.status == status)
-    if origin_region_id:
-        conditions.append(CargoOpportunity.origin_region_id == origin_region_id)
-    if dest_region_id:
-        conditions.append(CargoOpportunity.dest_region_id == dest_region_id)
-    if commodity_id:
-        conditions.append(CargoOpportunity.commodity_id == commodity_id)
-    if start_date:
-        conditions.append(CargoOpportunity.loading_date >= start_date)
-    if end_date:
-        conditions.append(CargoOpportunity.loading_date <= end_date)
-    if conditions:
-        query = query.where(and_(*conditions))
-        count_query = count_query.where(and_(*conditions))
+        opportunity = CargoOpportunity(
+            raw_message_id=parse_result.raw_message_id,
+            origin_node_id=origin_node_id,
+            dest_node_id=dest_node_id,
+            commodity_standard_id=commodity_id,
+            tonnage=parse_result.tonnage,
+            loading_date=parse_result.loading_date,
+            freight_price=parse_result.freight_price,
+            contact=parse_result.contact,
+            remarks=parse_result.remarks,
+            operator_id=operator_id,
+            status="ACTIVE",
+        )
 
-    total_res = await db.execute(count_query)
-    total = total_res.scalar_one()
-    query = query.order_by(CargoOpportunity.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    return PageResult(total=total, items=list(result.scalars().all()), page=page, page_size=page_size)
+        saved_opp = await self._cargo.create_opportunity(opportunity)
+        await self._cargo.update_parse_result(result_id, status="CONFIRMED")
 
+        await self._record_audit(
+            operator_id=operator_id,
+            action="CONFIRM",
+            target_type="CARGO_OPPORTUNITY",
+            target_id=saved_opp.id,
+            after_data={"from_parse_result_id": result_id},
+        )
+        await self._cargo.save()
+        logger.info(f"[CargoService] opportunity confirmed id={saved_opp.id}")
+        return saved_opp
 
-async def get_cargo_opportunity(db: AsyncSession, cargo_id: int) -> CargoOpportunity:
-    result = await db.execute(select(CargoOpportunity).where(CargoOpportunity.id == cargo_id))
-    obj = result.scalar_one_or_none()
-    if not obj:
-        raise HTTPException(status_code=404, detail="货源不存在")
-    return obj
+    # ─────────────────────────────────────────────────
+    # 货源机会
+    # ─────────────────────────────────────────────────
 
+    async def create_manual_opportunity(
+        self,
+        origin_node_id: Optional[int],
+        dest_node_id: Optional[int],
+        commodity_standard_id: Optional[int],
+        tonnage: Optional[float],
+        loading_date: Optional[str],
+        freight_price: Optional[float],
+        contact: Optional[str],
+        remarks: Optional[str],
+        operator_id: int,
+    ) -> CargoOpportunity:
+        """手动录入货源机会（不经过AI解析）"""
+        if origin_node_id:
+            node = await self._address.get_node(origin_node_id)
+            if not node:
+                raise NotFoundError("TransportNode (origin)", origin_node_id)
 
-async def cancel_cargo(db: AsyncSession, cargo_id: int) -> CargoOpportunity:
-    cargo = await get_cargo_opportunity(db, cargo_id)
-    cargo.status = "CANCELLED"
-    await db.flush()
-    return cargo
+        if dest_node_id:
+            node = await self._address.get_node(dest_node_id)
+            if not node:
+                raise NotFoundError("TransportNode (destination)", dest_node_id)
 
+        opportunity = CargoOpportunity(
+            origin_node_id=origin_node_id,
+            dest_node_id=dest_node_id,
+            commodity_standard_id=commodity_standard_id,
+            tonnage=tonnage,
+            loading_date=loading_date,
+            freight_price=freight_price,
+            contact=contact,
+            remarks=remarks,
+            operator_id=operator_id,
+            status="PENDING",
+        )
+        saved = await self._cargo.create_opportunity(opportunity)
+        await self._record_audit(
+            operator_id=operator_id,
+            action="CREATE",
+            target_type="CARGO_OPPORTUNITY",
+            target_id=saved.id,
+            after_data={"origin_node_id": origin_node_id, "dest_node_id": dest_node_id},
+        )
+        await self._cargo.save()
+        return saved
 
-async def get_ai_parse_results(
-    db: AsyncSession,
-    parse_status: Optional[str] = "PENDING_CONFIRM",
-    page: int = 1,
-    page_size: int = 20,
-) -> PageResult:
-    query = select(CargoAiParseResult)
-    count_query = select(func.count(CargoAiParseResult.id))
-    if parse_status:
-        query = query.where(CargoAiParseResult.parse_status == parse_status)
-        count_query = count_query.where(CargoAiParseResult.parse_status == parse_status)
+    async def list_opportunities(
+        self,
+        status: Optional[str] = None,
+        origin_node_id: Optional[int] = None,
+        dest_node_id: Optional[int] = None,
+        commodity_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._cargo.list_opportunities(
+            status=status,
+            origin_node_id=origin_node_id,
+            dest_node_id=dest_node_id,
+            commodity_id=commodity_id,
+            offset=offset,
+            limit=page_size,
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    total_res = await db.execute(count_query)
-    total = total_res.scalar_one()
-    query = query.order_by(CargoAiParseResult.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    return PageResult(total=total, items=list(result.scalars().all()), page=page, page_size=page_size)
+    # ─────────────────────────────────────────────────
+    # 内部辅助
+    # ─────────────────────────────────────────────────
 
-
-async def get_parse_result(db: AsyncSession, parse_result_id: int) -> CargoAiParseResult:
-    result = await db.execute(select(CargoAiParseResult).where(CargoAiParseResult.id == parse_result_id))
-    obj = result.scalar_one_or_none()
-    if not obj:
-        raise HTTPException(status_code=404, detail="解析结果不存在")
-    return obj
-
-
-async def get_raw_message(db: AsyncSession, raw_message_id: int) -> CargoRawMessage:
-    result = await db.execute(select(CargoRawMessage).where(CargoRawMessage.id == raw_message_id))
-    obj = result.scalar_one_or_none()
-    if not obj:
-        raise HTTPException(status_code=404, detail="原始消息不存在")
-    return obj
+    async def _record_audit(
+        self,
+        operator_id: int,
+        action: str,
+        target_type: str,
+        target_id: int,
+        before_data: Optional[dict] = None,
+        after_data: Optional[dict] = None,
+    ) -> None:
+        record = AuditRecord(
+            operator_id=operator_id,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            audit_status="APPROVED",
+            before_data=json.dumps(before_data, ensure_ascii=False) if before_data else None,
+            after_data=json.dumps(after_data, ensure_ascii=False) if after_data else None,
+        )
+        await self._audit.create_record(record)
