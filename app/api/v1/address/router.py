@@ -31,7 +31,7 @@ async def list_waterways(
     return success(data=[WaterwayResponse.model_validate(i) for i in items])
 
 
-@router.post("/waterway", summary="创建水系")
+@router.post("/waterway", summary="创建水系（编码自动生成）")
 async def create_waterway(
     data: WaterwayCreate,
     service: AddressService = Depends(get_address_service),
@@ -39,8 +39,9 @@ async def create_waterway(
 ):
     user, _ = user_roles
     obj = await service.create_waterway(
-        name=data.name, code=data.code, operator_id=user.id,
-        **data.model_dump(exclude={"name", "code"}, exclude_none=True)
+        name=data.name,
+        operator_id=user.id,
+        **data.model_dump(exclude={"name"}, exclude_none=True),
     )
     return success(data=WaterwayResponse.model_validate(obj))
 

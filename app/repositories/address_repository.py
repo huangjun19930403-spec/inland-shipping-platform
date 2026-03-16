@@ -80,6 +80,26 @@ class AddressRepository(BaseRepository):
         await self.delete(ww)
         return True
 
+    async def get_max_sibling_waterway_code(
+        self, parent_id: Optional[int]
+    ) -> Optional[str]:
+        """
+        获取同 parent_id 下字典序最大的 code，用于计算下一个序号。
+        使用字典序降序 + LIMIT 1，与零填充编码格式（WW-LL-NNN）自然对齐。
+        返回 None 表示尚无同级记录，序号应从 001 开始。
+        """
+        if parent_id is None:
+            condition = Waterway.parent_id.is_(None)
+        else:
+            condition = Waterway.parent_id == parent_id
+        result = await self._db.execute(
+            select(Waterway.code)
+            .where(condition)
+            .order_by(Waterway.code.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     # ─────────────────────────────────────────────────
     # Region（商业区域）
     # ─────────────────────────────────────────────────
