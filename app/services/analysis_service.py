@@ -32,11 +32,9 @@ class AnalysisService:
     # ─────────────────────────────────────────────────
 
     async def get_dashboard_summary(self) -> dict:
-        """获取仪表盘核心指标"""
         cargo_by_status = await self._analysis.count_opportunities_by_status()
         active_vessels = await self._analysis.count_active_vessels()
         daily_trend = await self._analysis.get_daily_cargo_trend(days=7)
-
         return {
             "cargo_total": sum(cargo_by_status.values()),
             "cargo_active": cargo_by_status.get("ACTIVE", 0),
@@ -48,16 +46,22 @@ class AnalysisService:
             ],
         }
 
+    # 别名，兼容 router
+    async def get_dashboard_stats(self) -> dict:
+        return await self.get_dashboard_summary()
+
     # ─────────────────────────────────────────────────
-    # 热力图统计
+    # 热力图
     # ─────────────────────────────────────────────────
 
-    async def get_heatmap(
+    async def get_cargo_heatmap(
         self,
-        stat_date: Optional[date] = None,
-        stat_type: str = "CARGO",
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        stat_type: str = "CARGO_ORIGIN",
+        region_id: Optional[int] = None,
     ) -> list:
-        target_date = stat_date or date.today()
+        target_date = start_date or date.today()
         stats = await self._analysis.get_heatmap_stats(
             stat_date=target_date, stat_type=stat_type
         )
@@ -66,70 +70,74 @@ class AnalysisService:
                 "node_id": s.node_id,
                 "stat_value": s.stat_value,
                 "stat_type": s.stat_type,
+                "stat_date": str(s.stat_date),
             }
             for s in stats
         ]
 
-    async def get_trend(
-        self,
-        start_date: date,
-        end_date: date,
-        node_id: Optional[int] = None,
-    ) -> list:
-        stats = await self._analysis.get_heatmap_range(
-            start_date=start_date, end_date=end_date, node_id=node_id
+    async def get_vessel_heatmap(self, region_id: Optional[int] = None) -> list:
+        stats = await self._analysis.get_heatmap_stats(
+            stat_date=date.today(), stat_type="VESSEL"
         )
         return [
             {
-                "date": str(s.stat_date),
                 "node_id": s.node_id,
-                "stat_type": s.stat_type,
                 "stat_value": s.stat_value,
+                "stat_type": s.stat_type,
             }
             for s in stats
         ]
 
     # ─────────────────────────────────────────────────
-    # AI趋势分析（由Agent驱动）
+    # 趋势
     # ─────────────────────────────────────────────────
 
-    async def generate_ai_analysis(
-        self, days: int = 7, db=None
-    ) -> dict:
-        """
-        生成AI趋势分析报告
+    async def get_cargo_trends(self, days: int = 7) -> dict:
+        trend = await self._analysis.get_daily_cargo_trend(days=days)
+        return {
+            "days": days,
+            "trend": [
+                {"date": str(row.stat_date), "total": int(row.total)}
+                for row in trend
+            ],
+        }
 
-        数据准备由Service完成，AI调用委托给AnalysisAgent
-        """
+    # ─────────────────────────────────────────────────
+    # Top节点
+    # ─────────────────────────────────────────────────
+
+    async def get_top_nodes(self, stat_type: str = "CARGO_ORIGIN", limit: int = 10) -> dict:
+        stats = await self._analysis.get_heatmap_stats(
+            stat_date=date.today(), stat_type=stat_type
+        )
+        sorted_stats = sorted(stats, key=lambda s: s.stat_value, reverse=True)[:limit]
+        return {
+            "stat_type": stat_type,
+            "nodes": [
+                {"node_id": s.node_id, "stat_value": s.stat_value}
+                for s in sorted_stats
+            ],
+        }
+
+    # ─────────────────────────────────────────────────
+    # AI分析
+    # ─────────────────────────────────────────────────
+
+    async def generate_ai_analysis(self, days: int = 7) -> dict:
         end = date.today()
         start = end - timedelta(days=days)
-
-        # 准备数据摘要
         stats = await self._analysis.get_heatmap_range(start, end)
         cargo_status = await self._analysis.count_opportunities_by_status()
         trend = await self._analysis.get_daily_cargo_trend(days=days)
-
-        # 格式化数据摘要给Agent
-        data_summary = self._format_data_summary(
-            stats=stats,
-            cargo_status=cargo_status,
-            trend=trend,
-            days=days,
-        )
-
-        # 调用AI Agent（通过db参数传递session用于Tool）
-        if db:
+        data_summary = self._format_data_summary(stats, cargo_status, trend, days)
+        try:
             from app.agents.analysis_agent import AnalysisAgent
             agent = AnalysisAgent()
-            result = await agent.run({
-                "days": days,
-                "data_summary": data_summary,
-            })
+            result = await agent.run({"days": days, "data_summary": data_summary})
             if result.success:
                 return result.output
-            logger.warning(f"[AnalysisService] AI analysis failed: {result.error}")
-
-        # 降级：返回基础统计
+        except Exception as e:
+            logger.warning(f"[AnalysisService] AI analysis failed: {e}")
         return {
             "trend_summary": f"最近{days}天数据汇总",
             "cargo_highlights": [f"活跃货源{cargo_status.get('ACTIVE', 0)}条"],
@@ -138,47 +146,34 @@ class AnalysisService:
             "recommendation": "数据分析功能需要AI服务支持",
         }
 
-    def _format_data_summary(
-        self, stats, cargo_status, trend, days: int
-    ) -> str:
+    def _format_data_summary(self, stats, cargo_status, trend, days: int) -> str:
         lines = [f"统计周期：近{days}天"]
         lines.append(f"货源状态分布：{dict(cargo_status)}")
-
         if trend:
-            trend_str = ", ".join(
-                f"{str(r.stat_date)}({int(r.total)})" for r in trend[-5:]
-            )
+            trend_str = ", ".join(f"{str(r.stat_date)}({int(r.total)})" for r in trend[-5:])
             lines.append(f"最近货量趋势：{trend_str}")
-
         if stats:
             top_nodes = sorted(stats, key=lambda s: s.stat_value, reverse=True)[:5]
-            node_str = ", ".join(
-                f"节点{s.node_id}({s.stat_value})" for s in top_nodes
-            )
+            node_str = ", ".join(f"节点{s.node_id}({s.stat_value})" for s in top_nodes)
             lines.append(f"热门节点（TOP5）：{node_str}")
-
         return "\n".join(lines)
 
     # ─────────────────────────────────────────────────
-    # 统计聚合（由Celery Task调用）
+    # 统计聚合（Celery Task 调用）
     # ─────────────────────────────────────────────────
 
-    async def compute_daily_stats(self, target_date: Optional[date] = None) -> int:
-        """
-        计算并持久化每日节点统计数据
-        通常由analysis_tasks.py中的Celery任务调用
-        """
-        target_date = target_date or date.today()
+    async def run_daily_stats(self, target_date: Optional[date] = None) -> dict:
+        count = await self.compute_daily_stats(target_date)
+        return {"updated_nodes": count, "target_date": str(target_date or date.today())}
 
+    async def compute_daily_stats(self, target_date: Optional[date] = None) -> int:
+        target_date = target_date or date.today()
         nodes, _ = await self._address.list_nodes(offset=0, limit=10000)
         updated_count = 0
-
         for node in nodes:
-            # 统计该节点当日货源数量
-            opps, cargo_count = await self._cargo.list_opportunities(
+            _, cargo_count = await self._cargo.list_opportunities(
                 origin_node_id=node.id, offset=0, limit=0
             )
-
             if cargo_count > 0:
                 await self._analysis.upsert_heatmap_stat(
                     stat_date=target_date,
@@ -187,9 +182,6 @@ class AnalysisService:
                     stat_value=cargo_count,
                 )
                 updated_count += 1
-
         await self._analysis.save()
-        logger.info(
-            f"[AnalysisService] daily stats computed date={target_date} nodes={updated_count}"
-        )
+        logger.info(f"[AnalysisService] daily stats computed date={target_date} nodes={updated_count}")
         return updated_count

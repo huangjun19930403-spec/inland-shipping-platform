@@ -8,7 +8,9 @@ import logging
 from typing import Optional
 
 from app.core.exceptions import NotFoundError, ConflictError
-from app.models.address import TransportNode, NodeAlias
+from app.models.address import (
+    Waterway, Region, AdminRegion, NodeType, TransportNode, NodeAlias,
+)
 from app.models.audit import AuditRecord
 from app.repositories.address_repository import AddressRepository
 from app.repositories.audit_repository import AuditRepository
@@ -31,31 +33,128 @@ class AddressService:
     # 水系
     # ─────────────────────────────────────────────────
 
-    async def list_waterways(self):
-        return await self._address.list_waterways()
+    async def list_waterways(self, status: Optional[int] = None):
+        return await self._address.list_waterways(status=status)
 
-    # ─────────────────────────────────────────────────
-    # 行政区域
-    # ─────────────────────────────────────────────────
+    async def create_waterway(self, name: str, code: str, operator_id: int, **kwargs) -> Waterway:
+        ww = Waterway(name=name, code=code, **kwargs)
+        saved = await self._address.create_waterway(ww)
+        await self._record_audit(operator_id, "CREATE", "WATERWAY", saved.id,
+                                 after_data={"name": name, "code": code})
+        await self._address.save()
+        return saved
 
-    async def list_admin_regions(
-        self, parent_id: Optional[int] = None, level: Optional[int] = None
-    ):
-        return await self._address.list_admin_regions(parent_id=parent_id, level=level)
+    async def update_waterway(self, waterway_id: int, operator_id: int, **kwargs) -> Waterway:
+        ww = await self._address.get_waterway(waterway_id)
+        if not ww:
+            raise NotFoundError("Waterway", waterway_id)
+        before = {"name": ww.name}
+        updated = await self._address.update_waterway(waterway_id, **kwargs)
+        await self._record_audit(operator_id, "UPDATE", "WATERWAY", waterway_id,
+                                 before_data=before, after_data=kwargs)
+        await self._address.save()
+        return updated
+
+    async def delete_waterway(self, waterway_id: int, operator_id: int) -> None:
+        ww = await self._address.get_waterway(waterway_id)
+        if not ww:
+            raise NotFoundError("Waterway", waterway_id)
+        await self._address.delete_waterway(waterway_id)
+        await self._record_audit(operator_id, "DELETE", "WATERWAY", waterway_id)
+        await self._address.save()
 
     # ─────────────────────────────────────────────────
     # 商业区域
     # ─────────────────────────────────────────────────
 
-    async def list_regions(self, waterway_id: Optional[int] = None):
-        return await self._address.list_regions(waterway_id=waterway_id)
+    async def list_regions(self, status: Optional[int] = None):
+        return await self._address.list_regions(status=status)
+
+    async def create_region(self, name: str, code: str, operator_id: int, **kwargs) -> Region:
+        region = Region(name=name, code=code, **kwargs)
+        saved = await self._address.create_region(region)
+        await self._record_audit(operator_id, "CREATE", "REGION", saved.id,
+                                 after_data={"name": name, "code": code})
+        await self._address.save()
+        return saved
+
+    async def update_region(self, region_id: int, operator_id: int, **kwargs) -> Region:
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        before = {"name": region.name}
+        updated = await self._address.update_region(region_id, **kwargs)
+        await self._record_audit(operator_id, "UPDATE", "REGION", region_id,
+                                 before_data=before, after_data=kwargs)
+        await self._address.save()
+        return updated
+
+    async def delete_region(self, region_id: int, operator_id: int) -> None:
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        await self._address.delete_region(region_id)
+        await self._record_audit(operator_id, "DELETE", "REGION", region_id)
+        await self._address.save()
+
+    async def get_nodes_in_region(self, region_id: int):
+        return await self._address.get_nodes_in_region(region_id)
+
+    # ─────────────────────────────────────────────────
+    # 行政区划
+    # ─────────────────────────────────────────────────
+
+    async def list_admin_regions(
+        self,
+        level: Optional[int] = None,
+        parent_code: Optional[str] = None,
+        parent_id: Optional[int] = None,
+    ):
+        return await self._address.list_admin_regions(
+            level=level, parent_code=parent_code, parent_id=parent_id
+        )
+
+    async def create_admin_region(self, name: str, code: str, **kwargs) -> AdminRegion:
+        region = AdminRegion(name=name, code=code, **kwargs)
+        saved = await self._address.create_admin_region(region)
+        await self._address.save()
+        return saved
+
+    async def update_admin_region(self, region_id: int, **kwargs) -> AdminRegion:
+        region = await self._address.get_admin_region(region_id)
+        if not region:
+            raise NotFoundError("AdminRegion", region_id)
+        updated = await self._address.update_admin_region(region_id, **kwargs)
+        await self._address.save()
+        return updated
 
     # ─────────────────────────────────────────────────
     # 节点类型
     # ─────────────────────────────────────────────────
 
-    async def list_node_types(self):
-        return await self._address.list_node_types()
+    async def list_node_types(self, status: Optional[int] = None):
+        return await self._address.list_node_types(status=status)
+
+    async def create_node_type(self, name: str, code: str, operator_id: int, **kwargs) -> NodeType:
+        nt = NodeType(name=name, code=code, **kwargs)
+        saved = await self._address.create_node_type(nt)
+        await self._address.save()
+        return saved
+
+    async def update_node_type(self, node_type_id: int, operator_id: int, **kwargs) -> NodeType:
+        nt = await self._address.get_node_type(node_type_id)
+        if not nt:
+            raise NotFoundError("NodeType", node_type_id)
+        updated = await self._address.update_node_type(node_type_id, **kwargs)
+        await self._address.save()
+        return updated
+
+    async def delete_node_type(self, node_type_id: int, operator_id: int) -> None:
+        nt = await self._address.get_node_type(node_type_id)
+        if not nt:
+            raise NotFoundError("NodeType", node_type_id)
+        await self._address.delete_node_type(node_type_id)
+        await self._address.save()
 
     # ─────────────────────────────────────────────────
     # 运输节点
@@ -63,22 +162,29 @@ class AddressService:
 
     async def list_nodes(
         self,
-        waterway_id: Optional[int] = None,
+        audit_status: Optional[int] = None,
         region_id: Optional[int] = None,
-        node_type_id: Optional[int] = None,
+        waterway_id: Optional[int] = None,
+        status: Optional[int] = None,
         keyword: Optional[str] = None,
         page: int = 1,
-        page_size: int = 50,
+        page_size: int = 20,
     ) -> dict:
         offset = (page - 1) * page_size
         items, total = await self._address.list_nodes(
             waterway_id=waterway_id,
             region_id=region_id,
-            node_type_id=node_type_id,
+            audit_status=audit_status,
+            status=status,
             keyword=keyword,
             offset=offset,
             limit=page_size,
         )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    async def search_nodes(self, q: str, page: int = 1, page_size: int = 20) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._address.search_nodes_by_alias(q, offset=offset, limit=page_size)
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     async def get_node(self, node_id: int) -> TransportNode:
@@ -92,55 +198,60 @@ class AddressService:
         name: str,
         code: str,
         waterway_id: int,
-        region_id: Optional[int],
-        node_type_id: Optional[int],
-        latitude: Optional[float],
-        longitude: Optional[float],
         operator_id: int,
+        region_id: Optional[int] = None,
+        node_type_id: Optional[int] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        submitter_id: Optional[int] = None,
         **kwargs,
     ) -> TransportNode:
-        # 检查code唯一性
         existing = await self._address.get_node_by_code(code)
         if existing:
             raise ConflictError(f"Node code '{code}' already exists")
-
         node = TransportNode(
-            name=name,
-            code=code,
-            waterway_id=waterway_id,
-            region_id=region_id,
-            node_type_id=node_type_id,
-            latitude=latitude,
-            longitude=longitude,
+            name=name, code=code, waterway_id=waterway_id,
+            region_id=region_id, node_type_id=node_type_id,
+            latitude=latitude, longitude=longitude,
+            submitter_id=submitter_id or operator_id,
+            audit_status=0,
             **kwargs,
         )
         saved = await self._address.create_node(node)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="TRANSPORT_NODE",
-            target_id=saved.id,
-            after_data={"name": name, "code": code},
-        )
+        await self._record_audit(operator_id, "CREATE", "TRANSPORT_NODE", saved.id,
+                                 after_data={"name": name, "code": code})
         await self._address.save()
-        logger.info(f"[AddressService] node created id={saved.id} code={code}")
         return saved
 
-    async def update_node(
-        self, node_id: int, operator_id: int, **kwargs
-    ) -> TransportNode:
+    async def update_node(self, node_id: int, operator_id: int, **kwargs) -> TransportNode:
         node = await self.get_node(node_id)
         before = {"name": node.name, "code": node.code}
-
         updated = await self._address.update_node(node_id, **kwargs)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="UPDATE",
-            target_type="TRANSPORT_NODE",
-            target_id=node_id,
-            before_data=before,
-            after_data=kwargs,
-        )
+        await self._record_audit(operator_id, "UPDATE", "TRANSPORT_NODE", node_id,
+                                 before_data=before, after_data=kwargs)
+        await self._address.save()
+        return updated
+
+    async def delete_node(self, node_id: int, operator_id: int) -> None:
+        node = await self.get_node(node_id)
+        await self._address.delete_node(node_id)
+        await self._record_audit(operator_id, "DELETE", "TRANSPORT_NODE", node_id,
+                                 before_data={"name": node.name})
+        await self._address.save()
+
+    async def approve_node(self, node_id: int, auditor_id: int, remark: str = "") -> TransportNode:
+        await self.get_node(node_id)
+        updated = await self._address.update_node(node_id, audit_status=1)
+        await self._record_audit(auditor_id, "APPROVE", "TRANSPORT_NODE", node_id,
+                                 after_data={"audit_status": 1, "remark": remark})
+        await self._address.save()
+        return updated
+
+    async def reject_node(self, node_id: int, auditor_id: int, remark: str) -> TransportNode:
+        await self.get_node(node_id)
+        updated = await self._address.update_node(node_id, audit_status=2)
+        await self._record_audit(auditor_id, "REJECT", "TRANSPORT_NODE", node_id,
+                                 after_data={"audit_status": 2, "remark": remark})
         await self._address.save()
         return updated
 
@@ -148,36 +259,20 @@ class AddressService:
     # 节点别名
     # ─────────────────────────────────────────────────
 
-    async def add_alias(
-        self, node_id: int, alias_name: str, operator_id: int
-    ) -> NodeAlias:
-        node = await self.get_node(node_id)
-
-        alias = NodeAlias(
-            transport_node_id=node_id,
-            alias_name=alias_name,
-        )
+    async def add_alias(self, node_id: int, alias_name: str, operator_id: int) -> NodeAlias:
+        await self.get_node(node_id)
+        alias = NodeAlias(transport_node_id=node_id, alias_name=alias_name)
         saved = await self._address.create_alias(alias)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="NODE_ALIAS",
-            target_id=saved.id,
-            after_data={"node_id": node_id, "alias_name": alias_name},
-        )
+        await self._record_audit(operator_id, "CREATE", "NODE_ALIAS", saved.id,
+                                 after_data={"node_id": node_id, "alias_name": alias_name})
         await self._address.save()
         return saved
 
-    async def delete_alias(self, alias_id: int, operator_id: int) -> None:
+    async def delete_alias(self, node_id: int, alias_id: int, operator_id: int) -> None:
         deleted = await self._address.delete_alias(alias_id)
         if not deleted:
             raise NotFoundError("NodeAlias", alias_id)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="DELETE",
-            target_type="NODE_ALIAS",
-            target_id=alias_id,
-        )
+        await self._record_audit(operator_id, "DELETE", "NODE_ALIAS", alias_id)
         await self._address.save()
 
     # ─────────────────────────────────────────────────
