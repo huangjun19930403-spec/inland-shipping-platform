@@ -6,7 +6,7 @@ from app.core.dependencies import get_address_service
 from app.core.security import get_current_user_roles, require_roles
 from app.schemas.address import (
     WaterwayCreate, WaterwayUpdate, WaterwayResponse,
-    RegionCreate, RegionUpdate, RegionResponse,
+    RegionCreate, RegionUpdate, RegionResponse, RegionDetailResponse,
     AdminRegionCreate, AdminRegionUpdate, AdminRegionResponse,
     NodeTypeCreate, NodeTypeUpdate, NodeTypeResponse,
     TransportNodeCreate, TransportNodeUpdate, TransportNodeResponse,
@@ -105,7 +105,7 @@ async def list_waterways_paged(
 
 # ===== Region =====
 
-@router.get("/region", summary="获取商业区域列表")
+@router.get("/region", summary="获取商业区域列表（不分页）")
 async def list_regions(
     status: Optional[int] = None,
     service: AddressService = Depends(get_address_service),
@@ -115,7 +115,38 @@ async def list_regions(
     return success(data=[RegionResponse.model_validate(i) for i in items])
 
 
-@router.post("/region", summary="创建商业区域")
+@router.get("/region/list", summary="分页查询商业区域（展开水系 / 城市详情）")
+async def list_regions_paged(
+    name: Optional[str] = Query(None, description="区域名称（模糊查询）"),
+    status: Optional[int] = Query(None, description="状态：1启用 0停用"),
+    audit_status: Optional[int] = Query(None, description="审核状态：0待审核 1通过 2驳回"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    service: AddressService = Depends(get_address_service),
+    _=Depends(get_current_user_roles),
+):
+    result = await service.list_regions_paged(
+        name=name, status=status, audit_status=audit_status,
+        page=page, page_size=page_size,
+    )
+
+    from app.schemas.address import WaterwayResponse as _WR
+    detail_items = []
+    for item in result["items"]:
+        detail = RegionDetailResponse.model_validate(item["region"])
+        detail.main_rivers_info = [_WR.model_validate(r) for r in item["rivers_info"]]
+        detail.main_cities_info = [AdminRegionResponse.model_validate(c) for c in item["cities_info"]]
+        detail_items.append(detail)
+
+    return success(data={
+        "total": result["total"],
+        "items": detail_items,
+        "page": result["page"],
+        "page_size": result["page_size"],
+    })
+
+
+@router.post("/region", summary="创建商业区域（编码/质心/城市自动计算，提交待审核）")
 async def create_region(
     data: RegionCreate,
     service: AddressService = Depends(get_address_service),
@@ -123,13 +154,14 @@ async def create_region(
 ):
     user, _ = user_roles
     obj = await service.create_region(
-        name=data.name, code=data.code, operator_id=user.id,
-        **data.model_dump(exclude={"name", "code"}, exclude_none=True)
+        name=data.name,
+        operator_id=user.id,
+        **data.model_dump(exclude={"name"}, exclude_none=True),
     )
     return success(data=RegionResponse.model_validate(obj))
 
 
-@router.put("/region/{region_id}", summary="更新商业区域")
+@router.put("/region/{region_id}", summary="更新商业区域（仅限停用状态，修改后需重新审核）")
 async def update_region(
     region_id: int,
     data: RegionUpdate,
@@ -139,7 +171,7 @@ async def update_region(
     user, _ = user_roles
     obj = await service.update_region(
         region_id=region_id, operator_id=user.id,
-        **data.model_dump(exclude_none=True)
+        **data.model_dump(exclude_none=True),
     )
     return success(data=RegionResponse.model_validate(obj))
 
@@ -153,6 +185,52 @@ async def delete_region(
     user, _ = user_roles
     await service.delete_region(region_id=region_id, operator_id=user.id)
     return success(message="删除成功")
+
+
+@router.post("/region/{region_id}/toggle-status", summary="启用/停用商业区域（自动取反）")
+async def toggle_region_status(
+    region_id: int,
+    service: AddressService = Depends(get_address_service),
+    _=Depends(require_roles("ADMIN", "OPERATOR")),
+):
+    obj = await service.toggle_region_status(region_id=region_id)
+    return success(data=RegionResponse.model_validate(obj))
+
+
+@router.post("/region/{region_id}/approve", summary="审批通过商业区域")
+async def approve_region(
+    region_id: int,
+    data: AuditActionRequest,
+    service: AddressService = Depends(get_address_service),
+    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
+):
+    user, roles = user_roles
+    region = await service._address.get_region(region_id)
+    if region and "SUPER_ADMIN" not in roles and region.submitter_id == user.id:
+        raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
+    obj = await service.approve_region(
+        region_id=region_id, auditor_id=user.id, remark=data.audit_remark or ""
+    )
+    return success(data=RegionResponse.model_validate(obj))
+
+
+@router.post("/region/{region_id}/reject", summary="驳回商业区域审批")
+async def reject_region(
+    region_id: int,
+    data: AuditActionRequest,
+    service: AddressService = Depends(get_address_service),
+    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
+):
+    user, roles = user_roles
+    region = await service._address.get_region(region_id)
+    if region and "SUPER_ADMIN" not in roles and region.submitter_id == user.id:
+        raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
+    if not data.audit_remark:
+        raise HTTPException(status_code=400, detail="驳回必须填写审核意见")
+    obj = await service.reject_region(
+        region_id=region_id, auditor_id=user.id, remark=data.audit_remark
+    )
+    return success(data=RegionResponse.model_validate(obj))
 
 
 @router.get("/region/{region_id}/nodes", summary="获取区域内的节点")

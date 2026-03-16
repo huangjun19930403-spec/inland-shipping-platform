@@ -111,9 +111,46 @@ class AddressRepository(BaseRepository):
         result = await self._db.execute(q.order_by(Region.sort_order))
         return result.scalars().all()
 
+    async def list_regions_paged(
+        self,
+        name: Optional[str] = None,
+        status: Optional[int] = None,
+        audit_status: Optional[int] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Tuple[Sequence[Region], int]:
+        conditions = []
+        if name:
+            conditions.append(Region.name.ilike(f"%{name}%"))
+        if status is not None:
+            conditions.append(Region.status == status)
+        if audit_status is not None:
+            conditions.append(Region.audit_status == audit_status)
+
+        q = select(Region)
+        if conditions:
+            q = q.where(and_(*conditions))
+
+        count_result = await self._db.execute(
+            select(func.count()).select_from(q.subquery())
+        )
+        total = count_result.scalar_one()
+
+        result = await self._db.execute(
+            q.order_by(Region.sort_order, Region.id).offset(offset).limit(limit)
+        )
+        return result.scalars().all(), total
+
     async def get_region(self, region_id: int) -> Optional[Region]:
         result = await self._db.execute(
             select(Region).where(Region.id == region_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_max_region_code(self) -> Optional[str]:
+        """获取字典序最大的区域编码，用于自动生成下一个 RG-NNN。"""
+        result = await self._db.execute(
+            select(Region.code).order_by(Region.code.desc()).limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -138,6 +175,39 @@ class AddressRepository(BaseRepository):
             .options(selectinload(TransportNode.aliases))
         )
         return result.scalars().unique().all()
+
+    async def get_waterways_by_ids(self, ids: list[int]) -> Sequence[Waterway]:
+        """按 ID 列表批量查询水系（用于展开 main_rivers）。"""
+        if not ids:
+            return []
+        result = await self._db.execute(
+            select(Waterway).where(Waterway.id.in_(ids))
+        )
+        return result.scalars().all()
+
+    async def get_admin_regions_by_ids(self, ids: list[int]) -> Sequence[AdminRegion]:
+        """按 ID 列表批量查询行政区划（用于展开 main_cities）。"""
+        if not ids:
+            return []
+        result = await self._db.execute(
+            select(AdminRegion).where(AdminRegion.id.in_(ids))
+        )
+        return result.scalars().all()
+
+    async def get_city_coords(self) -> Sequence[tuple]:
+        """
+        查询所有 level=2（市级）且有坐标的行政区划，
+        返回 (id, longitude, latitude) 元组序列，用于判断城市是否在区域内。
+        """
+        result = await self._db.execute(
+            select(AdminRegion.id, AdminRegion.longitude, AdminRegion.latitude)
+            .where(
+                AdminRegion.level == 2,
+                AdminRegion.longitude.is_not(None),
+                AdminRegion.latitude.is_not(None),
+            )
+        )
+        return result.all()
 
     # ─────────────────────────────────────────────────
     # AdminRegion（行政区划）

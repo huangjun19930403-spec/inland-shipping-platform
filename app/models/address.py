@@ -35,19 +35,25 @@ class Region(Base):
     __tablename__ = "region"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(50), unique=True, nullable=False, comment="区域编码")
+    code = Column(String(50), unique=True, nullable=False, comment="区域编码（系统自动生成，格式 RG-NNN）")
     name = Column(String(64), nullable=False, comment="区域名称")
     name_en = Column(String(128), comment="英文名称")
-    center_longitude = Column(DECIMAL(11, 8), comment="区域中心经度")
-    center_latitude = Column(DECIMAL(10, 8), comment="区域中心纬度")
-    main_rivers = Column(JSON, comment="主要水系")
-    main_cities = Column(JSON, comment="主要城市")
-    boundary_coordinates = Column(JSON, comment="边界坐标点序列")
+    center_longitude = Column(DECIMAL(11, 8), comment="区域中心经度（由边界坐标自动计算）")
+    center_latitude = Column(DECIMAL(10, 8), comment="区域中心纬度（由边界坐标自动计算）")
+    main_rivers = Column(JSON, comment="主要水系 ID 数组（Waterway.id）")
+    main_cities = Column(JSON, comment="主要城市 ID 数组（AdminRegion.id，由边界自动计算）")
+    boundary_coordinates = Column(JSON, comment="边界坐标点序列 [[lng,lat],...]")
     boundary_color = Column(String(20), default="#3388ff", comment="边界颜色")
     area_color = Column(String(20), default="#3388ff", comment="填充颜色")
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
-    status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=停用")
+    status = Column(SmallInteger, nullable=False, default=0, comment="1=启用,0=停用")
+    # 审核相关（与 TransportNode 一致）
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
+    audit_remark = Column(String(512), comment="审核意见")
+    submitter_id = Column(BigInteger, comment="提交人ID")
+    auditor_id = Column(BigInteger, comment="审核人ID")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

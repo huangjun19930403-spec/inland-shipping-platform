@@ -60,51 +60,59 @@ class WaterwayResponse(BaseModel):
 # ---------- Region ----------
 
 class RegionCreate(BaseModel):
-    code: str
+    """
+    区域新增请求体。
+    - code：由后端自动生成（RG-NNN），无需填写。
+    - center_longitude / center_latitude：由 boundary_coordinates 自动计算。
+    - main_cities：由 boundary_coordinates 与行政区划表自动匹配，无需填写。
+    - main_rivers：主要水系 ID 数组，由调用方提供（可选）。
+    """
     name: str
     name_en: Optional[str] = None
-    center_longitude: Optional[Decimal] = None
-    center_latitude: Optional[Decimal] = None
-    main_rivers: Optional[list] = None
-    main_cities: Optional[list] = None
-    boundary_coordinates: Optional[list] = None
+    main_rivers: Optional[List[int]] = None       # 水系 ID 列表，用户手动指定
+    boundary_coordinates: Optional[List[list]] = None  # [[lng, lat], ...]
     boundary_color: str = "#3388ff"
     area_color: str = "#3388ff"
     description: Optional[str] = None
     sort_order: int = 0
-    status: int = 1
 
 
 class RegionUpdate(BaseModel):
+    """
+    区域修改请求体。
+    仅允许在 status=0（停用）状态下修改；修改后需重新审核。
+    - center_* 和 main_cities 与新增一样由系统自动重算。
+    """
     name: Optional[str] = None
     name_en: Optional[str] = None
-    center_longitude: Optional[Decimal] = None
-    center_latitude: Optional[Decimal] = None
-    main_rivers: Optional[list] = None
-    main_cities: Optional[list] = None
-    boundary_coordinates: Optional[list] = None
+    main_rivers: Optional[List[int]] = None
+    boundary_coordinates: Optional[List[list]] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None
     description: Optional[str] = None
     sort_order: Optional[int] = None
-    status: Optional[int] = None
 
 
 class RegionResponse(BaseModel):
+    """区域基础响应（含审核字段，main_rivers / main_cities 为 ID 数组）。"""
     id: int
     code: str
     name: str
     name_en: Optional[str] = None
     center_longitude: Optional[Decimal] = None
     center_latitude: Optional[Decimal] = None
-    main_rivers: Optional[list] = None
-    main_cities: Optional[list] = None
+    main_rivers: Optional[List[int]] = None
+    main_cities: Optional[List[int]] = None
     boundary_coordinates: Optional[list] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None
     description: Optional[str] = None
     sort_order: int
     status: int
+    audit_status: int
+    audit_remark: Optional[str] = None
+    submitter_id: Optional[int] = None
+    auditor_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -156,6 +164,12 @@ class AdminRegionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RegionDetailResponse(RegionResponse):
+    """分页查询时使用的扩展响应：将 ID 数组展开为完整的水系 / 城市对象。"""
+    main_rivers_info: List[WaterwayResponse] = []
+    main_cities_info: List[AdminRegionResponse] = []
 
 
 # ---------- NodeType ----------

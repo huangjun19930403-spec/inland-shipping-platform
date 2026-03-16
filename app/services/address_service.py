@@ -9,7 +9,7 @@ from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 
-from app.core.exceptions import NotFoundError, ConflictError
+from app.core.exceptions import NotFoundError, ConflictError, BadRequestError
 from app.models.address import (
     Waterway, Region, AdminRegion, NodeType, TransportNode, NodeAlias,
 )
@@ -17,6 +17,11 @@ from app.models.audit import AuditRecord
 from app.repositories.address_repository import AddressRepository
 from app.repositories.audit_repository import AuditRepository
 from app.utils.waterway_code_generator import WaterwayCodeGenerator
+from app.utils.region_helpers import (
+    generate_region_code,
+    compute_centroid,
+    filter_cities_in_polygon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +156,85 @@ class AddressService:
     async def list_regions(self, status: Optional[int] = None):
         return await self._address.list_regions(status=status)
 
-    async def create_region(self, name: str, code: str, operator_id: int, **kwargs) -> Region:
-        region = Region(name=name, code=code, **kwargs)
+    async def list_regions_paged(
+        self,
+        name: Optional[str] = None,
+        status: Optional[int] = None,
+        audit_status: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._address.list_regions_paged(
+            name=name, status=status, audit_status=audit_status,
+            offset=offset, limit=page_size,
+        )
+        # 展开主要水系和城市
+        detail_items = []
+        for region in items:
+            rivers_info = []
+            cities_info = []
+            if region.main_rivers:
+                rivers_info = list(
+                    await self._address.get_waterways_by_ids(region.main_rivers)
+                )
+            if region.main_cities:
+                cities_info = list(
+                    await self._address.get_admin_regions_by_ids(region.main_cities)
+                )
+            detail_items.append({
+                "region": region,
+                "rivers_info": rivers_info,
+                "cities_info": cities_info,
+            })
+        return {
+            "items": detail_items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    async def _resolve_region_geo(
+        self,
+        boundary_coordinates: Optional[list],
+    ) -> tuple[Optional[float], Optional[float], list[int]]:
+        """
+        根据边界坐标计算质心和圈内城市 ID。
+        Returns: (center_lng, center_lat, city_ids)
+        """
+        if not boundary_coordinates:
+            return None, None, []
+        center_lng, center_lat = compute_centroid(boundary_coordinates)
+        city_coords = await self._address.get_city_coords()
+        city_tuples = [(row[0], float(row[1]), float(row[2])) for row in city_coords]
+        city_ids = filter_cities_in_polygon(city_tuples, boundary_coordinates)
+        return center_lng, center_lat, city_ids
+
+    async def create_region(self, name: str, operator_id: int, **kwargs) -> Region:
+        """
+        新增区域：
+        - code 自动生成（RG-NNN）
+        - 质心和城市列表由 boundary_coordinates 自动计算
+        - 初始 audit_status=0（待审核），status=0（停用）
+        """
+        max_code = await self._address.get_max_region_code()
+        code = generate_region_code(max_code)
+
+        boundary = kwargs.pop("boundary_coordinates", None)
+        center_lng, center_lat, city_ids = await self._resolve_region_geo(boundary)
+
+        region = Region(
+            name=name,
+            code=code,
+            boundary_coordinates=boundary,
+            center_longitude=center_lng,
+            center_latitude=center_lat,
+            main_cities=city_ids if city_ids else None,
+            submitter_id=operator_id,
+            audit_status=0,
+            status=0,
+            **kwargs,
+        )
         saved = await self._address.create_region(region)
         await self._record_audit(operator_id, "CREATE", "REGION", saved.id,
                                  after_data={"name": name, "code": code})
@@ -160,10 +242,30 @@ class AddressService:
         return saved
 
     async def update_region(self, region_id: int, operator_id: int, **kwargs) -> Region:
+        """
+        修改区域：
+        - 仅允许在 status=0（停用）状态下修改
+        - 修改后 audit_status 重置为 0（待审核）
+        - 若传入 boundary_coordinates，重新计算质心和城市
+        """
         region = await self._address.get_region(region_id)
         if not region:
             raise NotFoundError("Region", region_id)
-        before = {"name": region.name}
+        if region.status != 0:
+            raise BadRequestError("只能修改停用状态（status=0）的区域数据")
+
+        before = {"name": region.name, "code": region.code}
+
+        boundary = kwargs.pop("boundary_coordinates", None)
+        if boundary is not None:
+            center_lng, center_lat, city_ids = await self._resolve_region_geo(boundary)
+            kwargs["boundary_coordinates"] = boundary
+            kwargs["center_longitude"] = center_lng
+            kwargs["center_latitude"] = center_lat
+            kwargs["main_cities"] = city_ids if city_ids else None
+
+        kwargs["audit_status"] = 0  # 修改后需重新审核
+
         updated = await self._address.update_region(region_id, **kwargs)
         await self._record_audit(operator_id, "UPDATE", "REGION", region_id,
                                  before_data=before, after_data=kwargs)
@@ -177,6 +279,43 @@ class AddressService:
         await self._address.delete_region(region_id)
         await self._record_audit(operator_id, "DELETE", "REGION", region_id)
         await self._address.save()
+
+    async def approve_region(self, region_id: int, auditor_id: int, remark: str = "") -> Region:
+        """审批通过：audit_status=1，同时启用区域（status=1）。"""
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        updated = await self._address.update_region(
+            region_id, audit_status=1, status=1, auditor_id=auditor_id,
+            audit_remark=remark or None,
+        )
+        await self._record_audit(auditor_id, "APPROVE", "REGION", region_id,
+                                 after_data={"audit_status": 1, "remark": remark})
+        await self._address.save()
+        return updated
+
+    async def reject_region(self, region_id: int, auditor_id: int, remark: str) -> Region:
+        """审批驳回：audit_status=2，保持 status=0（停用）。"""
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        updated = await self._address.update_region(
+            region_id, audit_status=2, auditor_id=auditor_id, audit_remark=remark,
+        )
+        await self._record_audit(auditor_id, "REJECT", "REGION", region_id,
+                                 after_data={"audit_status": 2, "remark": remark})
+        await self._address.save()
+        return updated
+
+    async def toggle_region_status(self, region_id: int) -> Region:
+        """启用 / 停用区域（自动取反，无需审批）。"""
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        new_status = 0 if region.status == 1 else 1
+        updated = await self._address.update_region(region_id, status=new_status)
+        await self._address.save()
+        return updated
 
     async def get_nodes_in_region(self, region_id: int):
         return await self._address.get_nodes_in_region(region_id)
