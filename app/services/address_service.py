@@ -63,6 +63,40 @@ class AddressService:
         await self._record_audit(operator_id, "DELETE", "WATERWAY", waterway_id)
         await self._address.save()
 
+    async def enable_waterway(self, waterway_id: int, operator_id: int) -> Waterway:
+        ww = await self._address.get_waterway(waterway_id)
+        if not ww:
+            raise NotFoundError("Waterway", waterway_id)
+        updated = await self._address.update_waterway(waterway_id, status=1)
+        await self._record_audit(operator_id, "ENABLE", "WATERWAY", waterway_id,
+                                 before_data={"status": ww.status}, after_data={"status": 1})
+        await self._address.save()
+        return updated
+
+    async def disable_waterway(self, waterway_id: int, operator_id: int) -> Waterway:
+        ww = await self._address.get_waterway(waterway_id)
+        if not ww:
+            raise NotFoundError("Waterway", waterway_id)
+        updated = await self._address.update_waterway(waterway_id, status=0)
+        await self._record_audit(operator_id, "DISABLE", "WATERWAY", waterway_id,
+                                 before_data={"status": ww.status}, after_data={"status": 0})
+        await self._address.save()
+        return updated
+
+    async def list_waterways_paged(
+        self,
+        name: Optional[str] = None,
+        code: Optional[str] = None,
+        status: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._address.list_waterways_paged(
+            name=name, code=code, status=status, offset=offset, limit=page_size
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
     # ─────────────────────────────────────────────────
     # 商业区域
     # ─────────────────────────────────────────────────

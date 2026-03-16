@@ -71,6 +71,49 @@ async def delete_waterway(
     return success(message="删除成功")
 
 
+@router.post("/waterway/{waterway_id}/enable", summary="启用水系")
+async def enable_waterway(
+    waterway_id: int,
+    service: AddressService = Depends(get_address_service),
+    user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
+):
+    user, _ = user_roles
+    obj = await service.enable_waterway(waterway_id=waterway_id, operator_id=user.id)
+    return success(data=WaterwayResponse.model_validate(obj))
+
+
+@router.post("/waterway/{waterway_id}/disable", summary="停用水系")
+async def disable_waterway(
+    waterway_id: int,
+    service: AddressService = Depends(get_address_service),
+    user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
+):
+    user, _ = user_roles
+    obj = await service.disable_waterway(waterway_id=waterway_id, operator_id=user.id)
+    return success(data=WaterwayResponse.model_validate(obj))
+
+
+@router.get("/waterway/list", summary="分页查询水系列表（支持名称模糊查询、编码精确查询）")
+async def list_waterways_paged(
+    name: Optional[str] = Query(None, description="水系名称（模糊查询）"),
+    code: Optional[str] = Query(None, description="水系编码（精确查询）"),
+    status: Optional[int] = Query(None, description="状态：1启用 0停用"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    service: AddressService = Depends(get_address_service),
+    _=Depends(get_current_user_roles),
+):
+    result = await service.list_waterways_paged(
+        name=name, code=code, status=status, page=page, page_size=page_size
+    )
+    return success(data={
+        "total": result["total"],
+        "items": [WaterwayResponse.model_validate(i) for i in result["items"]],
+        "page": result["page"],
+        "page_size": result["page_size"],
+    })
+
+
 # ===== Region =====
 
 @router.get("/region", summary="获取商业区域列表")

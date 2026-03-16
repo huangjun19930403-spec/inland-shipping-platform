@@ -28,6 +28,38 @@ class AddressRepository(BaseRepository):
         result = await self._db.execute(q.order_by(Waterway.sort_order))
         return result.scalars().all()
 
+    async def list_waterways_paged(
+        self,
+        name: Optional[str] = None,
+        code: Optional[str] = None,
+        status: Optional[int] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Tuple[Sequence[Waterway], int]:
+        conditions = []
+        if name:
+            conditions.append(Waterway.name.ilike(f"%{name}%"))
+        if code:
+            conditions.append(Waterway.code == code)
+        if status is not None:
+            conditions.append(Waterway.status == status)
+
+        q = select(Waterway)
+        if conditions:
+            q = q.where(and_(*conditions))
+
+        count_result = await self._db.execute(
+            select(func.count()).select_from(q.subquery())
+        )
+        total = count_result.scalar_one()
+
+        result = await self._db.execute(
+            q.order_by(Waterway.sort_order, Waterway.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return result.scalars().all(), total
+
     async def get_waterway(self, waterway_id: int) -> Optional[Waterway]:
         result = await self._db.execute(
             select(Waterway).where(Waterway.id == waterway_id)
