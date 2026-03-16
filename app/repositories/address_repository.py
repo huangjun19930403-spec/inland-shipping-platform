@@ -2,19 +2,14 @@
 地址/节点数据访问层
 封装内河航运地理节点相关数据库操作
 """
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 
 from app.models.address import (
-    Waterway,
-    Region,
-    AdminRegion,
-    NodeType,
-    TransportNode,
-    NodeAlias,
-    RegionAddressRelation,
+    Waterway, Region, AdminRegion, NodeType,
+    TransportNode, NodeAlias, RegionAddressRelation,
 )
 from app.repositories.base import BaseRepository
 
@@ -26,9 +21,44 @@ class AddressRepository(BaseRepository):
     # Waterway
     # ─────────────────────────────────────────────────
 
-    async def list_waterways(self) -> Sequence[Waterway]:
-        result = await self._db.execute(select(Waterway))
+    async def list_waterways(self, status: Optional[int] = None) -> Sequence[Waterway]:
+        q = select(Waterway)
+        if status is not None:
+            q = q.where(Waterway.status == status)
+        result = await self._db.execute(q.order_by(Waterway.sort_order))
         return result.scalars().all()
+
+    async def list_waterways_paged(
+        self,
+        name: Optional[str] = None,
+        code: Optional[str] = None,
+        status: Optional[int] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Tuple[Sequence[Waterway], int]:
+        conditions = []
+        if name:
+            conditions.append(Waterway.name.ilike(f"%{name}%"))
+        if code:
+            conditions.append(Waterway.code == code)
+        if status is not None:
+            conditions.append(Waterway.status == status)
+
+        q = select(Waterway)
+        if conditions:
+            q = q.where(and_(*conditions))
+
+        count_result = await self._db.execute(
+            select(func.count()).select_from(q.subquery())
+        )
+        total = count_result.scalar_one()
+
+        result = await self._db.execute(
+            q.order_by(Waterway.sort_order, Waterway.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return result.scalars().all(), total
 
     async def get_waterway(self, waterway_id: int) -> Optional[Waterway]:
         result = await self._db.execute(
@@ -36,18 +66,151 @@ class AddressRepository(BaseRepository):
         )
         return result.scalar_one_or_none()
 
+    async def create_waterway(self, waterway: Waterway) -> Waterway:
+        return await self.create(waterway)
+
+    async def update_waterway(self, waterway_id: int, **kwargs) -> Optional[Waterway]:
+        ww = await self.get_waterway(waterway_id)
+        return await self.update(ww, **kwargs) if ww else None
+
+    async def delete_waterway(self, waterway_id: int) -> bool:
+        ww = await self.get_waterway(waterway_id)
+        if not ww:
+            return False
+        await self.delete(ww)
+        return True
+
+    async def get_max_sibling_waterway_code(
+        self, parent_id: Optional[int]
+    ) -> Optional[str]:
+        """
+        获取同 parent_id 下字典序最大的 code，用于计算下一个序号。
+        使用字典序降序 + LIMIT 1，与零填充编码格式（WW-LL-NNN）自然对齐。
+        返回 None 表示尚无同级记录，序号应从 001 开始。
+        """
+        if parent_id is None:
+            condition = Waterway.parent_id.is_(None)
+        else:
+            condition = Waterway.parent_id == parent_id
+        result = await self._db.execute(
+            select(Waterway.code)
+            .where(condition)
+            .order_by(Waterway.code.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     # ─────────────────────────────────────────────────
-    # Region
+    # Region（商业区域）
     # ─────────────────────────────────────────────────
 
-    async def list_regions(
-        self, waterway_id: Optional[int] = None
-    ) -> Sequence[Region]:
-        query = select(Region)
-        if waterway_id:
-            query = query.where(Region.waterway_id == waterway_id)
-        result = await self._db.execute(query)
+    async def list_regions(self, status: Optional[int] = None) -> Sequence[Region]:
+        q = select(Region)
+        if status is not None:
+            q = q.where(Region.status == status)
+        result = await self._db.execute(q.order_by(Region.sort_order))
         return result.scalars().all()
+
+    async def get_region(self, region_id: int) -> Optional[Region]:
+        result = await self._db.execute(
+            select(Region).where(Region.id == region_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_region(self, region: Region) -> Region:
+        return await self.create(region)
+
+    async def update_region(self, region_id: int, **kwargs) -> Optional[Region]:
+        region = await self.get_region(region_id)
+        return await self.update(region, **kwargs) if region else None
+
+    async def delete_region(self, region_id: int) -> bool:
+        region = await self.get_region(region_id)
+        if not region:
+            return False
+        await self.delete(region)
+        return True
+
+    async def get_nodes_in_region(self, region_id: int) -> Sequence[TransportNode]:
+        result = await self._db.execute(
+            select(TransportNode)
+            .where(TransportNode.region_id == region_id)
+            .options(selectinload(TransportNode.aliases))
+        )
+        return result.scalars().unique().all()
+
+    # ─────────────────────────────────────────────────
+    # AdminRegion（行政区划）
+    # ─────────────────────────────────────────────────
+
+    async def list_admin_regions(
+        self,
+        parent_id: Optional[int] = None,
+        level: Optional[int] = None,
+        parent_code: Optional[str] = None,
+    ) -> Sequence[AdminRegion]:
+        conditions = []
+        if level is not None:
+            conditions.append(AdminRegion.level == level)
+        if parent_code is not None:
+            parent_res = await self._db.execute(
+                select(AdminRegion).where(AdminRegion.code == parent_code)
+            )
+            parent = parent_res.scalar_one_or_none()
+            if parent:
+                conditions.append(AdminRegion.parent_id == parent.id)
+        elif parent_id is not None:
+            conditions.append(AdminRegion.parent_id == parent_id)
+
+        q = select(AdminRegion)
+        if conditions:
+            q = q.where(and_(*conditions))
+        result = await self._db.execute(q.order_by(AdminRegion.code))
+        return result.scalars().all()
+
+    async def get_admin_region(self, region_id: int) -> Optional[AdminRegion]:
+        result = await self._db.execute(
+            select(AdminRegion).where(AdminRegion.id == region_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_admin_region(self, region: AdminRegion) -> AdminRegion:
+        return await self.create(region)
+
+    async def update_admin_region(self, region_id: int, **kwargs) -> Optional[AdminRegion]:
+        region = await self.get_admin_region(region_id)
+        return await self.update(region, **kwargs) if region else None
+
+    # ─────────────────────────────────────────────────
+    # NodeType
+    # ─────────────────────────────────────────────────
+
+    async def list_node_types(self, status: Optional[int] = None) -> Sequence[NodeType]:
+        q = select(NodeType)
+        if status is not None:
+            q = q.where(NodeType.status == status)
+        result = await self._db.execute(q.order_by(NodeType.sort_order))
+        return result.scalars().all()
+
+    async def get_node_type(self, node_type_id: int) -> Optional[NodeType]:
+        result = await self._db.execute(
+            select(NodeType).where(NodeType.id == node_type_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_node_type(self, nt: NodeType) -> NodeType:
+        return await self.create(nt)
+
+    async def update_node_type(self, node_type_id: int, **kwargs) -> Optional[NodeType]:
+        nt = await self.get_node_type(node_type_id)
+        return await self.update(nt, **kwargs) if nt else None
+
+    async def delete_node_type(self, node_type_id: int) -> bool:
+        nt = await self.get_node_type(node_type_id)
+        if not nt:
+            return False
+        await self.delete(nt)
+        return True
 
     # ─────────────────────────────────────────────────
     # TransportNode
@@ -72,37 +235,76 @@ class AddressRepository(BaseRepository):
         waterway_id: Optional[int] = None,
         region_id: Optional[int] = None,
         node_type_id: Optional[int] = None,
+        audit_status: Optional[int] = None,
+        status: Optional[int] = None,
         keyword: Optional[str] = None,
         offset: int = 0,
         limit: int = 50,
-    ) -> tuple[Sequence[TransportNode], int]:
-        filters = []
-        if waterway_id:
-            filters.append(TransportNode.waterway_id == waterway_id)
-        if region_id:
-            filters.append(TransportNode.region_id == region_id)
-        if node_type_id:
-            filters.append(TransportNode.node_type_id == node_type_id)
+    ) -> Tuple[Sequence[TransportNode], int]:
+        conditions = []
+        if waterway_id is not None:
+            conditions.append(TransportNode.waterway_id == waterway_id)
+        if region_id is not None:
+            conditions.append(TransportNode.region_id == region_id)
+        if node_type_id is not None:
+            conditions.append(TransportNode.node_type_id == node_type_id)
+        if audit_status is not None:
+            conditions.append(TransportNode.audit_status == audit_status)
+        if status is not None:
+            conditions.append(TransportNode.status == status)
         if keyword:
-            filters.append(TransportNode.name.ilike(f"%{keyword}%"))
+            conditions.append(
+                or_(
+                    TransportNode.name.ilike(f"%{keyword}%"),
+                    TransportNode.code.ilike(f"%{keyword}%"),
+                )
+            )
 
-        query = select(TransportNode)
-        if filters:
-            query = query.where(and_(*filters))
+        base_q = select(TransportNode)
+        if conditions:
+            base_q = base_q.where(and_(*conditions))
 
-        from sqlalchemy import func
-        total_result = await self._db.execute(
-            select(func.count()).select_from(query.subquery())
+        count_result = await self._db.execute(
+            select(func.count()).select_from(base_q.subquery())
         )
-        total = total_result.scalar_one()
+        total = count_result.scalar_one()
 
         result = await self._db.execute(
-            query.offset(offset).limit(limit)
+            base_q.options(selectinload(TransportNode.aliases))
+            .order_by(TransportNode.id.desc())
+            .offset(offset)
+            .limit(limit)
         )
-        return result.scalars().all(), total
+        return result.scalars().unique().all(), total
+
+    async def search_nodes_by_alias(
+        self, q: str, offset: int = 0, limit: int = 20
+    ) -> Tuple[Sequence[TransportNode], int]:
+        alias_sub = (
+            select(NodeAlias.transport_node_id)
+            .where(NodeAlias.alias_name.ilike(f"%{q}%"))
+            .scalar_subquery()
+        )
+        cond = or_(
+            TransportNode.name.ilike(f"%{q}%"),
+            TransportNode.id.in_(alias_sub),
+        )
+        count_result = await self._db.execute(
+            select(func.count(TransportNode.id)).where(cond)
+        )
+        total = count_result.scalar_one()
+
+        result = await self._db.execute(
+            select(TransportNode)
+            .where(cond)
+            .options(selectinload(TransportNode.aliases))
+            .order_by(TransportNode.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return result.scalars().unique().all(), total
 
     async def get_all_nodes_with_aliases(self) -> Sequence[TransportNode]:
-        """获取全部节点及别名，用于AI模糊匹配"""
         result = await self._db.execute(
             select(TransportNode).options(selectinload(TransportNode.aliases))
         )
@@ -111,13 +313,16 @@ class AddressRepository(BaseRepository):
     async def create_node(self, node: TransportNode) -> TransportNode:
         return await self.create(node)
 
-    async def update_node(
-        self, node_id: int, **kwargs
-    ) -> Optional[TransportNode]:
+    async def update_node(self, node_id: int, **kwargs) -> Optional[TransportNode]:
         node = await self.get_node(node_id)
-        if node:
-            return await self.update(node, **kwargs)
-        return None
+        return await self.update(node, **kwargs) if node else None
+
+    async def delete_node(self, node_id: int) -> bool:
+        node = await self.get_node(node_id)
+        if not node:
+            return False
+        await self.delete(node)
+        return True
 
     # ─────────────────────────────────────────────────
     # NodeAlias
@@ -137,34 +342,7 @@ class AddressRepository(BaseRepository):
             select(NodeAlias).where(NodeAlias.id == alias_id)
         )
         alias = result.scalar_one_or_none()
-        if alias:
-            await self.delete(alias)
-            return True
-        return False
-
-    # ─────────────────────────────────────────────────
-    # NodeType
-    # ─────────────────────────────────────────────────
-
-    async def list_node_types(self) -> Sequence[NodeType]:
-        result = await self._db.execute(select(NodeType))
-        return result.scalars().all()
-
-    # ─────────────────────────────────────────────────
-    # AdminRegion
-    # ─────────────────────────────────────────────────
-
-    async def list_admin_regions(
-        self, parent_id: Optional[int] = None, level: Optional[int] = None
-    ) -> Sequence[AdminRegion]:
-        filters = []
-        if parent_id is not None:
-            filters.append(AdminRegion.parent_id == parent_id)
-        if level is not None:
-            filters.append(AdminRegion.level == level)
-
-        query = select(AdminRegion)
-        if filters:
-            query = query.where(and_(*filters))
-        result = await self._db.execute(query)
-        return result.scalars().all()
+        if not alias:
+            return False
+        await self.delete(alias)
+        return True

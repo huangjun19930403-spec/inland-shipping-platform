@@ -7,7 +7,11 @@ from decimal import Decimal
 # ---------- Waterway ----------
 
 class WaterwayCreate(BaseModel):
-    code: str
+    """
+    水系新增请求体。
+    code 字段已移除——编码由后端依据 HJ 932-2017 规则自动生成（WW-LL-NNN），
+    响应中的 WaterwayResponse.code 即为系统生成的编码。
+    """
     name: str
     name_en: Optional[str] = None
     level: int = 1
