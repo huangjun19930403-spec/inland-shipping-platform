@@ -1,80 +1,98 @@
-"""统计分析路由"""
+"""
+统计分析路由聚合入口
+
+子路由：
+  /analysis/cargo/*  — 货源分析（cargo_analysis.py）
+  /analysis/ship/*   — 船舶分析（ship_analysis.py）
+  /analysis/*        — 旧接口兼容（仪表盘、热力图、趋势、Top节点）
+"""
 from typing import Optional
 from datetime import date
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, Query
+
+from app.core.dependencies import get_analysis_service
 from app.core.security import get_current_user_roles, require_roles
-from app.schemas.analysis import (
-    DashboardStatsResponse, HeatmapStatResponse,
-    CargoTrendResponse, TopNodesResponse,
-)
 from app.schemas.common import success
-from app.services import analysis_service
+from app.services.analysis_service import AnalysisService
+
+# ── 新增子路由 ────────────────────────────────────────────
+from app.api.v1.analysis.cargo_analysis import router as cargo_router
+from app.api.v1.analysis.ship_analysis import router as ship_router
 
 router = APIRouter()
 
+# 货源分析子路由：/analysis/cargo/*
+router.include_router(cargo_router, prefix="/cargo", tags=["货源分析"])
+# 船舶分析子路由：/analysis/ship/*
+router.include_router(ship_router, prefix="/ship", tags=["船舶分析"])
 
-@router.get("/dashboard", summary="仪表盘统计数据")
+
+# ── 旧接口保持兼容 ────────────────────────────────────────
+
+@router.get("/dashboard", summary="仪表盘统计数据", tags=["数据分析"])
 async def get_dashboard(
-    db: AsyncSession = Depends(get_db),
+    service: AnalysisService = Depends(get_analysis_service),
     _=Depends(get_current_user_roles),
 ):
-    data = await analysis_service.get_dashboard_stats(db)
-    return success(data=DashboardStatsResponse(**data))
+    data = await service.get_dashboard_stats()
+    return success(data=data)
 
 
-@router.get("/cargo-heatmap", summary="货源热力图数据")
+@router.get("/cargo-heatmap", summary="货源热力图数据（旧接口）", tags=["数据分析"])
 async def get_cargo_heatmap(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     stat_type: str = Query("CARGO_ORIGIN", description="CARGO_ORIGIN or CARGO_DEST"),
     region_id: Optional[int] = None,
-    db: AsyncSession = Depends(get_db),
+    service: AnalysisService = Depends(get_analysis_service),
     _=Depends(get_current_user_roles),
 ):
-    items = await analysis_service.get_cargo_heatmap(db, start_date, end_date, stat_type, region_id)
+    new_type = "DEST" if stat_type == "CARGO_DEST" else "ORIGIN"
+    items = await service.get_cargo_heatmap(
+        stat_date=end_date or start_date,
+        stat_type=new_type,
+        region_id=region_id,
+    )
     return success(data=items)
 
 
-@router.get("/vessel-heatmap", summary="船舶分布热力图数据")
+@router.get("/vessel-heatmap", summary="船舶分布热力图数据（旧接口）", tags=["数据分析"])
 async def get_vessel_heatmap(
     region_id: Optional[int] = None,
-    db: AsyncSession = Depends(get_db),
+    service: AnalysisService = Depends(get_analysis_service),
     _=Depends(get_current_user_roles),
 ):
-    items = await analysis_service.get_vessel_heatmap(db, region_id)
+    items = await service.get_vessel_heatmap(region_id=region_id)
     return success(data=items)
 
 
-@router.get("/cargo-trends", summary="货源趋势数据")
+@router.get("/cargo-trends", summary="货源趋势数据（旧接口）", tags=["数据分析"])
 async def get_cargo_trends(
     days: int = Query(7, ge=1, le=90, description="统计天数"),
-    db: AsyncSession = Depends(get_db),
+    service: AnalysisService = Depends(get_analysis_service),
     _=Depends(get_current_user_roles),
 ):
-    data = await analysis_service.get_cargo_trends(db, days)
-    return success(data=CargoTrendResponse(**data))
+    data = await service.get_cargo_trends(days=days)
+    return success(data=data)
 
 
-@router.get("/top-nodes", summary="Top节点排行")
+@router.get("/top-nodes", summary="Top节点排行（旧接口）", tags=["数据分析"])
 async def get_top_nodes(
     stat_type: str = Query("CARGO_ORIGIN", description="CARGO_ORIGIN/CARGO_DEST/VESSEL"),
     limit: int = Query(10, ge=1, le=50),
-    db: AsyncSession = Depends(get_db),
+    service: AnalysisService = Depends(get_analysis_service),
     _=Depends(get_current_user_roles),
 ):
-    data = await analysis_service.get_top_nodes(db, stat_type, limit)
-    return success(data=TopNodesResponse(**data))
+    data = await service.get_top_nodes(stat_type=stat_type, limit=limit)
+    return success(data=data)
 
 
-@router.post("/run-stats", summary="手动触发每日统计聚合（管理员）")
+@router.post("/run-stats", summary="手动触发每日统计聚合（管理员）", tags=["数据分析"])
 async def run_daily_stats(
     target_date: Optional[date] = None,
-    db: AsyncSession = Depends(get_db),
+    service: AnalysisService = Depends(get_analysis_service),
     _=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
 ):
-    result = await analysis_service.run_daily_stats(db, target_date)
-    await db.commit()
+    result = await service.run_daily_stats(target_date=target_date)
     return success(data=result, message="统计聚合完成")

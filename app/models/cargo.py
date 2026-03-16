@@ -20,9 +20,11 @@ class CommodityCategory(Base):
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
     # 审核相关
-    audit_status = Column(SmallInteger, default=1, comment="0=待审核,1=已通过,2=已驳回")
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -41,9 +43,11 @@ class CommodityType(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
-    audit_status = Column(SmallInteger, default=1)
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -69,10 +73,12 @@ class CommodityStandard(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
-    audit_status = Column(SmallInteger, default=1, comment="0=待审核,1=已通过,2=已驳回")
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
     audit_remark = Column(String(512), comment="审核意见")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -203,6 +209,11 @@ class CargoOpportunity(Base):
                     comment="PENDING_CONFIRM/CONFIRMED/CANCELLED")
     input_type = Column(String(32), default="MANUAL", comment="录入方式:MANUAL/AI_PARSE")
     collector_id = Column(BigInteger, comment="采集员ID")
+    # 审核相关
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
+    submitter_id = Column(BigInteger, comment="提交人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

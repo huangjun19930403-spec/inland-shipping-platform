@@ -3,7 +3,7 @@
 ——使用 APScheduler 驱动每日统计聚合——
 
 已配置任务：
-1. daily_stats_job — 每日凌晨2:00 自动执行货源热力统计聚合
+1. daily_stat_job    — 每日凌晨2:00 执行全量统计 ETL（货源 + 船舶 8 张统计表）
 2. cleanup_stale_parsing — 每小时清理超时「解析中」的原始消息（>1小时未完成）
 """
 import logging
@@ -19,21 +19,15 @@ scheduler = AsyncIOScheduler()
 
 
 async def daily_stats_job():
-    """每日统计聚合任务：将货源和运力数据汇聚到 heatmap_stat_daily"""
-    from app.core.database import AsyncSessionLocal
-    from app.services.analysis_service import run_daily_stats
-    from datetime import date
+    """每日统计 ETL 任务（委托给 stat_tasks.daily_stat_job）"""
+    from app.tasks.stat_tasks import daily_stat_job
 
     logger.info("[Scheduler] 开始执行每日统计聚合任务...")
-    async with AsyncSessionLocal() as db:
-        try:
-            stats_date = date.today()
-            result = await run_daily_stats(db, stats_date)
-            await db.commit()
-            logger.info(f"[Scheduler] 每日统计聚合完成，日期={stats_date}，写入={result} 条")
-        except Exception as e:
-            logger.error(f"[Scheduler] 每日统计聚合失败: {e}")
-            await db.rollback()
+    try:
+        result = await daily_stat_job()
+        logger.info(f"[Scheduler] 每日统计聚合完成 {result}")
+    except Exception as e:
+        logger.error(f"[Scheduler] 每日统计聚合失败: {e}", exc_info=True)
 
 
 async def cleanup_stale_parsing_job():
@@ -74,7 +68,7 @@ def setup_scheduler():
             minute=settings.STATS_CRON_MINUTE,
         ),
         id="daily_stats",
-        name="每日货源热力统计聚合",
+        name="每日统计 ETL（货源 + 船舶）",
         replace_existing=True,
         misfire_grace_time=300,  # 允许延迟5分钟
     )

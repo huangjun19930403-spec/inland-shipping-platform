@@ -3,7 +3,6 @@
 职责：货物/商品相关业务逻辑编排
 规则：只调用Repository，不直接操作SQLAlchemy Session
 """
-import json
 import logging
 from typing import Optional
 
@@ -16,10 +15,9 @@ from app.models.cargo import (
     CargoAiParseResult,
     CargoOpportunity,
 )
-from app.models.audit import AuditRecord
 from app.repositories.cargo_repository import CargoRepository
 from app.repositories.address_repository import AddressRepository
-from app.repositories.audit_repository import AuditRepository
+from app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +26,7 @@ class CargoService:
     """
     货物业务服务
 
-    依赖注入：CargoRepository + AddressRepository + AuditRepository
+    依赖注入：CargoRepository + AddressRepository + AuditService
     不持有SQLAlchemy Session，通过Repository间接访问数据库
     """
 
@@ -36,11 +34,11 @@ class CargoService:
         self,
         cargo_repo: CargoRepository,
         address_repo: AddressRepository,
-        audit_repo: AuditRepository,
+        audit_svc: AuditService,
     ) -> None:
         self._cargo = cargo_repo
         self._address = address_repo
-        self._audit = audit_repo
+        self._audit_svc = audit_svc
 
     # ─────────────────────────────────────────────────
     # 商品分类
@@ -56,16 +54,17 @@ class CargoService:
             name=name,
             code=code,
             description=description,
+            submitter_id=operator_id,
+            audit_status=0,
         )
         saved = await self._cargo.categories.create(category)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="COMMODITY_CATEGORY",
-            target_id=saved.id,
+        await self._cargo.save()
+        await self._audit_svc.submit_for_audit(
+            target_type="COMMODITY_CATEGORY", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
             after_data={"name": saved.name, "code": saved.code},
         )
-        await self._cargo.save()
         logger.info(f"[CargoService] category created id={saved.id}")
         return saved
 
@@ -87,16 +86,17 @@ class CargoService:
             category_id=category_id,
             name=name,
             code=code,
+            submitter_id=operator_id,
+            audit_status=0,
         )
         saved = await self._cargo.types.create(cargo_type)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="COMMODITY_TYPE",
-            target_id=saved.id,
+        await self._cargo.save()
+        await self._audit_svc.submit_for_audit(
+            target_type="COMMODITY_TYPE", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
             after_data={"name": saved.name, "category_id": category_id},
         )
-        await self._cargo.save()
         return saved
 
     # ─────────────────────────────────────────────────
@@ -117,16 +117,17 @@ class CargoService:
             commodity_type_id=type_id,
             name=name,
             description=description,
+            submitter_id=operator_id,
+            audit_status=0,
         )
         saved = await self._cargo.standards.create(standard)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="COMMODITY_STANDARD",
-            target_id=saved.id,
+        await self._cargo.save()
+        await self._audit_svc.submit_for_audit(
+            target_type="COMMODITY_STANDARD", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
             after_data={"name": saved.name, "type_id": type_id},
         )
-        await self._cargo.save()
         return saved
 
     # ─────────────────────────────────────────────────
@@ -184,9 +185,6 @@ class CargoService:
         overrides: Optional[dict] = None,
     ) -> CargoOpportunity:
         """确认AI解析结果，创建最终货源机会记录"""
-        from sqlalchemy import select
-        from app.models.cargo import CargoAiParseResult as ParseModel
-
         # 直接查询parseResult（因cargo_repo.update_parse_result已支持）
         parse_result = await self._cargo.update_parse_result(result_id)
         if not parse_result:
@@ -214,20 +212,20 @@ class CargoService:
             contact=parse_result.contact,
             remarks=parse_result.remarks,
             operator_id=operator_id,
+            submitter_id=operator_id,
+            audit_status=0,
             status="ACTIVE",
         )
 
         saved_opp = await self._cargo.create_opportunity(opportunity)
         await self._cargo.update_parse_result(result_id, status="CONFIRMED")
-
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CONFIRM",
-            target_type="CARGO_OPPORTUNITY",
-            target_id=saved_opp.id,
+        await self._cargo.save()
+        await self._audit_svc.submit_for_audit(
+            target_type="CARGO_OPPORTUNITY", target_id=saved_opp.id,
+            target_name=f"CargoOpportunity#{saved_opp.id}", action="CREATE",
+            submitter_id=operator_id,
             after_data={"from_parse_result_id": result_id},
         )
-        await self._cargo.save()
         logger.info(f"[CargoService] opportunity confirmed id={saved_opp.id}")
         return saved_opp
 
@@ -268,17 +266,18 @@ class CargoService:
             contact=contact,
             remarks=remarks,
             operator_id=operator_id,
+            submitter_id=operator_id,
+            audit_status=0,
             status="PENDING",
         )
         saved = await self._cargo.create_opportunity(opportunity)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="CARGO_OPPORTUNITY",
-            target_id=saved.id,
+        await self._cargo.save()
+        await self._audit_svc.submit_for_audit(
+            target_type="CARGO_OPPORTUNITY", target_id=saved.id,
+            target_name=f"CargoOpportunity#{saved.id}", action="CREATE",
+            submitter_id=operator_id,
             after_data={"origin_node_id": origin_node_id, "dest_node_id": dest_node_id},
         )
-        await self._cargo.save()
         return saved
 
     async def list_opportunities(
@@ -300,27 +299,3 @@ class CargoService:
             limit=page_size,
         )
         return {"items": items, "total": total, "page": page, "page_size": page_size}
-
-    # ─────────────────────────────────────────────────
-    # 内部辅助
-    # ─────────────────────────────────────────────────
-
-    async def _record_audit(
-        self,
-        operator_id: int,
-        action: str,
-        target_type: str,
-        target_id: int,
-        before_data: Optional[dict] = None,
-        after_data: Optional[dict] = None,
-    ) -> None:
-        record = AuditRecord(
-            operator_id=operator_id,
-            action=action,
-            target_type=target_type,
-            target_id=target_id,
-            audit_status="APPROVED",
-            before_data=json.dumps(before_data, ensure_ascii=False) if before_data else None,
-            after_data=json.dumps(after_data, ensure_ascii=False) if after_data else None,
-        )
-        await self._audit.create_record(record)

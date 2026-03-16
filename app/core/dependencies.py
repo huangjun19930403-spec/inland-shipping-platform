@@ -88,35 +88,41 @@ async def get_system_repo(
 # Service依赖
 # ─────────────────────────────────────────────────
 
+async def get_audit_service(
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+) -> AuditService:
+    return AuditService(audit_repo=audit_repo)
+
+
 async def get_cargo_service(
     cargo_repo: CargoRepository = Depends(get_cargo_repo),
     address_repo: AddressRepository = Depends(get_address_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo),
+    audit_svc: AuditService = Depends(get_audit_service),
 ) -> CargoService:
     return CargoService(
         cargo_repo=cargo_repo,
         address_repo=address_repo,
-        audit_repo=audit_repo,
+        audit_svc=audit_svc,
     )
 
 
 async def get_address_service(
     address_repo: AddressRepository = Depends(get_address_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo),
+    audit_svc: AuditService = Depends(get_audit_service),
 ) -> AddressService:
     return AddressService(
         address_repo=address_repo,
-        audit_repo=audit_repo,
+        audit_svc=audit_svc,
     )
 
 
 async def get_vessel_service(
     vessel_repo: VesselRepository = Depends(get_vessel_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo),
+    audit_svc: AuditService = Depends(get_audit_service),
 ) -> VesselService:
     return VesselService(
         vessel_repo=vessel_repo,
-        audit_repo=audit_repo,
+        audit_svc=audit_svc,
     )
 
 
@@ -128,23 +134,8 @@ async def get_route_service(
 
 async def get_analysis_service(
     analysis_repo: AnalysisRepository = Depends(get_analysis_repo),
-    cargo_repo: CargoRepository = Depends(get_cargo_repo),
-    address_repo: AddressRepository = Depends(get_address_repo),
 ) -> AnalysisService:
-    return AnalysisService(
-        analysis_repo=analysis_repo,
-        cargo_repo=cargo_repo,
-        address_repo=address_repo,
-    )
+    """AnalysisService 只依赖 AnalysisRepository（只读统计表）"""
+    return AnalysisService(analysis_repo=analysis_repo)
 
 
-async def get_audit_service(
-    audit_repo: AuditRepository = Depends(get_audit_repo),
-    cargo_repo: CargoRepository = Depends(get_cargo_repo),
-    address_repo: AddressRepository = Depends(get_address_repo),
-) -> AuditService:
-    return AuditService(
-        audit_repo=audit_repo,
-        cargo_repo=cargo_repo,
-        address_repo=address_repo,
-    )

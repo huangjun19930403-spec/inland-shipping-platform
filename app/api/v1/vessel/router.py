@@ -1,9 +1,8 @@
-"""船舶路由"""
+"""船舶路由 — 使用 DI 模式调用 VesselService"""
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.dependencies import get_vessel_service
 from app.core.security import get_current_user_roles, require_roles
 from app.schemas.vessel import (
     VesselTypeDictCreate, VesselTypeDictUpdate, VesselTypeDictResponse,
@@ -13,7 +12,7 @@ from app.schemas.vessel import (
 )
 from app.schemas.audit import AuditActionRequest
 from app.schemas.common import success
-from app.services import vessel_service
+from app.services.vessel_service import VesselService
 
 router = APIRouter()
 
@@ -23,23 +22,24 @@ router = APIRouter()
 @router.get("/vessel-type", summary="获取船舶类型列表")
 async def list_vessel_types(
     status: Optional[int] = None,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     _=Depends(get_current_user_roles),
 ):
-    items = await vessel_service.get_vessel_types(db, status)
+    items = await service.list_vessel_types(status=status)
     return success(data=[VesselTypeDictResponse.model_validate(i) for i in items])
 
 
-@router.post("/vessel-type", summary="创建船舶类型")
+@router.post("/vessel-type", summary="创建船舶类型（待审核）")
 async def create_vessel_type(
     data: VesselTypeDictCreate,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
 ):
-    user, roles = user_roles
-    obj = await vessel_service.create_vessel_type(db, data, user.id, user.real_name)
-    await db.commit()
-    await db.refresh(obj)
+    user, _ = user_roles
+    obj = await service.create_vessel_type(
+        name=data.name, code=data.code, operator_id=user.id,
+        **data.model_dump(exclude={"name", "code"}, exclude_none=True)
+    )
     return success(data=VesselTypeDictResponse.model_validate(obj))
 
 
@@ -47,23 +47,25 @@ async def create_vessel_type(
 async def update_vessel_type(
     type_id: int,
     data: VesselTypeDictUpdate,
-    db: AsyncSession = Depends(get_db),
-    _=Depends(require_roles("ADMIN", "OPERATOR")),
+    service: VesselService = Depends(get_vessel_service),
+    user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
 ):
-    obj = await vessel_service.update_vessel_type(db, type_id, data)
-    await db.commit()
-    await db.refresh(obj)
+    user, _ = user_roles
+    obj = await service.update_vessel_type(
+        type_id=type_id, operator_id=user.id,
+        **data.model_dump(exclude_none=True)
+    )
     return success(data=VesselTypeDictResponse.model_validate(obj))
 
 
 @router.delete("/vessel-type/{type_id}", summary="删除船舶类型")
 async def delete_vessel_type(
     type_id: int,
-    db: AsyncSession = Depends(get_db),
-    _=Depends(require_roles("ADMIN")),
+    service: VesselService = Depends(get_vessel_service),
+    user_roles=Depends(require_roles("ADMIN")),
 ):
-    await vessel_service.delete_vessel_type(db, type_id)
-    await db.commit()
+    user, _ = user_roles
+    await service.delete_vessel_type(type_id=type_id, operator_id=user.id)
     return success(message="删除成功")
 
 
@@ -71,12 +73,13 @@ async def delete_vessel_type(
 async def approve_vessel_type(
     type_id: int,
     data: AuditActionRequest,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
 ):
-    user, roles = user_roles
-    obj = await vessel_service.approve_vessel_type(db, type_id, user.id, user.real_name, data.audit_remark or "")
-    await db.commit()
+    user, _ = user_roles
+    obj = await service.approve_vessel_type(
+        type_id=type_id, auditor_id=user.id, remark=data.audit_remark or ""
+    )
     return success(data=VesselTypeDictResponse.model_validate(obj))
 
 
@@ -84,14 +87,15 @@ async def approve_vessel_type(
 async def reject_vessel_type(
     type_id: int,
     data: AuditActionRequest,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
 ):
-    user, roles = user_roles
+    user, _ = user_roles
     if not data.audit_remark:
         raise HTTPException(status_code=400, detail="驳回必须填写审核意见")
-    obj = await vessel_service.reject_vessel_type(db, type_id, user.id, user.real_name, data.audit_remark)
-    await db.commit()
+    obj = await service.reject_vessel_type(
+        type_id=type_id, auditor_id=user.id, remark=data.audit_remark
+    )
     return success(data=VesselTypeDictResponse.model_validate(obj))
 
 
@@ -104,38 +108,47 @@ async def list_vessels(
     keyword: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     _=Depends(get_current_user_roles),
 ):
-    result = await vessel_service.get_vessels(db, audit_status, vessel_type_id, keyword, page, page_size)
+    result = await service.list_vessels(
+        audit_status=audit_status, vessel_type_id=vessel_type_id,
+        keyword=keyword, page=page, page_size=page_size,
+    )
     return success(data={
-        "total": result.total,
-        "items": [VesselResponse.model_validate(i) for i in result.items],
-        "page": result.page,
-        "page_size": result.page_size,
+        "total": result["total"],
+        "items": [VesselResponse.model_validate(i) for i in result["items"]],
+        "page": result["page"],
+        "page_size": result["page_size"],
     })
 
 
-@router.post("/vessel", summary="创建船舶（待审核）")
+@router.post("/vessel", summary="录入船舶（待审核）")
 async def create_vessel(
     data: VesselCreate,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "OPERATOR", "COLLECTOR")),
 ):
-    user, roles = user_roles
-    obj = await vessel_service.create_vessel(db, data, user.id, user.real_name)
-    await db.commit()
-    await db.refresh(obj)
+    user, _ = user_roles
+    obj = await service.register_vessel(
+        vessel_name=data.vessel_name,
+        vessel_type_id=data.vessel_type_id,
+        operator_id=user.id,
+        mmsi=getattr(data, "mmsi", None),
+        submitter_id=user.id,
+        **{k: v for k, v in data.model_dump(exclude_none=True).items()
+           if k not in {"vessel_name", "vessel_type_id", "mmsi"}}
+    )
     return success(data=VesselResponse.model_validate(obj))
 
 
 @router.get("/vessel/{vessel_id}", summary="获取船舶详情")
 async def get_vessel(
     vessel_id: int,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     _=Depends(get_current_user_roles),
 ):
-    obj = await vessel_service.get_vessel(db, vessel_id)
+    obj = await service.get_vessel(vessel_id)
     return success(data=VesselResponse.model_validate(obj))
 
 
@@ -143,24 +156,25 @@ async def get_vessel(
 async def update_vessel(
     vessel_id: int,
     data: VesselUpdate,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
 ):
-    user, roles = user_roles
-    obj = await vessel_service.update_vessel(db, vessel_id, data, user.id, user.real_name)
-    await db.commit()
-    await db.refresh(obj)
+    user, _ = user_roles
+    obj = await service.update_vessel(
+        vessel_id=vessel_id, operator_id=user.id,
+        **data.model_dump(exclude_none=True)
+    )
     return success(data=VesselResponse.model_validate(obj))
 
 
-@router.delete("/vessel/{vessel_id}", summary="删除船舶（软删除）")
+@router.delete("/vessel/{vessel_id}", summary="删除船舶")
 async def delete_vessel(
     vessel_id: int,
-    db: AsyncSession = Depends(get_db),
-    _=Depends(require_roles("ADMIN")),
+    service: VesselService = Depends(get_vessel_service),
+    user_roles=Depends(require_roles("ADMIN")),
 ):
-    await vessel_service.delete_vessel(db, vessel_id)
-    await db.commit()
+    user, _ = user_roles
+    await service.delete_vessel(vessel_id=vessel_id, operator_id=user.id)
     return success(message="删除成功")
 
 
@@ -168,17 +182,16 @@ async def delete_vessel(
 async def approve_vessel(
     vessel_id: int,
     data: AuditActionRequest,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
 ):
     user, roles = user_roles
-    vessel = await vessel_service.get_vessel(db, vessel_id)
-    from app.services.audit_service import check_can_audit
-    can = await check_can_audit(vessel.submitter_id or 0, user.id, roles)
-    if not can:
+    vessel = await service.get_vessel(vessel_id)
+    if "SUPER_ADMIN" not in roles and vessel.submitter_id == user.id:
         raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
-    obj = await vessel_service.approve_vessel(db, vessel_id, user.id, user.real_name, data.audit_remark or "")
-    await db.commit()
+    obj = await service.approve_vessel(
+        vessel_id=vessel_id, auditor_id=user.id, remark=data.audit_remark or ""
+    )
     return success(data=VesselResponse.model_validate(obj))
 
 
@@ -186,24 +199,25 @@ async def approve_vessel(
 async def reject_vessel(
     vessel_id: int,
     data: AuditActionRequest,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
 ):
     user, roles = user_roles
     if not data.audit_remark:
         raise HTTPException(status_code=400, detail="驳回必须填写审核意见")
-    obj = await vessel_service.reject_vessel(db, vessel_id, user.id, user.real_name, data.audit_remark)
-    await db.commit()
+    obj = await service.reject_vessel(
+        vessel_id=vessel_id, auditor_id=user.id, remark=data.audit_remark
+    )
     return success(data=VesselResponse.model_validate(obj))
 
 
-@router.get("/vessel/{vessel_id}/history", summary="获取船舶历史记录（船名和MMSI）")
+@router.get("/vessel/{vessel_id}/history", summary="获取船舶历史（船名+AIS）")
 async def get_vessel_history(
     vessel_id: int,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     _=Depends(get_current_user_roles),
 ):
-    history = await vessel_service.get_vessel_history(db, vessel_id)
+    history = await service.get_vessel_history(vessel_id)
     return success(data={
         "name_history": [VesselNameHistoryResponse.model_validate(i) for i in history["name_history"]],
         "ais_history": [VesselAisHistoryResponse.model_validate(i) for i in history["ais_history"]],
@@ -214,23 +228,24 @@ async def get_vessel_history(
 async def update_vessel_dynamic(
     vessel_id: int,
     data: VesselDynamicUpdate,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     user_roles=Depends(require_roles("ADMIN", "OPERATOR", "COLLECTOR")),
 ):
-    user, roles = user_roles
-    obj = await vessel_service.update_vessel_dynamic(db, vessel_id, data, operator_id=user.id)
-    await db.commit()
-    await db.refresh(obj)
+    user, _ = user_roles
+    obj = await service.update_dynamic(
+        vessel_id=vessel_id, operator_id=user.id,
+        **data.model_dump(exclude_none=True)
+    )
     return success(data=VesselDynamicResponse.model_validate(obj))
 
 
 @router.get("/vessel/{vessel_id}/dynamic", summary="获取船舶最新动态")
 async def get_vessel_dynamic(
     vessel_id: int,
-    db: AsyncSession = Depends(get_db),
+    service: VesselService = Depends(get_vessel_service),
     _=Depends(get_current_user_roles),
 ):
-    obj = await vessel_service.get_vessel_dynamic(db, vessel_id)
+    obj = await service.get_dynamic(vessel_id)
     if not obj:
         return success(data=None, message="暂无动态信息")
     return success(data=VesselDynamicResponse.model_validate(obj))

@@ -23,6 +23,7 @@ class RouteService:
         self,
         origin_region_id: Optional[int] = None,
         dest_region_id: Optional[int] = None,
+        status: Optional[int] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
@@ -30,6 +31,7 @@ class RouteService:
         items, total = await self._route.list_routes(
             origin_region_id=origin_region_id,
             dest_region_id=dest_region_id,
+            status=status,
             offset=offset,
             limit=page_size,
         )
@@ -48,20 +50,16 @@ class RouteService:
         dest_region_id: int,
         description: Optional[str] = None,
         path_nodes: Optional[list] = None,
+        **kwargs,
     ) -> ShippingRoute:
-        """
-        创建航线及路径节点
-
-        path_nodes: [{"node_id": int, "sequence": int, "distance_km": float}]
-        """
         route = ShippingRoute(
             name=name,
             origin_region_id=origin_region_id,
             dest_region_id=dest_region_id,
             description=description,
+            **kwargs,
         )
         saved = await self._route.create_route(route)
-
         if path_nodes:
             for pn in path_nodes:
                 path = ShippingRoutePath(
@@ -71,26 +69,57 @@ class RouteService:
                     distance_km=pn.get("distance_km"),
                 )
                 await self._route.create_path_node(path)
-
         await self._route.save()
         logger.info(f"[RouteService] route created id={saved.id} name={name}")
         return saved
 
-    async def update_route_paths(
-        self, route_id: int, path_nodes: list
-    ) -> ShippingRoute:
-        """替换航线路径节点"""
+    async def update_route(self, route_id: int, **kwargs) -> ShippingRoute:
         route = await self.get_route(route_id)
+        updated = await self._route.update_route(route_id, **kwargs)
+        await self._route.save()
+        return updated
 
+    async def delete_route(self, route_id: int) -> None:
+        await self.get_route(route_id)
+        await self._route.delete_route_paths(route_id)
+        await self._route.delete_route(route_id)
+        await self._route.save()
+
+    # ─────────────────────────────────────────────────
+    # 路径节点
+    # ─────────────────────────────────────────────────
+
+    async def get_route_path(self, route_id: int):
+        await self.get_route(route_id)
+        return await self._route.get_route_paths(route_id)
+
+    async def add_route_path(
+        self, route_id: int, node_id: int, sequence: int, distance_km: Optional[float] = None
+    ) -> ShippingRoutePath:
+        await self.get_route(route_id)
+        path = ShippingRoutePath(
+            route_id=route_id, node_id=node_id,
+            sequence=sequence, distance_km=distance_km,
+        )
+        saved = await self._route.create_path_node(path)
+        await self._route.save()
+        return saved
+
+    async def delete_route_path(self, route_id: int, path_id: int) -> None:
+        deleted = await self._route.delete_path_node(path_id)
+        if not deleted:
+            raise NotFoundError("ShippingRoutePath", path_id)
+        await self._route.save()
+
+    async def update_route_paths(self, route_id: int, path_nodes: list) -> ShippingRoute:
+        """替换航线路径节点"""
+        await self.get_route(route_id)
         await self._route.delete_route_paths(route_id)
         for pn in path_nodes:
             path = ShippingRoutePath(
-                route_id=route_id,
-                node_id=pn["node_id"],
-                sequence=pn["sequence"],
-                distance_km=pn.get("distance_km"),
+                route_id=route_id, node_id=pn["node_id"],
+                sequence=pn["sequence"], distance_km=pn.get("distance_km"),
             )
             await self._route.create_path_node(path)
-
         await self._route.save()
         return await self.get_route(route_id)

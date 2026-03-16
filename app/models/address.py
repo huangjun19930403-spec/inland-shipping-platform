@@ -24,6 +24,11 @@ class Waterway(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=停用")
+    # 审核相关
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
+    submitter_id = Column(BigInteger, comment="提交人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -48,12 +53,13 @@ class Region(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=0, comment="1=启用,0=停用")
-    # 审核相关（与 TransportNode 一致）
+    # 审核相关
     audit_status = Column(SmallInteger, nullable=False, default=0,
                           comment="0=待审核,1=已通过,2=已驳回")
     audit_remark = Column(String(512), comment="审核意见")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -92,6 +98,11 @@ class NodeType(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
+    # 审核相关
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
+    submitter_id = Column(BigInteger, comment="提交人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -125,10 +136,12 @@ class TransportNode(Base):
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1, comment="1=运营中,0=停用,2=建设中")
     # 审核相关
-    audit_status = Column(SmallInteger, default=1, comment="0=待审核,1=已通过,2=已驳回")
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
     audit_remark = Column(String(512), comment="审核意见")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

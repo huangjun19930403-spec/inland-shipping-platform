@@ -1,15 +1,19 @@
 """
 数据分析业务服务层
-职责：统计聚合、仪表盘数据、AI趋势分析编排
-规则：通过Repository访问数据，通过Agent调用AI
+
+职责：
+  - 从统计表读取数据并组装为 API 所需结构
+  - 禁止直接查询业务表（统计数据由 stat_tasks.py ETL 写入统计表）
+  - AI 趋势分析编排（可选功能）
+
+依赖：
+  AnalysisRepository — 所有数据读取均通过统计表
 """
 import logging
 from datetime import date, timedelta
 from typing import Optional
 
 from app.repositories.analysis_repository import AnalysisRepository
-from app.repositories.cargo_repository import CargoRepository
-from app.repositories.address_repository import AddressRepository
 
 logger = logging.getLogger(__name__)
 
@@ -17,179 +21,288 @@ logger = logging.getLogger(__name__)
 class AnalysisService:
     """数据分析业务服务"""
 
-    def __init__(
-        self,
-        analysis_repo: AnalysisRepository,
-        cargo_repo: CargoRepository,
-        address_repo: AddressRepository,
-    ) -> None:
+    def __init__(self, analysis_repo: AnalysisRepository) -> None:
         self._analysis = analysis_repo
-        self._cargo = cargo_repo
-        self._address = address_repo
 
     # ─────────────────────────────────────────────────
-    # 仪表盘
+    # 仪表盘（从统计表读取，不查业务表）
     # ─────────────────────────────────────────────────
 
-    async def get_dashboard_summary(self) -> dict:
-        """获取仪表盘核心指标"""
-        cargo_by_status = await self._analysis.count_opportunities_by_status()
-        active_vessels = await self._analysis.count_active_vessels()
-        daily_trend = await self._analysis.get_daily_cargo_trend(days=7)
-
+    async def get_dashboard_stats(self) -> dict:
+        cargo_stat = await self._analysis.get_latest_cargo_stat()
+        ship_stat = await self._analysis.get_latest_ship_total()
+        trend = await self._analysis.get_cargo_trend(days=7)
         return {
-            "cargo_total": sum(cargo_by_status.values()),
-            "cargo_active": cargo_by_status.get("ACTIVE", 0),
-            "cargo_pending": cargo_by_status.get("PENDING", 0),
-            "active_vessels": active_vessels,
+            "cargo_total": cargo_stat.total_count if cargo_stat else 0,
+            "cargo_active": cargo_stat.active_count if cargo_stat else 0,
+            "cargo_pending": cargo_stat.pending_count if cargo_stat else 0,
+            "active_vessels": ship_stat["vessel_count"],
             "daily_trend": [
-                {"date": str(row.stat_date), "total": row.total}
-                for row in daily_trend
+                {"date": str(r.stat_date), "total": r.total_count}
+                for r in trend
             ],
         }
 
+    # 别名，保持向后兼容
+    async def get_dashboard_summary(self) -> dict:
+        return await self.get_dashboard_stats()
+
     # ─────────────────────────────────────────────────
-    # 热力图统计
+    # 货源热力图
     # ─────────────────────────────────────────────────
 
-    async def get_heatmap(
+    async def get_cargo_heatmap(
         self,
         stat_date: Optional[date] = None,
-        stat_type: str = "CARGO",
+        stat_type: str = "ORIGIN",
+        region_id: Optional[int] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
     ) -> list:
-        target_date = stat_date or date.today()
-        stats = await self._analysis.get_heatmap_stats(
-            stat_date=target_date, stat_type=stat_type
-        )
+        target = stat_date or end_date or date.today()
+        rows = await self._analysis.get_cargo_heatmap(stat_date=target, stat_type=stat_type)
+        result = []
+        for r in rows:
+            node = r.node
+            item = {
+                "node_id": r.node_id,
+                "cargo_count": r.cargo_count,
+                "total_tonnage": float(r.total_tonnage or 0),
+                "stat_type": r.stat_type,
+                "stat_date": str(r.stat_date),
+                "longitude": float(node.longitude) if node and node.longitude else None,
+                "latitude": float(node.latitude) if node and node.latitude else None,
+                "node_name": node.name if node else None,
+            }
+            # 可选区域过滤
+            if region_id and node and node.region_id != region_id:
+                continue
+            result.append(item)
+        return result
+
+    # ─────────────────────────────────────────────────
+    # 货源趋势图
+    # ─────────────────────────────────────────────────
+
+    async def get_cargo_trend(self, days: int = 30) -> dict:
+        rows = await self._analysis.get_cargo_trend(days=days)
+        return {
+            "days": days,
+            "trend": [
+                {
+                    "date": str(r.stat_date),
+                    "total": r.total_count,
+                    "active": r.active_count,
+                    "pending": r.pending_count,
+                    "tonnage": float(r.total_tonnage or 0),
+                }
+                for r in rows
+            ],
+        }
+
+    # 旧接口别名
+    async def get_cargo_trends(self, days: int = 7) -> dict:
+        return await self.get_cargo_trend(days=days)
+
+    # ─────────────────────────────────────────────────
+    # 货品分类货源排名
+    # ─────────────────────────────────────────────────
+
+    async def get_cargo_commodity_rank(self, stat_date: Optional[date] = None) -> list:
+        target = stat_date or date.today()
+        rows = await self._analysis.get_cargo_commodity_stat(stat_date=target)
+        total = sum(r.cargo_count for r in rows) or 1
         return [
             {
-                "node_id": s.node_id,
-                "stat_value": s.stat_value,
-                "stat_type": s.stat_type,
+                "rank": idx + 1,
+                "commodity_category_id": r.commodity_category_id,
+                "category_name": r.category_name,
+                "cargo_count": r.cargo_count,
+                "total_tonnage": float(r.total_tonnage or 0),
+                "ratio": round(r.cargo_count / total * 100, 2),
             }
-            for s in stats
+            for idx, r in enumerate(rows)
         ]
 
-    async def get_trend(
+    # ─────────────────────────────────────────────────
+    # 区域货源分布占比 + 排名
+    # ─────────────────────────────────────────────────
+
+    async def get_cargo_region_distribution(
         self,
-        start_date: date,
-        end_date: date,
-        node_id: Optional[int] = None,
+        stat_date: Optional[date] = None,
+        stat_type: str = "ORIGIN",
+    ) -> dict:
+        target = stat_date or date.today()
+        rows = await self._analysis.get_cargo_region_stat(stat_date=target, stat_type=stat_type)
+        total = sum(r.cargo_count for r in rows) or 1
+        items = [
+            {
+                "rank": idx + 1,
+                "region_id": r.region_id,
+                "region_name": r.region_name,
+                "cargo_count": r.cargo_count,
+                "total_tonnage": float(r.total_tonnage or 0),
+                "ratio": round(r.cargo_count / total * 100, 2),
+            }
+            for idx, r in enumerate(rows)
+        ]
+        return {
+            "stat_type": stat_type,
+            "stat_date": str(target),
+            "total": sum(r.cargo_count for r in rows),
+            "items": items,
+        }
+
+    # ─────────────────────────────────────────────────
+    # 船舶热力图
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_heatmap(
+        self,
+        stat_date: Optional[date] = None,
+        region_id: Optional[int] = None,
     ) -> list:
-        stats = await self._analysis.get_heatmap_range(
-            start_date=start_date, end_date=end_date, node_id=node_id
-        )
+        target = stat_date or date.today()
+        rows = await self._analysis.get_ship_heatmap(stat_date=target)
+        result = []
+        for r in rows:
+            node = r.node
+            if region_id and node and node.region_id != region_id:
+                continue
+            result.append({
+                "node_id": r.node_id,
+                "vessel_count": r.vessel_count,
+                "total_deadweight": float(r.total_deadweight or 0),
+                "stat_date": str(r.stat_date),
+                "longitude": float(node.longitude) if node and node.longitude else None,
+                "latitude": float(node.latitude) if node and node.latitude else None,
+                "node_name": node.name if node else None,
+            })
+        return result
+
+    # 旧接口别名（兼容 analysis/router.py）
+    async def get_vessel_heatmap(self, region_id: Optional[int] = None) -> list:
+        return await self.get_ship_heatmap(region_id=region_id)
+
+    # ─────────────────────────────────────────────────
+    # 船舶类型数量占比
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_type_ratio(self, stat_date: Optional[date] = None) -> list:
+        target = stat_date or date.today()
+        rows = await self._analysis.get_ship_type_stat(stat_date=target)
+        total = sum(r.vessel_count for r in rows) or 1
         return [
             {
-                "date": str(s.stat_date),
-                "node_id": s.node_id,
-                "stat_type": s.stat_type,
-                "stat_value": s.stat_value,
+                "vessel_type_id": r.vessel_type_id,
+                "type_name": r.type_name,
+                "vessel_count": r.vessel_count,
+                "total_deadweight": float(r.total_deadweight or 0),
+                "ratio": round(r.vessel_count / total * 100, 2),
             }
-            for s in stats
+            for r in rows
         ]
 
     # ─────────────────────────────────────────────────
-    # AI趋势分析（由Agent驱动）
+    # 船龄分布直方图
     # ─────────────────────────────────────────────────
 
-    async def generate_ai_analysis(
-        self, days: int = 7, db=None
-    ) -> dict:
-        """
-        生成AI趋势分析报告
+    async def get_ship_age_distribution(self, stat_date: Optional[date] = None) -> list:
+        target = stat_date or date.today()
+        rows = await self._analysis.get_ship_age_stat(stat_date=target)
+        return [
+            {
+                "age_group": r.age_group,
+                "vessel_count": r.vessel_count,
+            }
+            for r in rows
+        ]
 
-        数据准备由Service完成，AI调用委托给AnalysisAgent
-        """
-        end = date.today()
-        start = end - timedelta(days=days)
+    # ─────────────────────────────────────────────────
+    # 区域运力分布（船舶数量 + 总载重吨）
+    # ─────────────────────────────────────────────────
 
-        # 准备数据摘要
-        stats = await self._analysis.get_heatmap_range(start, end)
-        cargo_status = await self._analysis.count_opportunities_by_status()
-        trend = await self._analysis.get_daily_cargo_trend(days=days)
+    async def get_ship_capacity_region(self, stat_date: Optional[date] = None) -> list:
+        target = stat_date or date.today()
+        rows = await self._analysis.get_ship_capacity_region(stat_date=target)
+        return [
+            {
+                "region_id": r.region_id,
+                "region_name": r.region_name,
+                "vessel_count": r.vessel_count,
+                "total_deadweight": float(r.total_deadweight or 0),
+            }
+            for r in rows
+        ]
 
-        # 格式化数据摘要给Agent
-        data_summary = self._format_data_summary(
-            stats=stats,
-            cargo_status=cargo_status,
-            trend=trend,
-            days=days,
-        )
+    # ─────────────────────────────────────────────────
+    # 旧接口 Top节点（兼容）
+    # ─────────────────────────────────────────────────
 
-        # 调用AI Agent（通过db参数传递session用于Tool）
-        if db:
+    async def get_top_nodes(self, stat_type: str = "CARGO_ORIGIN", limit: int = 10) -> dict:
+        target = date.today()
+        # 映射到新接口
+        new_type = "ORIGIN" if "ORIGIN" in stat_type else ("DEST" if "DEST" in stat_type else None)
+        if stat_type == "VESSEL":
+            rows = await self._analysis.get_ship_heatmap(stat_date=target)
+            nodes = [
+                {"node_id": r.node_id, "stat_value": r.vessel_count}
+                for r in rows[:limit]
+            ]
+        else:
+            rows = await self._analysis.get_cargo_heatmap(stat_date=target, stat_type=new_type)
+            nodes = [
+                {"node_id": r.node_id, "stat_value": r.cargo_count}
+                for r in rows[:limit]
+            ]
+        return {"stat_type": stat_type, "nodes": nodes}
+
+    # ─────────────────────────────────────────────────
+    # 手动触发统计（管理员接口调用，委托 stat_tasks）
+    # ─────────────────────────────────────────────────
+
+    async def run_daily_stats(self, target_date: Optional[date] = None) -> dict:
+        """手动触发每日统计聚合（管理员接口）"""
+        from app.tasks.stat_tasks import daily_stat_job
+        result = await daily_stat_job(target_date=target_date)
+        return result
+
+    # ─────────────────────────────────────────────────
+    # AI分析（可选）
+    # ─────────────────────────────────────────────────
+
+    async def generate_ai_analysis(self, days: int = 7) -> dict:
+        trend = await self._analysis.get_cargo_trend(days=days)
+        cargo_stat = await self._analysis.get_latest_cargo_stat()
+        data_summary = self._format_summary(trend, cargo_stat, days)
+        try:
             from app.agents.analysis_agent import AnalysisAgent
             agent = AnalysisAgent()
-            result = await agent.run({
-                "days": days,
-                "data_summary": data_summary,
-            })
+            result = await agent.run({"days": days, "data_summary": data_summary})
             if result.success:
                 return result.output
-            logger.warning(f"[AnalysisService] AI analysis failed: {result.error}")
-
-        # 降级：返回基础统计
+        except Exception as e:
+            logger.warning(f"[AnalysisService] AI analysis failed: {e}")
         return {
             "trend_summary": f"最近{days}天数据汇总",
-            "cargo_highlights": [f"活跃货源{cargo_status.get('ACTIVE', 0)}条"],
+            "cargo_highlights": [f"活跃货源{cargo_stat.active_count if cargo_stat else 0}条"],
             "route_highlights": [],
             "risk_factors": [],
             "recommendation": "数据分析功能需要AI服务支持",
         }
 
-    def _format_data_summary(
-        self, stats, cargo_status, trend, days: int
-    ) -> str:
+    def _format_summary(self, trend, cargo_stat, days: int) -> str:
         lines = [f"统计周期：近{days}天"]
-        lines.append(f"货源状态分布：{dict(cargo_status)}")
-
+        if cargo_stat:
+            lines.append(
+                f"货源状态：总量={cargo_stat.total_count}，"
+                f"已确认={cargo_stat.active_count}，"
+                f"待确认={cargo_stat.pending_count}"
+            )
         if trend:
             trend_str = ", ".join(
-                f"{str(r.stat_date)}({int(r.total)})" for r in trend[-5:]
+                f"{str(r.stat_date)}({r.total_count})" for r in trend[-5:]
             )
             lines.append(f"最近货量趋势：{trend_str}")
-
-        if stats:
-            top_nodes = sorted(stats, key=lambda s: s.stat_value, reverse=True)[:5]
-            node_str = ", ".join(
-                f"节点{s.node_id}({s.stat_value})" for s in top_nodes
-            )
-            lines.append(f"热门节点（TOP5）：{node_str}")
-
         return "\n".join(lines)
-
-    # ─────────────────────────────────────────────────
-    # 统计聚合（由Celery Task调用）
-    # ─────────────────────────────────────────────────
-
-    async def compute_daily_stats(self, target_date: Optional[date] = None) -> int:
-        """
-        计算并持久化每日节点统计数据
-        通常由analysis_tasks.py中的Celery任务调用
-        """
-        target_date = target_date or date.today()
-
-        nodes, _ = await self._address.list_nodes(offset=0, limit=10000)
-        updated_count = 0
-
-        for node in nodes:
-            # 统计该节点当日货源数量
-            opps, cargo_count = await self._cargo.list_opportunities(
-                origin_node_id=node.id, offset=0, limit=0
-            )
-
-            if cargo_count > 0:
-                await self._analysis.upsert_heatmap_stat(
-                    stat_date=target_date,
-                    node_id=node.id,
-                    stat_type="CARGO",
-                    stat_value=cargo_count,
-                )
-                updated_count += 1
-
-        await self._analysis.save()
-        logger.info(
-            f"[AnalysisService] daily stats computed date={target_date} nodes={updated_count}"
-        )
-        return updated_count
