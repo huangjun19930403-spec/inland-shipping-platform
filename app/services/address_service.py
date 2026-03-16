@@ -120,23 +120,13 @@ class AddressService:
         await self._record_audit(operator_id, "DELETE", "WATERWAY", waterway_id)
         await self._address.save()
 
-    async def enable_waterway(self, waterway_id: int, operator_id: int) -> Waterway:
+    async def toggle_waterway_status(self, waterway_id: int) -> Waterway:
+        """启用 / 停用水系（自动取反当前 status，无需审批）。"""
         ww = await self._address.get_waterway(waterway_id)
         if not ww:
             raise NotFoundError("Waterway", waterway_id)
-        updated = await self._address.update_waterway(waterway_id, status=1)
-        await self._record_audit(operator_id, "ENABLE", "WATERWAY", waterway_id,
-                                 before_data={"status": ww.status}, after_data={"status": 1})
-        await self._address.save()
-        return updated
-
-    async def disable_waterway(self, waterway_id: int, operator_id: int) -> Waterway:
-        ww = await self._address.get_waterway(waterway_id)
-        if not ww:
-            raise NotFoundError("Waterway", waterway_id)
-        updated = await self._address.update_waterway(waterway_id, status=0)
-        await self._record_audit(operator_id, "DISABLE", "WATERWAY", waterway_id,
-                                 before_data={"status": ww.status}, after_data={"status": 0})
+        new_status = 0 if ww.status == 1 else 1
+        updated = await self._address.update_waterway(waterway_id, status=new_status)
         await self._address.save()
         return updated
 

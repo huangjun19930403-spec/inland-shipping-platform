@@ -72,25 +72,13 @@ async def delete_waterway(
     return success(message="删除成功")
 
 
-@router.post("/waterway/{waterway_id}/enable", summary="启用水系")
-async def enable_waterway(
+@router.post("/waterway/{waterway_id}/toggle-status", summary="启用/停用水系（自动取反）")
+async def toggle_waterway_status(
     waterway_id: int,
     service: AddressService = Depends(get_address_service),
-    user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
+    _=Depends(require_roles("ADMIN", "OPERATOR")),
 ):
-    user, _ = user_roles
-    obj = await service.enable_waterway(waterway_id=waterway_id, operator_id=user.id)
-    return success(data=WaterwayResponse.model_validate(obj))
-
-
-@router.post("/waterway/{waterway_id}/disable", summary="停用水系")
-async def disable_waterway(
-    waterway_id: int,
-    service: AddressService = Depends(get_address_service),
-    user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
-):
-    user, _ = user_roles
-    obj = await service.disable_waterway(waterway_id=waterway_id, operator_id=user.id)
+    obj = await service.toggle_waterway_status(waterway_id=waterway_id)
     return success(data=WaterwayResponse.model_validate(obj))
 
 
