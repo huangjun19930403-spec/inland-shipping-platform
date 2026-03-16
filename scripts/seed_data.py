@@ -123,7 +123,11 @@ async def seed_regions(db, waterway_map: dict) -> None:
         res = await db.execute(select(Region).where(Region.code == rd["code"]))
         region = res.scalar_one_or_none()
         if not region:
-            region = Region(code=rd["code"], name=rd["name"], waterway_id=ww.id)
+            region = Region(
+                code=rd["code"],
+                name=rd["name"],
+                main_rivers=[ww.name],   # Region无waterway_id外键，用main_rivers(JSON)存水系
+            )
             db.add(region)
             logger.info(f"[seed] region created: {rd['name']}")
 
