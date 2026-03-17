@@ -94,15 +94,15 @@ class RegionUpdate(BaseModel):
 
 
 class RegionResponse(BaseModel):
-    """区域基础响应（含审核字段，main_rivers / main_cities 为 ID 数组）。"""
+    """区域基础响应（含审核字段，main_rivers / main_cities 为名称数组）。"""
     id: int
     code: str
     name: str
     name_en: Optional[str] = None
     center_longitude: Optional[Decimal] = None
     center_latitude: Optional[Decimal] = None
-    main_rivers: Optional[List[int]] = None
-    main_cities: Optional[List[int]] = None
+    main_rivers: Optional[List[str]] = None
+    main_cities: Optional[List[str]] = None
     boundary_coordinates: Optional[list] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None

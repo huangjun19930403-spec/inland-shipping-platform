@@ -162,8 +162,35 @@ class AddressService:
     # 商业区域
     # ─────────────────────────────────────────────────
 
-    async def list_regions(self, status: Optional[int] = None):
-        return await self._address.list_regions(status=status)
+    async def _enrich_region(self, region: Region) -> dict:
+        """
+        将 Region ORM 对象转为 dict，并将 main_rivers / main_cities 中的
+        整数 ID 解析为对应的水系名称 / 行政区划名称。
+        兼容历史脏数据（JSON 中直接存了名称字符串的情况）。
+        """
+        data = {col.name: getattr(region, col.name) for col in Region.__table__.columns}
+
+        if region.main_rivers:
+            int_ids = [x for x in region.main_rivers if isinstance(x, int)]
+            str_names = [x for x in region.main_rivers if isinstance(x, str)]
+            if int_ids:
+                waterways = await self._address.get_waterways_by_ids(int_ids)
+                str_names = str_names + [w.name for w in waterways]
+            data["main_rivers"] = str_names or None
+
+        if region.main_cities:
+            int_ids = [x for x in region.main_cities if isinstance(x, int)]
+            str_names = [x for x in region.main_cities if isinstance(x, str)]
+            if int_ids:
+                admin_regions = await self._address.get_admin_regions_by_ids(int_ids)
+                str_names = str_names + [r.name for r in admin_regions]
+            data["main_cities"] = str_names or None
+
+        return data
+
+    async def list_regions(self, status: Optional[int] = None) -> list:
+        items = await self._address.list_regions(status=status)
+        return [await self._enrich_region(r) for r in items]
 
     async def list_regions_paged(
         self,
@@ -178,21 +205,16 @@ class AddressService:
             name=name, status=status, audit_status=audit_status,
             offset=offset, limit=page_size,
         )
-        # 展开主要水系和城市
+        # 展开主要水系和城市（仅取整数 ID 查询，兼容历史脏数据）
         detail_items = []
         for region in items:
-            rivers_info = []
-            cities_info = []
-            if region.main_rivers:
-                rivers_info = list(
-                    await self._address.get_waterways_by_ids(region.main_rivers)
-                )
-            if region.main_cities:
-                cities_info = list(
-                    await self._address.get_admin_regions_by_ids(region.main_cities)
-                )
+            enriched = await self._enrich_region(region)
+            int_river_ids = [x for x in (region.main_rivers or []) if isinstance(x, int)]
+            int_city_ids = [x for x in (region.main_cities or []) if isinstance(x, int)]
+            rivers_info = list(await self._address.get_waterways_by_ids(int_river_ids)) if int_river_ids else []
+            cities_info = list(await self._address.get_admin_regions_by_ids(int_city_ids)) if int_city_ids else []
             detail_items.append({
-                "region": region,
+                "region": enriched,
                 "rivers_info": rivers_info,
                 "cities_info": cities_info,
             })
@@ -219,7 +241,7 @@ class AddressService:
         city_ids = filter_cities_in_polygon(city_tuples, boundary_coordinates)
         return center_lng, center_lat, city_ids
 
-    async def create_region(self, name: str, operator_id: int, **kwargs) -> Region:
+    async def create_region(self, name: str, operator_id: int, **kwargs) -> dict:
         """
         新增区域：
         - code 自动生成（RG-NNN）
@@ -252,9 +274,9 @@ class AddressService:
             submitter_id=operator_id,
             after_data={"name": name, "code": code},
         )
-        return saved
+        return await self._enrich_region(saved)
 
-    async def update_region(self, region_id: int, operator_id: int, **kwargs) -> Region:
+    async def update_region(self, region_id: int, operator_id: int, **kwargs) -> dict:
         """
         修改区域：
         - 仅允许在 status=0（停用）状态下修改
@@ -287,7 +309,7 @@ class AddressService:
             submitter_id=operator_id,
             before_data=before, after_data=kwargs,
         )
-        return updated
+        return await self._enrich_region(updated)
 
     async def delete_region(self, region_id: int, operator_id: int) -> None:
         region = await self._address.get_region(region_id)
@@ -300,7 +322,7 @@ class AddressService:
             target_name=region.name, action="DELETE", operator_id=operator_id,
         )
 
-    async def approve_region(self, region_id: int, auditor_id: int, remark: str = "") -> Region:
+    async def approve_region(self, region_id: int, auditor_id: int, remark: str = "") -> dict:
         """审批通过：audit_status=1，同时启用区域（status=1）。"""
         region = await self._address.get_region(region_id)
         if not region:
@@ -315,9 +337,9 @@ class AddressService:
             target_name=region.name, action="APPROVE", operator_id=auditor_id,
             audit_result="APPROVED", remark=remark or None,
         )
-        return updated
+        return await self._enrich_region(updated)
 
-    async def reject_region(self, region_id: int, auditor_id: int, remark: str) -> Region:
+    async def reject_region(self, region_id: int, auditor_id: int, remark: str) -> dict:
         """审批驳回：audit_status=2，保持 status=0（停用）。"""
         region = await self._address.get_region(region_id)
         if not region:
@@ -331,9 +353,9 @@ class AddressService:
             target_name=region.name, action="REJECT", operator_id=auditor_id,
             audit_result="REJECTED", remark=remark,
         )
-        return updated
+        return await self._enrich_region(updated)
 
-    async def toggle_region_status(self, region_id: int) -> Region:
+    async def toggle_region_status(self, region_id: int) -> dict:
         """启用 / 停用区域（自动取反，无需审批）。"""
         region = await self._address.get_region(region_id)
         if not region:
@@ -341,7 +363,7 @@ class AddressService:
         new_status = 0 if region.status == 1 else 1
         updated = await self._address.update_region(region_id, status=new_status)
         await self._address.save()
-        return updated
+        return await self._enrich_region(updated)
 
     async def get_nodes_in_region(self, region_id: int):
         return await self._address.get_nodes_in_region(region_id)
