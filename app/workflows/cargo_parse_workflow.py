@@ -4,8 +4,7 @@
 包括：调用Agent解析 → 持久化AI结果 → 更新原始消息状态
 """
 import logging
-from dataclasses import asdict
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,26 +91,26 @@ class CargoParseWorkflow(BaseWorkflow):
             ],
         }
 
-        import json
         parse_result = CargoAiParseResult(
             raw_message_id=raw_message_id,
             origin_text=output.origin_text,
-            destination_text=output.destination_text,
+            dest_text=output.destination_text,        # CargoParseOutput.destination_text → model.dest_text
             commodity_text=output.commodity_text,
             tonnage=output.tonnage,
             loading_date=output.loading_date,
             freight_price=output.freight_price,
-            contact=output.contact,
-            remarks=output.remarks,
+            contact_person=output.contact,            # CargoParseOutput.contact → model.contact_person
             origin_node_id=output.origin_node_id,
             dest_node_id=output.dest_node_id,
-            commodity_standard_id=output.commodity_standard_id,
+            commodity_id=output.commodity_standard_id,  # CargoParseOutput.commodity_standard_id → model.commodity_id
             origin_confidence=output.origin_confidence,
             dest_confidence=output.dest_confidence,
             commodity_confidence=output.commodity_confidence,
             overall_confidence=output.overall_confidence,
-            candidates_json=json.dumps(candidates_data, ensure_ascii=False),
-            status="PENDING_CONFIRM",
+            origin_candidates=candidates_data["origin_candidates"],
+            dest_candidates=candidates_data["dest_candidates"],
+            commodity_candidates=candidates_data["commodity_candidates"],
+            parse_status="PENDING_CONFIRM",           # model字段名为parse_status，不是status
         )
 
         saved = await self._cargo_repo.create_parse_result(parse_result)

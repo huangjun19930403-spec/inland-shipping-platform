@@ -171,20 +171,41 @@ class CommodityAliasResponse(BaseModel):
         from_attributes = True
 
 
-# ---------- Cargo Manual Input ----------
+# ---------- Cargo Manual Input（支持节点级或城市级位置）----------
 
 class CargoManualInput(BaseModel):
-    origin_node_id: int
-    dest_node_id: int
-    commodity_id: int
-    tonnage: Decimal
+    """手动录入货源请求体
+
+    位置支持两种精度（至少填一个）：
+    - 节点级：origin_node_id / dest_node_id（精确关联到 transport_node）
+    - 城市级：origin_admin_code / dest_admin_code（行政区划代码，如"310100"）
+    """
+    # 装货地
+    origin_node_id: Optional[int] = None
+    origin_admin_code: Optional[str] = None
+    origin_admin_name: Optional[str] = None
+    origin_raw_text: Optional[str] = None
+
+    # 卸货地
+    dest_node_id: Optional[int] = None
+    dest_admin_code: Optional[str] = None
+    dest_admin_name: Optional[str] = None
+    dest_raw_text: Optional[str] = None
+
+    # 货物信息
+    commodity_id: Optional[int] = None
+    commodity_text: Optional[str] = None
+    tonnage: Optional[Decimal] = None
     loading_date: Optional[date] = None
+    expire_date: Optional[date] = None
+
+    # 价格与联系方式
     freight_price: Optional[Decimal] = None
     price_type: Optional[int] = None
     price_unit: Optional[str] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
-    source_type: str = "WECHAT_GROUP"
+    source_type: str = "MANUAL"
     remark: Optional[str] = None
 
 
@@ -225,6 +246,12 @@ class CargoAiParseResultResponse(BaseModel):
     contact_text: Optional[str] = None
     origin_node_id: Optional[int] = None
     dest_node_id: Optional[int] = None
+    origin_admin_code: Optional[str] = None
+    origin_admin_name: Optional[str] = None
+    origin_location_type: Optional[str] = None
+    dest_admin_code: Optional[str] = None
+    dest_admin_name: Optional[str] = None
+    dest_location_type: Optional[str] = None
     commodity_id: Optional[int] = None
     tonnage: Optional[Decimal] = None
     loading_date: Optional[date] = None
@@ -251,31 +278,44 @@ class CargoAiParseResultResponse(BaseModel):
         from_attributes = True
 
 
-# ---------- CargoOpportunity ----------
+# ---------- CargoFreight ----------
 
-class CargoOpportunityResponse(BaseModel):
+class CargoFreightResponse(BaseModel):
     id: int
-    opportunity_no: str
-    origin_node_id: int
-    dest_node_id: int
-    commodity_id: int
-    tonnage: Decimal
-    origin_region_id: Optional[int] = None
-    dest_region_id: Optional[int] = None
-    route_id: Optional[int] = None
+    freight_no: str
+    source_type: str
+    status: str
+    # 装货地
+    origin_node_id: Optional[int] = None
+    origin_admin_code: Optional[str] = None
+    origin_admin_name: Optional[str] = None
+    origin_raw_text: Optional[str] = None
+    origin_precision: str
+    # 卸货地
+    dest_node_id: Optional[int] = None
+    dest_admin_code: Optional[str] = None
+    dest_admin_name: Optional[str] = None
+    dest_raw_text: Optional[str] = None
+    dest_precision: str
+    # 货物
+    commodity_id: Optional[int] = None
+    commodity_text: Optional[str] = None
+    tonnage: Optional[Decimal] = None
     loading_date: Optional[date] = None
+    expire_date: Optional[date] = None
+    # 价格
     freight_price: Optional[Decimal] = None
     price_type: Optional[int] = None
     price_unit: Optional[str] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
-    source_type: str
     remark: Optional[str] = None
+    # 来源追踪
     raw_message_id: Optional[int] = None
     parse_result_id: Optional[int] = None
-    status: str
-    input_type: str
+    tms_external_id: Optional[str] = None
     collector_id: Optional[int] = None
+    audit_status: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -286,8 +326,11 @@ class CargoOpportunityResponse(BaseModel):
 # ---------- CargoConfirmRequest ----------
 
 class CargoConfirmRequest(BaseModel):
+    """确认AI解析结果的人工修正字段（均为可选，不填则沿用AI解析值）"""
     origin_node_id: Optional[int] = None
+    origin_admin_code: Optional[str] = None
     dest_node_id: Optional[int] = None
+    dest_admin_code: Optional[str] = None
     commodity_id: Optional[int] = None
     tonnage: Optional[Decimal] = None
     loading_date: Optional[date] = None

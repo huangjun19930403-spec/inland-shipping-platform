@@ -3,13 +3,13 @@
 
 职责：
   - 从统计表读取数据并组装为 API 所需结构
-  - 禁止直接查询业务表（统计数据由 stat_tasks.py ETL 写入统计表）
+  - 禁止直接查询业务表（统计数据由 stat_tasks.py 写入统计表）
 
 依赖：
   AnalysisRepository — 所有数据读取均通过统计表
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from app.repositories.analysis_repository import AnalysisRepository
@@ -32,55 +32,64 @@ class AnalysisService:
         ship_stat = await self._analysis.get_latest_ship_total()
         return {
             "cargo_total": cargo_stat.total_count if cargo_stat else 0,
-            "cargo_active": cargo_stat.active_count if cargo_stat else 0,
+            "cargo_confirmed": cargo_stat.confirmed_count if cargo_stat else 0,
             "cargo_pending": cargo_stat.pending_count if cargo_stat else 0,
+            "cargo_tonnage": float(cargo_stat.total_tonnage or 0) if cargo_stat else 0,
             "active_vessels": ship_stat["vessel_count"],
+            "stat_date": str(cargo_stat.stat_date) if cargo_stat else None,
         }
 
     # ─────────────────────────────────────────────────
-    # 货源热力图
+    # 货源城市热力图（替代原节点级热力图）
     # ─────────────────────────────────────────────────
 
     async def get_cargo_heatmap(
         self,
         stat_date: Optional[date] = None,
         stat_type: str = "ORIGIN",
-        region_id: Optional[int] = None,
     ) -> list:
+        """返回城市级货源热力数据，含城市经纬度，用于热力地图渲染"""
         target = stat_date or date.today()
-        rows = await self._analysis.get_cargo_heatmap(stat_date=target, stat_type=stat_type)
-        result = []
-        for r in rows:
-            node = r.node
-            if region_id and node and node.region_id != region_id:
-                continue
-            result.append({
-                "node_id": r.node_id,
+        rows = await self._analysis.get_cargo_city_heatmap(
+            stat_date=target, stat_type=stat_type
+        )
+        return [
+            {
+                "city_code": r.city_code,
+                "city_name": r.city_name,
                 "cargo_count": r.cargo_count,
                 "total_tonnage": float(r.total_tonnage or 0),
                 "stat_type": r.stat_type,
                 "stat_date": str(r.stat_date),
-                "longitude": float(node.longitude) if node and node.longitude else None,
-                "latitude": float(node.latitude) if node and node.latitude else None,
-                "node_name": node.name if node else None,
-            })
-        return result
+                "longitude": float(r.city_longitude) if r.city_longitude else None,
+                "latitude": float(r.city_latitude) if r.city_latitude else None,
+            }
+            for r in rows
+        ]
 
     # ─────────────────────────────────────────────────
     # 货源趋势图
     # ─────────────────────────────────────────────────
 
-    async def get_cargo_trend(self, days: int = 30) -> dict:
-        rows = await self._analysis.get_cargo_trend(days=days)
+    async def get_cargo_trend(
+        self,
+        days: int = 30,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> dict:
+        rows = await self._analysis.get_cargo_trend(
+            days=days, start_date=start_date, end_date=end_date
+        )
         return {
             "days": days,
             "trend": [
                 {
                     "date": str(r.stat_date),
                     "total": r.total_count,
-                    "active": r.active_count,
+                    "confirmed": r.confirmed_count,
                     "pending": r.pending_count,
                     "tonnage": float(r.total_tonnage or 0),
+                    "avg_tonnage": float(r.avg_tonnage or 0),
                 }
                 for r in rows
             ],
@@ -105,6 +114,103 @@ class AnalysisService:
             }
             for idx, r in enumerate(rows)
         ]
+
+    # ─────────────────────────────────────────────────
+    # 起终点城市OD流量矩阵
+    # ─────────────────────────────────────────────────
+
+    async def get_cargo_od_stats(
+        self,
+        stat_date: Optional[date] = None,
+        days: int = 7,
+        top_n: int = 20,
+    ) -> dict:
+        """返回Top N OD流量，用于 Sankey 图或路线排行
+
+        当 stat_date 指定时返回单日数据，否则返回最近 days 天聚合数据。
+        """
+        if stat_date:
+            rows = await self._analysis.get_cargo_od_stat(
+                stat_date=stat_date, top_n=top_n
+            )
+            items = [
+                {
+                    "origin_city_code": r.origin_city_code,
+                    "origin_city_name": r.origin_city_name,
+                    "dest_city_code": r.dest_city_code,
+                    "dest_city_name": r.dest_city_name,
+                    "cargo_count": r.cargo_count,
+                    "total_tonnage": float(r.total_tonnage or 0),
+                }
+                for r in rows
+            ]
+        else:
+            end = date.today()
+            start = end - timedelta(days=days - 1)
+            rows = await self._analysis.get_cargo_od_range(
+                start_date=start, end_date=end, top_n=top_n
+            )
+            items = [
+                {
+                    "origin_city_code": r.origin_city_code,
+                    "origin_city_name": r.origin_city_name,
+                    "dest_city_code": r.dest_city_code,
+                    "dest_city_name": r.dest_city_name,
+                    "cargo_count": int(r.cargo_count or 0),
+                    "total_tonnage": float(r.total_tonnage or 0),
+                }
+                for r in rows
+            ]
+
+        return {
+            "stat_date": str(stat_date) if stat_date else None,
+            "days": None if stat_date else days,
+            "top_n": top_n,
+            "items": items,
+        }
+
+    # ─────────────────────────────────────────────────
+    # 渠道质量统计
+    # ─────────────────────────────────────────────────
+
+    async def get_cargo_channel_stats(
+        self,
+        stat_date: Optional[date] = None,
+        days: int = 30,
+    ) -> dict:
+        """返回各录入渠道的质量统计数据，用于堆叠面积图或数据质量卡片"""
+        if stat_date:
+            rows = await self._analysis.get_cargo_channel_stat(stat_date=stat_date)
+            # 单日：返回 items 列表
+            items = [
+                {
+                    "source_type": r.source_type,
+                    "raw_msg_count": r.raw_msg_count,
+                    "parse_success_count": r.parse_success_count,
+                    "confirmed_count": r.confirmed_count,
+                    "total_tonnage": float(r.total_tonnage or 0),
+                    "parse_rate": (
+                        round(r.parse_success_count / r.raw_msg_count * 100, 1)
+                        if r.raw_msg_count else None
+                    ),
+                    "stat_date": str(r.stat_date),
+                }
+                for r in rows
+            ]
+            return {"stat_date": str(stat_date), "items": items}
+        else:
+            rows = await self._analysis.get_cargo_channel_trend(days=days)
+            # 多日：按渠道分组返回趋势
+            grouped: dict[str, list] = {}
+            for r in rows:
+                grouped.setdefault(r.source_type, []).append({
+                    "date": str(r.stat_date),
+                    "raw_msg_count": r.raw_msg_count,
+                    "parse_success_count": r.parse_success_count,
+                    "confirmed_count": r.confirmed_count,
+                    "total_tonnage": float(r.total_tonnage or 0),
+                })
+            return {"days": days, "channels": grouped}
 
     # ─────────────────────────────────────────────────
     # 船舶热力图

@@ -2,6 +2,7 @@
 货物数据访问层
 封装所有与货物相关的数据库操作
 """
+from datetime import date
 from typing import Optional, Sequence
 
 from sqlalchemy import select, and_, desc, func, or_
@@ -14,7 +15,8 @@ from app.models.cargo import (
     CommodityAlias,
     CargoRawMessage,
     CargoAiParseResult,
-    CargoOpportunity,
+    CargoFreight,
+    TmsCargoRaw,
 )
 from app.repositories.base import BaseRepository
 
@@ -120,7 +122,9 @@ class CommodityAliasRepository(BaseRepository):
 
     async def get_all_aliases(self) -> Sequence[CommodityAlias]:
         """获取所有商品别名，用于AI模糊匹配"""
-        result = await self._db.execute(select(CommodityAlias))
+        result = await self._db.execute(
+            select(CommodityAlias).where(CommodityAlias.status == 1)
+        )
         return result.scalars().all()
 
     async def get_by_standard(self, standard_id: int) -> Sequence[CommodityAlias]:
@@ -171,12 +175,8 @@ class CargoRepository(BaseRepository):
         if filters:
             query = query.where(and_(*filters))
 
-        count_query = select(CargoRawMessage)
-        if filters:
-            count_query = count_query.where(and_(*filters))
-
         total_result = await self._db.execute(
-            select(func.count()).select_from(count_query.subquery())
+            select(func.count()).select_from(query.subquery())
         )
         total = total_result.scalar_one()
 
@@ -200,11 +200,19 @@ class CargoRepository(BaseRepository):
     # CargoAiParseResult
     # ─────────────────────────────────────────────────
 
-    async def get_parse_result(self, msg_id: int) -> Optional[CargoAiParseResult]:
+    async def get_parse_result_by_msg(self, msg_id: int) -> Optional[CargoAiParseResult]:
+        """根据原始消息ID获取解析结果"""
         result = await self._db.execute(
             select(CargoAiParseResult).where(
                 CargoAiParseResult.raw_message_id == msg_id
-            )
+            ).order_by(desc(CargoAiParseResult.id)).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_parse_result(self, result_id: int) -> Optional[CargoAiParseResult]:
+        """根据解析结果ID获取"""
+        result = await self._db.execute(
+            select(CargoAiParseResult).where(CargoAiParseResult.id == result_id)
         )
         return result.scalar_one_or_none()
 
@@ -227,51 +235,121 @@ class CargoRepository(BaseRepository):
         return instance
 
     # ─────────────────────────────────────────────────
-    # CargoOpportunity
+    # CargoFreight
     # ─────────────────────────────────────────────────
 
-    async def get_opportunity(self, opp_id: int) -> Optional[CargoOpportunity]:
+    async def get_freight(self, freight_id: int) -> Optional[CargoFreight]:
         result = await self._db.execute(
-            select(CargoOpportunity).where(CargoOpportunity.id == opp_id)
+            select(CargoFreight).where(
+                CargoFreight.id == freight_id,
+                CargoFreight.deleted_at.is_(None),
+            )
         )
         return result.scalar_one_or_none()
 
-    async def list_opportunities(
+    async def get_freight_by_no(self, freight_no: str) -> Optional[CargoFreight]:
+        result = await self._db.execute(
+            select(CargoFreight).where(
+                CargoFreight.freight_no == freight_no,
+                CargoFreight.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_freights(
         self,
         status: Optional[str] = None,
-        origin_node_id: Optional[int] = None,
-        dest_node_id: Optional[int] = None,
+        source_type: Optional[str] = None,
+        origin_admin_code: Optional[str] = None,
+        dest_admin_code: Optional[str] = None,
         commodity_id: Optional[int] = None,
+        stat_date: Optional[date] = None,
         offset: int = 0,
         limit: int = 20,
-    ) -> tuple[Sequence[CargoOpportunity], int]:
-        filters = []
+    ) -> tuple[Sequence[CargoFreight], int]:
+        filters = [CargoFreight.deleted_at.is_(None)]
         if status:
-            filters.append(CargoOpportunity.status == status)
-        if origin_node_id:
-            filters.append(CargoOpportunity.origin_node_id == origin_node_id)
-        if dest_node_id:
-            filters.append(CargoOpportunity.dest_node_id == dest_node_id)
+            filters.append(CargoFreight.status == status)
+        if source_type:
+            filters.append(CargoFreight.source_type == source_type)
+        if origin_admin_code:
+            filters.append(CargoFreight.origin_admin_code == origin_admin_code)
+        if dest_admin_code:
+            filters.append(CargoFreight.dest_admin_code == dest_admin_code)
         if commodity_id:
-            filters.append(CargoOpportunity.commodity_id == commodity_id)
+            filters.append(CargoFreight.commodity_id == commodity_id)
+        if stat_date:
+            filters.append(func.date(CargoFreight.created_at) == stat_date)
 
-        query = select(CargoOpportunity)
-        if filters:
-            query = query.where(and_(*filters))
-
+        query = select(CargoFreight).where(and_(*filters))
         total_result = await self._db.execute(
             select(func.count()).select_from(query.subquery())
         )
         total = total_result.scalar_one()
 
         result = await self._db.execute(
-            query.order_by(desc(CargoOpportunity.created_at))
+            query.order_by(desc(CargoFreight.created_at))
             .offset(offset)
             .limit(limit)
         )
         return result.scalars().all(), total
 
-    async def create_opportunity(
-        self, opportunity: CargoOpportunity
-    ) -> CargoOpportunity:
-        return await self.create(opportunity)
+    async def create_freight(self, freight: CargoFreight) -> CargoFreight:
+        return await self.create(freight)
+
+    async def update_freight_status(
+        self, freight_id: int, status: str
+    ) -> Optional[CargoFreight]:
+        freight = await self.get_freight(freight_id)
+        if freight:
+            freight.status = status
+            await self._db.flush()
+        return freight
+
+    # ─────────────────────────────────────────────────
+    # TmsCargoRaw
+    # ─────────────────────────────────────────────────
+
+    async def get_tms_raw_by_msg_id(
+        self, tms_message_id: str
+    ) -> Optional[TmsCargoRaw]:
+        result = await self._db.execute(
+            select(TmsCargoRaw).where(
+                TmsCargoRaw.tms_message_id == tms_message_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_tms_raw(self, tms_raw: TmsCargoRaw) -> TmsCargoRaw:
+        self._db.add(tms_raw)
+        await self._db.flush()
+        await self._db.refresh(tms_raw)
+        return tms_raw
+
+    async def update_tms_raw(
+        self, tms_id: int, **kwargs
+    ) -> Optional[TmsCargoRaw]:
+        result = await self._db.execute(
+            select(TmsCargoRaw).where(TmsCargoRaw.id == tms_id)
+        )
+        instance = result.scalar_one_or_none()
+        if instance:
+            for k, v in kwargs.items():
+                setattr(instance, k, v)
+            await self._db.flush()
+        return instance
+
+    async def list_tms_raws_pending(
+        self, offset: int = 0, limit: int = 20
+    ) -> tuple[Sequence[TmsCargoRaw], int]:
+        query = select(TmsCargoRaw).where(TmsCargoRaw.process_status == "PENDING")
+        total_result = await self._db.execute(
+            select(func.count()).select_from(query.subquery())
+        )
+        total = total_result.scalar_one()
+        result = await self._db.execute(
+            query.order_by(desc(TmsCargoRaw.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
+        return result.scalars().all(), total
