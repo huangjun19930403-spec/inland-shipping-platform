@@ -8,15 +8,12 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.core.security import get_current_user
-from app.models.system import SysUser
 from app.repositories.cargo_repository import CargoRepository
 from app.repositories.address_repository import AddressRepository
 from app.repositories.vessel_repository import VesselRepository
 from app.repositories.route_repository import RouteRepository
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.audit_repository import AuditRepository
-from app.repositories.system_repository import SystemRepository
 from app.services.cargo_service import CargoService
 from app.services.address_service import AddressService
 from app.services.vessel_service import VesselService
@@ -76,12 +73,6 @@ async def get_audit_repo(
     db: AsyncSession = Depends(get_db),
 ) -> AuditRepository:
     return AuditRepository(db)
-
-
-async def get_system_repo(
-    db: AsyncSession = Depends(get_db),
-) -> SystemRepository:
-    return SystemRepository(db)
 
 
 # ─────────────────────────────────────────────────

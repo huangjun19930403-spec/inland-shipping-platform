@@ -273,23 +273,13 @@ class AnalysisService:
     # ─────────────────────────────────────────────────
 
     async def generate_ai_analysis(self, days: int = 7) -> dict:
-        trend = await self._analysis.get_cargo_trend(days=days)
         cargo_stat = await self._analysis.get_latest_cargo_stat()
-        data_summary = self._format_summary(trend, cargo_stat, days)
-        try:
-            from app.agents.analysis_agent import AnalysisAgent
-            agent = AnalysisAgent()
-            result = await agent.run({"days": days, "data_summary": data_summary})
-            if result.success:
-                return result.output
-        except Exception as e:
-            logger.warning(f"[AnalysisService] AI analysis failed: {e}")
         return {
             "trend_summary": f"最近{days}天数据汇总",
             "cargo_highlights": [f"活跃货源{cargo_stat.active_count if cargo_stat else 0}条"],
             "route_highlights": [],
             "risk_factors": [],
-            "recommendation": "数据分析功能需要AI服务支持",
+            "recommendation": "AI趋势分析功能待实现",
         }
 
     def _format_summary(self, trend, cargo_stat, days: int) -> str:
