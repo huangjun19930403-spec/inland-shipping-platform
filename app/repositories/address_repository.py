@@ -381,7 +381,14 @@ class AddressRepository(BaseRepository):
         return result.scalars().unique().all()
 
     async def create_node(self, node: TransportNode) -> TransportNode:
-        return await self.create(node)
+        self._db.add(node)
+        await self._db.flush()
+        result = await self._db.execute(
+            select(TransportNode)
+            .options(selectinload(TransportNode.aliases))
+            .where(TransportNode.id == node.id)
+        )
+        return result.scalar_one()
 
     async def update_node(self, node_id: int, **kwargs) -> Optional[TransportNode]:
         node = await self.get_node(node_id)
@@ -400,7 +407,7 @@ class AddressRepository(BaseRepository):
 
     async def get_aliases_by_node(self, node_id: int) -> Sequence[NodeAlias]:
         result = await self._db.execute(
-            select(NodeAlias).where(NodeAlias.transport_node_id == node_id)
+            select(NodeAlias).where(NodeAlias.node_id == node_id)
         )
         return result.scalars().all()
 
