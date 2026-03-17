@@ -112,7 +112,7 @@ async def create_standard(
     obj = await service.create_standard(
         type_id=type_id,
         operator_id=user.id,
-        **data.model_dump(exclude={"type_id"}),
+        **data.model_dump(),
     )
     return success(data=obj)
 

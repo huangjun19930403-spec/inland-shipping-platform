@@ -122,7 +122,7 @@ class CargoService:
         saved = await self._cargo.standards.create(standard)
         await self._audit_svc.submit_for_audit(
             target_type="COMMODITY_STANDARD", target_id=saved.id,
-            target_name=name, action="CREATE",
+            target_name=saved.name, action="CREATE",
             submitter_id=operator_id,
             after_data={"name": saved.name, "type_id": type_id},
         )
