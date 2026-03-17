@@ -162,35 +162,8 @@ class AddressService:
     # 商业区域
     # ─────────────────────────────────────────────────
 
-    async def _enrich_region(self, region: Region) -> dict:
-        """
-        将 Region ORM 对象转为 dict，并将 main_rivers / main_cities 中的
-        整数 ID 解析为对应的水系名称 / 行政区划名称。
-        兼容历史脏数据（JSON 中直接存了名称字符串的情况）。
-        """
-        data = {col.name: getattr(region, col.name) for col in Region.__table__.columns}
-
-        if region.main_rivers:
-            int_ids = [x for x in region.main_rivers if isinstance(x, int)]
-            str_names = [x for x in region.main_rivers if isinstance(x, str)]
-            if int_ids:
-                waterways = await self._address.get_waterways_by_ids(int_ids)
-                str_names = str_names + [w.name for w in waterways]
-            data["main_rivers"] = str_names or None
-
-        if region.main_cities:
-            int_ids = [x for x in region.main_cities if isinstance(x, int)]
-            str_names = [x for x in region.main_cities if isinstance(x, str)]
-            if int_ids:
-                admin_regions = await self._address.get_admin_regions_by_ids(int_ids)
-                str_names = str_names + [r.name for r in admin_regions]
-            data["main_cities"] = str_names or None
-
-        return data
-
-    async def list_regions(self, status: Optional[int] = None) -> list:
-        items = await self._address.list_regions(status=status)
-        return [await self._enrich_region(r) for r in items]
+    async def list_regions(self, status: Optional[int] = None):
+        return await self._address.list_regions(status=status)
 
     async def list_regions_paged(
         self,
@@ -205,16 +178,17 @@ class AddressService:
             name=name, status=status, audit_status=audit_status,
             offset=offset, limit=page_size,
         )
-        # 展开主要水系和城市（仅取整数 ID 查询，兼容历史脏数据）
+        # 展开主要水系和城市（名称直接从冗余字段读取，无需二次查询）
         detail_items = []
         for region in items:
-            enriched = await self._enrich_region(region)
-            int_river_ids = [x for x in (region.main_rivers or []) if isinstance(x, int)]
-            int_city_ids = [x for x in (region.main_cities or []) if isinstance(x, int)]
-            rivers_info = list(await self._address.get_waterways_by_ids(int_river_ids)) if int_river_ids else []
-            cities_info = list(await self._address.get_admin_regions_by_ids(int_city_ids)) if int_city_ids else []
+            rivers_info = list(
+                await self._address.get_waterways_by_ids(region.main_rivers)
+            ) if region.main_rivers else []
+            cities_info = list(
+                await self._address.get_admin_regions_by_ids(region.main_cities)
+            ) if region.main_cities else []
             detail_items.append({
-                "region": enriched,
+                "region": region,
                 "rivers_info": rivers_info,
                 "cities_info": cities_info,
             })
@@ -241,18 +215,32 @@ class AddressService:
         city_ids = filter_cities_in_polygon(city_tuples, boundary_coordinates)
         return center_lng, center_lat, city_ids
 
-    async def create_region(self, name: str, operator_id: int, **kwargs) -> dict:
+    async def create_region(self, name: str, operator_id: int, **kwargs) -> Region:
         """
         新增区域：
         - code 自动生成（RG-NNN）
         - 质心和城市列表由 boundary_coordinates 自动计算
         - 初始 audit_status=0（待审核），status=0（停用）
+        - main_rivers_names / main_cities_names 写入时自动查表填充
         """
         max_code = await self._address.get_max_region_code()
         code = generate_region_code(max_code)
 
         boundary = kwargs.pop("boundary_coordinates", None)
         center_lng, center_lat, city_ids = await self._resolve_region_geo(boundary)
+
+        # 查询水系名称（冗余存储）
+        river_ids = kwargs.get("main_rivers") or []
+        rivers_names = None
+        if river_ids:
+            wws = await self._address.get_waterways_by_ids(river_ids)
+            rivers_names = [w.name for w in wws] or None
+
+        # 查询城市名称（冗余存储）
+        cities_names = None
+        if city_ids:
+            ars = await self._address.get_admin_regions_by_ids(city_ids)
+            cities_names = [r.name for r in ars] or None
 
         region = Region(
             name=name,
@@ -261,6 +249,8 @@ class AddressService:
             center_longitude=center_lng,
             center_latitude=center_lat,
             main_cities=city_ids if city_ids else None,
+            main_cities_names=cities_names,
+            main_rivers_names=rivers_names,
             submitter_id=operator_id,
             audit_status=0,
             status=0,
@@ -274,9 +264,9 @@ class AddressService:
             submitter_id=operator_id,
             after_data={"name": name, "code": code},
         )
-        return await self._enrich_region(saved)
+        return saved
 
-    async def update_region(self, region_id: int, operator_id: int, **kwargs) -> dict:
+    async def update_region(self, region_id: int, operator_id: int, **kwargs) -> Region:
         """
         修改区域：
         - 仅允许在 status=0（停用）状态下修改
@@ -298,6 +288,21 @@ class AddressService:
             kwargs["center_longitude"] = center_lng
             kwargs["center_latitude"] = center_lat
             kwargs["main_cities"] = city_ids if city_ids else None
+            # 同步更新城市名称冗余字段
+            if city_ids:
+                ars = await self._address.get_admin_regions_by_ids(city_ids)
+                kwargs["main_cities_names"] = [r.name for r in ars] or None
+            else:
+                kwargs["main_cities_names"] = None
+
+        # main_rivers 变更时同步更新水系名称冗余字段
+        if "main_rivers" in kwargs:
+            river_ids = kwargs["main_rivers"] or []
+            if river_ids:
+                wws = await self._address.get_waterways_by_ids(river_ids)
+                kwargs["main_rivers_names"] = [w.name for w in wws] or None
+            else:
+                kwargs["main_rivers_names"] = None
 
         kwargs["audit_status"] = 0  # 修改后需重新审核
 
@@ -309,7 +314,7 @@ class AddressService:
             submitter_id=operator_id,
             before_data=before, after_data=kwargs,
         )
-        return await self._enrich_region(updated)
+        return updated
 
     async def delete_region(self, region_id: int, operator_id: int) -> None:
         region = await self._address.get_region(region_id)
@@ -322,7 +327,7 @@ class AddressService:
             target_name=region.name, action="DELETE", operator_id=operator_id,
         )
 
-    async def approve_region(self, region_id: int, auditor_id: int, remark: str = "") -> dict:
+    async def approve_region(self, region_id: int, auditor_id: int, remark: str = "") -> Region:
         """审批通过：audit_status=1，同时启用区域（status=1）。"""
         region = await self._address.get_region(region_id)
         if not region:
@@ -337,9 +342,9 @@ class AddressService:
             target_name=region.name, action="APPROVE", operator_id=auditor_id,
             audit_result="APPROVED", remark=remark or None,
         )
-        return await self._enrich_region(updated)
+        return updated
 
-    async def reject_region(self, region_id: int, auditor_id: int, remark: str) -> dict:
+    async def reject_region(self, region_id: int, auditor_id: int, remark: str) -> Region:
         """审批驳回：audit_status=2，保持 status=0（停用）。"""
         region = await self._address.get_region(region_id)
         if not region:
@@ -353,9 +358,9 @@ class AddressService:
             target_name=region.name, action="REJECT", operator_id=auditor_id,
             audit_result="REJECTED", remark=remark,
         )
-        return await self._enrich_region(updated)
+        return updated
 
-    async def toggle_region_status(self, region_id: int) -> dict:
+    async def toggle_region_status(self, region_id: int) -> Region:
         """启用 / 停用区域（自动取反，无需审批）。"""
         region = await self._address.get_region(region_id)
         if not region:
@@ -363,7 +368,7 @@ class AddressService:
         new_status = 0 if region.status == 1 else 1
         updated = await self._address.update_region(region_id, status=new_status)
         await self._address.save()
-        return await self._enrich_region(updated)
+        return updated
 
     async def get_nodes_in_region(self, region_id: int):
         return await self._address.get_nodes_in_region(region_id)
