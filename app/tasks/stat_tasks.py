@@ -7,26 +7,17 @@
   - 任务执行时间：每天凌晨 02:00（由 APScheduler / Celery Beat 调度）
 
 任务列表：
-  daily_stat_job()   — 全量每日统计聚合，涵盖货源 + 船舶 6 张统计表
+  daily_stat_job()   — 全量每日统计聚合，涵盖货源 + 船舶 5 张统计表
 """
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
-from sqlalchemy import select, func, and_, case, text
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("inland.stat_tasks")
-
-# 船龄分组区间（左闭右开）
-_AGE_GROUPS = [
-    ("0-5",   0,  5),
-    ("5-10",  5,  10),
-    ("10-15", 10, 15),
-    ("15-20", 15, 20),
-    ("20+",   20, 9999),
-]
 
 
 # ─────────────────────────────────────────────────
@@ -108,47 +99,6 @@ async def _stat_cargo_daily(db: AsyncSession, stat_date: date) -> None:
     )
 
 
-async def _stat_cargo_region(db: AsyncSession, stat_date: date) -> None:
-    """cargo_opportunity → cargo_region_stat_daily
-    按装货/卸货区域统计货源数量及总吨位
-    """
-    from app.models.cargo import CargoOpportunity
-    from app.models.address import Region
-    from app.repositories.analysis_repository import AnalysisRepository
-
-    repo = AnalysisRepository(db)
-
-    for stat_type, region_col in (
-        ("ORIGIN", CargoOpportunity.origin_region_id),
-        ("DEST",   CargoOpportunity.dest_region_id),
-    ):
-        result = await db.execute(
-            select(
-                region_col.label("region_id"),
-                Region.name.label("region_name"),
-                func.count(CargoOpportunity.id).label("cargo_count"),
-                func.coalesce(func.sum(CargoOpportunity.tonnage), 0).label("total_tonnage"),
-            )
-            .join(Region, Region.id == region_col)
-            .where(
-                and_(
-                    region_col.isnot(None),
-                    func.date(CargoOpportunity.created_at) == stat_date,
-                )
-            )
-            .group_by(region_col, Region.name)
-        )
-        for row in result.all():
-            await repo.upsert_cargo_region_stat(
-                stat_date=stat_date,
-                region_id=row.region_id,
-                region_name=row.region_name,
-                stat_type=stat_type,
-                cargo_count=row.cargo_count,
-                total_tonnage=float(row.total_tonnage or 0),
-            )
-
-
 async def _stat_cargo_commodity(db: AsyncSession, stat_date: date) -> None:
     """cargo_opportunity → cargo_commodity_stat_daily
     按货品大类统计当日货源数量及总吨位
@@ -225,85 +175,6 @@ async def _stat_ship_type(db: AsyncSession, stat_date: date) -> None:
         )
 
 
-async def _stat_ship_capacity_region(db: AsyncSession, stat_date: date) -> None:
-    """vessel + vessel_dynamic → ship_capacity_region_daily
-    按当前所在区域（vessel_dynamic.current_node_id → transport_node.region_id）统计
-    """
-    from app.models.vessel import Vessel, VesselDynamic
-    from app.models.address import TransportNode, Region
-    from app.repositories.analysis_repository import AnalysisRepository
-
-    result = await db.execute(
-        select(
-            Region.id.label("region_id"),
-            Region.name.label("region_name"),
-            func.count(Vessel.id).label("vessel_count"),
-            func.coalesce(func.sum(Vessel.deadweight), 0).label("total_deadweight"),
-        )
-        .join(VesselDynamic, VesselDynamic.vessel_id == Vessel.id)
-        .join(TransportNode, TransportNode.id == VesselDynamic.current_node_id)
-        .join(Region, Region.id == TransportNode.region_id)
-        .where(
-            and_(
-                Vessel.data_status == 1,
-                Vessel.is_deleted == 0,
-                VesselDynamic.current_node_id.isnot(None),
-                TransportNode.region_id.isnot(None),
-            )
-        )
-        .group_by(Region.id, Region.name)
-    )
-
-    repo = AnalysisRepository(db)
-    for row in result.all():
-        await repo.upsert_ship_capacity_region(
-            stat_date=stat_date,
-            region_id=row.region_id,
-            region_name=row.region_name,
-            vessel_count=row.vessel_count,
-            total_deadweight=float(row.total_deadweight or 0),
-        )
-
-
-async def _stat_ship_age(db: AsyncSession, stat_date: date) -> None:
-    """vessel → ship_age_stat_daily
-    船龄 = stat_date.year - build_year，按分组区间聚合
-    """
-    from app.models.vessel import Vessel
-    from app.repositories.analysis_repository import AnalysisRepository
-
-    current_year = stat_date.year
-    result = await db.execute(
-        select(Vessel.build_year, func.count(Vessel.id).label("cnt"))
-        .where(
-            and_(
-                Vessel.data_status == 1,
-                Vessel.is_deleted == 0,
-                Vessel.build_year.isnot(None),
-            )
-        )
-        .group_by(Vessel.build_year)
-    )
-    rows = result.all()
-
-    # 按区间聚合
-    buckets: dict[str, int] = {g[0]: 0 for g in _AGE_GROUPS}
-    for row in rows:
-        age = current_year - row.build_year
-        for group_name, lo, hi in _AGE_GROUPS:
-            if lo <= age < hi:
-                buckets[group_name] += row.cnt
-                break
-
-    repo = AnalysisRepository(db)
-    for age_group, vessel_count in buckets.items():
-        await repo.upsert_ship_age_stat(
-            stat_date=stat_date,
-            age_group=age_group,
-            vessel_count=vessel_count,
-        )
-
-
 async def _stat_ship_heatmap(db: AsyncSession, stat_date: date) -> None:
     """vessel_dynamic (AIS当前位置) → ship_heatmap_daily
     按当前所在节点统计在港/在途船舶数量与总载重
@@ -360,21 +231,12 @@ async def _run_daily_stat_job(target_date: Optional[date] = None) -> dict:
             await _stat_cargo_daily(db, stat_date)
             results["cargo_stat_daily"] = True
 
-            await _stat_cargo_region(db, stat_date)
-            results["cargo_region_stat"] = True
-
             await _stat_cargo_commodity(db, stat_date)
             results["cargo_commodity_stat"] = True
 
             # 船舶统计
             await _stat_ship_type(db, stat_date)
             results["ship_type_stat"] = True
-
-            await _stat_ship_capacity_region(db, stat_date)
-            results["ship_capacity_region"] = True
-
-            await _stat_ship_age(db, stat_date)
-            results["ship_age_stat"] = True
 
             await _stat_ship_heatmap(db, stat_date)
             results["ship_heatmap"] = True

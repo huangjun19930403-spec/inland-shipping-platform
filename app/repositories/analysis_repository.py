@@ -7,9 +7,10 @@
   - ETL 逻辑（业务表 → 统计表）集中在 app/tasks/stat_tasks.py
 """
 from datetime import date, timedelta
-from typing import Optional, Sequence, List
+from typing import Optional, Sequence
 
-from sqlalchemy import select, and_, func, desc, delete
+from sqlalchemy import select, and_, func, desc
+
 from sqlalchemy.orm import joinedload
 
 from app.models.analysis import (
@@ -17,10 +18,7 @@ from app.models.analysis import (
     ShipHeatmapDaily,
     CargoStatDaily,
     CargoCommodityStatDaily,
-    CargoRegionStatDaily,
-    ShipCapacityRegionDaily,
     ShipTypeStatDaily,
-    ShipAgeStatDaily,
 )
 from app.repositories.base import BaseRepository
 
@@ -116,17 +114,10 @@ class AnalysisRepository(BaseRepository):
         await self._db.flush()
 
     # ─────────────────────────────────────────────────
-    # CargoStatDaily — 货源每日汇总（用于趋势图 + 仪表盘）
+    # CargoStatDaily — 货源每日汇总（趋势图 + 仪表盘）
     # ─────────────────────────────────────────────────
 
-    async def get_cargo_stat_daily(self, stat_date: date) -> Optional[CargoStatDaily]:
-        result = await self._db.execute(
-            select(CargoStatDaily).where(CargoStatDaily.stat_date == stat_date)
-        )
-        return result.scalar_one_or_none()
-
     async def get_cargo_trend(self, days: int = 30) -> Sequence[CargoStatDaily]:
-        """获取最近 days 天的货源趋势"""
         start = date.today() - timedelta(days=days - 1)
         result = await self._db.execute(
             select(CargoStatDaily)
@@ -206,97 +197,6 @@ class AnalysisRepository(BaseRepository):
         await self._db.flush()
 
     # ─────────────────────────────────────────────────
-    # CargoRegionStatDaily — 区域货源分布
-    # ─────────────────────────────────────────────────
-
-    async def get_cargo_region_stat(
-        self,
-        stat_date: date,
-        stat_type: Optional[str] = None,
-    ) -> Sequence[CargoRegionStatDaily]:
-        filters = [CargoRegionStatDaily.stat_date == stat_date]
-        if stat_type:
-            filters.append(CargoRegionStatDaily.stat_type == stat_type)
-        result = await self._db.execute(
-            select(CargoRegionStatDaily)
-            .where(and_(*filters))
-            .order_by(desc(CargoRegionStatDaily.cargo_count))
-        )
-        return result.scalars().all()
-
-    async def upsert_cargo_region_stat(
-        self,
-        stat_date: date,
-        region_id: int,
-        region_name: str,
-        stat_type: str,
-        cargo_count: int,
-        total_tonnage: float,
-    ) -> None:
-        result = await self._db.execute(
-            select(CargoRegionStatDaily).where(
-                and_(
-                    CargoRegionStatDaily.stat_date == stat_date,
-                    CargoRegionStatDaily.region_id == region_id,
-                    CargoRegionStatDaily.stat_type == stat_type,
-                )
-            )
-        )
-        row = result.scalar_one_or_none()
-        if row:
-            row.cargo_count = cargo_count
-            row.total_tonnage = total_tonnage
-            row.region_name = region_name
-        else:
-            self._db.add(CargoRegionStatDaily(
-                stat_date=stat_date, region_id=region_id, region_name=region_name,
-                stat_type=stat_type, cargo_count=cargo_count, total_tonnage=total_tonnage,
-            ))
-        await self._db.flush()
-
-    # ─────────────────────────────────────────────────
-    # ShipCapacityRegionDaily — 区域运力分布
-    # ─────────────────────────────────────────────────
-
-    async def get_ship_capacity_region(
-        self, stat_date: date
-    ) -> Sequence[ShipCapacityRegionDaily]:
-        result = await self._db.execute(
-            select(ShipCapacityRegionDaily)
-            .where(ShipCapacityRegionDaily.stat_date == stat_date)
-            .order_by(desc(ShipCapacityRegionDaily.vessel_count))
-        )
-        return result.scalars().all()
-
-    async def upsert_ship_capacity_region(
-        self,
-        stat_date: date,
-        region_id: int,
-        region_name: str,
-        vessel_count: int,
-        total_deadweight: float,
-    ) -> None:
-        result = await self._db.execute(
-            select(ShipCapacityRegionDaily).where(
-                and_(
-                    ShipCapacityRegionDaily.stat_date == stat_date,
-                    ShipCapacityRegionDaily.region_id == region_id,
-                )
-            )
-        )
-        row = result.scalar_one_or_none()
-        if row:
-            row.vessel_count = vessel_count
-            row.total_deadweight = total_deadweight
-            row.region_name = region_name
-        else:
-            self._db.add(ShipCapacityRegionDaily(
-                stat_date=stat_date, region_id=region_id, region_name=region_name,
-                vessel_count=vessel_count, total_deadweight=total_deadweight,
-            ))
-        await self._db.flush()
-
-    # ─────────────────────────────────────────────────
     # ShipTypeStatDaily — 船舶类型统计
     # ─────────────────────────────────────────────────
 
@@ -338,42 +238,7 @@ class AnalysisRepository(BaseRepository):
         await self._db.flush()
 
     # ─────────────────────────────────────────────────
-    # ShipAgeStatDaily — 船龄分布
-    # ─────────────────────────────────────────────────
-
-    async def get_ship_age_stat(self, stat_date: date) -> Sequence[ShipAgeStatDaily]:
-        _ORDER = ["0-5", "5-10", "10-15", "15-20", "20+"]
-        result = await self._db.execute(
-            select(ShipAgeStatDaily).where(ShipAgeStatDaily.stat_date == stat_date)
-        )
-        rows = result.scalars().all()
-        return sorted(rows, key=lambda r: _ORDER.index(r.age_group) if r.age_group in _ORDER else 99)
-
-    async def upsert_ship_age_stat(
-        self,
-        stat_date: date,
-        age_group: str,
-        vessel_count: int,
-    ) -> None:
-        result = await self._db.execute(
-            select(ShipAgeStatDaily).where(
-                and_(
-                    ShipAgeStatDaily.stat_date == stat_date,
-                    ShipAgeStatDaily.age_group == age_group,
-                )
-            )
-        )
-        row = result.scalar_one_or_none()
-        if row:
-            row.vessel_count = vessel_count
-        else:
-            self._db.add(ShipAgeStatDaily(
-                stat_date=stat_date, age_group=age_group, vessel_count=vessel_count,
-            ))
-        await self._db.flush()
-
-    # ─────────────────────────────────────────────────
-    # 仪表盘汇总（从统计表读取，避免查业务表）
+    # 仪表盘汇总
     # ─────────────────────────────────────────────────
 
     async def get_latest_cargo_stat(self) -> Optional[CargoStatDaily]:
@@ -384,20 +249,18 @@ class AnalysisRepository(BaseRepository):
         return result.scalar_one_or_none()
 
     async def get_latest_ship_total(self) -> dict:
-        """获取最新一天的全国船舶合计"""
+        """获取最新一天的全国船舶合计（从 ship_heatmap_daily 汇总节点数据）"""
         result = await self._db.execute(
-            select(
-                func.max(ShipCapacityRegionDaily.stat_date).label("latest_date"),
-            )
+            select(func.max(ShipHeatmapDaily.stat_date).label("latest_date"))
         )
         latest_date = result.scalar_one_or_none()
         if not latest_date:
             return {"vessel_count": 0, "total_deadweight": 0}
         result2 = await self._db.execute(
             select(
-                func.sum(ShipCapacityRegionDaily.vessel_count).label("vessel_count"),
-                func.sum(ShipCapacityRegionDaily.total_deadweight).label("total_deadweight"),
-            ).where(ShipCapacityRegionDaily.stat_date == latest_date)
+                func.sum(ShipHeatmapDaily.vessel_count).label("vessel_count"),
+                func.sum(ShipHeatmapDaily.total_deadweight).label("total_deadweight"),
+            ).where(ShipHeatmapDaily.stat_date == latest_date)
         )
         row = result2.one()
         return {

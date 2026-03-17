@@ -9,7 +9,7 @@
   AnalysisRepository — 所有数据读取均通过统计表
 """
 import logging
-from datetime import date, timedelta
+from datetime import date
 from typing import Optional
 
 from app.repositories.analysis_repository import AnalysisRepository
@@ -24,22 +24,17 @@ class AnalysisService:
         self._analysis = analysis_repo
 
     # ─────────────────────────────────────────────────
-    # 仪表盘（从统计表读取，不查业务表）
+    # 仪表盘
     # ─────────────────────────────────────────────────
 
     async def get_dashboard_stats(self) -> dict:
         cargo_stat = await self._analysis.get_latest_cargo_stat()
         ship_stat = await self._analysis.get_latest_ship_total()
-        trend = await self._analysis.get_cargo_trend(days=7)
         return {
             "cargo_total": cargo_stat.total_count if cargo_stat else 0,
             "cargo_active": cargo_stat.active_count if cargo_stat else 0,
             "cargo_pending": cargo_stat.pending_count if cargo_stat else 0,
             "active_vessels": ship_stat["vessel_count"],
-            "daily_trend": [
-                {"date": str(r.stat_date), "total": r.total_count}
-                for r in trend
-            ],
         }
 
     # ─────────────────────────────────────────────────
@@ -51,15 +46,15 @@ class AnalysisService:
         stat_date: Optional[date] = None,
         stat_type: str = "ORIGIN",
         region_id: Optional[int] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
     ) -> list:
-        target = stat_date or end_date or date.today()
+        target = stat_date or date.today()
         rows = await self._analysis.get_cargo_heatmap(stat_date=target, stat_type=stat_type)
         result = []
         for r in rows:
             node = r.node
-            item = {
+            if region_id and node and node.region_id != region_id:
+                continue
+            result.append({
                 "node_id": r.node_id,
                 "cargo_count": r.cargo_count,
                 "total_tonnage": float(r.total_tonnage or 0),
@@ -68,11 +63,7 @@ class AnalysisService:
                 "longitude": float(node.longitude) if node and node.longitude else None,
                 "latitude": float(node.latitude) if node and node.latitude else None,
                 "node_name": node.name if node else None,
-            }
-            # 可选区域过滤
-            if region_id and node and node.region_id != region_id:
-                continue
-            result.append(item)
+            })
         return result
 
     # ─────────────────────────────────────────────────
@@ -116,36 +107,6 @@ class AnalysisService:
         ]
 
     # ─────────────────────────────────────────────────
-    # 区域货源分布占比 + 排名
-    # ─────────────────────────────────────────────────
-
-    async def get_cargo_region_distribution(
-        self,
-        stat_date: Optional[date] = None,
-        stat_type: str = "ORIGIN",
-    ) -> dict:
-        target = stat_date or date.today()
-        rows = await self._analysis.get_cargo_region_stat(stat_date=target, stat_type=stat_type)
-        total = sum(r.cargo_count for r in rows) or 1
-        items = [
-            {
-                "rank": idx + 1,
-                "region_id": r.region_id,
-                "region_name": r.region_name,
-                "cargo_count": r.cargo_count,
-                "total_tonnage": float(r.total_tonnage or 0),
-                "ratio": round(r.cargo_count / total * 100, 2),
-            }
-            for idx, r in enumerate(rows)
-        ]
-        return {
-            "stat_type": stat_type,
-            "stat_date": str(target),
-            "total": sum(r.cargo_count for r in rows),
-            "items": items,
-        }
-
-    # ─────────────────────────────────────────────────
     # 船舶热力图
     # ─────────────────────────────────────────────────
 
@@ -173,7 +134,7 @@ class AnalysisService:
         return result
 
     # ─────────────────────────────────────────────────
-    # 船舶类型数量占比
+    # 船型占比
     # ─────────────────────────────────────────────────
 
     async def get_ship_type_ratio(self, stat_date: Optional[date] = None) -> list:
@@ -192,66 +153,9 @@ class AnalysisService:
         ]
 
     # ─────────────────────────────────────────────────
-    # 船龄分布直方图
-    # ─────────────────────────────────────────────────
-
-    async def get_ship_age_distribution(self, stat_date: Optional[date] = None) -> list:
-        target = stat_date or date.today()
-        rows = await self._analysis.get_ship_age_stat(stat_date=target)
-        return [
-            {
-                "age_group": r.age_group,
-                "vessel_count": r.vessel_count,
-            }
-            for r in rows
-        ]
-
-    # ─────────────────────────────────────────────────
-    # 区域运力分布（船舶数量 + 总载重吨）
-    # ─────────────────────────────────────────────────
-
-    async def get_ship_capacity_region(self, stat_date: Optional[date] = None) -> list:
-        target = stat_date or date.today()
-        rows = await self._analysis.get_ship_capacity_region(stat_date=target)
-        return [
-            {
-                "region_id": r.region_id,
-                "region_name": r.region_name,
-                "vessel_count": r.vessel_count,
-                "total_deadweight": float(r.total_deadweight or 0),
-            }
-            for r in rows
-        ]
-
-    # ─────────────────────────────────────────────────
-    # 旧接口 Top节点（兼容）
-    # ─────────────────────────────────────────────────
-
-    async def get_top_nodes(self, stat_type: str = "CARGO_ORIGIN", limit: int = 10) -> dict:
-        target = date.today()
-        # 映射到新接口
-        new_type = "ORIGIN" if "ORIGIN" in stat_type else ("DEST" if "DEST" in stat_type else None)
-        if stat_type == "VESSEL":
-            rows = await self._analysis.get_ship_heatmap(stat_date=target)
-            nodes = [
-                {"node_id": r.node_id, "stat_value": r.vessel_count}
-                for r in rows[:limit]
-            ]
-        else:
-            rows = await self._analysis.get_cargo_heatmap(stat_date=target, stat_type=new_type)
-            nodes = [
-                {"node_id": r.node_id, "stat_value": r.cargo_count}
-                for r in rows[:limit]
-            ]
-        return {"stat_type": stat_type, "nodes": nodes}
-
-    # ─────────────────────────────────────────────────
-    # 手动触发统计（管理员接口调用，委托 stat_tasks）
+    # 手动触发统计（管理员）
     # ─────────────────────────────────────────────────
 
     async def run_daily_stats(self, target_date: Optional[date] = None) -> dict:
-        """手动触发每日统计聚合（管理员接口）"""
         from app.tasks.stat_tasks import daily_stat_job
-        result = await daily_stat_job(target_date=target_date)
-        return result
-
+        return await daily_stat_job(target_date=target_date)

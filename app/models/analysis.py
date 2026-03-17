@@ -3,11 +3,18 @@
 表设计原则：
   - 所有统计表均有 stat_date 维度 + 统计指标字段
   - 不允许分析接口直接查询业务表；统计数据由每日 ETL 任务生成
-  - 索引覆盖常用查询维度（stat_date / region_id / commodity_id）
+  - 索引覆盖常用查询维度（stat_date / commodity_id）
+
+保留统计表（5 张）：
+  cargo_heatmap_daily        — 货源热力（节点级，含 ORIGIN/DEST）
+  ship_heatmap_daily         — 船舶热力（节点级）
+  cargo_stat_daily           — 货源每日汇总（趋势图 + 仪表盘）
+  cargo_commodity_stat_daily — 货品大类货源排名
+  ship_type_stat_daily       — 船型数量占比
 """
 from sqlalchemy import (
     Column, BigInteger, Integer, String, DECIMAL, DateTime, Date,
-    ForeignKey, UniqueConstraint, Index, SmallInteger,
+    ForeignKey, UniqueConstraint, Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -129,69 +136,6 @@ class CargoCommodityStatDaily(Base):
     commodity_category = relationship("CommodityCategory")
 
 
-# ─────────────────────────────────────────────────
-# 区域货源分布统计
-# ─────────────────────────────────────────────────
-
-class CargoRegionStatDaily(Base):
-    """区域货源分布统计日表
-    来源：cargo_opportunity.origin_region_id / dest_region_id
-    用途：区域货源分布占比 + 排名
-    """
-    __tablename__ = "cargo_region_stat_daily"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    stat_date = Column(Date, nullable=False, comment="统计日期")
-    region_id = Column(BigInteger, ForeignKey("region.id"), nullable=False, comment="区域ID")
-    region_name = Column(String(64), nullable=False, comment="区域名称（冗余存储）")
-    stat_type = Column(String(8), nullable=False, comment="ORIGIN=货源发出, DEST=货源到达")
-    cargo_count = Column(Integer, nullable=False, default=0, comment="货源数量")
-    total_tonnage = Column(DECIMAL(16, 2), nullable=False, default=0, comment="总吨位(吨)")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("stat_date", "region_id", "stat_type", name="uk_cargo_region_stat"),
-        Index("ix_cargo_region_stat_date", "stat_date"),
-        Index("ix_cargo_region_stat_region", "region_id"),
-    )
-
-    region = relationship("Region")
-
-
-# ─────────────────────────────────────────────────
-# 区域运力分布统计
-# ─────────────────────────────────────────────────
-
-class ShipCapacityRegionDaily(Base):
-    """区域运力分布统计日表
-    来源：vessel + vessel_dynamic → transport_node.region_id
-    用途：区域运力分布（船舶数量 + 总载重吨）
-    """
-    __tablename__ = "ship_capacity_region_daily"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    stat_date = Column(Date, nullable=False, comment="统计日期")
-    region_id = Column(BigInteger, ForeignKey("region.id"), nullable=False, comment="区域ID")
-    region_name = Column(String(64), nullable=False, comment="区域名称（冗余存储）")
-    vessel_count = Column(Integer, nullable=False, default=0, comment="船舶数量")
-    total_deadweight = Column(DECIMAL(16, 2), nullable=False, default=0, comment="总载重吨(DWT)")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("stat_date", "region_id", name="uk_ship_capacity_region"),
-        Index("ix_ship_capacity_region_date", "stat_date"),
-        Index("ix_ship_capacity_region_id", "region_id"),
-    )
-
-    region = relationship("Region")
-
-
-# ─────────────────────────────────────────────────
-# 船舶类型数量统计
-# ─────────────────────────────────────────────────
-
 class ShipTypeStatDaily(Base):
     """船舶类型数量统计日表
     来源：vessel → vessel_type_dict
@@ -217,31 +161,3 @@ class ShipTypeStatDaily(Base):
     )
 
     vessel_type = relationship("VesselTypeDict")
-
-
-# ─────────────────────────────────────────────────
-# 船龄分布统计
-# ─────────────────────────────────────────────────
-
-class ShipAgeStatDaily(Base):
-    """船龄分布统计日表
-    来源：vessel.build_year → 船龄 = 当前年 - build_year
-    分组区间：0-5 / 5-10 / 10-15 / 15-20 / 20+
-    用途：船龄分布直方图
-    """
-    __tablename__ = "ship_age_stat_daily"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    stat_date = Column(Date, nullable=False, comment="统计日期")
-    age_group = Column(
-        String(8), nullable=False,
-        comment="船龄分组：0-5 / 5-10 / 10-15 / 15-20 / 20+",
-    )
-    vessel_count = Column(Integer, nullable=False, default=0, comment="该船龄段船舶数量")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("stat_date", "age_group", name="uk_ship_age_stat"),
-        Index("ix_ship_age_stat_date", "stat_date"),
-    )
