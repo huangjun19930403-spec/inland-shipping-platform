@@ -59,69 +59,11 @@ CARGO_PARSE_TEMPLATE = PromptTemplate(
 
 
 # ─────────────────────────────────────────────────
-# 数据分析提示词
-# ─────────────────────────────────────────────────
-
-CARGO_TREND_ANALYSIS_TEMPLATE = PromptTemplate(
-    name="cargo_trend_analysis",
-    system="""你是内河航运市场分析师。
-根据提供的货运数据，生成简洁的市场趋势分析报告。
-重点关注：货量变化趋势、主要货种结构、热门航线、运价走势。
-输出为结构化JSON。""",
-    user_template="""分析以下{days}天的内河航运数据：
-
-{data_summary}
-
-输出JSON：
-{{
-    "trend_summary": "整体趋势描述（100字以内）",
-    "cargo_highlights": ["重要货种动态1", "重要货种动态2"],
-    "route_highlights": ["热门航线1", "热门航线2"],
-    "risk_factors": ["风险因素1"],
-    "recommendation": "操作建议（50字以内）"
-}}""",
-)
-
-
-# ─────────────────────────────────────────────────
-# 航线推荐提示词
-# ─────────────────────────────────────────────────
-
-ROUTE_RECOMMEND_TEMPLATE = PromptTemplate(
-    name="route_recommend",
-    system="""你是内河航运航线规划专家。
-根据起终点和货物类型，推荐最优内河航线方案。
-考虑因素：水深限制、桥梁净空、闸口通行、里程距离。
-输出为结构化JSON。""",
-    user_template="""请为以下货运任务推荐航线方案：
-起点：{origin}
-终点：{destination}
-货物：{commodity}
-船型：{vessel_type}
-吨位：{tonnage}吨
-
-已知可用航线：
-{available_routes}
-
-输出JSON：
-{{
-    "recommended_route_id": 航线ID或null,
-    "route_description": "航线说明",
-    "estimated_distance_km": 估算里程,
-    "key_constraints": ["关键限制1", "限制2"],
-    "alternative_suggestion": "备选建议"
-}}""",
-)
-
-
-# ─────────────────────────────────────────────────
 # 提示词注册表
 # ─────────────────────────────────────────────────
 
 PROMPT_REGISTRY: dict[str, PromptTemplate] = {
     "cargo_parse": CARGO_PARSE_TEMPLATE,
-    "cargo_trend_analysis": CARGO_TREND_ANALYSIS_TEMPLATE,
-    "route_recommend": ROUTE_RECOMMEND_TEMPLATE,
 }
 
 

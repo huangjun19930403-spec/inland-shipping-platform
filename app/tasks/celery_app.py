@@ -13,7 +13,6 @@ celery_app = Celery(
     include=[
         "app.tasks.ai_tasks",
         "app.tasks.analysis_tasks",
-        "app.tasks.dispatch_tasks",
     ],
 )
 
@@ -49,6 +48,5 @@ celery_app.conf.update(
     task_routes={
         "app.tasks.ai_tasks.*": {"queue": "ai"},
         "app.tasks.analysis_tasks.*": {"queue": "analysis"},
-        "app.tasks.dispatch_tasks.*": {"queue": "dispatch"},
     },
 )

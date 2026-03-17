@@ -4,7 +4,7 @@
 规则：通过Repository访问数据，通过Agent调用AI
 """
 import logging
-from datetime import date, timedelta
+from datetime import date
 from typing import Optional
 
 from app.repositories.analysis_repository import AnalysisRepository
@@ -124,39 +124,14 @@ class AnalysisService:
     # ─────────────────────────────────────────────────
 
     async def generate_ai_analysis(self, days: int = 7) -> dict:
-        end = date.today()
-        start = end - timedelta(days=days)
-        stats = await self._analysis.get_heatmap_range(start, end)
         cargo_status = await self._analysis.count_opportunities_by_status()
-        trend = await self._analysis.get_daily_cargo_trend(days=days)
-        data_summary = self._format_data_summary(stats, cargo_status, trend, days)
-        try:
-            from app.agents.analysis_agent import AnalysisAgent
-            agent = AnalysisAgent()
-            result = await agent.run({"days": days, "data_summary": data_summary})
-            if result.success:
-                return result.output
-        except Exception as e:
-            logger.warning(f"[AnalysisService] AI analysis failed: {e}")
         return {
             "trend_summary": f"最近{days}天数据汇总",
             "cargo_highlights": [f"活跃货源{cargo_status.get('ACTIVE', 0)}条"],
             "route_highlights": [],
             "risk_factors": [],
-            "recommendation": "数据分析功能需要AI服务支持",
+            "recommendation": "AI趋势分析功能待实现",
         }
-
-    def _format_data_summary(self, stats, cargo_status, trend, days: int) -> str:
-        lines = [f"统计周期：近{days}天"]
-        lines.append(f"货源状态分布：{dict(cargo_status)}")
-        if trend:
-            trend_str = ", ".join(f"{str(r.stat_date)}({int(r.total)})" for r in trend[-5:])
-            lines.append(f"最近货量趋势：{trend_str}")
-        if stats:
-            top_nodes = sorted(stats, key=lambda s: s.stat_value, reverse=True)[:5]
-            node_str = ", ".join(f"节点{s.node_id}({s.stat_value})" for s in top_nodes)
-            lines.append(f"热门节点（TOP5）：{node_str}")
-        return "\n".join(lines)
 
     # ─────────────────────────────────────────────────
     # 统计聚合（Celery Task 调用）

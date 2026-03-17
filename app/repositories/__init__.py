@@ -6,7 +6,6 @@ from app.repositories.vessel_repository import VesselRepository
 from app.repositories.route_repository import RouteRepository
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.audit_repository import AuditRepository
-from app.repositories.system_repository import SystemRepository
 
 __all__ = [
     "BaseRepository",
@@ -16,5 +15,4 @@ __all__ = [
     "RouteRepository",
     "AnalysisRepository",
     "AuditRepository",
-    "SystemRepository",
 ]

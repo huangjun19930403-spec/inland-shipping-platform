@@ -161,3 +161,13 @@ class AuditService:
     async def _post_reject_action(self, record) -> None:
         """驳回后的业务联动"""
         pass  # 可扩展：发送通知、更新状态等
+
+    async def get_pending_stats(self) -> dict:
+        """各类型待审核数量统计"""
+        target_types = [
+            "TRANSPORT_NODE", "VESSEL", "COMMODITY_STANDARD",
+            "COMMODITY_CATEGORY", "COMMODITY_TYPE", "WATERWAY",
+        ]
+        counts = await self._audit.count_pending_by_types(target_types)
+        counts["TOTAL"] = sum(counts.values())
+        return counts

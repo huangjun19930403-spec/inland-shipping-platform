@@ -1,13 +1,9 @@
 """审核中心路由 — 使用 DI 模式调用 AuditService"""
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
 
-from app.core.database import get_db
 from app.core.dependencies import get_audit_service
 from app.core.security import get_current_user_roles, require_roles
-from app.models.audit import AuditRecord
 from app.schemas.audit import AuditRecordResponse, AuditActionRequest
 from app.schemas.common import success
 from app.services.audit_service import AuditService
@@ -100,20 +96,8 @@ async def reject_audit(
 
 @router.get("/stats", summary="各类待审核数量统计")
 async def audit_stats(
-    db: AsyncSession = Depends(get_db),
+    service: AuditService = Depends(get_audit_service),
     _=Depends(require_roles("ADMIN", "OPERATOR", "SUPER_ADMIN")),
 ):
-    types = [
-        "TRANSPORT_NODE", "VESSEL", "COMMODITY_STANDARD",
-        "COMMODITY_CATEGORY", "COMMODITY_TYPE", "WATERWAY",
-    ]
-    result = {}
-    for t in types:
-        count = (await db.execute(
-            select(func.count(AuditRecord.id)).where(
-                and_(AuditRecord.target_type == t, AuditRecord.audit_result == "PENDING")
-            )
-        )).scalar_one()
-        result[t] = count
-    result["TOTAL"] = sum(result.values())
+    result = await service.get_pending_stats()
     return success(data=result)

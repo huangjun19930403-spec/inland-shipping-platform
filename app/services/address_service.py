@@ -3,7 +3,6 @@
 职责：内河运输节点、水系、区域相关业务逻辑
 规则：通过Repository访问数据，不直接操作SQLAlchemy Session
 """
-import json
 import logging
 from typing import Optional
 
@@ -13,7 +12,6 @@ from app.core.exceptions import NotFoundError, ConflictError
 from app.models.address import (
     Waterway, Region, AdminRegion, NodeType, TransportNode, NodeAlias,
 )
-from app.models.audit import AuditRecord
 from app.repositories.address_repository import AddressRepository
 from app.repositories.audit_repository import AuditRepository
 from app.utils.waterway_code_generator import WaterwayCodeGenerator
@@ -78,7 +76,7 @@ class AddressService:
             try:
                 ww = Waterway(name=name, code=code, **kwargs)
                 saved = await self._address.create_waterway(ww)
-                await self._record_audit(
+                await self._audit.record_action(
                     operator_id, "CREATE", "WATERWAY", saved.id,
                     after_data={"name": name, "code": code},
                 )
@@ -107,7 +105,7 @@ class AddressService:
             raise NotFoundError("Waterway", waterway_id)
         before = {"name": ww.name}
         updated = await self._address.update_waterway(waterway_id, **kwargs)
-        await self._record_audit(operator_id, "UPDATE", "WATERWAY", waterway_id,
+        await self._audit.record_action(operator_id, "UPDATE", "WATERWAY", waterway_id,
                                  before_data=before, after_data=kwargs)
         await self._address.save()
         return updated
@@ -117,7 +115,7 @@ class AddressService:
         if not ww:
             raise NotFoundError("Waterway", waterway_id)
         await self._address.delete_waterway(waterway_id)
-        await self._record_audit(operator_id, "DELETE", "WATERWAY", waterway_id)
+        await self._audit.record_action(operator_id, "DELETE", "WATERWAY", waterway_id)
         await self._address.save()
 
     async def enable_waterway(self, waterway_id: int, operator_id: int) -> Waterway:
@@ -125,7 +123,7 @@ class AddressService:
         if not ww:
             raise NotFoundError("Waterway", waterway_id)
         updated = await self._address.update_waterway(waterway_id, status=1)
-        await self._record_audit(operator_id, "ENABLE", "WATERWAY", waterway_id,
+        await self._audit.record_action(operator_id, "ENABLE", "WATERWAY", waterway_id,
                                  before_data={"status": ww.status}, after_data={"status": 1})
         await self._address.save()
         return updated
@@ -135,7 +133,7 @@ class AddressService:
         if not ww:
             raise NotFoundError("Waterway", waterway_id)
         updated = await self._address.update_waterway(waterway_id, status=0)
-        await self._record_audit(operator_id, "DISABLE", "WATERWAY", waterway_id,
+        await self._audit.record_action(operator_id, "DISABLE", "WATERWAY", waterway_id,
                                  before_data={"status": ww.status}, after_data={"status": 0})
         await self._address.save()
         return updated
@@ -164,7 +162,7 @@ class AddressService:
     async def create_region(self, name: str, code: str, operator_id: int, **kwargs) -> Region:
         region = Region(name=name, code=code, **kwargs)
         saved = await self._address.create_region(region)
-        await self._record_audit(operator_id, "CREATE", "REGION", saved.id,
+        await self._audit.record_action(operator_id, "CREATE", "REGION", saved.id,
                                  after_data={"name": name, "code": code})
         await self._address.save()
         return saved
@@ -175,7 +173,7 @@ class AddressService:
             raise NotFoundError("Region", region_id)
         before = {"name": region.name}
         updated = await self._address.update_region(region_id, **kwargs)
-        await self._record_audit(operator_id, "UPDATE", "REGION", region_id,
+        await self._audit.record_action(operator_id, "UPDATE", "REGION", region_id,
                                  before_data=before, after_data=kwargs)
         await self._address.save()
         return updated
@@ -185,7 +183,7 @@ class AddressService:
         if not region:
             raise NotFoundError("Region", region_id)
         await self._address.delete_region(region_id)
-        await self._record_audit(operator_id, "DELETE", "REGION", region_id)
+        await self._audit.record_action(operator_id, "DELETE", "REGION", region_id)
         await self._address.save()
 
     async def get_nodes_in_region(self, region_id: int):
@@ -309,7 +307,7 @@ class AddressService:
             **kwargs,
         )
         saved = await self._address.create_node(node)
-        await self._record_audit(operator_id, "CREATE", "TRANSPORT_NODE", saved.id,
+        await self._audit.record_action(operator_id, "CREATE", "TRANSPORT_NODE", saved.id,
                                  after_data={"name": name, "code": code})
         await self._address.save()
         return saved
@@ -318,7 +316,7 @@ class AddressService:
         node = await self.get_node(node_id)
         before = {"name": node.name, "code": node.code}
         updated = await self._address.update_node(node_id, **kwargs)
-        await self._record_audit(operator_id, "UPDATE", "TRANSPORT_NODE", node_id,
+        await self._audit.record_action(operator_id, "UPDATE", "TRANSPORT_NODE", node_id,
                                  before_data=before, after_data=kwargs)
         await self._address.save()
         return updated
@@ -326,14 +324,14 @@ class AddressService:
     async def delete_node(self, node_id: int, operator_id: int) -> None:
         node = await self.get_node(node_id)
         await self._address.delete_node(node_id)
-        await self._record_audit(operator_id, "DELETE", "TRANSPORT_NODE", node_id,
+        await self._audit.record_action(operator_id, "DELETE", "TRANSPORT_NODE", node_id,
                                  before_data={"name": node.name})
         await self._address.save()
 
     async def approve_node(self, node_id: int, auditor_id: int, remark: str = "") -> TransportNode:
         await self.get_node(node_id)
         updated = await self._address.update_node(node_id, audit_status=1)
-        await self._record_audit(auditor_id, "APPROVE", "TRANSPORT_NODE", node_id,
+        await self._audit.record_action(auditor_id, "APPROVE", "TRANSPORT_NODE", node_id,
                                  after_data={"audit_status": 1, "remark": remark})
         await self._address.save()
         return updated
@@ -341,7 +339,7 @@ class AddressService:
     async def reject_node(self, node_id: int, auditor_id: int, remark: str) -> TransportNode:
         await self.get_node(node_id)
         updated = await self._address.update_node(node_id, audit_status=2)
-        await self._record_audit(auditor_id, "REJECT", "TRANSPORT_NODE", node_id,
+        await self._audit.record_action(auditor_id, "REJECT", "TRANSPORT_NODE", node_id,
                                  after_data={"audit_status": 2, "remark": remark})
         await self._address.save()
         return updated
@@ -354,7 +352,7 @@ class AddressService:
         await self.get_node(node_id)
         alias = NodeAlias(transport_node_id=node_id, alias_name=alias_name)
         saved = await self._address.create_alias(alias)
-        await self._record_audit(operator_id, "CREATE", "NODE_ALIAS", saved.id,
+        await self._audit.record_action(operator_id, "CREATE", "NODE_ALIAS", saved.id,
                                  after_data={"node_id": node_id, "alias_name": alias_name})
         await self._address.save()
         return saved
@@ -363,29 +361,6 @@ class AddressService:
         deleted = await self._address.delete_alias(alias_id)
         if not deleted:
             raise NotFoundError("NodeAlias", alias_id)
-        await self._record_audit(operator_id, "DELETE", "NODE_ALIAS", alias_id)
+        await self._audit.record_action(operator_id, "DELETE", "NODE_ALIAS", alias_id)
         await self._address.save()
 
-    # ─────────────────────────────────────────────────
-    # 内部辅助
-    # ─────────────────────────────────────────────────
-
-    async def _record_audit(
-        self,
-        operator_id: int,
-        action: str,
-        target_type: str,
-        target_id: int,
-        before_data: Optional[dict] = None,
-        after_data: Optional[dict] = None,
-    ) -> None:
-        record = AuditRecord(
-            operator_id=operator_id,
-            action=action,
-            target_type=target_type,
-            target_id=target_id,
-            audit_status="APPROVED",
-            before_data=json.dumps(before_data, ensure_ascii=False) if before_data else None,
-            after_data=json.dumps(after_data, ensure_ascii=False) if after_data else None,
-        )
-        await self._audit.create_record(record)

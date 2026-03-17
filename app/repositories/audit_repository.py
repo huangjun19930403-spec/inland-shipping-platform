@@ -1,6 +1,7 @@
 """
 审计数据访问层
 """
+import json
 from typing import Optional, Sequence
 
 from sqlalchemy import select, and_, desc
@@ -11,6 +12,27 @@ from app.repositories.base import BaseRepository
 
 class AuditRepository(BaseRepository):
     model_class = AuditRecord
+
+    async def record_action(
+        self,
+        operator_id: int,
+        action: str,
+        target_type: str,
+        target_id: int,
+        before_data: Optional[dict] = None,
+        after_data: Optional[dict] = None,
+    ) -> AuditRecord:
+        """创建操作审计记录（已自动通过状态）"""
+        record = AuditRecord(
+            operator_id=operator_id,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            audit_status="APPROVED",
+            before_data=json.dumps(before_data, ensure_ascii=False) if before_data else None,
+            after_data=json.dumps(after_data, ensure_ascii=False) if after_data else None,
+        )
+        return await self.create(record)
 
     async def create_record(self, record: AuditRecord) -> AuditRecord:
         return await self.create(record)
@@ -87,3 +109,16 @@ class AuditRepository(BaseRepository):
             record.audit_comment = reason
             await self._db.flush()
         return record
+
+    async def count_pending_by_types(self, target_types: list[str]) -> dict[str, int]:
+        """统计各类型待审核数量"""
+        from sqlalchemy import func
+        result = {}
+        for t in target_types:
+            count = (await self._db.execute(
+                select(func.count(AuditRecord.id)).where(
+                    and_(AuditRecord.target_type == t, AuditRecord.audit_status == "PENDING")
+                )
+            )).scalar_one()
+            result[t] = count
+        return result
