@@ -84,7 +84,6 @@ class CommodityTypeResponse(BaseModel):
 # ---------- CommodityStandard ----------
 
 class CommodityStandardCreate(BaseModel):
-    type_id: int
     code: Optional[str] = None
     name: str
     name_en: Optional[str] = None
@@ -133,6 +132,7 @@ class CommodityStandardResponse(BaseModel):
     audit_remark: Optional[str] = None
     submitter_id: Optional[int] = None
     auditor_id: Optional[int] = None
+    audited_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -144,6 +144,14 @@ class CommodityStandardResponse(BaseModel):
 
 class CommodityAliasCreate(BaseModel):
     commodity_id: int
+    alias_name: str
+    alias_type: str = "COMMON"
+    priority: int = 0
+    status: int = 1
+
+
+class CommodityAliasBody(BaseModel):
+    """创建货品别名请求体（commodity_id 来自 URL 路径）"""
     alias_name: str
     alias_type: str = "COMMON"
     priority: int = 0

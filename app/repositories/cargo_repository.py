@@ -4,7 +4,7 @@
 """
 from typing import Optional, Sequence
 
-from sqlalchemy import select, and_, desc, func
+from sqlalchemy import select, and_, desc, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.models.cargo import (
@@ -76,6 +76,44 @@ class CargoStandardRepository(BaseRepository):
         )
         return result.scalars().all()
 
+    async def list_paginated(
+        self,
+        type_id: Optional[int] = None,
+        keyword: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[Sequence[CommodityStandard], int]:
+        filters = [CommodityStandard.deleted_at.is_(None)]
+        if type_id:
+            filters.append(CommodityStandard.type_id == type_id)
+        if keyword:
+            filters.append(CommodityStandard.name.ilike(f"%{keyword}%"))
+
+        query = select(CommodityStandard).where(and_(*filters))
+        total_result = await self._db.execute(
+            select(func.count()).select_from(query.subquery())
+        )
+        total = total_result.scalar_one()
+        result = await self._db.execute(
+            query.order_by(CommodityStandard.sort_order, CommodityStandard.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return result.scalars().all(), total
+
+    async def get_all(
+        self, type_id: Optional[int] = None
+    ) -> Sequence[CommodityStandard]:
+        filters = [CommodityStandard.deleted_at.is_(None)]
+        if type_id:
+            filters.append(CommodityStandard.type_id == type_id)
+        result = await self._db.execute(
+            select(CommodityStandard)
+            .where(and_(*filters))
+            .order_by(CommodityStandard.sort_order, CommodityStandard.id)
+        )
+        return result.scalars().all()
+
 
 class CommodityAliasRepository(BaseRepository):
     model_class = CommodityAlias
@@ -92,6 +130,9 @@ class CommodityAliasRepository(BaseRepository):
             )
         )
         return result.scalars().all()
+
+    async def create_alias(self, alias: CommodityAlias) -> CommodityAlias:
+        return await self.create(alias)
 
 
 class CargoRepository(BaseRepository):
