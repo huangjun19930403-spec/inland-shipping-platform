@@ -7,7 +7,6 @@
   4. get_pending_tasks()   — 查询待审核任务列表
   5. list_all_tasks()      — 查询全部任务（带过滤）
   6. list_records()        — 查询历史审核记录
-  兼容旧接口：approve() / reject()（基于 audit_record_id）
 """
 import decimal
 import logging
@@ -346,77 +345,6 @@ class AuditService:
         from sqlalchemy import text
         sql = text(f"UPDATE {table_name} SET status = :status WHERE id = :target_id")
         await self._audit._db.execute(sql, {"status": status, "target_id": target_id})
-
-    # ─────────────────────────────────────────────────
-    # 兼容旧接口（基于 audit_record_id 的 approve/reject）
-    # ─────────────────────────────────────────────────
-
-    async def approve(
-        self,
-        record_id: int,
-        auditor_id: int,
-        auditor_role: str,
-        comment: Optional[str] = None,
-    ) -> dict:
-        """兼容旧版基于 audit_record_id 的审批接口"""
-        record = await self._audit.get_record(record_id)
-        if not record:
-            raise NotFoundError("AuditRecord", record_id)
-        if record.audit_result != "PENDING":
-            raise ValidationError(f"记录状态为 '{record.audit_result}'，只有 PENDING 可以审批")
-        if auditor_role not in ("SUPER_ADMIN", "ADMIN"):
-            raise PermissionError("只有 ADMIN 或 SUPER_ADMIN 可以审批")
-        if auditor_role != "SUPER_ADMIN" and record.submitter_id == auditor_id:
-            raise PermissionError("不能审批自己提交的数据")
-
-        record.audit_result = "APPROVED"
-        record.auditor_id = auditor_id
-        record.audited_at = datetime.now()
-        if comment:
-            record.audit_remark = comment
-        await self._audit._db.flush()
-
-        # 同步更新业务表
-        await self._update_business_audit_status(
-            record.target_type, record.target_id,
-            audit_status=1, audited_at=datetime.now(), auditor_id=auditor_id,
-        )
-        if record.target_type in _ACTIVATE_ON_APPROVE:
-            await self._update_business_status(record.target_type, record.target_id, status=1)
-
-        await self._audit.save()
-        logger.info("[AuditService] (compat) approved record_id=%s by auditor=%s", record_id, auditor_id)
-        return {"record_id": record_id, "status": "APPROVED"}
-
-    async def reject(
-        self,
-        record_id: int,
-        auditor_id: int,
-        auditor_role: str,
-        reason: str,
-    ) -> dict:
-        """兼容旧版基于 audit_record_id 的驳回接口"""
-        record = await self._audit.get_record(record_id)
-        if not record:
-            raise NotFoundError("AuditRecord", record_id)
-        if record.audit_result != "PENDING":
-            raise ValidationError(f"记录状态为 '{record.audit_result}'，只有 PENDING 可以驳回")
-        if auditor_role not in ("SUPER_ADMIN", "ADMIN"):
-            raise PermissionError("只有 ADMIN 或 SUPER_ADMIN 可以驳回")
-
-        record.audit_result = "REJECTED"
-        record.auditor_id = auditor_id
-        record.audited_at = datetime.now()
-        record.audit_remark = reason
-        await self._audit._db.flush()
-
-        await self._update_business_audit_status(
-            record.target_type, record.target_id,
-            audit_status=2, audited_at=datetime.now(), auditor_id=auditor_id,
-        )
-        await self._audit.save()
-        logger.info("[AuditService] (compat) rejected record_id=%s reason=%s", record_id, reason)
-        return {"record_id": record_id, "status": "REJECTED", "reason": reason}
 
     # ─────────────────────────────────────────────────
     # 工具方法：供业务 Service 写审核记录日志

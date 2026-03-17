@@ -57,12 +57,3 @@ class AuditTaskApproveRequest(BaseModel):
 
 class AuditTaskRejectRequest(BaseModel):
     remark: str = Field(..., min_length=1, description="驳回原因（必填）")
-
-
-# ─────────────────────────────────────────────────
-# 通用审核动作请求（兼容旧接口）
-# ─────────────────────────────────────────────────
-
-class AuditActionRequest(BaseModel):
-    """兼容旧版 /audit/{record_id}/approve 和 /audit/{record_id}/reject 接口"""
-    audit_remark: Optional[str] = Field(None, description="审核意见")
