@@ -46,7 +46,7 @@ async def run_daily_stats(
     return success(data=result, message="统计聚合完成")
 
 
-@router.get("/cargo/heatmap", summary="货源热力图", tags=["货源分析"])
+@router.get("/cargo/heatmap", summary="货源热力图", tags=["数据分析"])
 async def get_cargo_heatmap(
     stat_date: Optional[date] = Query(None, description="统计日期，默认今天"),
     stat_type: str = Query("ORIGIN", description="ORIGIN=装货热力 | DEST=卸货热力"),
@@ -64,7 +64,7 @@ async def get_cargo_heatmap(
     return success(data={"stat_date": str(stat_date or date.today()), "items": items})
 
 
-@router.get("/cargo/trend", summary="货源趋势图", tags=["货源分析"])
+@router.get("/cargo/trend", summary="货源趋势图", tags=["数据分析"])
 async def get_cargo_trend(
     days: int = Query(30, ge=1, le=365, description="统计天数，最多365天"),
     service: AnalysisService = Depends(get_analysis_service),
@@ -78,7 +78,7 @@ async def get_cargo_trend(
     return success(data=data)
 
 
-@router.get("/cargo/commodity_rank", summary="货品分类货源数量排名", tags=["货源分析"])
+@router.get("/cargo/commodity_rank", summary="货品分类货源数量排名", tags=["数据分析"])
 async def get_cargo_commodity_rank(
     stat_date: Optional[date] = Query(None, description="统计日期，默认今天"),
     service: AnalysisService = Depends(get_analysis_service),
@@ -92,7 +92,7 @@ async def get_cargo_commodity_rank(
     return success(data={"stat_date": str(stat_date or date.today()), "items": items})
 
 
-@router.get("/ship/heatmap", summary="船舶分布热力图", tags=["船舶分析"])
+@router.get("/ship/heatmap", summary="船舶分布热力图", tags=["数据分析"])
 async def get_ship_heatmap(
     stat_date: Optional[date] = Query(None, description="统计日期，默认今天"),
     region_id: Optional[int] = Query(None, description="按区域过滤（可选）"),
@@ -107,7 +107,7 @@ async def get_ship_heatmap(
     return success(data={"stat_date": str(stat_date or date.today()), "items": items})
 
 
-@router.get("/ship/type_ratio", summary="船舶类型数量占比", tags=["船舶分析"])
+@router.get("/ship/type_ratio", summary="船舶类型数量占比", tags=["数据分析"])
 async def get_ship_type_ratio(
     stat_date: Optional[date] = Query(None, description="统计日期，默认今天"),
     service: AnalysisService = Depends(get_analysis_service),
