@@ -101,7 +101,7 @@ class CommodityQueryTool(BaseTool):
             # 构建id→aliases映射
             id_to_aliases: dict[int, list[str]] = {}
             for alias in aliases:
-                sid = alias.commodity_standard_id
+                sid = alias.commodity_id
                 if sid not in id_to_aliases:
                     id_to_aliases[sid] = []
                 id_to_aliases[sid].append(alias.alias_name)
@@ -115,7 +115,7 @@ class CommodityQueryTool(BaseTool):
                     "id": std.id,
                     "name": std.name,
                     "aliases": id_to_aliases.get(std.id, []),
-                    "type_id": getattr(std, "commodity_type_id", None),
+                    "type_id": std.type_id,
                 })
 
             return ToolResult(success=True, data=entity_list)
