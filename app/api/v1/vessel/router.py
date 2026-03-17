@@ -203,19 +203,7 @@ async def get_vessel_history(
     })
 
 
-@router.get("/vessel/{vessel_id}/dynamic", summary="获取船舶最新动态（by vessel_id）")
-async def get_vessel_dynamic(
-    vessel_id: int,
-    service: VesselService = Depends(get_vessel_service),
-    _=Depends(get_current_user_roles),
-):
-    obj = await service.get_dynamic(vessel_id)
-    if not obj:
-        return success(data=None, message="暂无动态信息")
-    return success(data=VesselDynamicResponse.model_validate(obj))
-
-
-@router.get("/vessel/dynamic/{mmsi}", summary="获取船舶最新动态（by MMSI）")
+@router.get("/vessel/dynamic/{mmsi}", summary="获取船舶最新动态")
 async def get_vessel_dynamic_by_mmsi(
     mmsi: str,
     service: VesselService = Depends(get_vessel_service),
@@ -227,7 +215,7 @@ async def get_vessel_dynamic_by_mmsi(
     return success(data=VesselDynamicResponse.model_validate(obj))
 
 
-@router.put("/vessel/dynamic/{mmsi}", summary="更新船舶动态（by MMSI，REST 接口；生产环境由 Kafka 消费者驱动）")
+@router.put("/vessel/dynamic/{mmsi}", summary="更新船舶动态（无记录自动新增，有记录则更新）")
 async def update_vessel_dynamic_by_mmsi(
     mmsi: str,
     data: VesselDynamicUpdate,
