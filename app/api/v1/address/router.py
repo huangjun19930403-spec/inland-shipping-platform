@@ -1,6 +1,6 @@
 """地址路由 — 使用 DI 模式调用 AddressService"""
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_address_service
 from app.core.security import get_current_user_roles, require_roles
@@ -12,7 +12,6 @@ from app.schemas.address import (
     TransportNodeCreate, TransportNodeUpdate, TransportNodeResponse,
     NodeAliasCreate, NodeAliasResponse,
 )
-from app.schemas.audit import AuditActionRequest
 from app.schemas.common import success
 from app.services.address_service import AddressService
 
@@ -61,7 +60,7 @@ async def update_waterway(
     return success(data=WaterwayResponse.model_validate(obj))
 
 
-@router.delete("/waterway/{waterway_id}", summary="删除水系")
+@router.delete("/waterway/{waterway_id}", summary="删除水系（软删）")
 async def delete_waterway(
     waterway_id: int,
     service: AddressService = Depends(get_address_service),
@@ -176,7 +175,7 @@ async def update_region(
     return success(data=RegionResponse.model_validate(obj))
 
 
-@router.delete("/region/{region_id}", summary="删除商业区域")
+@router.delete("/region/{region_id}", summary="删除商业区域（软删）")
 async def delete_region(
     region_id: int,
     service: AddressService = Depends(get_address_service),
@@ -194,42 +193,6 @@ async def toggle_region_status(
     _=Depends(require_roles("ADMIN", "OPERATOR")),
 ):
     obj = await service.toggle_region_status(region_id=region_id)
-    return success(data=RegionResponse.model_validate(obj))
-
-
-@router.post("/region/{region_id}/approve", summary="审批通过商业区域")
-async def approve_region(
-    region_id: int,
-    data: AuditActionRequest,
-    service: AddressService = Depends(get_address_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
-):
-    user, roles = user_roles
-    region = await service._address.get_region(region_id)
-    if region and "SUPER_ADMIN" not in roles and region.submitter_id == user.id:
-        raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
-    obj = await service.approve_region(
-        region_id=region_id, auditor_id=user.id, remark=data.audit_remark or ""
-    )
-    return success(data=RegionResponse.model_validate(obj))
-
-
-@router.post("/region/{region_id}/reject", summary="驳回商业区域审批")
-async def reject_region(
-    region_id: int,
-    data: AuditActionRequest,
-    service: AddressService = Depends(get_address_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
-):
-    user, roles = user_roles
-    region = await service._address.get_region(region_id)
-    if region and "SUPER_ADMIN" not in roles and region.submitter_id == user.id:
-        raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
-    if not data.audit_remark:
-        raise HTTPException(status_code=400, detail="驳回必须填写审核意见")
-    obj = await service.reject_region(
-        region_id=region_id, auditor_id=user.id, remark=data.audit_remark
-    )
     return success(data=RegionResponse.model_validate(obj))
 
 
@@ -294,7 +257,7 @@ async def list_node_types(
     return success(data=[NodeTypeResponse.model_validate(i) for i in items])
 
 
-@router.post("/node-type", summary="创建节点类型")
+@router.post("/node-type", summary="创建节点类型（编码自动生成）")
 async def create_node_type(
     data: NodeTypeCreate,
     service: AddressService = Depends(get_address_service),
@@ -302,8 +265,8 @@ async def create_node_type(
 ):
     user, _ = user_roles
     obj = await service.create_node_type(
-        name=data.name, code=data.code, operator_id=user.id,
-        **data.model_dump(exclude={"name", "code"}, exclude_none=True)
+        name=data.name, operator_id=user.id,
+        **data.model_dump(exclude={"name"}, exclude_none=True)
     )
     return success(data=NodeTypeResponse.model_validate(obj))
 
@@ -323,7 +286,7 @@ async def update_node_type(
     return success(data=NodeTypeResponse.model_validate(obj))
 
 
-@router.delete("/node-type/{node_type_id}", summary="删除节点类型")
+@router.delete("/node-type/{node_type_id}", summary="删除节点类型（软删）")
 async def delete_node_type(
     node_type_id: int,
     service: AddressService = Depends(get_address_service),
@@ -378,7 +341,7 @@ async def list_transport_nodes(
     })
 
 
-@router.post("/transport-node", summary="创建运输节点（待审核）")
+@router.post("/transport-node", summary="创建运输节点（编码自动生成，坐标自动归属区域）")
 async def create_transport_node(
     data: TransportNodeCreate,
     service: AddressService = Depends(get_address_service),
@@ -387,14 +350,9 @@ async def create_transport_node(
     user, _ = user_roles
     obj = await service.create_node(
         name=data.name,
-        code=data.code,
-        waterway_id=data.waterway_id,
         operator_id=user.id,
         submitter_id=user.id,
-        region_id=getattr(data, "region_id", None),
-        node_type_id=getattr(data, "node_type_id", None),
-        latitude=getattr(data, "latitude", None),
-        longitude=getattr(data, "longitude", None),
+        **data.model_dump(exclude={"name"}, exclude_none=True),
     )
     return success(data=TransportNodeResponse.model_validate(obj))
 
@@ -409,7 +367,7 @@ async def get_transport_node(
     return success(data=TransportNodeResponse.model_validate(obj))
 
 
-@router.put("/transport-node/{node_id}", summary="更新节点")
+@router.put("/transport-node/{node_id}", summary="更新节点（经纬度变化时自动重新归属区域）")
 async def update_transport_node(
     node_id: int,
     data: TransportNodeUpdate,
@@ -424,7 +382,7 @@ async def update_transport_node(
     return success(data=TransportNodeResponse.model_validate(obj))
 
 
-@router.delete("/transport-node/{node_id}", summary="删除节点")
+@router.delete("/transport-node/{node_id}", summary="删除节点（软删）")
 async def delete_transport_node(
     node_id: int,
     service: AddressService = Depends(get_address_service),
@@ -449,7 +407,7 @@ async def add_node_alias(
     return success(data=NodeAliasResponse.model_validate(obj))
 
 
-@router.delete("/transport-node/{node_id}/aliases/{alias_id}", summary="删除节点别名")
+@router.delete("/transport-node/{node_id}/aliases/{alias_id}", summary="删除节点别名（软删）")
 async def delete_node_alias(
     node_id: int,
     alias_id: int,
@@ -461,39 +419,20 @@ async def delete_node_alias(
     return success(message="删除成功")
 
 
-# ===== Audit Actions =====
+# ===== 一键归属 =====
 
-@router.post("/transport-node/{node_id}/approve", summary="审批通过节点")
-async def approve_transport_node(
-    node_id: int,
-    data: AuditActionRequest,
+@router.post(
+    "/transport-node/reassign-regions",
+    summary="一键归属：重新计算所有节点的区域归属关系",
+)
+async def reassign_node_regions(
     service: AddressService = Depends(get_address_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
+    _=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
 ):
-    user, roles = user_roles
-    node = await service.get_node(node_id)
-    if "SUPER_ADMIN" not in roles and node.submitter_id == user.id:
-        raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
-    obj = await service.approve_node(
-        node_id=node_id, auditor_id=user.id, remark=data.audit_remark or ""
-    )
-    return success(data=TransportNodeResponse.model_validate(obj))
-
-
-@router.post("/transport-node/{node_id}/reject", summary="驳回节点")
-async def reject_transport_node(
-    node_id: int,
-    data: AuditActionRequest,
-    service: AddressService = Depends(get_address_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
-):
-    user, roles = user_roles
-    node = await service.get_node(node_id)
-    if "SUPER_ADMIN" not in roles and node.submitter_id == user.id:
-        raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
-    if not data.audit_remark:
-        raise HTTPException(status_code=400, detail="驳回必须填写审核意见")
-    obj = await service.reject_node(
-        node_id=node_id, auditor_id=user.id, remark=data.audit_remark
-    )
-    return success(data=TransportNodeResponse.model_validate(obj))
+    """
+    遍历所有有经纬度的运输节点，判断其是否落在各已启用区域的边界内：
+    - 落在区域内 且 关系不存在 → 插入 region_address_relation
+    - 已存在的关系 且 坐标不再落在区域内 → 删除该关系
+    """
+    result = await service.reassign_all_nodes()
+    return success(data=result, message="归属计算完成")

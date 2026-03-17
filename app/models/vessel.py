@@ -28,6 +28,7 @@ class VesselTypeDict(Base):
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -62,6 +63,7 @@ class Vessel(Base):
     # 状态管理
     data_status = Column(SmallInteger, default=1, comment="1=有效,0=注销")
     is_deleted = Column(SmallInteger, default=0)
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     # 审核相关
     audit_status = Column(SmallInteger, nullable=False, default=0,
                           comment="0=待审核,1=已通过,2=已驳回")

@@ -4,7 +4,7 @@
 """
 from typing import Optional, Sequence
 
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, func
 from sqlalchemy.orm import selectinload
 
 from app.models.cargo import (
@@ -24,9 +24,9 @@ class CargoCategoryRepository(BaseRepository):
 
     async def get_all_with_types(self) -> Sequence[CommodityCategory]:
         result = await self._db.execute(
-            select(CommodityCategory).options(
-                selectinload(CommodityCategory.types)
-            )
+            select(CommodityCategory)
+            .where(CommodityCategory.deleted_at.is_(None))
+            .options(selectinload(CommodityCategory.types))
         )
         return result.scalars().unique().all()
 
@@ -36,14 +36,20 @@ class CargoTypeRepository(BaseRepository):
 
     async def get_by_category(self, category_id: int) -> Sequence[CommodityType]:
         result = await self._db.execute(
-            select(CommodityType).where(CommodityType.category_id == category_id)
+            select(CommodityType).where(
+                CommodityType.category_id == category_id,
+                CommodityType.deleted_at.is_(None),
+            )
         )
         return result.scalars().all()
 
     async def get_with_standards(self, type_id: int) -> Optional[CommodityType]:
         result = await self._db.execute(
             select(CommodityType)
-            .where(CommodityType.id == type_id)
+            .where(
+                CommodityType.id == type_id,
+                CommodityType.deleted_at.is_(None),
+            )
             .options(selectinload(CommodityType.standards))
         )
         return result.scalar_one_or_none()
@@ -55,7 +61,8 @@ class CargoStandardRepository(BaseRepository):
     async def get_by_type(self, type_id: int) -> Sequence[CommodityStandard]:
         result = await self._db.execute(
             select(CommodityStandard).where(
-                CommodityStandard.commodity_type_id == type_id
+                CommodityStandard.type_id == type_id,
+                CommodityStandard.deleted_at.is_(None),
             )
         )
         return result.scalars().all()
@@ -63,7 +70,8 @@ class CargoStandardRepository(BaseRepository):
     async def search_by_name(self, keyword: str) -> Sequence[CommodityStandard]:
         result = await self._db.execute(
             select(CommodityStandard).where(
-                CommodityStandard.name.ilike(f"%{keyword}%")
+                CommodityStandard.name.ilike(f"%{keyword}%"),
+                CommodityStandard.deleted_at.is_(None),
             )
         )
         return result.scalars().all()
@@ -80,7 +88,7 @@ class CommodityAliasRepository(BaseRepository):
     async def get_by_standard(self, standard_id: int) -> Sequence[CommodityAlias]:
         result = await self._db.execute(
             select(CommodityAlias).where(
-                CommodityAlias.commodity_standard_id == standard_id
+                CommodityAlias.commodity_id == standard_id
             )
         )
         return result.scalars().all()
@@ -114,9 +122,9 @@ class CargoRepository(BaseRepository):
     ) -> tuple[Sequence[CargoRawMessage], int]:
         filters = []
         if status:
-            filters.append(CargoRawMessage.parse_status == status)
+            filters.append(CargoRawMessage.status == status)
         if operator_id:
-            filters.append(CargoRawMessage.operator_id == operator_id)
+            filters.append(CargoRawMessage.collector_id == operator_id)
 
         query = select(CargoRawMessage)
         if filters:
@@ -126,7 +134,6 @@ class CargoRepository(BaseRepository):
         if filters:
             count_query = count_query.where(and_(*filters))
 
-        from sqlalchemy import func
         total_result = await self._db.execute(
             select(func.count()).select_from(count_query.subquery())
         )
@@ -144,7 +151,7 @@ class CargoRepository(BaseRepository):
     ) -> Optional[CargoRawMessage]:
         msg = await self.get_by_id(msg_id)
         if msg:
-            msg.parse_status = status
+            msg.status = status
             await self._db.flush()
         return msg
 
@@ -205,13 +212,12 @@ class CargoRepository(BaseRepository):
         if dest_node_id:
             filters.append(CargoOpportunity.dest_node_id == dest_node_id)
         if commodity_id:
-            filters.append(CargoOpportunity.commodity_standard_id == commodity_id)
+            filters.append(CargoOpportunity.commodity_id == commodity_id)
 
         query = select(CargoOpportunity)
         if filters:
             query = query.where(and_(*filters))
 
-        from sqlalchemy import func
         total_result = await self._db.execute(
             select(func.count()).select_from(query.subquery())
         )

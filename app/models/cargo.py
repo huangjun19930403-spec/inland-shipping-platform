@@ -25,6 +25,7 @@ class CommodityCategory(Base):
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -48,6 +49,7 @@ class CommodityType(Base):
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -79,6 +81,7 @@ class CommodityStandard(Base):
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

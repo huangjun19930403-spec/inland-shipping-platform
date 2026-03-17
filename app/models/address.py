@@ -7,6 +7,9 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
+# 软删公共列（直接在各模型内内联，避免多继承歧义）
+_SOFT_DELETE_COL = lambda: Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
+
 
 class Waterway(Base):
     """水系表"""
@@ -29,6 +32,7 @@ class Waterway(Base):
                           comment="0=待审核,1=已通过,2=已驳回")
     submitter_id = Column(BigInteger, comment="提交人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -62,6 +66,7 @@ class Region(Base):
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -105,6 +110,7 @@ class NodeType(Base):
                           comment="0=待审核,1=已通过,2=已驳回")
     submitter_id = Column(BigInteger, comment="提交人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -144,6 +150,7 @@ class TransportNode(Base):
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
     audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -165,6 +172,7 @@ class NodeAlias(Base):
     source = Column(String(64), comment="别名来源")
     priority = Column(Integer, nullable=False, default=0, comment="匹配优先级")
     status = Column(SmallInteger, nullable=False, default=1)
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

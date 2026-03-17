@@ -23,6 +23,7 @@ class ShippingRoute(Base):
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=停用")
     created_by = Column(BigInteger, comment="创建人ID")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

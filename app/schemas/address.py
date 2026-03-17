@@ -177,7 +177,7 @@ class RegionDetailResponse(RegionResponse):
 # ---------- NodeType ----------
 
 class NodeTypeCreate(BaseModel):
-    code: str
+    """节点类型新增请求体。code 由系统自动生成（NT-{UUID12}），无需填写。"""
     name: str
     name_en: Optional[str] = None
     transport_mode: str = "WATERWAY"
@@ -241,7 +241,7 @@ class NodeAliasResponse(BaseModel):
 # ---------- TransportNode ----------
 
 class TransportNodeCreate(BaseModel):
-    code: str
+    """运输节点新增请求体。code 由系统自动生成（TN-{UUID12}），无需填写。"""
     name: str
     name_en: Optional[str] = None
     node_type_id: int
