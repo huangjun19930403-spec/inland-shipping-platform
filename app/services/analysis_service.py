@@ -4,7 +4,6 @@
 职责：
   - 从统计表读取数据并组装为 API 所需结构
   - 禁止直接查询业务表（统计数据由 stat_tasks.py ETL 写入统计表）
-  - AI 趋势分析编排（可选功能）
 
 依赖：
   AnalysisRepository — 所有数据读取均通过统计表
@@ -42,10 +41,6 @@ class AnalysisService:
                 for r in trend
             ],
         }
-
-    # 别名，保持向后兼容
-    async def get_dashboard_summary(self) -> dict:
-        return await self.get_dashboard_stats()
 
     # ─────────────────────────────────────────────────
     # 货源热力图
@@ -99,10 +94,6 @@ class AnalysisService:
                 for r in rows
             ],
         }
-
-    # 旧接口别名
-    async def get_cargo_trends(self, days: int = 7) -> dict:
-        return await self.get_cargo_trend(days=days)
 
     # ─────────────────────────────────────────────────
     # 货品分类货源排名
@@ -180,10 +171,6 @@ class AnalysisService:
                 "node_name": node.name if node else None,
             })
         return result
-
-    # 旧接口别名（兼容 analysis/router.py）
-    async def get_vessel_heatmap(self, region_id: Optional[int] = None) -> list:
-        return await self.get_ship_heatmap(region_id=region_id)
 
     # ─────────────────────────────────────────────────
     # 船舶类型数量占比
@@ -268,31 +255,3 @@ class AnalysisService:
         result = await daily_stat_job(target_date=target_date)
         return result
 
-    # ─────────────────────────────────────────────────
-    # AI分析（可选）
-    # ─────────────────────────────────────────────────
-
-    async def generate_ai_analysis(self, days: int = 7) -> dict:
-        cargo_stat = await self._analysis.get_latest_cargo_stat()
-        return {
-            "trend_summary": f"最近{days}天数据汇总",
-            "cargo_highlights": [f"活跃货源{cargo_stat.active_count if cargo_stat else 0}条"],
-            "route_highlights": [],
-            "risk_factors": [],
-            "recommendation": "AI趋势分析功能待实现",
-        }
-
-    def _format_summary(self, trend, cargo_stat, days: int) -> str:
-        lines = [f"统计周期：近{days}天"]
-        if cargo_stat:
-            lines.append(
-                f"货源状态：总量={cargo_stat.total_count}，"
-                f"已确认={cargo_stat.active_count}，"
-                f"待确认={cargo_stat.pending_count}"
-            )
-        if trend:
-            trend_str = ", ".join(
-                f"{str(r.stat_date)}({r.total_count})" for r in trend[-5:]
-            )
-            lines.append(f"最近货量趋势：{trend_str}")
-        return "\n".join(lines)

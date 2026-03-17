@@ -15,35 +15,6 @@ from app.core.database import Base
 
 
 # ─────────────────────────────────────────────────
-# 原有热力统计表（保持向后兼容，由新 ETL 继续写入）
-# ─────────────────────────────────────────────────
-
-class HeatmapStatDaily(Base):
-    """热力统计日表（兼容旧接口，统一热力数据入口）"""
-    __tablename__ = "heatmap_stat_daily"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    stat_date = Column(Date, nullable=False, comment="统计日期")
-    node_id = Column(BigInteger, ForeignKey("transport_node.id"), nullable=False, comment="运输节点ID")
-    stat_type = Column(
-        String(32), nullable=False,
-        comment="CARGO_ORIGIN=装货统计, CARGO_DEST=卸货统计, VESSEL=运力统计",
-    )
-    cargo_count = Column(Integer, default=0, comment="货源数量")
-    total_tonnage = Column(DECIMAL(16, 2), default=0, comment="总吨位(吨)")
-    vessel_count = Column(Integer, default=0, comment="船舶数量")
-    total_deadweight = Column(DECIMAL(16, 2), default=0, comment="总载重吨(DWT)")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("stat_date", "node_id", "stat_type", name="uk_heatmap_daily"),
-    )
-
-    node = relationship("TransportNode")
-
-
-# ─────────────────────────────────────────────────
 # 货源热力统计日表
 # ─────────────────────────────────────────────────
 

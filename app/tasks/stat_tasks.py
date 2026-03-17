@@ -7,7 +7,7 @@
   - 任务执行时间：每天凌晨 02:00（由 APScheduler / Celery Beat 调度）
 
 任务列表：
-  daily_stat_job()   — 全量每日统计聚合，涵盖货源 + 船舶 8 张统计表
+  daily_stat_job()   — 全量每日统计聚合，涵盖货源 + 船舶 6 张统计表
 """
 import asyncio
 import logging
@@ -67,14 +67,6 @@ async def _stat_cargo_heatmap(db: AsyncSession, stat_date: date) -> int:
                 stat_date=stat_date,
                 node_id=row.node_id,
                 stat_type=stat_type,
-                cargo_count=row.cargo_count,
-                total_tonnage=float(row.total_tonnage or 0),
-            )
-            # 同步写入旧热力表保持兼容
-            await repo.upsert_heatmap_stat(
-                stat_date=stat_date,
-                node_id=row.node_id,
-                stat_type=f"CARGO_{stat_type}",
                 cargo_count=row.cargo_count,
                 total_tonnage=float(row.total_tonnage or 0),
             )
@@ -341,14 +333,6 @@ async def _stat_ship_heatmap(db: AsyncSession, stat_date: date) -> None:
         await repo.upsert_ship_heatmap(
             stat_date=stat_date,
             node_id=row.node_id,
-            vessel_count=row.vessel_count,
-            total_deadweight=float(row.total_deadweight or 0),
-        )
-        # 同步写入旧热力表保持兼容
-        await repo.upsert_heatmap_stat(
-            stat_date=stat_date,
-            node_id=row.node_id,
-            stat_type="VESSEL",
             vessel_count=row.vessel_count,
             total_deadweight=float(row.total_deadweight or 0),
         )

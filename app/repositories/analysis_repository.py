@@ -13,7 +13,6 @@ from sqlalchemy import select, and_, func, desc, delete
 from sqlalchemy.orm import joinedload
 
 from app.models.analysis import (
-    HeatmapStatDaily,
     CargoHeatmapDaily,
     ShipHeatmapDaily,
     CargoStatDaily,
@@ -27,80 +26,7 @@ from app.repositories.base import BaseRepository
 
 
 class AnalysisRepository(BaseRepository):
-    model_class = HeatmapStatDaily  # 保留基类绑定，向后兼容
-
-    # ─────────────────────────────────────────────────
-    # HeatmapStatDaily（旧接口兼容）
-    # ─────────────────────────────────────────────────
-
-    async def get_heatmap_stats(
-        self,
-        stat_date: date,
-        stat_type: Optional[str] = None,
-    ) -> Sequence[HeatmapStatDaily]:
-        filters = [HeatmapStatDaily.stat_date == stat_date]
-        if stat_type:
-            filters.append(HeatmapStatDaily.stat_type == stat_type)
-        result = await self._db.execute(
-            select(HeatmapStatDaily).where(and_(*filters))
-        )
-        return result.scalars().all()
-
-    async def get_heatmap_range(
-        self,
-        start_date: date,
-        end_date: date,
-        node_id: Optional[int] = None,
-    ) -> Sequence[HeatmapStatDaily]:
-        filters = [
-            HeatmapStatDaily.stat_date >= start_date,
-            HeatmapStatDaily.stat_date <= end_date,
-        ]
-        if node_id:
-            filters.append(HeatmapStatDaily.node_id == node_id)
-        result = await self._db.execute(
-            select(HeatmapStatDaily).where(and_(*filters)).order_by(HeatmapStatDaily.stat_date)
-        )
-        return result.scalars().all()
-
-    async def upsert_heatmap_stat(
-        self,
-        stat_date: date,
-        node_id: int,
-        stat_type: str,
-        cargo_count: int = 0,
-        total_tonnage: float = 0,
-        vessel_count: int = 0,
-        total_deadweight: float = 0,
-    ) -> HeatmapStatDaily:
-        result = await self._db.execute(
-            select(HeatmapStatDaily).where(
-                and_(
-                    HeatmapStatDaily.stat_date == stat_date,
-                    HeatmapStatDaily.node_id == node_id,
-                    HeatmapStatDaily.stat_type == stat_type,
-                )
-            )
-        )
-        stat = result.scalar_one_or_none()
-        if stat:
-            stat.cargo_count = cargo_count
-            stat.total_tonnage = total_tonnage
-            stat.vessel_count = vessel_count
-            stat.total_deadweight = total_deadweight
-        else:
-            stat = HeatmapStatDaily(
-                stat_date=stat_date,
-                node_id=node_id,
-                stat_type=stat_type,
-                cargo_count=cargo_count,
-                total_tonnage=total_tonnage,
-                vessel_count=vessel_count,
-                total_deadweight=total_deadweight,
-            )
-            self._db.add(stat)
-        await self._db.flush()
-        return stat
+    model_class = CargoStatDaily
 
     # ─────────────────────────────────────────────────
     # CargoHeatmapDaily — 货源热力统计
