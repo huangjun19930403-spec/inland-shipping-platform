@@ -28,6 +28,19 @@ class VesselService:
     async def list_vessel_types(self, status: Optional[int] = None):
         return await self._vessel.list_vessel_types(status=status)
 
+    async def list_vessel_types_paginated(
+        self,
+        status: Optional[int] = None,
+        keyword: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._vessel.list_vessel_types_paginated(
+            status=status, keyword=keyword, offset=offset, limit=page_size
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
     async def get_vessel_type(self, type_id: int) -> VesselTypeDict:
         vt = await self._vessel.get_vessel_type(type_id)
         if not vt:
@@ -71,31 +84,6 @@ class VesselService:
         )
         await self._vessel.save()
 
-    async def approve_vessel_type(
-        self, type_id: int, auditor_id: int, remark: str = ""
-    ) -> VesselTypeDict:
-        vt = await self.get_vessel_type(type_id)
-        updated = await self._vessel.update_vessel_type(type_id, audit_status=1)
-        await self._audit_svc.record_operation(
-            target_type="VESSEL_TYPE", target_id=type_id,
-            target_name=vt.name, action="APPROVE", operator_id=auditor_id,
-            audit_result="APPROVED", remark=remark or None,
-        )
-        await self._vessel.save()
-        return updated
-
-    async def reject_vessel_type(
-        self, type_id: int, auditor_id: int, remark: str
-    ) -> VesselTypeDict:
-        vt = await self.get_vessel_type(type_id)
-        updated = await self._vessel.update_vessel_type(type_id, audit_status=2)
-        await self._audit_svc.record_operation(
-            target_type="VESSEL_TYPE", target_id=type_id,
-            target_name=vt.name, action="REJECT", operator_id=auditor_id,
-            audit_result="REJECTED", remark=remark,
-        )
-        await self._vessel.save()
-        return updated
 
     # ─────────────────────────────────────────────────
     # 船舶档案
@@ -186,27 +174,47 @@ class VesselService:
         )
         await self._vessel.save()
 
-    async def approve_vessel(self, vessel_id: int, auditor_id: int, remark: str = "") -> Vessel:
-        vessel = await self.get_vessel(vessel_id)
-        updated = await self._vessel.update_vessel(vessel_id, audit_status=1)
-        await self._audit_svc.record_operation(
-            target_type="VESSEL", target_id=vessel_id,
-            target_name=vessel.vessel_name, action="APPROVE", operator_id=auditor_id,
-            audit_result="APPROVED", remark=remark or None,
-        )
-        await self._vessel.save()
-        return updated
-
-    async def reject_vessel(self, vessel_id: int, auditor_id: int, remark: str) -> Vessel:
-        vessel = await self.get_vessel(vessel_id)
-        updated = await self._vessel.update_vessel(vessel_id, audit_status=2)
-        await self._audit_svc.record_operation(
-            target_type="VESSEL", target_id=vessel_id,
-            target_name=vessel.vessel_name, action="REJECT", operator_id=auditor_id,
-            audit_result="REJECTED", remark=remark,
-        )
-        await self._vessel.save()
-        return updated
+    async def bulk_register_vessels(
+        self,
+        rows: list[dict],
+        operator_id: int,
+    ) -> dict:
+        """批量录入船舶，每条船仍需独立审核"""
+        success_list = []
+        failed_list = []
+        for idx, row in enumerate(rows, start=2):  # Excel 第1行是表头，数据从第2行起
+            vessel_name = str(row.get("vessel_name") or "").strip()
+            vessel_no = str(row.get("vessel_no") or "").strip()
+            try:
+                if not vessel_name:
+                    raise ValueError("vessel_name 不能为空")
+                if not vessel_no:
+                    raise ValueError("vessel_no 不能为空")
+                mmsi = str(row["mmsi"]).strip() if row.get("mmsi") else None
+                vessel_type_id = int(row["vessel_type_id"]) if row.get("vessel_type_id") else None
+                extra = {
+                    k: v for k, v in row.items()
+                    if k not in {"vessel_name", "vessel_no", "mmsi", "vessel_type_id"}
+                    and v is not None and str(v).strip() != ""
+                }
+                saved = await self.register_vessel(
+                    vessel_name=vessel_name,
+                    vessel_type_id=vessel_type_id,
+                    operator_id=operator_id,
+                    mmsi=mmsi,
+                    vessel_no=vessel_no,
+                    **extra,
+                )
+                success_list.append({"row": idx, "vessel_id": saved.id, "vessel_name": vessel_name})
+            except Exception as e:
+                failed_list.append({"row": idx, "vessel_name": vessel_name, "error": str(e)})
+        return {
+            "total": len(rows),
+            "success_count": len(success_list),
+            "failed_count": len(failed_list),
+            "success_list": success_list,
+            "failed_list": failed_list,
+        }
 
     # ─────────────────────────────────────────────────
     # 船舶动态

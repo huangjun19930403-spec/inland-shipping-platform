@@ -1,6 +1,6 @@
 """船舶路由 — 使用 DI 模式调用 VesselService"""
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 
 from app.core.dependencies import get_vessel_service
 from app.core.security import get_current_user_roles, require_roles
@@ -10,16 +10,16 @@ from app.schemas.vessel import (
     VesselDynamicUpdate, VesselDynamicResponse,
     VesselNameHistoryResponse, VesselAisHistoryResponse,
 )
-from app.schemas.audit import AuditActionRequest
 from app.schemas.common import success
 from app.services.vessel_service import VesselService
+from app.utils.excel_utils import parse_vessel_excel
 
 router = APIRouter()
 
 
 # ===== VesselTypeDict =====
 
-@router.get("/vessel-type", summary="获取船舶类型列表")
+@router.get("/vessel-type", summary="获取船舶类型列表（全量，用于下拉）")
 async def list_vessel_types(
     status: Optional[int] = None,
     service: VesselService = Depends(get_vessel_service),
@@ -27,6 +27,26 @@ async def list_vessel_types(
 ):
     items = await service.list_vessel_types(status=status)
     return success(data=[VesselTypeDictResponse.model_validate(i) for i in items])
+
+
+@router.get("/vessel-type/list", summary="船舶类型分页查询")
+async def list_vessel_types_paginated(
+    status: Optional[int] = Query(None),
+    keyword: Optional[str] = Query(None, description="名称/编码关键词"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    service: VesselService = Depends(get_vessel_service),
+    _=Depends(get_current_user_roles),
+):
+    result = await service.list_vessel_types_paginated(
+        status=status, keyword=keyword, page=page, page_size=page_size
+    )
+    return success(data={
+        "total": result["total"],
+        "items": [VesselTypeDictResponse.model_validate(i) for i in result["items"]],
+        "page": result["page"],
+        "page_size": result["page_size"],
+    })
 
 
 @router.post("/vessel-type", summary="创建船舶类型（待审核）")
@@ -67,36 +87,6 @@ async def delete_vessel_type(
     user, _ = user_roles
     await service.delete_vessel_type(type_id=type_id, operator_id=user.id)
     return success(message="删除成功")
-
-
-@router.post("/vessel-type/{type_id}/approve", summary="审批通过船舶类型")
-async def approve_vessel_type(
-    type_id: int,
-    data: AuditActionRequest,
-    service: VesselService = Depends(get_vessel_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
-):
-    user, _ = user_roles
-    obj = await service.approve_vessel_type(
-        type_id=type_id, auditor_id=user.id, remark=data.audit_remark or ""
-    )
-    return success(data=VesselTypeDictResponse.model_validate(obj))
-
-
-@router.post("/vessel-type/{type_id}/reject", summary="驳回船舶类型")
-async def reject_vessel_type(
-    type_id: int,
-    data: AuditActionRequest,
-    service: VesselService = Depends(get_vessel_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
-):
-    user, _ = user_roles
-    if not data.audit_remark:
-        raise HTTPException(status_code=400, detail="驳回必须填写审核意见")
-    obj = await service.reject_vessel_type(
-        type_id=type_id, auditor_id=user.id, remark=data.audit_remark
-    )
-    return success(data=VesselTypeDictResponse.model_validate(obj))
 
 
 # ===== Vessel =====
@@ -142,6 +132,27 @@ async def create_vessel(
     return success(data=VesselResponse.model_validate(obj))
 
 
+@router.post("/vessel/import", summary="批量导入船舶（Excel .xlsx）")
+async def import_vessels(
+    file: UploadFile = File(..., description="Excel文件，格式见模板"),
+    service: VesselService = Depends(get_vessel_service),
+    user_roles=Depends(require_roles("ADMIN", "OPERATOR")),
+):
+    """
+    通过 Excel 批量录入船舶，每条船记录仍独立进入审核流程。
+    Excel 第一行为表头，必填列：vessel_no、vessel_name。
+    """
+    user, _ = user_roles
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件")
+    content = await file.read()
+    rows = parse_vessel_excel(content)
+    if not rows:
+        raise HTTPException(status_code=400, detail="Excel 文件为空或格式不正确")
+    result = await service.bulk_register_vessels(rows=rows, operator_id=user.id)
+    return success(data=result)
+
+
 @router.get("/vessel/{vessel_id}", summary="获取船舶详情")
 async def get_vessel(
     vessel_id: int,
@@ -176,39 +187,6 @@ async def delete_vessel(
     user, _ = user_roles
     await service.delete_vessel(vessel_id=vessel_id, operator_id=user.id)
     return success(message="删除成功")
-
-
-@router.post("/vessel/{vessel_id}/approve", summary="审批通过船舶")
-async def approve_vessel(
-    vessel_id: int,
-    data: AuditActionRequest,
-    service: VesselService = Depends(get_vessel_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
-):
-    user, roles = user_roles
-    vessel = await service.get_vessel(vessel_id)
-    if "SUPER_ADMIN" not in roles and vessel.submitter_id == user.id:
-        raise HTTPException(status_code=403, detail="提交人不能审核自己提交的内容")
-    obj = await service.approve_vessel(
-        vessel_id=vessel_id, auditor_id=user.id, remark=data.audit_remark or ""
-    )
-    return success(data=VesselResponse.model_validate(obj))
-
-
-@router.post("/vessel/{vessel_id}/reject", summary="驳回船舶")
-async def reject_vessel(
-    vessel_id: int,
-    data: AuditActionRequest,
-    service: VesselService = Depends(get_vessel_service),
-    user_roles=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
-):
-    user, roles = user_roles
-    if not data.audit_remark:
-        raise HTTPException(status_code=400, detail="驳回必须填写审核意见")
-    obj = await service.reject_vessel(
-        vessel_id=vessel_id, auditor_id=user.id, remark=data.audit_remark
-    )
-    return success(data=VesselResponse.model_validate(obj))
 
 
 @router.get("/vessel/{vessel_id}/history", summary="获取船舶历史（船名+AIS）")

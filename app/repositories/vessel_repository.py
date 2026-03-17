@@ -38,6 +38,35 @@ class VesselRepository(BaseRepository):
         )
         return result.scalar_one_or_none()
 
+    async def list_vessel_types_paginated(
+        self,
+        status: Optional[int] = None,
+        keyword: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[Sequence[VesselTypeDict], int]:
+        conditions = [VesselTypeDict.deleted_at.is_(None)]
+        if status is not None:
+            conditions.append(VesselTypeDict.status == status)
+        if keyword:
+            conditions.append(
+                or_(
+                    VesselTypeDict.name.ilike(f"%{keyword}%"),
+                    VesselTypeDict.code.ilike(f"%{keyword}%"),
+                )
+            )
+        query = select(VesselTypeDict).where(and_(*conditions))
+        total_result = await self._db.execute(
+            select(func.count()).select_from(query.subquery())
+        )
+        total = total_result.scalar_one()
+        result = await self._db.execute(
+            query.order_by(VesselTypeDict.sort_order, VesselTypeDict.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return result.scalars().all(), total
+
     async def create_vessel_type(self, vt: VesselTypeDict) -> VesselTypeDict:
         return await self.create(vt)
 
