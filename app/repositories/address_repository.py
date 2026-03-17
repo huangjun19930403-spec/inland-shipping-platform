@@ -351,7 +351,7 @@ class AddressRepository(BaseRepository):
         self, q: str, offset: int = 0, limit: int = 20
     ) -> Tuple[Sequence[TransportNode], int]:
         alias_sub = (
-            select(NodeAlias.transport_node_id)
+            select(NodeAlias.node_id)
             .where(NodeAlias.alias_name.ilike(f"%{q}%"))
             .scalar_subquery()
         )
