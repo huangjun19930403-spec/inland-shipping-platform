@@ -127,15 +127,15 @@ class RouteService:
         saved = await self._route.create_path(path)
         await self._route.save()
         logger.info(f"[RouteService] path created id={saved.id} route_id={route_id} name={name}")
-        return saved
+        return await self._route.get_path(saved.id)
 
     async def update_route_path(
         self, route_id: int, path_id: int, **kwargs
     ) -> ShippingRoutePath:
         path = await self.get_route_path(route_id, path_id)
-        updated = await self._route.update_path(path.id, **kwargs)
+        await self._route.update_path(path.id, **kwargs)
         await self._route.save()
-        return updated
+        return await self._route.get_path(path.id)
 
     async def delete_route_path(self, route_id: int, path_id: int) -> None:
         path = await self.get_route_path(route_id, path_id)
