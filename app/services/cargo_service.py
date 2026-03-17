@@ -107,18 +107,17 @@ class CargoService:
         return await self._cargo.standards.get_by_type(type_id)
 
     async def create_standard(
-        self, type_id: int, name: str, description: Optional[str], operator_id: int
+        self, type_id: int, operator_id: int, **kwargs
     ) -> CommodityStandard:
         cargo_type = await self._cargo.types.get_by_id(type_id)
         if not cargo_type:
             raise NotFoundError("CommodityType", type_id)
 
         standard = CommodityStandard(
-            commodity_type_id=type_id,
-            name=name,
-            description=description,
+            type_id=type_id,
             submitter_id=operator_id,
             audit_status=0,
+            **kwargs,
         )
         saved = await self._cargo.standards.create(standard)
         await self._audit_svc.submit_for_audit(

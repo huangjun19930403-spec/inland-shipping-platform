@@ -111,9 +111,8 @@ async def create_standard(
     user, _ = user_roles
     obj = await service.create_standard(
         type_id=type_id,
-        name=data.name,
-        description=data.description,
         operator_id=user.id,
+        **data.model_dump(exclude={"type_id"}),
     )
     return success(data=obj)
 
