@@ -7,7 +7,7 @@ import logging
 from typing import Optional
 
 from app.core.exceptions import NotFoundError, ConflictError
-from app.models.vessel import Vessel, VesselTypeDict, VesselNameHistory, VesselDynamic
+from app.models.vessel import Vessel, VesselTypeDict, VesselNameHistory, VesselAisHistory, VesselDynamic
 from app.repositories.vessel_repository import VesselRepository
 from app.services.audit_service import AuditService
 
@@ -154,6 +154,14 @@ class VesselService:
                 new_name=new_name, changed_by=operator_id,
             )
             await self._vessel.create_name_history(history)
+        # MMSI 变更记录历史
+        new_mmsi = kwargs.get("mmsi")
+        if new_mmsi and vessel.mmsi and new_mmsi != vessel.mmsi:
+            ais_history = VesselAisHistory(
+                vessel_id=vessel_id, old_mmsi=vessel.mmsi,
+                new_mmsi=new_mmsi, changed_by=operator_id,
+            )
+            await self._vessel.create_ais_history(ais_history)
         updated = await self._vessel.update_vessel(vessel_id, **kwargs)
         await self._audit_svc.submit_for_audit(
             target_type="VESSEL", target_id=vessel_id,
@@ -224,9 +232,23 @@ class VesselService:
         await self.get_vessel(vessel_id)
         return await self._vessel.get_dynamic(vessel_id)
 
+    async def get_dynamic_by_mmsi(self, mmsi: str) -> Optional[VesselDynamic]:
+        return await self._vessel.get_dynamic_by_mmsi(mmsi)
+
     async def update_dynamic(self, vessel_id: int, operator_id: int, **kwargs) -> VesselDynamic:
         await self.get_vessel(vessel_id)
         dynamic = await self._vessel.upsert_dynamic(vessel_id, **kwargs)
+        await self._vessel.save()
+        return dynamic
+
+    async def update_dynamic_by_mmsi(
+        self, mmsi: str, operator_id: Optional[int] = None, **kwargs
+    ) -> VesselDynamic:
+        """以 MMSI 为键更新船舶动态（REST 接口和 Kafka 消费者共用）"""
+        vessel = await self._vessel.get_vessel_by_mmsi(mmsi)
+        vessel_id = vessel.id if vessel else None
+        kwargs["updated_by"] = operator_id
+        dynamic = await self._vessel.upsert_dynamic_by_mmsi(mmsi, vessel_id, **kwargs)
         await self._vessel.save()
         return dynamic
 

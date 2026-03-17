@@ -117,8 +117,9 @@ class VesselDynamic(Base):
     __tablename__ = "vessel_dynamic"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    vessel_id = Column(BigInteger, ForeignKey("vessel.id"), nullable=False, unique=True,
+    vessel_id = Column(BigInteger, ForeignKey("vessel.id"), nullable=True, unique=True,
                        comment="每船唯一一条最新动态")
+    mmsi = Column(String(20), unique=True, nullable=True, comment="MMSI号（动态更新的唯一键）")
     # 位置信息
     current_longitude = Column(DECIMAL(11, 8), comment="当前经度")
     current_latitude = Column(DECIMAL(10, 8), comment="当前纬度")

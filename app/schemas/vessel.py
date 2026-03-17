@@ -150,7 +150,8 @@ class VesselDynamicUpdate(BaseModel):
 
 class VesselDynamicResponse(BaseModel):
     id: int
-    vessel_id: int
+    vessel_id: Optional[int] = None
+    mmsi: Optional[str] = None
     current_longitude: Optional[Decimal] = None
     current_latitude: Optional[Decimal] = None
     current_node_id: Optional[int] = None
@@ -196,3 +197,20 @@ class VesselAisHistoryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------- Kafka 消息体 ----------
+
+class VesselDynamicKafkaMessage(BaseModel):
+    """Kafka Topic: vessel.dynamic — 船舶 AIS 动态消息体"""
+    mmsi: str                                          # 必填：MMSI 号（唯一标识）
+    current_longitude: Optional[Decimal] = None       # 当前经度
+    current_latitude: Optional[Decimal] = None        # 当前纬度
+    vessel_status: Optional[str] = None               # EMPTY/LOADED/IN_PORT/ANCHORED/UNDERWAY/MAINTENANCE
+    current_draft: Optional[Decimal] = None           # 当前吃水(m)
+    speed: Optional[Decimal] = None                   # 当前航速(节)
+    heading: Optional[Decimal] = None                 # 船首向(度)
+    cargo_info: Optional[str] = None                  # 载货信息
+    eta: Optional[datetime] = None                    # 预计到达时间
+    dest_node_id: Optional[int] = None                # 目的港节点ID
+    remark: Optional[str] = None

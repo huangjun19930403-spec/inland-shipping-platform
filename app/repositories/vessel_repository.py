@@ -160,6 +160,12 @@ class VesselRepository(BaseRepository):
         )
         return result.scalar_one_or_none()
 
+    async def get_dynamic_by_mmsi(self, mmsi: str) -> Optional[VesselDynamic]:
+        result = await self._db.execute(
+            select(VesselDynamic).where(VesselDynamic.mmsi == mmsi)
+        )
+        return result.scalar_one_or_none()
+
     async def upsert_dynamic(self, vessel_id: int, **kwargs) -> VesselDynamic:
         dynamic = await self.get_dynamic(vessel_id)
         if dynamic:
@@ -173,9 +179,30 @@ class VesselRepository(BaseRepository):
         await self._db.refresh(dynamic)
         return dynamic
 
+    async def upsert_dynamic_by_mmsi(
+        self, mmsi: str, vessel_id: Optional[int], **kwargs
+    ) -> VesselDynamic:
+        """以 MMSI 为唯一键更新船舶动态，vessel_id 找到时一并绑定"""
+        dynamic = await self.get_dynamic_by_mmsi(mmsi)
+        if dynamic:
+            for k, v in kwargs.items():
+                if hasattr(dynamic, k):
+                    setattr(dynamic, k, v)
+            if vessel_id and not dynamic.vessel_id:
+                dynamic.vessel_id = vessel_id
+        else:
+            dynamic = VesselDynamic(mmsi=mmsi, vessel_id=vessel_id, **kwargs)
+            self._db.add(dynamic)
+        await self._db.flush()
+        await self._db.refresh(dynamic)
+        return dynamic
+
     # ─────────────────────────────────────────────────
     # VesselNameHistory / AisHistory
     # ─────────────────────────────────────────────────
+
+    async def create_ais_history(self, history: VesselAisHistory) -> VesselAisHistory:
+        return await self.create(history)
 
     async def list_name_history(self, vessel_id: int) -> Sequence[VesselNameHistory]:
         result = await self._db.execute(

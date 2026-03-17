@@ -9,8 +9,9 @@
   6. list_records()        — 查询历史审核记录
   兼容旧接口：approve() / reject()（基于 audit_record_id）
 """
+import decimal
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 from app.core.exceptions import NotFoundError, ValidationError, PermissionError
@@ -18,6 +19,24 @@ from app.models.audit import AuditRecord, AuditTask
 from app.repositories.audit_repository import AuditRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_for_json(data: Optional[dict]) -> Optional[dict]:
+    """递归将 dict 中不可 JSON 序列化的类型转换为安全类型"""
+    if data is None:
+        return None
+    result = {}
+    for k, v in data.items():
+        if isinstance(v, decimal.Decimal):
+            result[k] = str(v)
+        elif isinstance(v, (datetime, date)):
+            result[k] = v.isoformat()
+        elif isinstance(v, dict):
+            result[k] = _sanitize_for_json(v)
+        else:
+            result[k] = v
+    return result
+
 
 # 支持审核的 target_type 与对应表名/字段映射
 # 格式: target_type -> (table_name, pk_col, has_status_field)
@@ -63,6 +82,8 @@ class AuditService:
         若该对象已有 pending 任务，先将旧任务更新为最新提交内容（upsert 语义）。
         同时写一条 audit_record 作为历史日志。
         """
+        before_data = _sanitize_for_json(before_data)
+        after_data = _sanitize_for_json(after_data)
         # 1. upsert audit_task
         existing = await self._audit.get_pending_task_by_target(target_type, target_id)
         if existing:
@@ -417,6 +438,8 @@ class AuditService:
         写一条审核记录日志（不创建 audit_task）。
         用于：DELETE、TOGGLE_STATUS 等不需要走审批流的操作记录。
         """
+        before_data = _sanitize_for_json(before_data)
+        after_data = _sanitize_for_json(after_data)
         record = AuditRecord(
             target_type=target_type,
             target_id=target_id,

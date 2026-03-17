@@ -9,6 +9,7 @@ from app.schemas.vessel import (
     VesselCreate, VesselUpdate, VesselResponse,
     VesselDynamicUpdate, VesselDynamicResponse,
     VesselNameHistoryResponse, VesselAisHistoryResponse,
+    VesselDynamicKafkaMessage,
 )
 from app.schemas.common import success
 from app.services.vessel_service import VesselService
@@ -202,22 +203,7 @@ async def get_vessel_history(
     })
 
 
-@router.put("/vessel/{vessel_id}/dynamic", summary="更新船舶动态")
-async def update_vessel_dynamic(
-    vessel_id: int,
-    data: VesselDynamicUpdate,
-    service: VesselService = Depends(get_vessel_service),
-    user_roles=Depends(require_roles("ADMIN", "OPERATOR", "COLLECTOR")),
-):
-    user, _ = user_roles
-    obj = await service.update_dynamic(
-        vessel_id=vessel_id, operator_id=user.id,
-        **data.model_dump(exclude_none=True)
-    )
-    return success(data=VesselDynamicResponse.model_validate(obj))
-
-
-@router.get("/vessel/{vessel_id}/dynamic", summary="获取船舶最新动态")
+@router.get("/vessel/{vessel_id}/dynamic", summary="获取船舶最新动态（by vessel_id）")
 async def get_vessel_dynamic(
     vessel_id: int,
     service: VesselService = Depends(get_vessel_service),
@@ -226,4 +212,31 @@ async def get_vessel_dynamic(
     obj = await service.get_dynamic(vessel_id)
     if not obj:
         return success(data=None, message="暂无动态信息")
+    return success(data=VesselDynamicResponse.model_validate(obj))
+
+
+@router.get("/vessel/dynamic/{mmsi}", summary="获取船舶最新动态（by MMSI）")
+async def get_vessel_dynamic_by_mmsi(
+    mmsi: str,
+    service: VesselService = Depends(get_vessel_service),
+    _=Depends(get_current_user_roles),
+):
+    obj = await service.get_dynamic_by_mmsi(mmsi)
+    if not obj:
+        return success(data=None, message="暂无动态信息")
+    return success(data=VesselDynamicResponse.model_validate(obj))
+
+
+@router.put("/vessel/dynamic/{mmsi}", summary="更新船舶动态（by MMSI，REST 接口；生产环境由 Kafka 消费者驱动）")
+async def update_vessel_dynamic_by_mmsi(
+    mmsi: str,
+    data: VesselDynamicUpdate,
+    service: VesselService = Depends(get_vessel_service),
+    user_roles=Depends(require_roles("ADMIN", "OPERATOR", "COLLECTOR")),
+):
+    user, _ = user_roles
+    obj = await service.update_dynamic_by_mmsi(
+        mmsi=mmsi, operator_id=user.id,
+        **data.model_dump(exclude_none=True)
+    )
     return success(data=VesselDynamicResponse.model_validate(obj))
