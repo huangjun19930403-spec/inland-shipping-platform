@@ -86,34 +86,33 @@ async def get_audit_service(
 
 
 async def get_cargo_service(
-    cargo_repo: CargoRepository = Depends(get_cargo_repo),
-    address_repo: AddressRepository = Depends(get_address_repo),
-    audit_svc: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db),
 ) -> CargoService:
+    # 显式共享同一 Session，确保业务写入与审核写入在同一事务内提交
     return CargoService(
-        cargo_repo=cargo_repo,
-        address_repo=address_repo,
-        audit_svc=audit_svc,
+        cargo_repo=CargoRepository(db),
+        address_repo=AddressRepository(db),
+        audit_svc=AuditService(audit_repo=AuditRepository(db)),
     )
 
 
 async def get_address_service(
-    address_repo: AddressRepository = Depends(get_address_repo),
-    audit_svc: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db),
 ) -> AddressService:
+    # 显式共享同一 Session，确保业务写入与审核写入在同一事务内提交
     return AddressService(
-        address_repo=address_repo,
-        audit_svc=audit_svc,
+        address_repo=AddressRepository(db),
+        audit_svc=AuditService(audit_repo=AuditRepository(db)),
     )
 
 
 async def get_vessel_service(
-    vessel_repo: VesselRepository = Depends(get_vessel_repo),
-    audit_svc: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db),
 ) -> VesselService:
+    # 显式共享同一 Session，确保业务写入与审核写入在同一事务内提交
     return VesselService(
-        vessel_repo=vessel_repo,
-        audit_svc=audit_svc,
+        vessel_repo=VesselRepository(db),
+        audit_svc=AuditService(audit_repo=AuditRepository(db)),
     )
 
 

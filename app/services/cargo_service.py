@@ -58,13 +58,13 @@ class CargoService:
             audit_status=0,
         )
         saved = await self._cargo.categories.create(category)
-        await self._cargo.save()
         await self._audit_svc.submit_for_audit(
             target_type="COMMODITY_CATEGORY", target_id=saved.id,
             target_name=name, action="CREATE",
             submitter_id=operator_id,
             after_data={"name": saved.name, "code": saved.code},
         )
+        await self._cargo.save()
         logger.info(f"[CargoService] category created id={saved.id}")
         return saved
 
@@ -90,13 +90,13 @@ class CargoService:
             audit_status=0,
         )
         saved = await self._cargo.types.create(cargo_type)
-        await self._cargo.save()
         await self._audit_svc.submit_for_audit(
             target_type="COMMODITY_TYPE", target_id=saved.id,
             target_name=name, action="CREATE",
             submitter_id=operator_id,
             after_data={"name": saved.name, "category_id": category_id},
         )
+        await self._cargo.save()
         return saved
 
     # ─────────────────────────────────────────────────
@@ -121,13 +121,13 @@ class CargoService:
             audit_status=0,
         )
         saved = await self._cargo.standards.create(standard)
-        await self._cargo.save()
         await self._audit_svc.submit_for_audit(
             target_type="COMMODITY_STANDARD", target_id=saved.id,
             target_name=name, action="CREATE",
             submitter_id=operator_id,
             after_data={"name": saved.name, "type_id": type_id},
         )
+        await self._cargo.save()
         return saved
 
     # ─────────────────────────────────────────────────
@@ -219,13 +219,13 @@ class CargoService:
 
         saved_opp = await self._cargo.create_opportunity(opportunity)
         await self._cargo.update_parse_result(result_id, status="CONFIRMED")
-        await self._cargo.save()
         await self._audit_svc.submit_for_audit(
             target_type="CARGO_OPPORTUNITY", target_id=saved_opp.id,
             target_name=f"CargoOpportunity#{saved_opp.id}", action="CREATE",
             submitter_id=operator_id,
             after_data={"from_parse_result_id": result_id},
         )
+        await self._cargo.save()
         logger.info(f"[CargoService] opportunity confirmed id={saved_opp.id}")
         return saved_opp
 
@@ -271,13 +271,13 @@ class CargoService:
             status="PENDING",
         )
         saved = await self._cargo.create_opportunity(opportunity)
-        await self._cargo.save()
         await self._audit_svc.submit_for_audit(
             target_type="CARGO_OPPORTUNITY", target_id=saved.id,
             target_name=f"CargoOpportunity#{saved.id}", action="CREATE",
             submitter_id=operator_id,
             after_data={"origin_node_id": origin_node_id, "dest_node_id": dest_node_id},
         )
+        await self._cargo.save()
         return saved
 
     async def list_opportunities(

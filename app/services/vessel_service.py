@@ -39,49 +39,49 @@ class VesselService:
     ) -> VesselTypeDict:
         vt = VesselTypeDict(name=name, code=code, submitter_id=operator_id, audit_status=0, **kwargs)
         saved = await self._vessel.create_vessel_type(vt)
-        await self._vessel.save()
         await self._audit_svc.submit_for_audit(
             target_type="VESSEL_TYPE", target_id=saved.id,
             target_name=name, action="CREATE",
             submitter_id=operator_id,
             after_data={"name": name, "code": code},
         )
+        await self._vessel.save()
         return saved
 
     async def update_vessel_type(self, type_id: int, operator_id: int, **kwargs) -> VesselTypeDict:
         vt = await self.get_vessel_type(type_id)
         before = {"name": vt.name}
         updated = await self._vessel.update_vessel_type(type_id, **kwargs)
-        await self._vessel.save()
         await self._audit_svc.submit_for_audit(
             target_type="VESSEL_TYPE", target_id=type_id,
             target_name=vt.name, action="UPDATE",
             submitter_id=operator_id,
             before_data=before, after_data=kwargs,
         )
+        await self._vessel.save()
         return updated
 
     async def delete_vessel_type(self, type_id: int, operator_id: int) -> None:
         vt = await self.get_vessel_type(type_id)
         await self._vessel.delete_vessel_type(type_id)
-        await self._vessel.save()
         await self._audit_svc.record_operation(
             target_type="VESSEL_TYPE", target_id=type_id,
             target_name=vt.name, action="DELETE", operator_id=operator_id,
             before_data={"name": vt.name},
         )
+        await self._vessel.save()
 
     async def approve_vessel_type(
         self, type_id: int, auditor_id: int, remark: str = ""
     ) -> VesselTypeDict:
         vt = await self.get_vessel_type(type_id)
         updated = await self._vessel.update_vessel_type(type_id, audit_status=1)
-        await self._vessel.save()
         await self._audit_svc.record_operation(
             target_type="VESSEL_TYPE", target_id=type_id,
             target_name=vt.name, action="APPROVE", operator_id=auditor_id,
             audit_result="APPROVED", remark=remark or None,
         )
+        await self._vessel.save()
         return updated
 
     async def reject_vessel_type(
@@ -89,12 +89,12 @@ class VesselService:
     ) -> VesselTypeDict:
         vt = await self.get_vessel_type(type_id)
         updated = await self._vessel.update_vessel_type(type_id, audit_status=2)
-        await self._vessel.save()
         await self._audit_svc.record_operation(
             target_type="VESSEL_TYPE", target_id=type_id,
             target_name=vt.name, action="REJECT", operator_id=auditor_id,
             audit_result="REJECTED", remark=remark,
         )
+        await self._vessel.save()
         return updated
 
     # ─────────────────────────────────────────────────
@@ -146,13 +146,13 @@ class VesselService:
             **kwargs,
         )
         saved = await self._vessel.create_vessel(vessel)
-        await self._vessel.save()
         await self._audit_svc.submit_for_audit(
             target_type="VESSEL", target_id=saved.id,
             target_name=vessel_name, action="CREATE",
             submitter_id=operator_id,
             after_data={"vessel_name": vessel_name, "mmsi": mmsi},
         )
+        await self._vessel.save()
         return saved
 
     async def update_vessel(self, vessel_id: int, operator_id: int, **kwargs) -> Vessel:
@@ -167,45 +167,45 @@ class VesselService:
             )
             await self._vessel.create_name_history(history)
         updated = await self._vessel.update_vessel(vessel_id, **kwargs)
-        await self._vessel.save()
         await self._audit_svc.submit_for_audit(
             target_type="VESSEL", target_id=vessel_id,
             target_name=vessel.vessel_name, action="UPDATE",
             submitter_id=operator_id,
             before_data=before, after_data=kwargs,
         )
+        await self._vessel.save()
         return updated
 
     async def delete_vessel(self, vessel_id: int, operator_id: int) -> None:
         vessel = await self.get_vessel(vessel_id)
         await self._vessel.delete_vessel(vessel_id)
-        await self._vessel.save()
         await self._audit_svc.record_operation(
             target_type="VESSEL", target_id=vessel_id,
             target_name=vessel.vessel_name, action="DELETE", operator_id=operator_id,
             before_data={"vessel_name": vessel.vessel_name},
         )
+        await self._vessel.save()
 
     async def approve_vessel(self, vessel_id: int, auditor_id: int, remark: str = "") -> Vessel:
         vessel = await self.get_vessel(vessel_id)
         updated = await self._vessel.update_vessel(vessel_id, audit_status=1)
-        await self._vessel.save()
         await self._audit_svc.record_operation(
             target_type="VESSEL", target_id=vessel_id,
             target_name=vessel.vessel_name, action="APPROVE", operator_id=auditor_id,
             audit_result="APPROVED", remark=remark or None,
         )
+        await self._vessel.save()
         return updated
 
     async def reject_vessel(self, vessel_id: int, auditor_id: int, remark: str) -> Vessel:
         vessel = await self.get_vessel(vessel_id)
         updated = await self._vessel.update_vessel(vessel_id, audit_status=2)
-        await self._vessel.save()
         await self._audit_svc.record_operation(
             target_type="VESSEL", target_id=vessel_id,
             target_name=vessel.vessel_name, action="REJECT", operator_id=auditor_id,
             audit_result="REJECTED", remark=remark,
         )
+        await self._vessel.save()
         return updated
 
     # ─────────────────────────────────────────────────
