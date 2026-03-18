@@ -7,28 +7,26 @@ AI异步任务
 """
 import asyncio
 import logging
-
-from app.core.logging import setup_logging
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
 
 async def _run_cargo_parse(raw_message_id: int) -> dict:
     """执行货源解析工作流（异步实现）"""
+    from sqlalchemy import select
     from app.core.database import AsyncSessionLocal
     from app.models.cargo import CargoRawMessage
     from app.workflows.cargo_parse_workflow import CargoParseWorkflow
 
     async with AsyncSessionLocal() as db:
-        # 获取原始消息
-        from sqlalchemy import select
         result = await db.execute(
             select(CargoRawMessage).where(CargoRawMessage.id == raw_message_id)
         )
         msg = result.scalar_one_or_none()
 
         if not msg:
-            logger.error(f"[ai_tasks] raw_message {raw_message_id} not found")
+            logger.error("[ai_tasks] raw_message %s not found", raw_message_id)
             return {"success": False, "error": "message not found"}
 
         workflow = CargoParseWorkflow(db)
@@ -52,13 +50,13 @@ def parse_cargo_message(raw_message_id: int) -> dict:
     1. parse_cargo_message.delay(msg_id)  # Celery异步
     2. asyncio.run(_run_cargo_parse(msg_id))  # 直接同步调用（测试用）
     """
-    logger.info(f"[ai_tasks] parse_cargo_message start id={raw_message_id}")
+    logger.info("[ai_tasks] parse_cargo_message start id=%s", raw_message_id)
     try:
         result = asyncio.run(_run_cargo_parse(raw_message_id))
-        logger.info(f"[ai_tasks] parse_cargo_message done id={raw_message_id} success={result['success']}")
+        logger.info("[ai_tasks] parse_cargo_message done id=%s success=%s", raw_message_id, result["success"])
         return result
     except Exception as e:
-        logger.error(f"[ai_tasks] parse_cargo_message failed id={raw_message_id}: {e}")
+        logger.error("[ai_tasks] parse_cargo_message failed id=%s: %s", raw_message_id, e)
         return {"success": False, "error": str(e)}
 
 
@@ -79,23 +77,22 @@ except ImportError:
 
 async def _cleanup_stale() -> int:
     """清理超时的PARSING状态消息"""
-    from datetime import datetime, timedelta
+    from sqlalchemy import select
     from app.core.database import AsyncSessionLocal
     from app.models.cargo import CargoRawMessage
-    from sqlalchemy import select, update
 
     async with AsyncSessionLocal() as db:
-        threshold = datetime.utcnow() - timedelta(hours=1)
+        threshold = datetime.now(timezone.utc) - timedelta(hours=1)
         result = await db.execute(
             select(CargoRawMessage).where(
-                CargoRawMessage.parse_status == "PARSING",
-                CargoRawMessage.updated_at < threshold,
+                CargoRawMessage.status == "PARSING",
+                CargoRawMessage.created_at < threshold,
             )
         )
         stale = result.scalars().all()
         count = 0
         for msg in stale:
-            msg.parse_status = "PENDING"
+            msg.status = "PENDING"
             count += 1
         await db.commit()
         return count
@@ -104,7 +101,7 @@ async def _cleanup_stale() -> int:
 def cleanup_stale_parsing() -> dict:
     """Celery任务：清理超时解析任务"""
     count = asyncio.run(_cleanup_stale())
-    logger.info(f"[ai_tasks] cleanup_stale_parsing reset {count} messages")
+    logger.info("[ai_tasks] cleanup_stale_parsing reset %s messages", count)
     return {"reset_count": count}
 
 
@@ -128,7 +125,8 @@ async def trigger_cargo_parse(raw_message_id: int) -> None:
         result = await _run_cargo_parse(raw_message_id)
         if not result["success"]:
             logger.warning(
-                f"[ai_tasks] parse workflow failed id={raw_message_id}: {result.get('error')}"
+                "[ai_tasks] parse workflow failed id=%s: %s",
+                raw_message_id, result.get("error"),
             )
     except Exception as e:
-        logger.error(f"[ai_tasks] trigger_cargo_parse exception id={raw_message_id}: {e}")
+        logger.error("[ai_tasks] trigger_cargo_parse exception id=%s: %s", raw_message_id, e)

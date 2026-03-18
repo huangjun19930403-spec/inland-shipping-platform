@@ -18,6 +18,7 @@ from app.models.cargo import (
     CargoAiParseResult,
     CargoFreight,
 )
+from app.repositories.ai_repository import AiRepository
 from app.repositories.cargo_repository import CargoRepository
 from app.repositories.address_repository import AddressRepository
 from app.services.audit_service import AuditService
@@ -42,10 +43,12 @@ class CargoService:
         cargo_repo: CargoRepository,
         address_repo: AddressRepository,
         audit_svc: AuditService,
+        ai_repo: AiRepository,
     ) -> None:
         self._cargo = cargo_repo
         self._address = address_repo
         self._audit_svc = audit_svc
+        self._ai_repo = ai_repo
 
     # ─────────────────────────────────────────────────
     # 商品分类
@@ -232,6 +235,21 @@ class CargoService:
             )
 
         ov = overrides or {}
+
+        # 检测哪些字段被人工修正（用于反馈到AiCallLog）
+        _correctable = {
+            "origin_node_id": parse_result.origin_node_id,
+            "dest_node_id": parse_result.dest_node_id,
+            "commodity_id": parse_result.commodity_id,
+            "tonnage": parse_result.tonnage,
+            "loading_date": parse_result.loading_date,
+            "freight_price": parse_result.freight_price,
+        }
+        corrected_fields = [
+            k for k, ai_val in _correctable.items()
+            if k in ov and ov[k] is not None and ov[k] != ai_val
+        ]
+
         # 位置信息优先用人工修正值，无则用AI解析值
         origin_node_id = ov.get("origin_node_id") or parse_result.origin_node_id
         dest_node_id = ov.get("dest_node_id") or parse_result.dest_node_id
@@ -279,6 +297,24 @@ class CargoService:
             confirmed_by=operator_id,
             confirmed_at=datetime.now(),
         )
+
+        # 写回人工确认反馈到 AiCallLog
+        import json
+        call_log = await self._ai_repo.get_call_log_by_parse_result(result_id)
+        if call_log:
+            has_correction = bool(corrected_fields)
+            await self._ai_repo.update_call_log(
+                call_log.id,
+                human_confirmed=True,
+                corrected_fields=json.dumps(corrected_fields, ensure_ascii=False) if corrected_fields else None,
+            )
+            if call_log.prompt_template_id and call_log.prompt_version:
+                await self._ai_repo.increment_confirm_stats(
+                    template_id=call_log.prompt_template_id,
+                    version=call_log.prompt_version,
+                    corrected=has_correction,
+                )
+
         await self._audit_svc.submit_for_audit(
             target_type="CARGO_FREIGHT", target_id=saved_freight.id,
             target_name=f"CargoFreight#{saved_freight.freight_no}", action="CREATE",

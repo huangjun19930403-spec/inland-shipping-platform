@@ -16,7 +16,7 @@ from app.core.config import settings
 
 # 导入所有模型（确保Alembic能检测到所有表）
 from app.models.base import Base
-from app.models import system, address, cargo, vessel, route, analysis, audit  # noqa: F401
+from app.models import system, address, cargo, vessel, route, analysis, audit, ai  # noqa: F401
 
 # Alembic配置对象
 config = context.config

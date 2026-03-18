@@ -8,6 +8,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
+from app.repositories.ai_repository import AiRepository
 from app.repositories.cargo_repository import CargoRepository
 from app.repositories.address_repository import AddressRepository
 from app.repositories.vessel_repository import VesselRepository
@@ -85,6 +86,12 @@ async def get_audit_service(
     return AuditService(audit_repo=audit_repo)
 
 
+async def get_ai_repo(
+    db: AsyncSession = Depends(get_db),
+) -> AiRepository:
+    return AiRepository(db)
+
+
 async def get_cargo_service(
     db: AsyncSession = Depends(get_db),
 ) -> CargoService:
@@ -93,6 +100,7 @@ async def get_cargo_service(
         cargo_repo=CargoRepository(db),
         address_repo=AddressRepository(db),
         audit_svc=AuditService(audit_repo=AuditRepository(db)),
+        ai_repo=AiRepository(db),
     )
 
 

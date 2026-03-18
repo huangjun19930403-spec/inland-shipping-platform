@@ -17,9 +17,21 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
 
-    # AI配置（Anthropic Claude）
+    # AI配置
+    AI_PROVIDER: str = "anthropic"  # anthropic / openai / deepseek / tongyi
+    # Anthropic
     ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY", "")
     AI_MODEL: str = "claude-sonnet-4-6"
+    # OpenAI / DeepSeek（deepseek 复用 openai SDK，仅 base_url 不同）
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_BASE_URL: Optional[str] = None
+    DEEPSEEK_API_KEY: Optional[str] = os.getenv("DEEPSEEK_API_KEY", "")
+    # 通义千问（DashScope）
+    DASHSCOPE_API_KEY: Optional[str] = os.getenv("DASHSCOPE_API_KEY", "")
+    TONGYI_MODEL: str = "qwen-turbo"
+    # 公共参数
+    AI_MAX_TOKENS: int = 2048
+    AI_TEMPERATURE: float = 0.1
     AI_CONFIDENCE_THRESHOLD: int = 60  # AI解析置信度阈值
 
     # Celery配置（生产环境需Redis）

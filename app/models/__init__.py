@@ -1,3 +1,4 @@
+from app.models.ai import AiPromptTemplate, AiPromptVersion, AiCallLog  # noqa
 from app.models.address import (  # noqa
     Waterway, Region, AdminRegion, NodeType, TransportNode, NodeAlias, RegionAddressRelation
 )

@@ -3,15 +3,16 @@
 职责：协调多个Tool完成货运文本的完整解析流程
 """
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.base import BaseAgent, AgentResult
+from app.ai.entity_cache import get_nodes, get_commodities
+from app.ai.providers.base import LLMCallResult
 from app.tools.cargo_tools import CargoParseTextTool
 from app.tools.entity_match_tools import EntityMatchTool, MatchCandidate
-from app.tools.database_tools import NodeQueryTool, CommodityQueryTool
 
 logger = logging.getLogger(__name__)
 
@@ -50,36 +51,31 @@ class CargoParseOutput:
     # 整体置信度（各字段平均）
     overall_confidence: int
 
+    # LLM调用元数据（用于写 AiCallLog）
+    template_id: Optional[int] = None
+    template_version: Optional[int] = None
+    call_result: Optional[LLMCallResult] = None
+
 
 class CargoAgent(BaseAgent):
     """
     货源解析Agent
 
     执行流程：
-    1. [cargo_parse_text] 调用LLM提取结构化字段
-    2. [node_query] 获取所有运输节点数据
-    3. [commodity_query] 获取所有商品数据
-    4. [entity_match] 分别匹配起点、终点、商品实体
-    5. 组装最终结构化结果
-
-    注意：Agent不直接操作数据库，通过Tool间接访问。
+    1. [cargo_parse_text] 调用LLM提取结构化字段（使用DB提示词 + TTL缓存）
+    2. 从实体缓存获取节点和商品数据（TTL 10分钟，避免每次全量查询）
+    3. [entity_match] 分别匹配起点、终点、商品实体
+    4. 组装最终结构化结果，携带LLM调用元数据
     """
 
     name = "cargo_agent"
     description = "解析原始货运文本，提取并匹配结构化信息"
 
     def __init__(self, db: AsyncSession) -> None:
-        self._parse_tool = CargoParseTextTool()
+        self._db = db
+        self._parse_tool = CargoParseTextTool(db)
         self._match_tool = EntityMatchTool()
-        self._node_tool = NodeQueryTool(db)
-        self._commodity_tool = CommodityQueryTool(db)
-
-        self.tools = [
-            self._parse_tool,
-            self._match_tool,
-            self._node_tool,
-            self._commodity_tool,
-        ]
+        self.tools = [self._parse_tool, self._match_tool]
 
     async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
@@ -92,7 +88,7 @@ class CargoAgent(BaseAgent):
         raw_text = input_data.get("raw_text", "")
         steps = []
 
-        # Step 1: 文本解析
+        # Step 1: 文本解析（LLM）
         steps.append("cargo_parse_text: extracting fields from raw text")
         parse_result = await self._parse_tool.execute(raw_text=raw_text)
 
@@ -103,21 +99,22 @@ class CargoAgent(BaseAgent):
                 steps=steps,
             )
 
-        parsed = parse_result.data
+        tool_data = parse_result.data or {}
+        parsed = tool_data.get("fields", {})
+        template_id: Optional[int] = tool_data.get("template_id")
+        template_version: Optional[int] = tool_data.get("template_version")
+        call_result: Optional[LLMCallResult] = tool_data.get("call_result")
+
         origin_text = parsed.get("origin", {}).get("value")
         dest_text = parsed.get("destination", {}).get("value")
         commodity_text = parsed.get("commodity", {}).get("value")
         tonnage_data = parsed.get("tonnage", {})
         price_data = parsed.get("freight_price", {})
 
-        # Step 2: 获取基础数据
-        steps.append("node_query: loading transport nodes for matching")
-        node_result = await self._node_tool.execute()
-        nodes = node_result.data or []
-
-        steps.append("commodity_query: loading commodity standards for matching")
-        commodity_result = await self._commodity_tool.execute()
-        commodities = commodity_result.data or []
+        # Step 2: 从缓存获取基础数据（避免每次全量 SELECT）
+        steps.append("entity_cache: loading nodes and commodities")
+        nodes = await get_nodes(self._db)
+        commodities = await get_commodities(self._db)
 
         # Step 3: 实体匹配
         steps.append(f"entity_match: matching origin '{origin_text}'")
@@ -160,20 +157,21 @@ class CargoAgent(BaseAgent):
             dest_candidates=dest_match["candidates"],
             commodity_candidates=commodity_match["candidates"],
             overall_confidence=overall_confidence,
+            template_id=template_id,
+            template_version=template_version,
+            call_result=call_result,
         )
 
         logger.info(
-            f"[CargoAgent] complete "
-            f"origin={output.origin_text}→{output.origin_node_name}({output.origin_confidence}) "
-            f"dest={output.destination_text}→{output.dest_node_name}({output.dest_confidence}) "
-            f"commodity={output.commodity_text}→{output.commodity_standard_name}({output.commodity_confidence})"
+            "[CargoAgent] complete origin=%s→%s(%d) dest=%s→%s(%d) commodity=%s→%s(%d)",
+            output.origin_text, output.origin_node_name, output.origin_confidence,
+            output.destination_text, output.dest_node_name, output.dest_confidence,
+            output.commodity_text, output.commodity_standard_name, output.commodity_confidence,
         )
 
         return AgentResult(success=True, output=output, steps=steps)
 
-    async def _match_entity(
-        self, text: Optional[str], entities: list[dict]
-    ) -> dict:
+    async def _match_entity(self, text: Optional[str], entities: list[dict]) -> dict:
         """匹配单个实体，text为None时返回空结果"""
         if not text:
             return {"best_match": None, "candidates": [], "match_confidence": 0}
