@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Any, Optional, List
 from datetime import datetime
 from decimal import Decimal
 
@@ -140,9 +140,9 @@ class RegionResponse(BaseModel):
     name_en: Optional[str] = None
     center_longitude: Optional[Decimal] = None
     center_latitude: Optional[Decimal] = None
-    main_rivers: Optional[List[int]] = None
+    main_rivers: Optional[List[Any]] = None
     main_rivers_names: Optional[List[str]] = None
-    main_cities: Optional[List[int]] = None
+    main_cities: Optional[List[Any]] = None
     main_cities_names: Optional[List[str]] = None
     boundary_coordinates: Optional[list] = None
     boundary_color: Optional[str] = None

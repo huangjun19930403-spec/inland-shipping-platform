@@ -30,6 +30,18 @@ def _make_freight_no() -> str:
     return f"CS-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
 
 
+def _parse_date(value: Optional[str]):
+    """将字符串日期转为 date 对象（SQLite Date 列不接受字符串）。"""
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 class CargoService:
     """
     货物业务服务
@@ -383,7 +395,7 @@ class CargoService:
             commodity_id=commodity_id,
             commodity_text=commodity_text,
             tonnage=tonnage,
-            loading_date=loading_date,
+            loading_date=_parse_date(loading_date),
             freight_price=freight_price,
             price_type=price_type,
             price_unit=price_unit,
