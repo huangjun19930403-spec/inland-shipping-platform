@@ -7,8 +7,6 @@ import logging
 import uuid
 from typing import Optional
 
-from sqlalchemy.exc import IntegrityError
-
 from app.core.exceptions import NotFoundError, ConflictError, BadRequestError
 from app.models.address import (
     Waterway, Region, AdminRegion, NodeType, TransportNode, NodeAlias,
@@ -17,7 +15,6 @@ from app.repositories.address_repository import AddressRepository
 from app.services.audit_service import AuditService
 from app.utils.waterway_code_generator import WaterwayCodeGenerator
 from app.utils.region_helpers import (
-    generate_region_code,
     compute_centroid,
     filter_cities_in_polygon,
     point_in_polygon,
@@ -27,8 +24,6 @@ logger = logging.getLogger(__name__)
 
 # 模块级单例：无状态工具类，整个进程复用同一实例
 _waterway_code_gen = WaterwayCodeGenerator()
-# 编码冲突时最大重试次数（高并发下同级别的竞争插入）
-_CODE_GEN_MAX_RETRIES = 3
 
 
 def _gen_node_type_code() -> str:
@@ -65,10 +60,8 @@ class AddressService:
 
         并发安全策略
         ────────────
-        1. 查询同 parent_id 下当前最大编码，生成候选编码。
-        2. 执行 flush；若触发唯一约束冲突（并发插入导致序号碰撞），
-           回滚本次 flush 并重新查询最大编码，最多重试 _CODE_GEN_MAX_RETRIES 次。
-        3. 数据库层的 UNIQUE 约束是最终防线，保证绝对唯一性。
+        通过 code_sequence 表的原子 upsert 获取本次应使用的序号，
+        天然保证并发唯一性，无需重试逻辑。
         """
         level: int = kwargs.get("level", 1)
         parent_id: Optional[int] = kwargs.get("parent_id")
@@ -80,41 +73,27 @@ class AddressService:
                 raise NotFoundError("Waterway (parent)", parent_id)
             parent_code = parent_ww.code
 
-        for attempt in range(_CODE_GEN_MAX_RETRIES):
-            max_sibling = await self._address.get_max_sibling_waterway_code(parent_id)
-            code = _waterway_code_gen.generate(
-                name=name,
-                level=level,
-                parent_id=parent_id,
-                parent_code=parent_code,
-                max_sibling_code=max_sibling,
-            )
-            try:
-                ww = Waterway(name=name, code=code, **kwargs)
-                saved = await self._address.create_waterway(ww)
-                await self._audit_svc.submit_for_audit(
-                    target_type="WATERWAY", target_id=saved.id,
-                    target_name=name, action="CREATE",
-                    submitter_id=operator_id,
-                    after_data={"name": name, "code": code},
-                )
-                await self._address.save()
-                return saved
-            except IntegrityError:
-                await self._address.rollback()
-                if attempt < _CODE_GEN_MAX_RETRIES - 1:
-                    logger.warning(
-                        "水系编码 %r 冲突（并发写入），第 %d 次重试",
-                        code, attempt + 1,
-                    )
-                else:
-                    logger.error(
-                        "水系编码生成失败：%d 次重试后仍冲突，name=%r parent_id=%s",
-                        _CODE_GEN_MAX_RETRIES, name, parent_id,
-                    )
-                    raise
+        # 按 parent 维度分配序号：每个 parent 独立计数，互不影响
+        scope = f"ww:{parent_id if parent_id is not None else 'root'}"
+        seq = await self._address.next_code_seq(scope)
+        code = _waterway_code_gen.generate(
+            name=name,
+            level=level,
+            parent_id=parent_id,
+            parent_code=parent_code,
+            seq=seq,
+        )
 
-        raise RuntimeError("create_waterway: unexpected exit from retry loop")
+        ww = Waterway(name=name, code=code, **kwargs)
+        saved = await self._address.create_waterway(ww)
+        await self._audit_svc.submit_for_audit(
+            target_type="WATERWAY", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
+            after_data={"name": name, "code": code},
+        )
+        await self._address.save()
+        return saved
 
     async def update_waterway(self, waterway_id: int, operator_id: int, **kwargs) -> Waterway:
         ww = await self._address.get_waterway(waterway_id)
@@ -220,8 +199,8 @@ class AddressService:
         return center_lng, center_lat, city_ids
 
     async def create_region(self, name: str, operator_id: int, **kwargs) -> Region:
-        max_code = await self._address.get_max_region_code()
-        code = generate_region_code(max_code)
+        seq = await self._address.next_code_seq("region")
+        code = f"RG-{seq:03d}"
 
         boundary = kwargs.pop("boundary_coordinates", None)
         center_lng, center_lat, city_ids = await self._resolve_region_geo(boundary)

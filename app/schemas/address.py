@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
@@ -59,6 +59,33 @@ class WaterwayResponse(BaseModel):
 
 # ---------- Region ----------
 
+def _validate_boundary_coordinates(v: Optional[List]) -> Optional[List]:
+    """
+    校验区域边界坐标列表。
+    规则：
+    - None 表示不传边界，直接放行。
+    - 至少 3 个顶点（构成有效多边形）。
+    - 每个顶点格式为 [经度, 纬度]，共 2 个数值。
+    - 经度范围：[-180, 180]；纬度范围：[-90, 90]。
+    """
+    if v is None:
+        return v
+    if len(v) < 3:
+        raise ValueError("边界多边形至少需要 3 个顶点")
+    for i, pt in enumerate(v):
+        if not hasattr(pt, "__len__") or len(pt) < 2:
+            raise ValueError(f"第 {i} 个坐标点格式错误，需要 [经度, 纬度] 两个数值")
+        try:
+            lng, lat = float(pt[0]), float(pt[1])
+        except (TypeError, ValueError):
+            raise ValueError(f"第 {i} 个坐标点包含非数值内容")
+        if not (-180.0 <= lng <= 180.0):
+            raise ValueError(f"第 {i} 个点经度 {lng} 超出范围 [-180, 180]")
+        if not (-90.0 <= lat <= 90.0):
+            raise ValueError(f"第 {i} 个点纬度 {lat} 超出范围 [-90, 90]")
+    return v
+
+
 class RegionCreate(BaseModel):
     """
     区域新增请求体。
@@ -66,15 +93,21 @@ class RegionCreate(BaseModel):
     - center_longitude / center_latitude：由 boundary_coordinates 自动计算。
     - main_cities：由 boundary_coordinates 与行政区划表自动匹配，无需填写。
     - main_rivers：主要水系 ID 数组，由调用方提供（可选）。
+    - boundary_coordinates：[[经度, 纬度], ...] 格式，经度 [-180,180]，纬度 [-90,90]，至少 3 点。
     """
     name: str
     name_en: Optional[str] = None
-    main_rivers: Optional[List[int]] = None       # 水系 ID 列表，用户手动指定
-    boundary_coordinates: Optional[List[list]] = None  # [[lng, lat], ...]
+    main_rivers: Optional[List[int]] = None
+    boundary_coordinates: Optional[List[List[float]]] = None
     boundary_color: str = "#3388ff"
     area_color: str = "#3388ff"
     description: Optional[str] = None
     sort_order: int = 0
+
+    @field_validator("boundary_coordinates")
+    @classmethod
+    def validate_boundary(cls, v):
+        return _validate_boundary_coordinates(v)
 
 
 class RegionUpdate(BaseModel):
@@ -82,15 +115,21 @@ class RegionUpdate(BaseModel):
     区域修改请求体。
     仅允许在 status=0（停用）状态下修改；修改后需重新审核。
     - center_* 和 main_cities 与新增一样由系统自动重算。
+    - boundary_coordinates：[[经度, 纬度], ...] 格式，经度 [-180,180]，纬度 [-90,90]，至少 3 点。
     """
     name: Optional[str] = None
     name_en: Optional[str] = None
     main_rivers: Optional[List[int]] = None
-    boundary_coordinates: Optional[List[list]] = None
+    boundary_coordinates: Optional[List[List[float]]] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None
     description: Optional[str] = None
     sort_order: Optional[int] = None
+
+    @field_validator("boundary_coordinates")
+    @classmethod
+    def validate_boundary(cls, v):
+        return _validate_boundary_coordinates(v)
 
 
 class RegionResponse(BaseModel):

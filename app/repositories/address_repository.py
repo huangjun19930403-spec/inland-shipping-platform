@@ -4,7 +4,7 @@
 """
 from typing import Optional, Sequence, Tuple
 
-from sqlalchemy import select, and_, or_, func, delete as sql_delete
+from sqlalchemy import select, and_, or_, func, delete as sql_delete, text
 from sqlalchemy.orm import selectinload
 
 from app.models.address import (
@@ -83,21 +83,31 @@ class AddressRepository(BaseRepository):
         await self.delete(ww)
         return True
 
-    async def get_max_sibling_waterway_code(
-        self, parent_id: Optional[int]
-    ) -> Optional[str]:
-        """获取同 parent_id 下字典序最大的 code（含已软删记录，避免编码复用）"""
-        if parent_id is None:
-            condition = Waterway.parent_id.is_(None)
-        else:
-            condition = Waterway.parent_id == parent_id
+    async def next_code_seq(self, scope: str) -> int:
+        """
+        原子获取并递增指定 scope 的序号，返回本次应使用的序号值。
+
+        使用 PostgreSQL upsert（INSERT ... ON CONFLICT DO UPDATE）保证并发安全：
+        - 首次使用某 scope：插入初始值 1，返回 1。
+        - 后续调用：原子递增 next_val，返回递增后的新值。
+
+        Args:
+            scope: 序号命名空间，如 'region'、'ww:root'、'ww:42'。
+
+        Returns:
+            本次插入应使用的唯一序号（从 1 开始递增）。
+        """
         result = await self._db.execute(
-            select(Waterway.code)
-            .where(condition)
-            .order_by(Waterway.code.desc())
-            .limit(1)
+            text("""
+                INSERT INTO code_sequence (scope, next_val)
+                VALUES (:scope, 1)
+                ON CONFLICT (scope)
+                DO UPDATE SET next_val = code_sequence.next_val + 1
+                RETURNING next_val
+            """),
+            {"scope": scope},
         )
-        return result.scalar_one_or_none()
+        return result.scalar_one()
 
     # ─────────────────────────────────────────────────
     # Region（商业区域）
@@ -146,13 +156,6 @@ class AddressRepository(BaseRepository):
                 Region.id == region_id,
                 Region.deleted_at.is_(None),
             )
-        )
-        return result.scalar_one_or_none()
-
-    async def get_max_region_code(self) -> Optional[str]:
-        """获取字典序最大的区域编码（含已软删，避免编码复用）"""
-        result = await self._db.execute(
-            select(Region.code).order_by(Region.code.desc()).limit(1)
         )
         return result.scalar_one_or_none()
 

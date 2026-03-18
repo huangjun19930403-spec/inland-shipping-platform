@@ -4,7 +4,7 @@
 编码结构：WW-LL-NNN
   WW  = 一级流域编码（01~08），见 BASIN_KEYWORDS
   LL  = 水系等级代码（01 主干 / 02 支流 / 03 运河·人工水道）
-  NNN = 同 parent_id 下顺序号（001 起步，逐一递增）
+  NNN = 同 parent_id 下顺序号（001 起步，由数据库原子序列提供）
 
 参考标准：HJ 932-2017 / SL/T 213-2020（为航运业务作了简化处理）
 
@@ -13,6 +13,10 @@
   赣江（长江支流）→ 01-02-001
   湘江（长江支流）→ 01-02-002
   京杭运河      → 08-03-001
+
+并发安全说明：
+  序号（NNN）由调用方通过数据库原子序列（code_sequence 表的 upsert）提前获取，
+  本工具类不再访问数据库，也不含任何重试逻辑。
 """
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ class WaterwayCodeGenerator:
 
     设计原则
     --------
-    - 无 I/O 依赖：所有 DB 查询结果作为参数传入，便于单元测试与替换。
+    - 无 I/O 依赖：序号由调用方传入，便于单元测试与替换。
     - 无副作用：相同输入始终产生相同结果。
     - 易扩展：流域关键词映射与等级映射均为可覆盖的类属性。
 
@@ -40,7 +44,7 @@ class WaterwayCodeGenerator:
         level=2,
         parent_id=1,
         parent_code="01-01-001",
-        max_sibling_code="01-02-001",   # None 表示第一个同级节点
+        seq=2,           # 由数据库原子序列提供，已保证唯一
     )
     # → "01-02-002"
     """
@@ -87,19 +91,18 @@ class WaterwayCodeGenerator:
         level: int,
         parent_id: Optional[int],
         parent_code: Optional[str],
-        max_sibling_code: Optional[str],
+        seq: int,
     ) -> str:
         """
         生成符合规范的水系编码。
 
         Parameters
         ----------
-        name              水系名称，用于识别所属流域（WW 段）
-        level             水系层级（1=主干, 2=支流, 3=运河/人工水道）
-        parent_id         父级水系 ID；NULL 表示顶级水系
-        parent_code       父级水系已有编码，用于继承 WW 段；无父级时传 None
-        max_sibling_code  同 parent_id 下当前编码字典序最大值；
-                          无兄弟节点时传 None，序号将从 001 开始
+        name        水系名称，用于识别所属流域（WW 段）
+        level       水系层级（1=主干, 2=支流, 3=运河/人工水道）
+        parent_id   父级水系 ID；NULL 表示顶级水系
+        parent_code 父级水系已有编码，用于继承 WW 段；无父级时传 None
+        seq         本次插入的序号（由 code_sequence 原子序列提供，已保证唯一）
 
         Returns
         -------
@@ -107,11 +110,10 @@ class WaterwayCodeGenerator:
         """
         basin = self._resolve_basin(name, parent_code)
         level_seg = self._resolve_level_segment(level, parent_id)
-        seq = self._next_sequence(max_sibling_code)
         code = f"{basin}{self.CODE_SEPARATOR}{level_seg}{self.CODE_SEPARATOR}{seq:0{self.SEQ_WIDTH}d}"
         logger.debug(
-            "WaterwayCodeGenerator: name=%r level=%d parent_id=%s → %s",
-            name, level, parent_id, code,
+            "WaterwayCodeGenerator: name=%r level=%d parent_id=%s seq=%d → %s",
+            name, level, parent_id, seq, code,
         )
         return code
 
@@ -155,20 +157,3 @@ class WaterwayCodeGenerator:
         if parent_id is None:
             return self.LEVEL_TRUNK
         return self.LEVEL_TRIBUTARY
-
-    @staticmethod
-    def _next_sequence(max_code: Optional[str]) -> int:
-        """
-        从最大兄弟编码解析序号并 +1；无兄弟节点时返回 1。
-        解析失败（编码格式异常）时安全回退到 1 并记录警告。
-        """
-        if not max_code:
-            return 1
-        try:
-            return int(max_code.split("-")[2]) + 1
-        except (IndexError, ValueError):
-            logger.warning(
-                "WaterwayCodeGenerator: 无法解析序号段，编码=%r，已回退到 1",
-                max_code,
-            )
-            return 1
