@@ -3,14 +3,17 @@
 
 接口列表：
   GET  /analysis/dashboard             — 仪表盘统计数据
-  POST /analysis/run-stats             — 手动触发每日统计聚合（管理员）
+  POST /analysis/run-stats             — 手动触发货源+船舶全量统计（管理员）
+  POST /analysis/run-stats/ship        — 手动触发船舶统计刷新（管理员）
   GET  /analysis/cargo/heatmap         — 货源城市热力图
   GET  /analysis/cargo/trend           — 货源趋势图
   GET  /analysis/cargo/commodity_rank  — 货品分类货源数量排名
-  GET  /analysis/cargo/od_flow         — 起终点城市OD流量矩阵（新增）
-  GET  /analysis/cargo/channel_stats   — 各录入渠道质量统计（新增）
-  GET  /analysis/ship/heatmap          — 船舶分布热力图
-  GET  /analysis/ship/type_ratio       — 船舶类型数量占比
+  GET  /analysis/cargo/od_flow         — 起终点城市OD流量矩阵
+  GET  /analysis/cargo/channel_stats   — 各录入渠道质量统计
+  GET  /analysis/ship/region_heatmap   — 船舶区域热力图（快照）
+  GET  /analysis/ship/city_heatmap     — 船舶城市热力图（快照，支持省级聚合）
+  GET  /analysis/ship/dwt_dist         — 船舶载重吨区间分布
+  GET  /analysis/ship/age_dist         — 船舶船龄区间分布
 
 规则：
   - 所有查询接口只读统计表，响应时间目标 < 200ms
@@ -38,7 +41,7 @@ async def get_dashboard(
     return success(data=data)
 
 
-@router.post("/run-stats", summary="手动触发每日统计聚合（管理员）", tags=["数据分析"])
+@router.post("/run-stats", summary="手动触发货源+船舶全量统计聚合（管理员）", tags=["数据分析"])
 async def run_daily_stats(
     target_date: Optional[date] = None,
     service: AnalysisService = Depends(get_analysis_service),
@@ -46,6 +49,19 @@ async def run_daily_stats(
 ):
     result = await service.run_daily_stats(target_date=target_date)
     return success(data=result, message="统计聚合完成")
+
+
+@router.post("/run-stats/ship", summary="手动触发船舶统计全量刷新（管理员）", tags=["数据分析"])
+async def run_ship_stats(
+    service: AnalysisService = Depends(get_analysis_service),
+    _=Depends(require_roles("ADMIN", "SUPER_ADMIN")),
+):
+    """
+    强制触发四张船舶统计快照的全量重算（忽略 Kafka 节流限制）。
+    适用于初始化数据、数据修正、手动校验等场景。
+    """
+    result = await service.run_ship_stats()
+    return success(data=result, message="船舶统计刷新完成")
 
 
 @router.get("/cargo/heatmap", summary="货源城市热力图", tags=["数据分析"])
@@ -149,30 +165,76 @@ async def get_cargo_channel_stats(
     return success(data=data)
 
 
-@router.get("/ship/heatmap", summary="船舶分布热力图", tags=["数据分析"])
-async def get_ship_heatmap(
-    stat_date: Optional[date] = Query(None, description="统计日期，默认今天"),
-    region_id: Optional[int] = Query(None, description="按区域过滤（可选）"),
+@router.get("/ship/region_heatmap", summary="船舶区域热力图（快照）", tags=["数据分析"])
+async def get_ship_region_heatmap(
     service: AnalysisService = Depends(get_analysis_service),
     _=Depends(get_current_user_roles),
 ):
     """
-    返回指定日期各节点的船舶分布热力数据，用于船舶位置热力地图渲染。
-    数据来源：`ship_heatmap_daily` 统计表（每日 02:00 由定时任务更新）。
+    返回各商业区域（Region）的船舶数量和运力快照，含多边形边界坐标。
+    数据来源：`ship_stat_region` 快照表（Kafka AIS 更新触发 30s 节流刷新）。
+
+    前端建议：
+    - 多边形热力地图：用 boundary_coordinates 绘制区域边界，按 vessel_count 着色
+    - 区域运力气泡：以 center_longitude/center_latitude 为圆心，total_deadweight 控制圆半径
     """
-    items = await service.get_ship_heatmap(stat_date=stat_date, region_id=region_id)
-    return success(data={"stat_date": str(stat_date or date.today()), "items": items})
+    data = await service.get_ship_region_heatmap()
+    return success(data=data)
 
 
-@router.get("/ship/type_ratio", summary="船舶类型数量占比", tags=["数据分析"])
-async def get_ship_type_ratio(
-    stat_date: Optional[date] = Query(None, description="统计日期，默认今天"),
+@router.get("/ship/city_heatmap", summary="船舶城市热力图（快照）", tags=["数据分析"])
+async def get_ship_city_heatmap(
+    level: str = Query("city", description="聚合粒度：city=城市级 | province=省级"),
+    province_name: Optional[str] = Query(None, description="按省份过滤（city级别时生效）"),
     service: AnalysisService = Depends(get_analysis_service),
     _=Depends(get_current_user_roles),
 ):
     """
-    返回各船型数量占比，用于饼图渲染。
-    数据来源：`ship_type_stat_daily` 统计表（每日 02:00 由定时任务更新）。
+    返回城市或省级别的船舶分布热力数据。
+    数据来源：`ship_stat_city` 快照表（Kafka AIS 更新触发 30s 节流刷新）。
+
+    city 模式：每条数据含城市经纬度，可渲染气泡热力地图
+    province 模式：按省份聚合，适合全国大图概览
+
+    前端建议：
+    - city 级：气泡地图，以 longitude/latitude 定位，vessel_count 控制气泡大小
+    - province 级：省级 choropleth 地图（需配合省级 GeoJSON 边界）
     """
-    items = await service.get_ship_type_ratio(stat_date=stat_date)
-    return success(data={"stat_date": str(stat_date or date.today()), "items": items})
+    data = await service.get_ship_city_heatmap(
+        level=level, province_name=province_name
+    )
+    return success(data=data)
+
+
+@router.get("/ship/dwt_dist", summary="船舶载重吨区间分布", tags=["数据分析"])
+async def get_ship_dwt_distribution(
+    service: AnalysisService = Depends(get_analysis_service),
+    _=Depends(get_current_user_roles),
+):
+    """
+    返回船舶载重吨区间分布快照（6个档位）。
+    数据来源：`ship_stat_dwt` 快照表（vessel CRUD/批量导入后触发刷新）。
+
+    档位：500吨以下 / 500-1000吨 / 1000-2000吨 / 2000-5000吨 / 5000吨以上 / 未录入
+
+    前端建议：柱状图或直方图，X轴档位标签，Y轴船舶数量，可叠加比例标注。
+    """
+    data = await service.get_ship_dwt_distribution()
+    return success(data=data)
+
+
+@router.get("/ship/age_dist", summary="船舶船龄区间分布", tags=["数据分析"])
+async def get_ship_age_distribution(
+    service: AnalysisService = Depends(get_analysis_service),
+    _=Depends(get_current_user_roles),
+):
+    """
+    返回船舶船龄区间分布快照（6个档位，基于 vessel.build_year 实时计算）。
+    数据来源：`ship_stat_age` 快照表（vessel CRUD/批量导入后触发刷新）。
+
+    档位：5年以内 / 6-10年 / 11-15年 / 16-20年 / 20年以上 / 未知
+
+    前端建议：柱状图，X轴船龄档位，Y轴船舶数量，可配合 ratio 显示占比饼图。
+    """
+    data = await service.get_ship_age_distribution()
+    return success(data=data)

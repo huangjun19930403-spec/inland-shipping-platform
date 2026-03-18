@@ -3,6 +3,7 @@
 职责：船舶档案、动态数据、历史记录相关业务逻辑
 规则：通过Repository访问数据，不直接操作SQLAlchemy Session
 """
+import asyncio
 import logging
 from typing import Optional
 
@@ -14,12 +15,34 @@ from app.services.audit_service import AuditService
 logger = logging.getLogger(__name__)
 
 
+def _schedule_static_stat_refresh_task() -> None:
+    """在后台 asyncio Task 中触发静态船舶统计刷新（DWT + 船龄分布）"""
+    async def _run() -> None:
+        try:
+            from app.tasks.stat_tasks import refresh_vessel_static_stats
+            await refresh_vessel_static_stats()
+        except Exception as exc:
+            logger.warning("静态船舶统计刷新失败: %s", exc)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run())
+    except RuntimeError:
+        # 非 async 上下文（理论上不会发生），降级为同步忽略
+        logger.warning("无法调度静态船舶统计刷新：没有运行中的事件循环")
+
+
 class VesselService:
     """船舶业务服务"""
 
     def __init__(self, vessel_repo: VesselRepository, audit_svc: AuditService) -> None:
         self._vessel = vessel_repo
         self._audit_svc = audit_svc
+
+    @staticmethod
+    def _schedule_static_stat_refresh() -> None:
+        """调度后台 Task 刷新 DWT / 船龄分布快照（fire-and-forget）"""
+        _schedule_static_stat_refresh_task()
 
     # ─────────────────────────────────────────────────
     # 船型字典
@@ -141,6 +164,8 @@ class VesselService:
             after_data={"vessel_name": vessel_name, "mmsi": mmsi},
         )
         await self._vessel.save()
+        # 静态档案变更 → 异步刷新 DWT / 船龄分布快照
+        self._schedule_static_stat_refresh()
         return saved
 
     async def update_vessel(self, vessel_id: int, operator_id: int, **kwargs) -> Vessel:
@@ -170,6 +195,8 @@ class VesselService:
             before_data=before, after_data=kwargs,
         )
         await self._vessel.save()
+        # 静态档案变更 → 异步刷新 DWT / 船龄分布快照
+        self._schedule_static_stat_refresh()
         return updated
 
     async def delete_vessel(self, vessel_id: int, operator_id: int) -> None:
@@ -181,6 +208,8 @@ class VesselService:
             before_data={"vessel_name": vessel.vessel_name},
         )
         await self._vessel.save()
+        # 静态档案变更 → 异步刷新 DWT / 船龄分布快照
+        self._schedule_static_stat_refresh()
 
     async def bulk_register_vessels(
         self,
@@ -216,13 +245,17 @@ class VesselService:
                 success_list.append({"row": idx, "vessel_id": saved.id, "vessel_name": vessel_name})
             except Exception as e:
                 failed_list.append({"row": idx, "vessel_name": vessel_name, "error": str(e)})
-        return {
+        result = {
             "total": len(rows),
             "success_count": len(success_list),
             "failed_count": len(failed_list),
             "success_list": success_list,
             "failed_list": failed_list,
         }
+        if success_list:
+            # 批量导入完成后统一触发一次静态统计刷新
+            self._schedule_static_stat_refresh()
+        return result
 
     # ─────────────────────────────────────────────────
     # 船舶动态

@@ -10,6 +10,8 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from typing import Optional
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -23,6 +25,34 @@ logger = logging.getLogger(__name__)
 
 KAFKA_TOPIC = "vessel.dynamic"
 KAFKA_GROUP_ID = "inland-vessel-dynamic-group"
+
+# ─────────────────────────────────────────────────
+# 动态统计节流：进程级，30s 内最多触发一次全量刷新
+# ─────────────────────────────────────────────────
+_DYNAMIC_STAT_THROTTLE_SECONDS = 30
+_dynamic_stat_lock = asyncio.Lock()
+_dynamic_stat_last_run: Optional[datetime] = None
+
+
+async def _trigger_dynamic_stat_refresh() -> None:
+    """节流触发区域+城市热力快照刷新（进程级 30s 节流）"""
+    global _dynamic_stat_last_run
+
+    async with _dynamic_stat_lock:
+        now = datetime.utcnow()
+        if (
+            _dynamic_stat_last_run is not None
+            and now - _dynamic_stat_last_run < timedelta(seconds=_DYNAMIC_STAT_THROTTLE_SECONDS)
+        ):
+            return  # 节流：距上次刷新不足 30s，跳过
+
+        try:
+            from app.tasks.stat_tasks import refresh_vessel_dynamic_stats
+            await refresh_vessel_dynamic_stats()
+            _dynamic_stat_last_run = datetime.utcnow()
+            logger.debug("vessel.dynamic: 区域/城市热力快照已刷新")
+        except Exception as exc:
+            logger.warning("vessel.dynamic: 动态统计刷新失败 — %s", exc)
 
 
 async def _process_message(msg_value: bytes) -> None:
@@ -47,6 +77,10 @@ async def _process_message(msg_value: bytes) -> None:
         except Exception as e:
             await session.rollback()
             logger.error("vessel.dynamic: 处理消息失败 mmsi=%s — %s", msg.mmsi, e)
+            return
+
+    # 动态位置更新成功后，节流触发区域/城市热力统计刷新
+    await _trigger_dynamic_stat_refresh()
 
 
 async def start_consumer(bootstrap_servers: str = None) -> None:

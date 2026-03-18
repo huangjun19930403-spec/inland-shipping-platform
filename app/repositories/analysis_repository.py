@@ -10,16 +10,17 @@ from datetime import date, timedelta
 from typing import Optional, Sequence
 
 from sqlalchemy import select, and_, func, desc
-from sqlalchemy.orm import joinedload
 
 from app.models.analysis import (
     CargoCityHeatmap,
-    ShipHeatmapDaily,
     CargoStatDaily,
     CargoCommodityStatDaily,
     CargoOdDaily,
     CargoChannelDaily,
-    ShipTypeStatDaily,
+    ShipStatRegion,
+    ShipStatCity,
+    ShipStatDwt,
+    ShipStatAge,
 )
 from app.repositories.base import BaseRepository
 
@@ -85,45 +86,6 @@ class AnalysisRepository(BaseRepository):
                 total_tonnage=total_tonnage,
                 city_longitude=city_longitude,
                 city_latitude=city_latitude,
-            ))
-        await self._db.flush()
-
-    # ─────────────────────────────────────────────────
-    # ShipHeatmapDaily — 船舶热力统计
-    # ─────────────────────────────────────────────────
-
-    async def get_ship_heatmap(self, stat_date: date) -> Sequence[ShipHeatmapDaily]:
-        result = await self._db.execute(
-            select(ShipHeatmapDaily)
-            .options(joinedload(ShipHeatmapDaily.node))
-            .where(ShipHeatmapDaily.stat_date == stat_date)
-            .order_by(desc(ShipHeatmapDaily.vessel_count))
-        )
-        return result.unique().scalars().all()
-
-    async def upsert_ship_heatmap(
-        self,
-        stat_date: date,
-        node_id: int,
-        vessel_count: int,
-        total_deadweight: float,
-    ) -> None:
-        result = await self._db.execute(
-            select(ShipHeatmapDaily).where(
-                and_(
-                    ShipHeatmapDaily.stat_date == stat_date,
-                    ShipHeatmapDaily.node_id == node_id,
-                )
-            )
-        )
-        row = result.scalar_one_or_none()
-        if row:
-            row.vessel_count = vessel_count
-            row.total_deadweight = total_deadweight
-        else:
-            self._db.add(ShipHeatmapDaily(
-                stat_date=stat_date, node_id=node_id,
-                vessel_count=vessel_count, total_deadweight=total_deadweight,
             ))
         await self._db.flush()
 
@@ -379,47 +341,6 @@ class AnalysisRepository(BaseRepository):
         await self._db.flush()
 
     # ─────────────────────────────────────────────────
-    # ShipTypeStatDaily — 船舶类型统计
-    # ─────────────────────────────────────────────────
-
-    async def get_ship_type_stat(self, stat_date: date) -> Sequence[ShipTypeStatDaily]:
-        result = await self._db.execute(
-            select(ShipTypeStatDaily)
-            .where(ShipTypeStatDaily.stat_date == stat_date)
-            .order_by(desc(ShipTypeStatDaily.vessel_count))
-        )
-        return result.scalars().all()
-
-    async def upsert_ship_type_stat(
-        self,
-        stat_date: date,
-        vessel_type_id: int,
-        type_name: str,
-        vessel_count: int,
-        total_deadweight: float,
-    ) -> None:
-        result = await self._db.execute(
-            select(ShipTypeStatDaily).where(
-                and_(
-                    ShipTypeStatDaily.stat_date == stat_date,
-                    ShipTypeStatDaily.vessel_type_id == vessel_type_id,
-                )
-            )
-        )
-        row = result.scalar_one_or_none()
-        if row:
-            row.vessel_count = vessel_count
-            row.total_deadweight = total_deadweight
-            row.type_name = type_name
-        else:
-            self._db.add(ShipTypeStatDaily(
-                stat_date=stat_date, vessel_type_id=vessel_type_id,
-                type_name=type_name, vessel_count=vessel_count,
-                total_deadweight=total_deadweight,
-            ))
-        await self._db.flush()
-
-    # ─────────────────────────────────────────────────
     # 仪表盘汇总
     # ─────────────────────────────────────────────────
 
@@ -430,22 +351,58 @@ class AnalysisRepository(BaseRepository):
         )
         return result.scalar_one_or_none()
 
-    async def get_latest_ship_total(self) -> dict:
-        """获取最新一天的全国船舶合计（从 ship_heatmap_daily 汇总节点数据）"""
+    # ─────────────────────────────────────────────────
+    # ShipStatRegion — 区域热力快照（只读）
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_stat_region(self) -> Sequence[ShipStatRegion]:
+        """返回全部区域热力快照，按 vessel_count 降序"""
         result = await self._db.execute(
-            select(func.max(ShipHeatmapDaily.stat_date).label("latest_date"))
+            select(ShipStatRegion).order_by(desc(ShipStatRegion.vessel_count))
         )
-        latest_date = result.scalar_one_or_none()
-        if not latest_date:
-            return {"vessel_count": 0, "total_deadweight": 0}
-        result2 = await self._db.execute(
-            select(
-                func.sum(ShipHeatmapDaily.vessel_count).label("vessel_count"),
-                func.sum(ShipHeatmapDaily.total_deadweight).label("total_deadweight"),
-            ).where(ShipHeatmapDaily.stat_date == latest_date)
+        return result.scalars().all()
+
+    # ─────────────────────────────────────────────────
+    # ShipStatCity — 城市热力快照（只读）
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_stat_city(
+        self, province_name: Optional[str] = None
+    ) -> Sequence[ShipStatCity]:
+        """返回城市热力快照，可按省份过滤，按 vessel_count 降序"""
+        filters = []
+        if province_name:
+            filters.append(ShipStatCity.province_name == province_name)
+        stmt = select(ShipStatCity).order_by(desc(ShipStatCity.vessel_count))
+        if filters:
+            stmt = stmt.where(and_(*filters))
+        result = await self._db.execute(stmt)
+        return result.scalars().all()
+
+    # ─────────────────────────────────────────────────
+    # ShipStatDwt — 载重吨分布快照（只读）
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_stat_dwt(self) -> Sequence[ShipStatDwt]:
+        """返回全部载重吨区间分布快照，按 min_dwt 排序（NULL 排末尾）"""
+        result = await self._db.execute(
+            select(ShipStatDwt).order_by(
+                ShipStatDwt.min_dwt.is_(None),
+                ShipStatDwt.min_dwt,
+            )
         )
-        row = result2.one()
-        return {
-            "vessel_count": int(row.vessel_count or 0),
-            "total_deadweight": float(row.total_deadweight or 0),
-        }
+        return result.scalars().all()
+
+    # ─────────────────────────────────────────────────
+    # ShipStatAge — 船龄分布快照（只读）
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_stat_age(self) -> Sequence[ShipStatAge]:
+        """返回全部船龄区间分布快照，按 min_age 排序（NULL 排末尾）"""
+        result = await self._db.execute(
+            select(ShipStatAge).order_by(
+                ShipStatAge.min_age.is_(None),
+                ShipStatAge.min_age,
+            )
+        )
+        return result.scalars().all()

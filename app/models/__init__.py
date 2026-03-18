@@ -7,7 +7,8 @@ from app.models.cargo import (  # noqa
 )
 from app.models.analysis import (  # noqa
     CargoCityHeatmap, CargoStatDaily, CargoCommodityStatDaily,
-    CargoOdDaily, CargoChannelDaily, ShipHeatmapDaily, ShipTypeStatDaily
+    CargoOdDaily, CargoChannelDaily,
+    ShipStatRegion, ShipStatCity, ShipStatDwt, ShipStatAge,
 )
 from app.models.vessel import (  # noqa
     VesselTypeDict, Vessel, VesselNameHistory, VesselAisHistory, VesselDynamic

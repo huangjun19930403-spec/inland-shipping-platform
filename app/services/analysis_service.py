@@ -29,18 +29,22 @@ class AnalysisService:
 
     async def get_dashboard_stats(self) -> dict:
         cargo_stat = await self._analysis.get_latest_cargo_stat()
-        ship_stat = await self._analysis.get_latest_ship_total()
+        # 从区域快照汇总船舶总数和总运力
+        region_rows = await self._analysis.get_ship_stat_region()
+        vessel_count = sum(r.vessel_count for r in region_rows)
+        total_deadweight = sum(float(r.total_deadweight or 0) for r in region_rows)
         return {
             "cargo_total": cargo_stat.total_count if cargo_stat else 0,
             "cargo_confirmed": cargo_stat.confirmed_count if cargo_stat else 0,
             "cargo_pending": cargo_stat.pending_count if cargo_stat else 0,
             "cargo_tonnage": float(cargo_stat.total_tonnage or 0) if cargo_stat else 0,
-            "active_vessels": ship_stat["vessel_count"],
+            "active_vessels": vessel_count,
+            "vessel_deadweight": total_deadweight,
             "stat_date": str(cargo_stat.stat_date) if cargo_stat else None,
         }
 
     # ─────────────────────────────────────────────────
-    # 货源城市热力图（替代原节点级热力图）
+    # 货源城市热力图
     # ─────────────────────────────────────────────────
 
     async def get_cargo_heatmap(
@@ -181,7 +185,6 @@ class AnalysisService:
         """返回各录入渠道的质量统计数据，用于堆叠面积图或数据质量卡片"""
         if stat_date:
             rows = await self._analysis.get_cargo_channel_stat(stat_date=stat_date)
-            # 单日：返回 items 列表
             items = [
                 {
                     "source_type": r.source_type,
@@ -200,7 +203,6 @@ class AnalysisService:
             return {"stat_date": str(stat_date), "items": items}
         else:
             rows = await self._analysis.get_cargo_channel_trend(days=days)
-            # 多日：按渠道分组返回趋势
             grouped: dict[str, list] = {}
             for r in rows:
                 grouped.setdefault(r.source_type, []).append({
@@ -213,50 +215,135 @@ class AnalysisService:
             return {"days": days, "channels": grouped}
 
     # ─────────────────────────────────────────────────
-    # 船舶热力图
+    # 船舶区域热力图（快照）
     # ─────────────────────────────────────────────────
 
-    async def get_ship_heatmap(
-        self,
-        stat_date: Optional[date] = None,
-        region_id: Optional[int] = None,
-    ) -> list:
-        target = stat_date or date.today()
-        rows = await self._analysis.get_ship_heatmap(stat_date=target)
-        result = []
-        for r in rows:
-            node = r.node
-            if region_id and node and node.region_id != region_id:
-                continue
-            result.append({
-                "node_id": r.node_id,
-                "vessel_count": r.vessel_count,
-                "total_deadweight": float(r.total_deadweight or 0),
-                "stat_date": str(r.stat_date),
-                "longitude": float(node.longitude) if node and node.longitude else None,
-                "latitude": float(node.latitude) if node and node.latitude else None,
-                "node_name": node.name if node else None,
-            })
-        return result
-
-    # ─────────────────────────────────────────────────
-    # 船型占比
-    # ─────────────────────────────────────────────────
-
-    async def get_ship_type_ratio(self, stat_date: Optional[date] = None) -> list:
-        target = stat_date or date.today()
-        rows = await self._analysis.get_ship_type_stat(stat_date=target)
-        total = sum(r.vessel_count for r in rows) or 1
-        return [
+    async def get_ship_region_heatmap(self) -> dict:
+        """返回各商业区域的船舶数量和运力快照，含多边形边界坐标供前端绘图"""
+        rows = await self._analysis.get_ship_stat_region()
+        items = [
             {
-                "vessel_type_id": r.vessel_type_id,
-                "type_name": r.type_name,
+                "region_id": r.region_id,
+                "region_name": r.region_name,
+                "center_longitude": float(r.center_longitude) if r.center_longitude else None,
+                "center_latitude": float(r.center_latitude) if r.center_latitude else None,
+                "boundary_coordinates": r.boundary_coordinates,
                 "vessel_count": r.vessel_count,
                 "total_deadweight": float(r.total_deadweight or 0),
-                "ratio": round(r.vessel_count / total * 100, 2),
+                "ratio": float(r.ratio or 0),
+                "refreshed_at": r.refreshed_at.isoformat() if r.refreshed_at else None,
             }
             for r in rows
         ]
+        return {
+            "total_vessels": sum(r["vessel_count"] for r in items),
+            "items": items,
+        }
+
+    # ─────────────────────────────────────────────────
+    # 船舶城市热力图（快照）
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_city_heatmap(
+        self,
+        level: str = "city",
+        province_name: Optional[str] = None,
+    ) -> dict:
+        """返回城市/省份级船舶分布热力数据
+
+        level='city'     — 返回各城市的 vessel_count / total_deadweight / 经纬度
+        level='province' — 在服务层按 province_name 聚合（无需额外DB查询）
+        province_name    — 过滤指定省份（city模式下生效）
+        """
+        rows = await self._analysis.get_ship_stat_city(
+            province_name=province_name if level == "city" else None
+        )
+
+        if level == "province":
+            # 省级聚合
+            prov: dict[str, dict] = {}
+            for r in rows:
+                pn = r.province_name or "未知"
+                if pn not in prov:
+                    prov[pn] = {"province_name": pn, "vessel_count": 0, "total_deadweight": 0.0}
+                prov[pn]["vessel_count"] += r.vessel_count
+                prov[pn]["total_deadweight"] += float(r.total_deadweight or 0)
+            total = sum(p["vessel_count"] for p in prov.values()) or 1
+            items = sorted(prov.values(), key=lambda x: x["vessel_count"], reverse=True)
+            for item in items:
+                item["ratio"] = round(item["vessel_count"] / total * 100, 2)
+            return {"level": "province", "total_vessels": total, "items": items}
+
+        # 城市级
+        total = sum(r.vessel_count for r in rows) or 1
+        items = [
+            {
+                "city_code": r.city_code,
+                "city_name": r.city_name,
+                "province_name": r.province_name,
+                "longitude": float(r.longitude) if r.longitude else None,
+                "latitude": float(r.latitude) if r.latitude else None,
+                "vessel_count": r.vessel_count,
+                "total_deadweight": float(r.total_deadweight or 0),
+                "ratio": float(r.ratio or 0),
+                "refreshed_at": r.refreshed_at.isoformat() if r.refreshed_at else None,
+            }
+            for r in rows
+        ]
+        return {
+            "level": "city",
+            "province_name": province_name,
+            "total_vessels": total,
+            "items": items,
+        }
+
+    # ─────────────────────────────────────────────────
+    # 载重吨分布
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_dwt_distribution(self) -> dict:
+        """返回船舶载重吨区间分布快照"""
+        rows = await self._analysis.get_ship_stat_dwt()
+        total = sum(r.vessel_count for r in rows) or 1
+        items = [
+            {
+                "segment_label": r.segment_label,
+                "min_dwt": r.min_dwt,
+                "max_dwt": r.max_dwt,
+                "vessel_count": r.vessel_count,
+                "ratio": float(r.ratio or 0),
+                "refreshed_at": r.refreshed_at.isoformat() if r.refreshed_at else None,
+            }
+            for r in rows
+        ]
+        return {
+            "total_vessels": total,
+            "items": items,
+        }
+
+    # ─────────────────────────────────────────────────
+    # 船龄分布
+    # ─────────────────────────────────────────────────
+
+    async def get_ship_age_distribution(self) -> dict:
+        """返回船舶船龄区间分布快照"""
+        rows = await self._analysis.get_ship_stat_age()
+        total = sum(r.vessel_count for r in rows) or 1
+        items = [
+            {
+                "age_range_label": r.age_range_label,
+                "min_age": r.min_age,
+                "max_age": r.max_age,
+                "vessel_count": r.vessel_count,
+                "ratio": float(r.ratio or 0),
+                "refreshed_at": r.refreshed_at.isoformat() if r.refreshed_at else None,
+            }
+            for r in rows
+        ]
+        return {
+            "total_vessels": total,
+            "items": items,
+        }
 
     # ─────────────────────────────────────────────────
     # 手动触发统计（管理员）
@@ -265,3 +352,8 @@ class AnalysisService:
     async def run_daily_stats(self, target_date: Optional[date] = None) -> dict:
         from app.tasks.stat_tasks import daily_stat_job
         return await daily_stat_job(target_date=target_date)
+
+    async def run_ship_stats(self) -> dict:
+        """手动触发全量船舶统计刷新（管理员，忽略节流）"""
+        from app.tasks.stat_tasks import refresh_all_vessel_stats
+        return await refresh_all_vessel_stats()
