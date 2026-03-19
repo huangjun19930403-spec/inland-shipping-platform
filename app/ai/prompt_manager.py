@@ -37,7 +37,7 @@ class PromptTemplate:
         return result
 
 
-async def get_template(name: str, db: AsyncSession) -> PromptTemplate:
+async def get_template(name: str, db: AsyncSession, app=None) -> PromptTemplate:
     """获取指定名称的激活版本提示词模板。
 
     优先读内存缓存，缓存过期后从 DB 加载激活版本。

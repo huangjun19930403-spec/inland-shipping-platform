@@ -5,7 +5,6 @@
 - 提示词模板管理 CRUD
 - 调用日志查询 + 统计
 """
-import json
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -20,6 +19,7 @@ from app.repositories.ai_repository import AiRepository
 from app.schemas.cargo import CargoRawMessageResponse, CargoAiParseResultResponse
 from app.schemas.common import success
 from app.ai.prompt_manager import invalidate_cache
+from app.ai.utils import normalize_corrected_fields
 
 router = APIRouter()
 
@@ -136,7 +136,7 @@ async def create_prompt_version(
     template_id: int,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_roles("ADMIN")),
+    user_roles=Depends(require_roles("ADMIN")),
 ):
     """
     body: {
@@ -147,6 +147,7 @@ async def create_prompt_version(
     }
     """
     ai_repo = AiRepository(db)
+    user, _ = user_roles
     template = await ai_repo.get_template_by_id(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="模板不存在")
@@ -163,7 +164,7 @@ async def create_prompt_version(
         system_prompt=system_prompt,
         user_template=user_template,
         change_note=body.get("change_note"),
-        created_by=body.get("created_by", "operator"),
+        created_by=user.id,
     )
     saved = await ai_repo.create_version(ver)
 
@@ -235,7 +236,7 @@ async def list_call_logs(
                 "parse_result_id": log.parse_result_id,
                 "confidence_score": log.confidence_score,
                 "human_confirmed": log.human_confirmed,
-                "corrected_fields": json.loads(log.corrected_fields) if log.corrected_fields else [],
+                "corrected_fields": normalize_corrected_fields(log.corrected_fields),
                 "created_at": log.created_at.isoformat() if log.created_at else None,
             }
             for log in logs

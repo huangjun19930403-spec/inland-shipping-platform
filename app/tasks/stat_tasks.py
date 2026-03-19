@@ -215,18 +215,7 @@ async def _stat_cargo_channel(db: AsyncSession, stat_date: date) -> None:
     )
     freight_rows = {r.source_type: r for r in freight_result.all()}
 
-    # WECHAT_AI 渠道原始消息数及解析成功数
-    msg_result = await db.execute(
-        select(
-            func.count(CargoRawMessage.id).label("raw_count"),
-            func.sum(
-                func.cast(CargoRawMessage.status == "PARSED", db.bind.dialect.type_compiler.__class__)
-                if False else 1
-            ).label("_unused"),
-        )
-        .where(func.date(CargoRawMessage.created_at) == stat_date)
-    )
-    # 简化实现：单独统计 WECHAT_AI 原始消息总数和成功数
+    # WECHAT_AI 渠道原始消息总数和解析成功数
     raw_total_result = await db.execute(
         select(func.count(CargoRawMessage.id))
         .where(func.date(CargoRawMessage.created_at) == stat_date)

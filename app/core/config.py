@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # Celery配置（生产环境需Redis）
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    # Redis Streams 配置（TMS消费者使用）
+    REDIS_URL: str = "redis://localhost:6379/2"
 
     # 定时任务配置（Celery Beat crontab格式）
     STATS_CRON_SCHEDULE: str = "0 2 * * *"  # 每日凌晨2点

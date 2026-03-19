@@ -49,7 +49,9 @@ _TARGET_TABLE_MAP = {
     "COMMODITY_CATEGORY":  "commodity_category",
     "COMMODITY_TYPE":      "commodity_type",
     "COMMODITY_STANDARD":  "commodity_standard",
-    "CARGO_OPPORTUNITY":   "cargo_opportunity",
+    "CARGO_FREIGHT":       "cargo_freight",
+    # 兼容旧数据：历史上使用 CARGO_OPPORTUNITY，现统一映射到 cargo_freight
+    "CARGO_OPPORTUNITY":   "cargo_freight",
 }
 
 # 审批通过后需要同时将 status 置为 1 的表（启用状态）

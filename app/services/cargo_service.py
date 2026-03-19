@@ -311,14 +311,13 @@ class CargoService:
         )
 
         # 写回人工确认反馈到 AiCallLog
-        import json
         call_log = await self._ai_repo.get_call_log_by_parse_result(result_id)
         if call_log:
             has_correction = bool(corrected_fields)
             await self._ai_repo.update_call_log(
                 call_log.id,
-                human_confirmed=True,
-                corrected_fields=json.dumps(corrected_fields, ensure_ascii=False) if corrected_fields else None,
+                human_confirmed=(not has_correction),
+                corrected_fields=corrected_fields or None,
             )
             if call_log.prompt_template_id and call_log.prompt_version:
                 await self._ai_repo.increment_confirm_stats(
