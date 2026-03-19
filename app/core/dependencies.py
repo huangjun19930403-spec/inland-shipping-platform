@@ -8,15 +8,13 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.core.security import get_current_user
-from app.models.system import SysUser
+from app.repositories.ai_repository import AiRepository
 from app.repositories.cargo_repository import CargoRepository
 from app.repositories.address_repository import AddressRepository
 from app.repositories.vessel_repository import VesselRepository
 from app.repositories.route_repository import RouteRepository
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.audit_repository import AuditRepository
-from app.repositories.system_repository import SystemRepository
 from app.services.cargo_service import CargoService
 from app.services.address_service import AddressService
 from app.services.vessel_service import VesselService
@@ -78,45 +76,51 @@ async def get_audit_repo(
     return AuditRepository(db)
 
 
-async def get_system_repo(
-    db: AsyncSession = Depends(get_db),
-) -> SystemRepository:
-    return SystemRepository(db)
-
-
 # ─────────────────────────────────────────────────
 # Service依赖
 # ─────────────────────────────────────────────────
 
-async def get_cargo_service(
-    cargo_repo: CargoRepository = Depends(get_cargo_repo),
-    address_repo: AddressRepository = Depends(get_address_repo),
+async def get_audit_service(
     audit_repo: AuditRepository = Depends(get_audit_repo),
+) -> AuditService:
+    return AuditService(audit_repo=audit_repo)
+
+
+async def get_ai_repo(
+    db: AsyncSession = Depends(get_db),
+) -> AiRepository:
+    return AiRepository(db)
+
+
+async def get_cargo_service(
+    db: AsyncSession = Depends(get_db),
 ) -> CargoService:
+    # 显式共享同一 Session，确保业务写入与审核写入在同一事务内提交
     return CargoService(
-        cargo_repo=cargo_repo,
-        address_repo=address_repo,
-        audit_repo=audit_repo,
+        cargo_repo=CargoRepository(db),
+        address_repo=AddressRepository(db),
+        audit_svc=AuditService(audit_repo=AuditRepository(db)),
+        ai_repo=AiRepository(db),
     )
 
 
 async def get_address_service(
-    address_repo: AddressRepository = Depends(get_address_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo),
+    db: AsyncSession = Depends(get_db),
 ) -> AddressService:
+    # 显式共享同一 Session，确保业务写入与审核写入在同一事务内提交
     return AddressService(
-        address_repo=address_repo,
-        audit_repo=audit_repo,
+        address_repo=AddressRepository(db),
+        audit_svc=AuditService(audit_repo=AuditRepository(db)),
     )
 
 
 async def get_vessel_service(
-    vessel_repo: VesselRepository = Depends(get_vessel_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo),
+    db: AsyncSession = Depends(get_db),
 ) -> VesselService:
+    # 显式共享同一 Session，确保业务写入与审核写入在同一事务内提交
     return VesselService(
-        vessel_repo=vessel_repo,
-        audit_repo=audit_repo,
+        vessel_repo=VesselRepository(db),
+        audit_svc=AuditService(audit_repo=AuditRepository(db)),
     )
 
 
@@ -128,23 +132,8 @@ async def get_route_service(
 
 async def get_analysis_service(
     analysis_repo: AnalysisRepository = Depends(get_analysis_repo),
-    cargo_repo: CargoRepository = Depends(get_cargo_repo),
-    address_repo: AddressRepository = Depends(get_address_repo),
 ) -> AnalysisService:
-    return AnalysisService(
-        analysis_repo=analysis_repo,
-        cargo_repo=cargo_repo,
-        address_repo=address_repo,
-    )
+    """AnalysisService 只依赖 AnalysisRepository（只读统计表）"""
+    return AnalysisService(analysis_repo=analysis_repo)
 
 
-async def get_audit_service(
-    audit_repo: AuditRepository = Depends(get_audit_repo),
-    cargo_repo: CargoRepository = Depends(get_cargo_repo),
-    address_repo: AddressRepository = Depends(get_address_repo),
-) -> AuditService:
-    return AuditService(
-        audit_repo=audit_repo,
-        cargo_repo=cargo_repo,
-        address_repo=address_repo,
-    )

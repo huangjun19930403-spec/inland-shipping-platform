@@ -3,8 +3,9 @@
 职责：货物/商品相关业务逻辑编排
 规则：只调用Repository，不直接操作SQLAlchemy Session
 """
-import json
 import logging
+import uuid
+from datetime import date, datetime
 from typing import Optional
 
 from app.core.exceptions import NotFoundError, ValidationError
@@ -12,23 +13,40 @@ from app.models.cargo import (
     CommodityCategory,
     CommodityType,
     CommodityStandard,
+    CommodityAlias,
     CargoRawMessage,
     CargoAiParseResult,
-    CargoOpportunity,
+    CargoFreight,
 )
-from app.models.audit import AuditRecord
+from app.repositories.ai_repository import AiRepository
 from app.repositories.cargo_repository import CargoRepository
 from app.repositories.address_repository import AddressRepository
-from app.repositories.audit_repository import AuditRepository
+from app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
+
+
+def _make_freight_no() -> str:
+    return f"CS-{date.today().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+
+
+def _parse_date(value: Optional[str]):
+    """将字符串日期转为 date 对象（SQLite Date 列不接受字符串）。"""
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
 class CargoService:
     """
     货物业务服务
 
-    依赖注入：CargoRepository + AddressRepository + AuditRepository
+    依赖注入：CargoRepository + AddressRepository + AuditService
     不持有SQLAlchemy Session，通过Repository间接访问数据库
     """
 
@@ -36,11 +54,13 @@ class CargoService:
         self,
         cargo_repo: CargoRepository,
         address_repo: AddressRepository,
-        audit_repo: AuditRepository,
+        audit_svc: AuditService,
+        ai_repo: AiRepository,
     ) -> None:
         self._cargo = cargo_repo
         self._address = address_repo
-        self._audit = audit_repo
+        self._audit_svc = audit_svc
+        self._ai_repo = ai_repo
 
     # ─────────────────────────────────────────────────
     # 商品分类
@@ -56,13 +76,14 @@ class CargoService:
             name=name,
             code=code,
             description=description,
+            submitter_id=operator_id,
+            audit_status=0,
         )
         saved = await self._cargo.categories.create(category)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="COMMODITY_CATEGORY",
-            target_id=saved.id,
+        await self._audit_svc.submit_for_audit(
+            target_type="COMMODITY_CATEGORY", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
             after_data={"name": saved.name, "code": saved.code},
         )
         await self._cargo.save()
@@ -87,13 +108,14 @@ class CargoService:
             category_id=category_id,
             name=name,
             code=code,
+            submitter_id=operator_id,
+            audit_status=0,
         )
         saved = await self._cargo.types.create(cargo_type)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="COMMODITY_TYPE",
-            target_id=saved.id,
+        await self._audit_svc.submit_for_audit(
+            target_type="COMMODITY_TYPE", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
             after_data={"name": saved.name, "category_id": category_id},
         )
         await self._cargo.save()
@@ -106,26 +128,53 @@ class CargoService:
     async def list_standards_by_type(self, type_id: int):
         return await self._cargo.standards.get_by_type(type_id)
 
+    async def list_standards_paginated(
+        self,
+        type_id: Optional[int] = None,
+        keyword: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._cargo.standards.list_paginated(
+            type_id=type_id, keyword=keyword, offset=offset, limit=page_size
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    async def list_all_standards(self, type_id: Optional[int] = None):
+        return await self._cargo.standards.get_all(type_id=type_id)
+
     async def create_standard(
-        self, type_id: int, name: str, description: Optional[str], operator_id: int
+        self, type_id: int, operator_id: int, **kwargs
     ) -> CommodityStandard:
         cargo_type = await self._cargo.types.get_by_id(type_id)
         if not cargo_type:
             raise NotFoundError("CommodityType", type_id)
 
         standard = CommodityStandard(
-            commodity_type_id=type_id,
-            name=name,
-            description=description,
+            type_id=type_id,
+            submitter_id=operator_id,
+            audit_status=0,
+            **kwargs,
         )
         saved = await self._cargo.standards.create(standard)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="COMMODITY_STANDARD",
-            target_id=saved.id,
+        await self._audit_svc.submit_for_audit(
+            target_type="COMMODITY_STANDARD", target_id=saved.id,
+            target_name=saved.name, action="CREATE",
+            submitter_id=operator_id,
             after_data={"name": saved.name, "type_id": type_id},
         )
+        await self._cargo.save()
+        return saved
+
+    async def create_commodity_alias(
+        self, standard_id: int, operator_id: int, **kwargs
+    ) -> CommodityAlias:
+        standard = await self._cargo.standards.get_by_id(standard_id)
+        if not standard:
+            raise NotFoundError("CommodityStandard", standard_id)
+        alias = CommodityAlias(commodity_id=standard_id, **kwargs)
+        saved = await self._cargo.aliases.create_alias(alias)
         await self._cargo.save()
         return saved
 
@@ -134,14 +183,17 @@ class CargoService:
     # ─────────────────────────────────────────────────
 
     async def submit_cargo_text(
-        self, raw_text: str, source: Optional[str], operator_id: int
+        self, raw_text: str, source_type: Optional[str], operator_id: int,
+        group_name: Optional[str] = None, sender_name: Optional[str] = None,
     ) -> CargoRawMessage:
         """提交原始货运文本，创建待解析记录"""
         raw_msg = CargoRawMessage(
             raw_text=raw_text,
-            source=source,
-            operator_id=operator_id,
-            parse_status="PENDING",
+            source_type=source_type or "WECHAT_GROUP",
+            group_name=group_name,
+            sender_name=sender_name,
+            collector_id=operator_id,
+            status="PENDING",
         )
         saved = await self._cargo.create(raw_msg)
         await self._cargo.save()
@@ -172,7 +224,8 @@ class CargoService:
     # ─────────────────────────────────────────────────
 
     async def get_parse_result(self, msg_id: int) -> CargoAiParseResult:
-        result = await self._cargo.get_parse_result(msg_id)
+        """根据原始消息ID获取最新解析结果"""
+        result = await self._cargo.get_parse_result_by_msg(msg_id)
         if not result:
             raise NotFoundError("CargoAiParseResult for message", msg_id)
         return result
@@ -182,72 +235,136 @@ class CargoService:
         result_id: int,
         operator_id: int,
         overrides: Optional[dict] = None,
-    ) -> CargoOpportunity:
-        """确认AI解析结果，创建最终货源机会记录"""
-        from sqlalchemy import select
-        from app.models.cargo import CargoAiParseResult as ParseModel
-
-        # 直接查询parseResult（因cargo_repo.update_parse_result已支持）
-        parse_result = await self._cargo.update_parse_result(result_id)
+    ) -> CargoFreight:
+        """确认AI解析结果，创建最终货源记录（CargoFreight）"""
+        parse_result = await self._cargo.get_parse_result(result_id)
         if not parse_result:
             raise NotFoundError("CargoAiParseResult", result_id)
 
-        if parse_result.status != "PENDING_CONFIRM":
+        if parse_result.parse_status != "PENDING_CONFIRM":
             raise ValidationError(
-                f"Cannot confirm: status is '{parse_result.status}'"
+                f"Cannot confirm: parse_status is '{parse_result.parse_status}'"
             )
 
-        # 合并人工修正
         ov = overrides or {}
+
+        # 检测哪些字段被人工修正（用于反馈到AiCallLog）
+        _correctable = {
+            "origin_node_id": parse_result.origin_node_id,
+            "dest_node_id": parse_result.dest_node_id,
+            "commodity_id": parse_result.commodity_id,
+            "tonnage": parse_result.tonnage,
+            "loading_date": parse_result.loading_date,
+            "freight_price": parse_result.freight_price,
+        }
+        corrected_fields = [
+            k for k, ai_val in _correctable.items()
+            if k in ov and ov[k] is not None and ov[k] != ai_val
+        ]
+
+        # 位置信息优先用人工修正值，无则用AI解析值
         origin_node_id = ov.get("origin_node_id") or parse_result.origin_node_id
         dest_node_id = ov.get("dest_node_id") or parse_result.dest_node_id
-        commodity_id = ov.get("commodity_standard_id") or parse_result.commodity_standard_id
+        origin_admin_code = ov.get("origin_admin_code") or parse_result.origin_admin_code
+        dest_admin_code = ov.get("dest_admin_code") or parse_result.dest_admin_code
 
-        opportunity = CargoOpportunity(
-            raw_message_id=parse_result.raw_message_id,
+        # 推断位置精度
+        origin_precision = "NODE" if origin_node_id else ("CITY" if origin_admin_code else "UNKNOWN")
+        dest_precision = "NODE" if dest_node_id else ("CITY" if dest_admin_code else "UNKNOWN")
+
+        freight = CargoFreight(
+            freight_no=_make_freight_no(),
+            source_type="WECHAT_AI",
+            status="CONFIRMED",
             origin_node_id=origin_node_id,
+            origin_admin_code=origin_admin_code,
+            origin_admin_name=parse_result.origin_admin_name,
+            origin_raw_text=parse_result.origin_text,
+            origin_precision=origin_precision,
             dest_node_id=dest_node_id,
-            commodity_standard_id=commodity_id,
-            tonnage=parse_result.tonnage,
-            loading_date=parse_result.loading_date,
-            freight_price=parse_result.freight_price,
-            contact=parse_result.contact,
-            remarks=parse_result.remarks,
-            operator_id=operator_id,
-            status="ACTIVE",
+            dest_admin_code=dest_admin_code,
+            dest_admin_name=parse_result.dest_admin_name,
+            dest_raw_text=parse_result.dest_text,
+            dest_precision=dest_precision,
+            commodity_id=ov.get("commodity_id") or parse_result.commodity_id,
+            commodity_text=parse_result.commodity_text,
+            tonnage=ov.get("tonnage") or parse_result.tonnage,
+            loading_date=ov.get("loading_date") or parse_result.loading_date,
+            freight_price=ov.get("freight_price") or parse_result.freight_price,
+            price_type=ov.get("price_type") or parse_result.price_type,
+            contact_person=ov.get("contact_person") or parse_result.contact_person,
+            contact_phone=ov.get("contact_phone") or parse_result.contact_phone,
+            remark=ov.get("remark"),
+            raw_message_id=parse_result.raw_message_id,
+            parse_result_id=result_id,
+            collector_id=operator_id,
+            submitter_id=operator_id,
+            audit_status=0,
         )
 
-        saved_opp = await self._cargo.create_opportunity(opportunity)
-        await self._cargo.update_parse_result(result_id, status="CONFIRMED")
+        saved_freight = await self._cargo.create_freight(freight)
+        await self._cargo.update_parse_result(
+            result_id,
+            parse_status="CONFIRMED",
+            confirmed_by=operator_id,
+            confirmed_at=datetime.now(),
+        )
 
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CONFIRM",
-            target_type="CARGO_OPPORTUNITY",
-            target_id=saved_opp.id,
-            after_data={"from_parse_result_id": result_id},
+        # 写回人工确认反馈到 AiCallLog
+        import json
+        call_log = await self._ai_repo.get_call_log_by_parse_result(result_id)
+        if call_log:
+            has_correction = bool(corrected_fields)
+            await self._ai_repo.update_call_log(
+                call_log.id,
+                human_confirmed=True,
+                corrected_fields=json.dumps(corrected_fields, ensure_ascii=False) if corrected_fields else None,
+            )
+            if call_log.prompt_template_id and call_log.prompt_version:
+                await self._ai_repo.increment_confirm_stats(
+                    template_id=call_log.prompt_template_id,
+                    version=call_log.prompt_version,
+                    corrected=has_correction,
+                )
+
+        await self._audit_svc.submit_for_audit(
+            target_type="CARGO_FREIGHT", target_id=saved_freight.id,
+            target_name=f"CargoFreight#{saved_freight.freight_no}", action="CREATE",
+            submitter_id=operator_id,
+            after_data={"from_parse_result_id": result_id, "source_type": "WECHAT_AI"},
         )
         await self._cargo.save()
-        logger.info(f"[CargoService] opportunity confirmed id={saved_opp.id}")
-        return saved_opp
+        logger.info(f"[CargoService] freight confirmed id={saved_freight.id}")
+        return saved_freight
 
     # ─────────────────────────────────────────────────
-    # 货源机会
+    # 货源主记录（CargoFreight）
     # ─────────────────────────────────────────────────
 
-    async def create_manual_opportunity(
+    async def create_manual_freight(
         self,
-        origin_node_id: Optional[int],
-        dest_node_id: Optional[int],
-        commodity_standard_id: Optional[int],
-        tonnage: Optional[float],
-        loading_date: Optional[str],
-        freight_price: Optional[float],
-        contact: Optional[str],
-        remarks: Optional[str],
         operator_id: int,
-    ) -> CargoOpportunity:
-        """手动录入货源机会（不经过AI解析）"""
+        origin_node_id: Optional[int] = None,
+        origin_admin_code: Optional[str] = None,
+        origin_admin_name: Optional[str] = None,
+        origin_raw_text: Optional[str] = None,
+        dest_node_id: Optional[int] = None,
+        dest_admin_code: Optional[str] = None,
+        dest_admin_name: Optional[str] = None,
+        dest_raw_text: Optional[str] = None,
+        commodity_id: Optional[int] = None,
+        commodity_text: Optional[str] = None,
+        tonnage: Optional[float] = None,
+        loading_date: Optional[str] = None,
+        freight_price: Optional[float] = None,
+        price_type: Optional[int] = None,
+        price_unit: Optional[str] = None,
+        contact_person: Optional[str] = None,
+        contact_phone: Optional[str] = None,
+        remark: Optional[str] = None,
+        source_type: str = "MANUAL",
+    ) -> CargoFreight:
+        """手动录入货源（MANUAL渠道）"""
         if origin_node_id:
             node = await self._address.get_node(origin_node_id)
             if not node:
@@ -258,69 +375,77 @@ class CargoService:
             if not node:
                 raise NotFoundError("TransportNode (destination)", dest_node_id)
 
-        opportunity = CargoOpportunity(
+        origin_precision = "NODE" if origin_node_id else ("CITY" if origin_admin_code else "UNKNOWN")
+        dest_precision = "NODE" if dest_node_id else ("CITY" if dest_admin_code else "UNKNOWN")
+
+        freight = CargoFreight(
+            freight_no=_make_freight_no(),
+            source_type=source_type,
+            status="CONFIRMED",
             origin_node_id=origin_node_id,
+            origin_admin_code=origin_admin_code,
+            origin_admin_name=origin_admin_name,
+            origin_raw_text=origin_raw_text,
+            origin_precision=origin_precision,
             dest_node_id=dest_node_id,
-            commodity_standard_id=commodity_standard_id,
+            dest_admin_code=dest_admin_code,
+            dest_admin_name=dest_admin_name,
+            dest_raw_text=dest_raw_text,
+            dest_precision=dest_precision,
+            commodity_id=commodity_id,
+            commodity_text=commodity_text,
             tonnage=tonnage,
-            loading_date=loading_date,
+            loading_date=_parse_date(loading_date),
             freight_price=freight_price,
-            contact=contact,
-            remarks=remarks,
-            operator_id=operator_id,
-            status="PENDING",
+            price_type=price_type,
+            price_unit=price_unit,
+            contact_person=contact_person,
+            contact_phone=contact_phone,
+            remark=remark,
+            collector_id=operator_id,
+            submitter_id=operator_id,
+            audit_status=0,
         )
-        saved = await self._cargo.create_opportunity(opportunity)
-        await self._record_audit(
-            operator_id=operator_id,
-            action="CREATE",
-            target_type="CARGO_OPPORTUNITY",
-            target_id=saved.id,
-            after_data={"origin_node_id": origin_node_id, "dest_node_id": dest_node_id},
+        saved = await self._cargo.create_freight(freight)
+        await self._audit_svc.submit_for_audit(
+            target_type="CARGO_FREIGHT", target_id=saved.id,
+            target_name=f"CargoFreight#{saved.freight_no}", action="CREATE",
+            submitter_id=operator_id,
+            after_data={
+                "origin_admin_code": origin_admin_code,
+                "dest_admin_code": dest_admin_code,
+                "source_type": source_type,
+            },
         )
         await self._cargo.save()
         return saved
 
-    async def list_opportunities(
+    async def get_freight(self, freight_id: int) -> CargoFreight:
+        freight = await self._cargo.get_freight(freight_id)
+        if not freight:
+            raise NotFoundError("CargoFreight", freight_id)
+        return freight
+
+    async def list_freights(
         self,
         status: Optional[str] = None,
-        origin_node_id: Optional[int] = None,
-        dest_node_id: Optional[int] = None,
+        source_type: Optional[str] = None,
+        origin_admin_code: Optional[str] = None,
+        dest_admin_code: Optional[str] = None,
         commodity_id: Optional[int] = None,
+        stat_date: Optional[date] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
         offset = (page - 1) * page_size
-        items, total = await self._cargo.list_opportunities(
+        items, total = await self._cargo.list_freights(
             status=status,
-            origin_node_id=origin_node_id,
-            dest_node_id=dest_node_id,
+            source_type=source_type,
+            origin_admin_code=origin_admin_code,
+            dest_admin_code=dest_admin_code,
             commodity_id=commodity_id,
+            stat_date=stat_date,
             offset=offset,
             limit=page_size,
         )
         return {"items": items, "total": total, "page": page, "page_size": page_size}
-
-    # ─────────────────────────────────────────────────
-    # 内部辅助
-    # ─────────────────────────────────────────────────
-
-    async def _record_audit(
-        self,
-        operator_id: int,
-        action: str,
-        target_type: str,
-        target_id: int,
-        before_data: Optional[dict] = None,
-        after_data: Optional[dict] = None,
-    ) -> None:
-        record = AuditRecord(
-            operator_id=operator_id,
-            action=action,
-            target_type=target_type,
-            target_id=target_id,
-            audit_status="APPROVED",
-            before_data=json.dumps(before_data, ensure_ascii=False) if before_data else None,
-            after_data=json.dumps(after_data, ensure_ascii=False) if after_data else None,
-        )
-        await self._audit.create_record(record)

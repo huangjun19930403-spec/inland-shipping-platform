@@ -1194,12 +1194,8 @@ async def seed_vessel_types(db) -> None:
 
 async def seed_ai_prompt(db) -> None:
     """初始化 AI 提示词模板 cargo_parse v1（幂等）"""
-    from sqlalchemy import select
-    try:
-        from app.models.ai import AiPromptTemplate, AiPromptVersion
-    except ModuleNotFoundError:
-        logger.warning("[seed] app.models.ai 不存在，跳过 AI 提示词初始化")
-        return
+    from sqlalchemy import select, text
+    from app.models.ai import AiPromptTemplate, AiPromptVersion
 
     res = await db.execute(select(AiPromptTemplate).where(AiPromptTemplate.name == "cargo_parse"))
     tmpl = res.scalar_one_or_none()

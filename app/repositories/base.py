@@ -1,7 +1,9 @@
 """
 通用Repository基类
 提供CRUD基础能力，所有业务Repository继承此类
+软删支持：若模型含 deleted_at 列，delete() 标记时间戳而非物理删除，查询自动过滤已删除记录
 """
+from datetime import datetime
 from typing import Any, Generic, Optional, Sequence, Type, TypeVar
 
 from sqlalchemy import select, func
@@ -10,6 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.base import Base
 
 ModelT = TypeVar("ModelT", bound=Base)
+
+
+def _has_soft_delete(obj) -> bool:
+    """判断模型类或实例是否支持软删（含 deleted_at 列）"""
+    return hasattr(obj, "deleted_at")
 
 
 class BaseRepository(Generic[ModelT]):
@@ -30,10 +37,11 @@ class BaseRepository(Generic[ModelT]):
     # ─────────────────────────────────────────────────
 
     async def get_by_id(self, pk: int) -> Optional[ModelT]:
-        """按主键查询"""
-        result = await self._db.execute(
-            select(self.model_class).where(self.model_class.id == pk)
-        )
+        """按主键查询（软删模型自动过滤已删除）"""
+        q = select(self.model_class).where(self.model_class.id == pk)
+        if _has_soft_delete(self.model_class):
+            q = q.where(self.model_class.deleted_at.is_(None))
+        result = await self._db.execute(q)
         return result.scalar_one_or_none()
 
     async def get_all(
@@ -41,17 +49,22 @@ class BaseRepository(Generic[ModelT]):
         offset: int = 0,
         limit: int = 20,
     ) -> Sequence[ModelT]:
-        """分页查询全部记录"""
-        result = await self._db.execute(
-            select(self.model_class).offset(offset).limit(limit)
-        )
+        """分页查询全部记录（软删模型自动过滤已删除）"""
+        q = select(self.model_class)
+        if _has_soft_delete(self.model_class):
+            q = q.where(self.model_class.deleted_at.is_(None))
+        result = await self._db.execute(q.offset(offset).limit(limit))
         return result.scalars().all()
 
     async def count(self) -> int:
-        """统计总数"""
-        result = await self._db.execute(
-            select(func.count()).select_from(self.model_class)
-        )
+        """统计总数（软删模型自动过滤已删除）"""
+        if _has_soft_delete(self.model_class):
+            q = select(func.count()).select_from(self.model_class).where(
+                self.model_class.deleted_at.is_(None)
+            )
+        else:
+            q = select(func.count()).select_from(self.model_class)
+        result = await self._db.execute(q)
         return result.scalar_one()
 
     async def create(self, instance: ModelT) -> ModelT:
@@ -70,9 +83,15 @@ class BaseRepository(Generic[ModelT]):
         return instance
 
     async def delete(self, instance: ModelT) -> None:
-        """删除记录"""
-        await self._db.delete(instance)
-        await self._db.flush()
+        """删除记录（软删优先：若含 deleted_at 则标记时间戳，否则物理删除）"""
+        if _has_soft_delete(instance):
+            instance.deleted_at = datetime.now()
+            if hasattr(instance, "is_deleted"):
+                instance.is_deleted = 1
+            await self._db.flush()
+        else:
+            await self._db.delete(instance)
+            await self._db.flush()
 
     async def save(self) -> None:
         """提交当前事务"""

@@ -1,7 +1,4 @@
-try:  # noqa: SIM105
-    from app.models.ai import AiPromptTemplate, AiPromptVersion, AiCallLog  # noqa
-except ModuleNotFoundError:  # AI 模块在部分仓库版本中不存在
-    pass
+from app.models.ai import AiPromptTemplate, AiPromptVersion, AiCallLog  # noqa
 from app.models.address import (  # noqa
     Waterway, Region, AdminRegion, NodeType, TransportNode, NodeAlias, RegionAddressRelation,
     CodeSequence

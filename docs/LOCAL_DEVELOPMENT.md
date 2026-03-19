@@ -558,4 +558,77 @@ uvicorn main:app --reload --log-level debug
 
 ---
 
-*文档版本：V2.0 | 最后更新：2026-03-14*
+## 11. 审计日志机制（`_record_audit`）
+
+### 11.1 作用
+
+`_record_audit` 是 `AddressService`（及同类 Service）中的私有辅助方法，**负责将所有数据变更操作写入 `audit_record` 表**，形成可追溯的操作历史。每次 CREATE / UPDATE / DELETE / ENABLE / DISABLE 操作完成后都会调用它，在同一个数据库事务内一并提交。
+
+```
+用户请求
+  └─→ Router
+        └─→ Service（业务逻辑）
+              ├─→ Repository.create / update / delete  ← 操作目标表
+              ├─→ _record_audit(...)                   ← 写审计记录
+              └─→ Repository.save()                    ← 统一 commit
+```
+
+### 11.2 方法签名
+
+```python
+async def _record_audit(
+    self,
+    operator_id: int,   # 操作人 ID（来自 JWT token）
+    action: str,        # 操作类型：CREATE / UPDATE / DELETE / ENABLE / DISABLE
+    target_type: str,   # 被操作的对象类型：WATERWAY / REGION / TRANSPORT_NODE / ...
+    target_id: int,     # 被操作对象的主键 ID
+    before_data: Optional[dict] = None,  # 变更前数据快照（UPDATE/DELETE 时填充）
+    after_data:  Optional[dict] = None,  # 变更后数据快照（CREATE/UPDATE 时填充）
+) -> None:
+```
+
+### 11.3 写入的字段（对应 `audit_record` 表）
+
+| 模型字段 | 值来源 | 说明 |
+|---|---|---|
+| `submitter_id` | `operator_id` 参数 | 操作人 ID（JWT 中的 `user.id`） |
+| `action` | `action` 参数 | `CREATE` / `UPDATE` / `DELETE` / `ENABLE` / `DISABLE` |
+| `target_type` | `target_type` 参数 | 操作对象类型，如 `WATERWAY` |
+| `target_id` | `target_id` 参数 | 操作对象主键 |
+| `audit_result` | 固定值 `"APPROVED"` | 内部操作默认直接通过，无需二次审批 |
+| `before_data` | `before_data` 参数 | JSON 字符串，记录变更前的字段值 |
+| `after_data` | `after_data` 参数 | JSON 字符串，记录变更后的字段值 |
+
+> **注意：** `audit_result` 固定为 `"APPROVED"` 表示内部人员操作免审核直接生效；
+> 如果是外部数据采集员提交的 `TransportNode` 等，则走独立的 `PENDING → APPROVED/REJECTED` 审核流，
+> 由 `/audit/` 路由下的接口处理，不经过 `_record_audit`。
+
+### 11.4 常见错误与排查
+
+**TypeError: 'xxx' is an invalid keyword argument for AuditRecord**
+
+原因：`_record_audit` 中构造 `AuditRecord(...)` 时使用了不存在的字段名。
+
+`AuditRecord` 的正确字段名（截至 2026-03-16）：
+
+```python
+# ✅ 正确
+AuditRecord(
+    submitter_id=operator_id,   # 不是 operator_id，不是 user_id
+    audit_result="APPROVED",    # 不是 audit_status
+    action=...,
+    target_type=...,
+    target_id=...,
+    before_data=...,
+    after_data=...,
+)
+```
+
+排查步骤：
+1. 查看完整错误堆栈，确认 `TypeError` 抛出位置是否在 `_record_audit`
+2. 打开 `app/models/audit.py` 核对 `AuditRecord` 所有 `Column` 字段名
+3. 对比 `_record_audit` 中 `AuditRecord(...)` 的关键字参数，逐一修正
+
+---
+
+*文档版本：V2.0 | 最后更新：2026-03-16*

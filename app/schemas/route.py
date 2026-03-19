@@ -1,31 +1,75 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
 
-class ShippingRoutePathCreate(BaseModel):
+# ─────────────────────────────────────────────────
+# 路径节点（ShippingRoutePathNode）
+# ─────────────────────────────────────────────────
+
+class ShippingRoutePathNodeCreate(BaseModel):
     node_id: int
     sequence: int
     distance_from_start: Optional[Decimal] = None
     node_role: str = "WAYPOINT"
 
 
-class ShippingRoutePathResponse(BaseModel):
+class ShippingRoutePathNodeResponse(BaseModel):
     id: int
-    route_id: int
+    path_id: int
     node_id: int
     sequence: int
     distance_from_start: Optional[Decimal] = None
     node_role: str
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
+
+# ─────────────────────────────────────────────────
+# 路线方案（ShippingRoutePath）
+# ─────────────────────────────────────────────────
+
+class ShippingRoutePathCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    sort_order: int = 0
+    status: int = 1
+
+
+class ShippingRoutePathUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: Optional[int] = None
+    status: Optional[int] = None
+
+
+class ShippingRoutePathNodesBatchSet(BaseModel):
+    """批量替换路线节点"""
+    nodes: List[ShippingRoutePathNodeCreate]
+
+
+class ShippingRoutePathResponse(BaseModel):
+    id: int
+    route_id: int
+    code: str
+    name: str
+    description: Optional[str] = None
+    sort_order: int
+    status: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    nodes: List[ShippingRoutePathNodeResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ─────────────────────────────────────────────────
+# 航线（ShippingRoute）
+# ─────────────────────────────────────────────────
 
 class ShippingRouteCreate(BaseModel):
-    code: str
     name: str
     origin_region_id: int
     dest_region_id: int
@@ -34,7 +78,6 @@ class ShippingRouteCreate(BaseModel):
     description: Optional[str] = None
     sort_order: int = 0
     status: int = 1
-    path_nodes: Optional[List[ShippingRoutePathCreate]] = None
 
 
 class ShippingRouteUpdate(BaseModel):
@@ -62,7 +105,6 @@ class ShippingRouteResponse(BaseModel):
     created_by: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    path_nodes: List[ShippingRoutePathResponse] = []
+    paths: List[ShippingRoutePathResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

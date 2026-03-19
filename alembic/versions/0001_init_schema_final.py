@@ -17,7 +17,7 @@ depends_on = None
 def upgrade() -> None:
     """Create all tables from current ORM metadata."""
     from app.core.database import Base
-    from app.models import system, address, cargo, vessel, route, analysis, audit  # noqa: F401
+    from app.models import system, address, cargo, vessel, route, analysis, audit, ai  # noqa: F401
 
     bind = op.get_bind()
     Base.metadata.create_all(bind=bind, checkfirst=True)
@@ -26,7 +26,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop all tables from current ORM metadata."""
     from app.core.database import Base
-    from app.models import system, address, cargo, vessel, route, analysis, audit  # noqa: F401
+    from app.models import system, address, cargo, vessel, route, analysis, audit, ai  # noqa: F401
 
     bind = op.get_bind()
     Base.metadata.drop_all(bind=bind, checkfirst=True)

@@ -23,9 +23,12 @@ class VesselTypeDict(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
-    audit_status = Column(SmallInteger, default=1)
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -60,11 +63,14 @@ class Vessel(Base):
     # 状态管理
     data_status = Column(SmallInteger, default=1, comment="1=有效,0=注销")
     is_deleted = Column(SmallInteger, default=0)
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     # 审核相关
-    audit_status = Column(SmallInteger, default=1, comment="0=待审核,1=已通过,2=已驳回")
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
     audit_remark = Column(String(512), comment="审核意见")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -111,8 +117,9 @@ class VesselDynamic(Base):
     __tablename__ = "vessel_dynamic"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    vessel_id = Column(BigInteger, ForeignKey("vessel.id"), nullable=False, unique=True,
+    vessel_id = Column(BigInteger, ForeignKey("vessel.id"), nullable=True, unique=True,
                        comment="每船唯一一条最新动态")
+    mmsi = Column(String(20), unique=True, nullable=True, comment="MMSI号（动态更新的唯一键）")
     # 位置信息
     current_longitude = Column(DECIMAL(11, 8), comment="当前经度")
     current_latitude = Column(DECIMAL(10, 8), comment="当前纬度")
