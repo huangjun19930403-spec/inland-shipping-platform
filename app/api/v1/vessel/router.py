@@ -147,7 +147,10 @@ async def import_vessels(
     if not (file.filename or "").lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="仅支持 .xlsx 格式文件")
     content = await file.read()
-    rows = parse_vessel_excel(content)
+    try:
+        rows = parse_vessel_excel(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not rows:
         raise HTTPException(status_code=400, detail="Excel 文件为空或格式不正确")
     result = await service.bulk_register_vessels(rows=rows, operator_id=user.id)

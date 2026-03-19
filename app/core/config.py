@@ -1,9 +1,11 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import os
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
     # 应用基础配置
     APP_NAME: str = "中国内河航运数据采集与分析平台"
     APP_VERSION: str = "2.0.0"
@@ -50,10 +52,5 @@ class Settings(BaseSettings):
 
     # CORS配置
     ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-
 
 settings = Settings()

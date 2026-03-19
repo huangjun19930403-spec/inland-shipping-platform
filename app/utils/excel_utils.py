@@ -1,6 +1,7 @@
 """Excel 文件解析工具"""
 from io import BytesIO
 from typing import Any
+from zipfile import BadZipFile
 
 
 # Excel 船舶导入模板列名（与 Vessel 模型字段对应）
@@ -60,8 +61,12 @@ def parse_vessel_excel(content: bytes) -> list[dict]:
     返回字段字典列表，空行自动跳过。
     """
     import openpyxl
+    from openpyxl.utils.exceptions import InvalidFileException
 
-    wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+    try:
+        wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+    except (BadZipFile, InvalidFileException, OSError, ValueError) as exc:
+        raise ValueError("Excel 文件格式错误，请上传有效的 .xlsx 文件") from exc
     ws = wb.active
 
     rows_iter = ws.iter_rows(values_only=True)

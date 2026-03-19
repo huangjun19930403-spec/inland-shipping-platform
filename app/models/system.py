@@ -21,7 +21,11 @@ class SysRole(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    users = relationship("SysUserRole", back_populates="role")
+    users = relationship(
+        "SysUserRole",
+        back_populates="role",
+        cascade="all, delete-orphan",
+    )
 
 
 class SysUser(Base):
@@ -46,7 +50,11 @@ class SysUser(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    roles = relationship("SysUserRole", back_populates="user")
+    roles = relationship(
+        "SysUserRole",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class SysUserRole(Base):
@@ -54,8 +62,16 @@ class SysUserRole(Base):
     __tablename__ = "sys_user_role"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("sys_user.id"), nullable=False)
-    role_id = Column(BigInteger, ForeignKey("sys_role.id"), nullable=False)
+    user_id = Column(
+        BigInteger,
+        ForeignKey("sys_user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role_id = Column(
+        BigInteger,
+        ForeignKey("sys_role.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     created_at = Column(DateTime, server_default=func.now())
 
     user = relationship("SysUser", back_populates="roles")

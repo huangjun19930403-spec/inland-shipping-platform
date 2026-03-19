@@ -974,8 +974,24 @@ async def seed_users(db, role_map: dict) -> None:
             )
             db.add(user)
             await db.flush()
-            db.add(SysUserRole(user_id=user.id, role_id=role_map[role_code].id))
             logger.info(f"[seed] user: {username}")
+        else:
+            # 自愈已有账号：恢复基础信息、启用状态和默认密码
+            user.real_name = real_name
+            user.department = department
+            user.status = 1
+            user.password_hash = get_password_hash(password)
+            logger.info(f"[seed] user updated: {username}")
+
+        role_id = role_map[role_code].id
+        role_res = await db.execute(
+            select(SysUserRole).where(
+                SysUserRole.user_id == user.id,
+                SysUserRole.role_id == role_id,
+            )
+        )
+        if not role_res.scalar_one_or_none():
+            db.add(SysUserRole(user_id=user.id, role_id=role_id))
 
 
 async def seed_waterways(db) -> dict:

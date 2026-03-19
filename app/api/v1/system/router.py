@@ -2,7 +2,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 
 from app.core.database import get_db
 from app.core.security import require_roles, get_password_hash
@@ -155,6 +155,8 @@ async def delete_user(
     user = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    # 先删除关联角色，避免出现 user_id 被置空触发 NOT NULL 约束
+    await db.execute(delete(SysUserRole).where(SysUserRole.user_id == user_id))
     await db.delete(user)
     await db.commit()
     return success(message="删除成功")
