@@ -90,9 +90,17 @@ class CommodityStandardCreate(BaseModel):
     commodity_class: Optional[str] = None
     industry: Optional[str] = None
     density: Optional[Decimal] = None
+    default_density: Optional[Decimal] = None
     is_dangerous: int = 0
+    danger_level: Optional[str] = None
+    common_unit: Optional[str] = None
     loading_method: Optional[str] = None
     recommended_ship_type: Optional[str] = None
+    match_keywords: Optional[Any] = None
+    match_regex: Optional[str] = None
+    source: str = "MANUAL"
+    confidence: Optional[Decimal] = None
+    is_ai_generated: int = 0
     description: Optional[str] = None
     sort_order: int = 0
     status: int = 1
@@ -105,9 +113,17 @@ class CommodityStandardUpdate(BaseModel):
     commodity_class: Optional[str] = None
     industry: Optional[str] = None
     density: Optional[Decimal] = None
+    default_density: Optional[Decimal] = None
     is_dangerous: Optional[int] = None
+    danger_level: Optional[str] = None
+    common_unit: Optional[str] = None
     loading_method: Optional[str] = None
     recommended_ship_type: Optional[str] = None
+    match_keywords: Optional[Any] = None
+    match_regex: Optional[str] = None
+    source: Optional[str] = None
+    confidence: Optional[Decimal] = None
+    is_ai_generated: Optional[int] = None
     description: Optional[str] = None
     sort_order: Optional[int] = None
     status: Optional[int] = None
@@ -122,9 +138,17 @@ class CommodityStandardResponse(BaseModel):
     commodity_class: Optional[str] = None
     industry: Optional[str] = None
     density: Optional[Decimal] = None
+    default_density: Optional[Decimal] = None
     is_dangerous: int
+    danger_level: Optional[str] = None
+    common_unit: Optional[str] = None
     loading_method: Optional[str] = None
     recommended_ship_type: Optional[str] = None
+    match_keywords: Optional[Any] = None
+    match_regex: Optional[str] = None
+    source: Optional[str] = None
+    confidence: Optional[Decimal] = None
+    is_ai_generated: int = 0
     description: Optional[str] = None
     sort_order: int
     status: int
@@ -147,6 +171,11 @@ class CommodityAliasCreate(BaseModel):
     alias_name: str
     alias_type: str = "COMMON"
     priority: int = 0
+    match_keywords: Optional[Any] = None
+    match_regex: Optional[str] = None
+    source: str = "MANUAL"
+    confidence: Optional[Decimal] = None
+    is_ai_generated: int = 0
     status: int = 1
 
 
@@ -155,6 +184,11 @@ class CommodityAliasBody(BaseModel):
     alias_name: str
     alias_type: str = "COMMON"
     priority: int = 0
+    match_keywords: Optional[Any] = None
+    match_regex: Optional[str] = None
+    source: str = "MANUAL"
+    confidence: Optional[Decimal] = None
+    is_ai_generated: int = 0
     status: int = 1
 
 
@@ -164,6 +198,11 @@ class CommodityAliasResponse(BaseModel):
     alias_name: str
     alias_type: str
     priority: int
+    match_keywords: Optional[Any] = None
+    match_regex: Optional[str] = None
+    source: Optional[str] = None
+    confidence: Optional[Decimal] = None
+    is_ai_generated: int = 0
     status: int
     created_at: Optional[datetime] = None
 
@@ -206,6 +245,15 @@ class CargoManualInput(BaseModel):
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
     source_type: str = "MANUAL"
+    record_source: str = "MANUAL"
+    record_status: str = "ACTIVE"
+    analysis_status: str = "READY"
+    data_quality_score: Optional[Decimal] = None
+    location_match_score: Optional[Decimal] = None
+    commodity_match_score: Optional[Decimal] = None
+    is_test_data: int = 0
+    is_long_term_info: int = 0
+    source_message_time: Optional[datetime] = None
     remark: Optional[str] = None
 
 

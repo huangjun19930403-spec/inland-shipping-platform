@@ -22,7 +22,6 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
 from app.core.exceptions import AppException
-from app.core.database import init_db
 from app.api.v1 import api_router
 
 # 初始化日志（必须在其他模块导入前）
@@ -34,10 +33,7 @@ logger = get_logger("inland.main")
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("=== 内河航运平台 V2.0 启动中 ===")
-
-    # 初始化数据库表结构
-    await init_db()
-    logger.info("数据库初始化完成")
+    logger.info("数据库初始化策略：由 Alembic 迁移统一管理")
 
     # 首次启动种子数据（从独立脚本调用）
     # 生产环境：通过 `python -m scripts.seed_data` 手动执行

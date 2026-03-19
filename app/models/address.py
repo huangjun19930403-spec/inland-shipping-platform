@@ -1,14 +1,11 @@
 """地址数据体系模型"""
 from sqlalchemy import (
-    Column, BigInteger, Integer, String, Text, Integer, SmallInteger,
-    DECIMAL, DateTime, JSON, ForeignKey
+    Column, BigInteger, Integer, String, SmallInteger,
+    DECIMAL, DateTime, JSON, ForeignKey, UniqueConstraint, Index
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from app.core.database import Base
-
-# 软删公共列（直接在各模型内内联，避免多继承歧义）
-_SOFT_DELETE_COL = lambda: Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
+from app.models.base import Base
 
 
 class Waterway(Base):
@@ -49,10 +46,11 @@ class Region(Base):
     name_en = Column(String(128), comment="英文名称")
     center_longitude = Column(DECIMAL(11, 8), comment="区域中心经度（由边界坐标自动计算）")
     center_latitude = Column(DECIMAL(10, 8), comment="区域中心纬度（由边界坐标自动计算）")
-    main_rivers = Column(JSON, comment="主要水系 ID 数组（Waterway.id）")
-    main_rivers_names = Column(JSON, comment="主要水系名称数组（冗余，与 main_rivers 同步）")
-    main_cities = Column(JSON, comment="主要城市 ID 数组（AdminRegion.id，由边界自动计算）")
-    main_cities_names = Column(JSON, comment="主要城市名称数组（冗余，与 main_cities 同步）")
+    # 以下4列保留仅用于过渡兼容，不再作为正式关系表达
+    main_rivers = Column(JSON, comment="(弃用) 主要水系ID数组，正式关系见 region_waterway_relation")
+    main_rivers_names = Column(JSON, comment="(弃用) 主要水系名称数组")
+    main_cities = Column(JSON, comment="(弃用) 主要城市ID数组，正式关系见 region_city_relation")
+    main_cities_names = Column(JSON, comment="(弃用) 主要城市名称数组")
     boundary_coordinates = Column(JSON, comment="边界坐标点序列 [[lng,lat],...]")
     boundary_color = Column(String(20), default="#3388ff", comment="边界颜色")
     area_color = Column(String(20), default="#3388ff", comment="填充颜色")
@@ -127,7 +125,11 @@ class TransportNode(Base):
     node_category = Column(SmallInteger, nullable=False, default=4,
                            comment="1=装货,2=卸货,3=中转,4=综合,5=航道")
     waterway_id = Column(BigInteger, ForeignKey("waterway.id"), comment="所属水系")
-    region_id = Column(BigInteger, ForeignKey("region.id"), comment="所属商业区域")
+    # 兼容字段：正式归属关系使用 region_address_relation
+    region_id = Column(BigInteger, ForeignKey("region.id"), comment="(弃用) 单值区域归属")
+    province_code = Column(String(12), comment="省级行政区划代码")
+    city_code = Column(String(12), comment="市级行政区划代码")
+    district_code = Column(String(12), comment="区县级行政区划代码")
     province = Column(String(32), comment="所属省份")
     city = Column(String(32), comment="所属城市")
     district = Column(String(32), comment="所属区县")
@@ -186,6 +188,66 @@ class RegionAddressRelation(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     region_id = Column(BigInteger, ForeignKey("region.id"), nullable=False)
     transport_node_id = Column(BigInteger, ForeignKey("transport_node.id"), nullable=False)
+    relation_type = Column(
+        String(32),
+        nullable=False,
+        default="PRIMARY",
+        comment="PRIMARY/SECONDARY/PASSING/COVERED",
+    )
     is_primary = Column(SmallInteger, nullable=False, default=1, comment="1=主归属")
+    source = Column(
+        String(32),
+        nullable=False,
+        default="RULE",
+        comment="RULE/AI/MANUAL/SYNC",
+    )
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("region_id", "transport_node_id", name="uk_region_node_relation"),
+        Index("ix_region_address_node", "transport_node_id"),
+    )
+
+
+class RegionWaterwayRelation(Base):
+    """区域-水系关系"""
+    __tablename__ = "region_waterway_relation"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    region_id = Column(BigInteger, ForeignKey("region.id"), nullable=False)
+    waterway_id = Column(BigInteger, ForeignKey("waterway.id"), nullable=False)
+    relation_type = Column(String(32), nullable=False, default="MAIN", comment="MAIN/RELATED")
+    is_primary = Column(SmallInteger, nullable=False, default=0, comment="1=主关系")
+    source = Column(String(32), nullable=False, default="RULE", comment="RULE/AI/MANUAL/SYNC")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("region_id", "waterway_id", name="uk_region_waterway_relation"),
+        Index("ix_region_waterway_region", "region_id"),
+    )
+
+
+class RegionCityRelation(Base):
+    """区域-城市关系"""
+    __tablename__ = "region_city_relation"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    region_id = Column(BigInteger, ForeignKey("region.id"), nullable=False)
+    admin_region_id = Column(BigInteger, ForeignKey("admin_region.id"), nullable=False)
+    relation_type = Column(
+        String(32),
+        nullable=False,
+        default="COVERED",
+        comment="MAIN/COVERED/RELATED",
+    )
+    is_primary = Column(SmallInteger, nullable=False, default=0, comment="1=主关系")
+    source = Column(String(32), nullable=False, default="RULE", comment="RULE/AI/MANUAL/SYNC")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("region_id", "admin_region_id", name="uk_region_city_relation"),
+        Index("ix_region_city_region", "region_id"),
+    )

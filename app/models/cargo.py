@@ -11,7 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from app.core.database import Base
+from app.models.base import Base
 
 
 class CommodityCategory(Base):
@@ -74,9 +74,17 @@ class CommodityStandard(Base):
     commodity_class = Column(String(32), comment="货品分类:散货/件杂/液体/集装箱/特种")
     industry = Column(String(64), comment="行业分类")
     density = Column(DECIMAL(8, 4), comment="密度(t/m³)")
+    default_density = Column(DECIMAL(8, 4), comment="默认密度(t/m³)")
     is_dangerous = Column(SmallInteger, default=0, comment="0=否,1=是")
+    danger_level = Column(String(32), comment="危险等级：NONE/LOW/MEDIUM/HIGH")
+    common_unit = Column(String(32), comment="常用计量单位：吨/方/箱")
     loading_method = Column(String(64), comment="装货方式")
     recommended_ship_type = Column(String(128), comment="推荐船型")
+    match_keywords = Column(JSON, comment="规则匹配关键词列表")
+    match_regex = Column(String(256), comment="规则匹配正则")
+    source = Column(String(32), default="MANUAL", comment="MANUAL/AI/IMPORT/TMS")
+    confidence = Column(DECIMAL(5, 2), default=100, comment="标准命中置信度(0-100)")
+    is_ai_generated = Column(SmallInteger, default=0, comment="是否AI生成候选")
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
@@ -104,6 +112,11 @@ class CommodityAlias(Base):
     alias_type = Column(String(32), default="COMMON",
                         comment="COMMON/ABBR/DIALECT/INDUSTRY")
     priority = Column(Integer, nullable=False, default=0, comment="匹配优先级")
+    match_keywords = Column(JSON, comment="别名匹配关键词")
+    match_regex = Column(String(256), comment="别名匹配正则")
+    source = Column(String(32), default="MANUAL", comment="MANUAL/AI/IMPORT")
+    confidence = Column(DECIMAL(5, 2), default=100, comment="别名置信度(0-100)")
+    is_ai_generated = Column(SmallInteger, default=0, comment="是否AI建议别名")
     status = Column(SmallInteger, nullable=False, default=1)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -227,6 +240,18 @@ class CargoFreight(Base):
                          comment="TMS/WECHAT_AI/MANUAL")
     status = Column(String(20), nullable=False, default="CONFIRMED",
                     comment="PENDING/CONFIRMED/CANCELLED/EXPIRED")
+    record_source = Column(String(32), nullable=False, default="MANUAL",
+                           comment="记录来源：WECHAT_AI/TMS/MANUAL/IMPORT")
+    record_status = Column(String(32), nullable=False, default="ACTIVE",
+                           comment="记录状态：ACTIVE/INVALID/ARCHIVED")
+    analysis_status = Column(String(32), nullable=False, default="READY",
+                             comment="分析状态：READY/SKIPPED/INVALID")
+    data_quality_score = Column(DECIMAL(5, 2), nullable=True, comment="数据质量评分(0-100)")
+    location_match_score = Column(DECIMAL(5, 2), nullable=True, comment="位置匹配评分(0-100)")
+    commodity_match_score = Column(DECIMAL(5, 2), nullable=True, comment="货品匹配评分(0-100)")
+    is_test_data = Column(SmallInteger, nullable=False, default=0, comment="1=测试数据")
+    is_long_term_info = Column(SmallInteger, nullable=False, default=0, comment="1=长期有效信息")
+    source_message_time = Column(DateTime, nullable=True, comment="来源消息时间")
 
     # ── 装货地（多精度，至少有 origin_raw_text） ──
     origin_node_id = Column(BigInteger, ForeignKey("transport_node.id"), nullable=True,

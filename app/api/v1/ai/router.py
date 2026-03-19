@@ -16,7 +16,9 @@ from app.core.database import get_db
 from app.core.security import require_roles
 from app.models.cargo import CargoRawMessage, CargoAiParseResult
 from app.models.ai import AiPromptTemplate, AiPromptVersion
+from app.repositories.address_repository import AddressRepository
 from app.repositories.ai_repository import AiRepository
+from app.repositories.cargo_repository import CargoRepository
 from app.schemas.cargo import CargoRawMessageResponse, CargoAiParseResultResponse
 from app.schemas.common import success
 from app.ai.prompt_manager import invalidate_cache
@@ -254,3 +256,81 @@ async def get_call_log_stats(
     ai_repo = AiRepository(db)
     stats = await ai_repo.get_call_log_stats()
     return success(data=stats)
+
+
+@router.post("/match-suggestions/node", summary="标准节点匹配建议")
+async def suggest_nodes(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_roles("ADMIN", "OPERATOR", "COLLECTOR")),
+):
+    keyword = (body.get("keyword") or "").strip()
+    limit = int(body.get("limit") or 10)
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword 不能为空")
+    repo = AddressRepository(db)
+    items, total = await repo.search_nodes_by_alias(keyword, offset=0, limit=limit)
+    return success(data={
+        "keyword": keyword,
+        "total": total,
+        "items": [
+            {
+                "id": item.id,
+                "code": item.code,
+                "name": item.name,
+                "city": item.city,
+                "province": item.province,
+                "score": 100 if item.name == keyword else 80,
+            }
+            for item in items
+        ],
+    })
+
+
+@router.post("/match-suggestions/commodity", summary="标准货品匹配建议")
+async def suggest_commodity(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_roles("ADMIN", "OPERATOR", "COLLECTOR")),
+):
+    keyword = (body.get("keyword") or "").strip()
+    limit = int(body.get("limit") or 10)
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword 不能为空")
+    repo = CargoRepository(db)
+    items = await repo.standards.search_by_name(keyword)
+    return success(data={
+        "keyword": keyword,
+        "total": len(items[:limit]),
+        "items": [
+            {
+                "id": item.id,
+                "code": item.code,
+                "name": item.name,
+                "danger_level": item.danger_level,
+                "common_unit": item.common_unit,
+                "score": 100 if item.name == keyword else 80,
+            }
+            for item in items[:limit]
+        ],
+    })
+
+
+@router.post("/analysis-explain", summary="统计结果解释生成")
+async def explain_analysis_result(
+    body: dict,
+    _=Depends(require_roles("ADMIN", "OPERATOR", "COLLECTOR")),
+):
+    metric = body.get("metric") or "unknown"
+    time_scope = body.get("time_scope") or "未指定时间"
+    highlights = body.get("highlights") or []
+    risks = body.get("risks") or []
+    conclusion = body.get("conclusion") or "当前统计结果总体平稳。"
+    text = (
+        f"在 {time_scope} 的 {metric} 分析中，"
+        f"核心结论为：{conclusion}。"
+        f"重点现象：{'; '.join(highlights) if highlights else '暂无显著异常'}。"
+        f"风险提示：{'; '.join(risks) if risks else '未发现高风险异常'}。"
+        "口径说明：本解释基于统计聚合结果自动生成，请结合审核状态确认数据有效性。"
+    )
+    return success(data={"explain_text": text, "prompt_version": "phase1-default-v1"})

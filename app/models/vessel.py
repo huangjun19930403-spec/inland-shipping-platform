@@ -5,7 +5,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from app.core.database import Base
+from app.models.base import Base
 
 
 class VesselTypeDict(Base):
@@ -120,9 +120,20 @@ class VesselDynamic(Base):
     vessel_id = Column(BigInteger, ForeignKey("vessel.id"), nullable=True, unique=True,
                        comment="每船唯一一条最新动态")
     mmsi = Column(String(20), unique=True, nullable=True, comment="MMSI号（动态更新的唯一键）")
+    data_source = Column(String(32), nullable=False, default="AIS", comment="AIS/MANUAL/IMPORT")
+    reported_at = Column(DateTime, comment="源系统上报时间")
+    ingested_at = Column(DateTime, server_default=func.now(), comment="平台接入时间")
     # 位置信息
     current_longitude = Column(DECIMAL(11, 8), comment="当前经度")
     current_latitude = Column(DECIMAL(10, 8), comment="当前纬度")
+    current_region_id = Column(BigInteger, ForeignKey("region.id"), comment="当前归属商业区域")
+    current_city_code = Column(String(12), comment="当前归属城市代码")
+    position_match_type = Column(
+        String(32),
+        default="UNKNOWN",
+        comment="NODE_EXACT/POLYGON_MATCH/CITY_NEAREST/UNKNOWN",
+    )
+    position_match_distance_m = Column(DECIMAL(12, 2), comment="位置匹配距离(米)")
     current_node_id = Column(BigInteger, ForeignKey("transport_node.id"), comment="当前所在节点")
     # 状态信息
     vessel_status = Column(String(32), default="UNDERWAY",
@@ -141,3 +152,4 @@ class VesselDynamic(Base):
     vessel = relationship("Vessel", back_populates="dynamic")
     current_node = relationship("TransportNode", foreign_keys=[current_node_id])
     dest_node = relationship("TransportNode", foreign_keys=[dest_node_id])
+    current_region = relationship("Region", foreign_keys=[current_region_id])

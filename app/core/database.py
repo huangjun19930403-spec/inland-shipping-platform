@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
+from app.models.base import Base
 
 
 engine = create_async_engine(
@@ -9,15 +9,7 @@ engine = create_async_engine(
     connect_args={"check_same_thread": False},
 )
 
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
-
-
-class Base(DeclarativeBase):
-    pass
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def get_db():
@@ -29,9 +21,9 @@ async def get_db():
 
 
 async def init_db():
-    """初始化数据库，创建所有表"""
+    """开发辅助：按元数据直接建表（生产环境禁用，统一使用 Alembic）"""
     from app.models import (  # noqa: F401
-        address, cargo, vessel, route, analysis, system, audit
+        address, cargo, vessel, route, analysis, system, audit, ai
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

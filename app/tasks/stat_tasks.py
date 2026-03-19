@@ -333,13 +333,14 @@ async def _stat_ship_region(db: AsyncSession) -> int:
     """vessel_dynamic → ship_stat_region（航运商业区域热力快照）
 
     归属逻辑：
-      1. current_node_id → transport_node.region_id（精确）
+      1. current_region_id（动态直接归属）
+      2. current_node_id → region_address_relation（主归属）
       2. 只有 GPS → Region.boundary_coordinates 射线法（Python）
     """
     from datetime import datetime
     from sqlalchemy import delete as sa_delete
     from app.models.vessel import Vessel, VesselDynamic
-    from app.models.address import Region, TransportNode
+    from app.models.address import Region, RegionAddressRelation
     from app.models.analysis import ShipStatRegion
 
     # Step1: 加载全部有效区域及多边形
@@ -370,10 +371,17 @@ async def _stat_ship_region(db: AsyncSession) -> int:
             VesselDynamic.current_longitude,
             VesselDynamic.current_latitude,
             Vessel.deadweight,
-            TransportNode.region_id,
+            VesselDynamic.current_region_id,
+            RegionAddressRelation.region_id.label("node_region_id"),
         )
         .join(Vessel, Vessel.id == VesselDynamic.vessel_id)
-        .outerjoin(TransportNode, TransportNode.id == VesselDynamic.current_node_id)
+        .outerjoin(
+            RegionAddressRelation,
+            and_(
+                RegionAddressRelation.transport_node_id == VesselDynamic.current_node_id,
+                RegionAddressRelation.is_primary == 1,
+            ),
+        )
         .where(and_(Vessel.data_status == 1, Vessel.is_deleted == 0))
     )
 
@@ -381,9 +389,12 @@ async def _stat_ship_region(db: AsyncSession) -> int:
     buckets: dict[int, dict] = {}
     for row in rows_result.all():
         rid = None
-        # 优先：通过节点直接取 region_id
-        if row.region_id:
-            rid = row.region_id
+        # 优先：动态直连区域
+        if row.current_region_id:
+            rid = row.current_region_id
+        # 次优：节点主归属区域
+        elif row.node_region_id:
+            rid = row.node_region_id
         # 兜底：GPS 射线法
         elif row.current_longitude and row.current_latitude:
             lon = float(row.current_longitude)

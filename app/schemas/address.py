@@ -287,6 +287,9 @@ class TransportNodeCreate(BaseModel):
     node_category: int = 4
     waterway_id: Optional[int] = None
     region_id: Optional[int] = None
+    province_code: Optional[str] = None
+    city_code: Optional[str] = None
+    district_code: Optional[str] = None
     province: Optional[str] = None
     city: Optional[str] = None
     district: Optional[str] = None
@@ -311,6 +314,9 @@ class TransportNodeUpdate(BaseModel):
     node_category: Optional[int] = None
     waterway_id: Optional[int] = None
     region_id: Optional[int] = None
+    province_code: Optional[str] = None
+    city_code: Optional[str] = None
+    district_code: Optional[str] = None
     province: Optional[str] = None
     city: Optional[str] = None
     district: Optional[str] = None
@@ -337,6 +343,9 @@ class TransportNodeResponse(BaseModel):
     node_category: int
     waterway_id: Optional[int] = None
     region_id: Optional[int] = None
+    province_code: Optional[str] = None
+    city_code: Optional[str] = None
+    district_code: Optional[str] = None
     province: Optional[str] = None
     city: Optional[str] = None
     district: Optional[str] = None

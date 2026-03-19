@@ -231,6 +231,16 @@ class AddressService:
             **kwargs,
         )
         saved = await self._address.create_region(region)
+        await self._address.sync_region_waterway_relations(
+            region_id=saved.id,
+            waterway_ids=river_ids,
+            source="MANUAL",
+        )
+        await self._address.sync_region_city_relations(
+            region_id=saved.id,
+            city_ids=city_ids,
+            source="RULE",
+        )
         await self._audit_svc.submit_for_audit(
             target_type="REGION", target_id=saved.id,
             target_name=name, action="CREATE",
@@ -262,6 +272,7 @@ class AddressService:
             else:
                 kwargs["main_cities_names"] = None
 
+        river_ids = None
         if "main_rivers" in kwargs:
             river_ids = kwargs["main_rivers"] or []
             if river_ids:
@@ -273,6 +284,18 @@ class AddressService:
         kwargs["audit_status"] = 0
 
         updated = await self._address.update_region(region_id, **kwargs)
+        if river_ids is not None:
+            await self._address.sync_region_waterway_relations(
+                region_id=region_id,
+                waterway_ids=river_ids,
+                source="MANUAL",
+            )
+        if "main_cities" in kwargs:
+            await self._address.sync_region_city_relations(
+                region_id=region_id,
+                city_ids=kwargs["main_cities"] or [],
+                source="RULE",
+            )
         await self._audit_svc.submit_for_audit(
             target_type="REGION", target_id=region_id,
             target_name=region.name, action="UPDATE",

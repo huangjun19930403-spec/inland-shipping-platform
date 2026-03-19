@@ -3,7 +3,7 @@ from sqlalchemy import (
     Column, BigInteger, Integer, String, SmallInteger, DateTime, JSON
 )
 from sqlalchemy.sql import func
-from app.core.database import Base
+from app.models.base import Base
 
 
 class AuditTask(Base):

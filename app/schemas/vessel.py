@@ -135,8 +135,15 @@ class VesselResponse(BaseModel):
 # ---------- VesselDynamic ----------
 
 class VesselDynamicUpdate(BaseModel):
+    data_source: Optional[str] = None
+    reported_at: Optional[datetime] = None
+    ingested_at: Optional[datetime] = None
     current_longitude: Optional[Decimal] = None
     current_latitude: Optional[Decimal] = None
+    current_region_id: Optional[int] = None
+    current_city_code: Optional[str] = None
+    position_match_type: Optional[str] = None
+    position_match_distance_m: Optional[Decimal] = None
     current_node_id: Optional[int] = None
     vessel_status: Optional[str] = None
     current_draft: Optional[Decimal] = None
@@ -152,8 +159,15 @@ class VesselDynamicResponse(BaseModel):
     id: int
     vessel_id: Optional[int] = None
     mmsi: Optional[str] = None
+    data_source: str
+    reported_at: Optional[datetime] = None
+    ingested_at: Optional[datetime] = None
     current_longitude: Optional[Decimal] = None
     current_latitude: Optional[Decimal] = None
+    current_region_id: Optional[int] = None
+    current_city_code: Optional[str] = None
+    position_match_type: Optional[str] = None
+    position_match_distance_m: Optional[Decimal] = None
     current_node_id: Optional[int] = None
     vessel_status: str
     current_draft: Optional[Decimal] = None

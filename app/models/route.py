@@ -11,7 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from app.core.database import Base
+from app.models.base import Base
 
 
 class ShippingRoute(Base):
@@ -64,6 +64,12 @@ class ShippingRoutePath(Base):
         order_by="ShippingRoutePathNode.sequence",
         cascade="all, delete-orphan",
     )
+    segments = relationship(
+        "ShippingRoutePathSegment",
+        back_populates="path",
+        order_by="ShippingRoutePathSegment.sequence",
+        cascade="all, delete-orphan",
+    )
 
 
 class ShippingRoutePathNode(Base):
@@ -81,3 +87,29 @@ class ShippingRoutePathNode(Base):
 
     path = relationship("ShippingRoutePath", back_populates="nodes")
     node = relationship("TransportNode")
+
+
+class ShippingRoutePathSegment(Base):
+    """路线分段（支持多段水运/多式联运）"""
+    __tablename__ = "shipping_route_path_segment"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    path_id = Column(BigInteger, ForeignKey("shipping_route_path.id"), nullable=False, comment="所属路线ID")
+    sequence = Column(Integer, nullable=False, comment="分段顺序")
+    segment_type = Column(
+        String(32),
+        nullable=False,
+        default="WATERWAY",
+        comment="WATERWAY/RAILWAY/HIGHWAY/MULTIMODAL",
+    )
+    from_node_id = Column(BigInteger, ForeignKey("transport_node.id"), nullable=True)
+    to_node_id = Column(BigInteger, ForeignKey("transport_node.id"), nullable=True)
+    distance_km = Column(DECIMAL(10, 2), comment="分段里程(km)")
+    estimated_duration_hours = Column(DECIMAL(8, 2), comment="分段预计时长(小时)")
+    description = Column(String(512), comment="分段说明")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    path = relationship("ShippingRoutePath", back_populates="segments")
+    from_node = relationship("TransportNode", foreign_keys=[from_node_id])
+    to_node = relationship("TransportNode", foreign_keys=[to_node_id])

@@ -147,6 +147,15 @@ async def create_freight(
         contact_person=data.contact_person,
         contact_phone=data.contact_phone,
         source_type=data.source_type,
+        record_source=data.record_source,
+        record_status=data.record_status,
+        analysis_status=data.analysis_status,
+        data_quality_score=float(data.data_quality_score) if data.data_quality_score is not None else None,
+        location_match_score=float(data.location_match_score) if data.location_match_score is not None else None,
+        commodity_match_score=float(data.commodity_match_score) if data.commodity_match_score is not None else None,
+        is_test_data=data.is_test_data,
+        is_long_term_info=data.is_long_term_info,
+        source_message_time=data.source_message_time,
         remark=data.remark,
     )
     background_tasks.add_task(refresh_cargo_stats, date.today())

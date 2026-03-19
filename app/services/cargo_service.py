@@ -267,6 +267,7 @@ class CargoService:
         dest_node_id = ov.get("dest_node_id") or parse_result.dest_node_id
         origin_admin_code = ov.get("origin_admin_code") or parse_result.origin_admin_code
         dest_admin_code = ov.get("dest_admin_code") or parse_result.dest_admin_code
+        raw_msg = await self._cargo.get_raw_message(parse_result.raw_message_id) if parse_result.raw_message_id else None
 
         # 推断位置精度
         origin_precision = "NODE" if origin_node_id else ("CITY" if origin_admin_code else "UNKNOWN")
@@ -276,6 +277,15 @@ class CargoService:
             freight_no=_make_freight_no(),
             source_type="WECHAT_AI",
             status="CONFIRMED",
+            record_source="WECHAT_AI",
+            record_status="ACTIVE",
+            analysis_status="READY",
+            data_quality_score=float(parse_result.overall_confidence or 0),
+            location_match_score=float(
+                max(parse_result.origin_confidence or 0, parse_result.dest_confidence or 0)
+            ),
+            commodity_match_score=float(parse_result.commodity_confidence or 0),
+            source_message_time=raw_msg.message_time if raw_msg else None,
             origin_node_id=origin_node_id,
             origin_admin_code=origin_admin_code,
             origin_admin_name=parse_result.origin_admin_name,
@@ -363,6 +373,15 @@ class CargoService:
         contact_phone: Optional[str] = None,
         remark: Optional[str] = None,
         source_type: str = "MANUAL",
+        record_source: str = "MANUAL",
+        record_status: str = "ACTIVE",
+        analysis_status: str = "READY",
+        data_quality_score: Optional[float] = None,
+        location_match_score: Optional[float] = None,
+        commodity_match_score: Optional[float] = None,
+        is_test_data: int = 0,
+        is_long_term_info: int = 0,
+        source_message_time: Optional[datetime] = None,
     ) -> CargoFreight:
         """手动录入货源（MANUAL渠道）"""
         if origin_node_id:
@@ -382,6 +401,15 @@ class CargoService:
             freight_no=_make_freight_no(),
             source_type=source_type,
             status="CONFIRMED",
+            record_source=record_source,
+            record_status=record_status,
+            analysis_status=analysis_status,
+            data_quality_score=data_quality_score,
+            location_match_score=location_match_score,
+            commodity_match_score=commodity_match_score,
+            is_test_data=is_test_data,
+            is_long_term_info=is_long_term_info,
+            source_message_time=source_message_time,
             origin_node_id=origin_node_id,
             origin_admin_code=origin_admin_code,
             origin_admin_name=origin_admin_name,

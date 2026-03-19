@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models.address import (
     Waterway, Region, AdminRegion, NodeType,
     TransportNode, NodeAlias, RegionAddressRelation,
+    RegionWaterwayRelation, RegionCityRelation,
 )
 from app.repositories.base import BaseRepository
 
@@ -174,10 +175,15 @@ class AddressRepository(BaseRepository):
         return True
 
     async def get_nodes_in_region(self, region_id: int) -> Sequence[TransportNode]:
+        rel_sub = (
+            select(RegionAddressRelation.transport_node_id)
+            .where(RegionAddressRelation.region_id == region_id)
+            .scalar_subquery()
+        )
         result = await self._db.execute(
             select(TransportNode)
             .where(
-                TransportNode.region_id == region_id,
+                TransportNode.id.in_(rel_sub),
                 TransportNode.deleted_at.is_(None),
             )
             .options(selectinload(TransportNode.aliases))
@@ -195,6 +201,27 @@ class AddressRepository(BaseRepository):
         )
         return result.scalars().all()
 
+    async def sync_region_waterway_relations(
+        self,
+        region_id: int,
+        waterway_ids: list[int],
+        source: str = "RULE",
+    ) -> None:
+        await self._db.execute(
+            sql_delete(RegionWaterwayRelation).where(RegionWaterwayRelation.region_id == region_id)
+        )
+        for idx, wid in enumerate(waterway_ids):
+            self._db.add(
+                RegionWaterwayRelation(
+                    region_id=region_id,
+                    waterway_id=wid,
+                    relation_type="MAIN",
+                    is_primary=1 if idx == 0 else 0,
+                    source=source,
+                )
+            )
+        await self._db.flush()
+
     async def get_admin_regions_by_ids(self, ids: list[int]) -> Sequence[AdminRegion]:
         if not ids:
             return []
@@ -202,6 +229,27 @@ class AddressRepository(BaseRepository):
             select(AdminRegion).where(AdminRegion.id.in_(ids))
         )
         return result.scalars().all()
+
+    async def sync_region_city_relations(
+        self,
+        region_id: int,
+        city_ids: list[int],
+        source: str = "RULE",
+    ) -> None:
+        await self._db.execute(
+            sql_delete(RegionCityRelation).where(RegionCityRelation.region_id == region_id)
+        )
+        for idx, cid in enumerate(city_ids):
+            self._db.add(
+                RegionCityRelation(
+                    region_id=region_id,
+                    admin_region_id=cid,
+                    relation_type="COVERED",
+                    is_primary=1 if idx == 0 else 0,
+                    source=source,
+                )
+            )
+        await self._db.flush()
 
     async def get_city_coords(self) -> Sequence[tuple]:
         result = await self._db.execute(
@@ -239,14 +287,14 @@ class AddressRepository(BaseRepository):
         if level is not None:
             conditions.append(AdminRegion.level == level)
         if parent_code is not None:
+            conditions.append(AdminRegion.parent_code == parent_code)
+        elif parent_id is not None:
             parent_res = await self._db.execute(
-                select(AdminRegion).where(AdminRegion.code == parent_code)
+                select(AdminRegion).where(AdminRegion.id == parent_id)
             )
             parent = parent_res.scalar_one_or_none()
             if parent:
-                conditions.append(AdminRegion.parent_id == parent.id)
-        elif parent_id is not None:
-            conditions.append(AdminRegion.parent_id == parent_id)
+                conditions.append(AdminRegion.parent_code == parent.code)
 
         q = select(AdminRegion)
         if conditions:
@@ -342,7 +390,12 @@ class AddressRepository(BaseRepository):
         if waterway_id is not None:
             conditions.append(TransportNode.waterway_id == waterway_id)
         if region_id is not None:
-            conditions.append(TransportNode.region_id == region_id)
+            rel_sub = (
+                select(RegionAddressRelation.transport_node_id)
+                .where(RegionAddressRelation.region_id == region_id)
+                .scalar_subquery()
+            )
+            conditions.append(TransportNode.id.in_(rel_sub))
         if node_type_id is not None:
             conditions.append(TransportNode.node_type_id == node_type_id)
         if audit_status is not None:
@@ -490,12 +543,19 @@ class AddressRepository(BaseRepository):
         return result.scalar_one_or_none()
 
     async def create_region_relation(
-        self, region_id: int, node_id: int, is_primary: int = 1
+        self,
+        region_id: int,
+        node_id: int,
+        is_primary: int = 1,
+        relation_type: str = "PRIMARY",
+        source: str = "RULE",
     ) -> RegionAddressRelation:
         relation = RegionAddressRelation(
             region_id=region_id,
             transport_node_id=node_id,
             is_primary=is_primary,
+            relation_type=relation_type,
+            source=source,
         )
         self._db.add(relation)
         await self._db.flush()
