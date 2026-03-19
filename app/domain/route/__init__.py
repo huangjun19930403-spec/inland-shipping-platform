@@ -1,3 +1,3 @@
-from app.services.route_service import RouteService
+from app.domain.route.service import RouteService
 
 __all__ = ["RouteService"]

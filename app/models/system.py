@@ -76,3 +76,11 @@ class SysUserRole(Base):
 
     user = relationship("SysUser", back_populates="roles")
     role = relationship("SysRole", back_populates="users")
+
+
+class CodeSequence(Base):
+    """原子序列表（用于区域/水系等编码生成）"""
+    __tablename__ = "code_sequence"
+
+    scope = Column(String(64), primary_key=True, comment="序号命名空间")
+    next_val = Column(Integer, nullable=False, default=1, comment="下次分配序号")

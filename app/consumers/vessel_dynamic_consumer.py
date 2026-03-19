@@ -18,8 +18,8 @@ from app.core.database import AsyncSessionLocal
 from app.repositories.vessel_repository import VesselRepository
 from app.repositories.audit_repository import AuditRepository
 from app.schemas.vessel import VesselDynamicKafkaMessage
-from app.services.audit_service import AuditService
-from app.services.vessel_service import VesselService
+from app.domain.audit.service import AuditService
+from app.domain.vessel.service import VesselService
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,9 @@ async def _trigger_dynamic_stat_refresh() -> None:
             return  # 节流：距上次刷新不足 30s，跳过
 
         try:
-            from app.tasks.stat_tasks import refresh_vessel_dynamic_stats
-            await refresh_vessel_dynamic_stats()
+            from app.jobs.ship_stats import run_ship_dynamic_stats
+
+            await run_ship_dynamic_stats()
             _dynamic_stat_last_run = datetime.utcnow()
             logger.debug("vessel.dynamic: 区域/城市热力快照已刷新")
         except Exception as exc:

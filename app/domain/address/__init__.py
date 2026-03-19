@@ -1,3 +1,3 @@
-from app.services.address_service import AddressService
+from app.domain.address.service import AddressService
 
 __all__ = ["AddressService"]

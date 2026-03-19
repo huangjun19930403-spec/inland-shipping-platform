@@ -15,12 +15,13 @@ from app.repositories.vessel_repository import VesselRepository
 from app.repositories.route_repository import RouteRepository
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.audit_repository import AuditRepository
-from app.services.cargo_service import CargoService
-from app.services.address_service import AddressService
-from app.services.vessel_service import VesselService
-from app.services.route_service import RouteService
-from app.services.analysis_service import AnalysisService
-from app.services.audit_service import AuditService
+from app.domain.cargo.service import CargoService
+from app.domain.commodity.service import CommodityService
+from app.domain.address.service import AddressService
+from app.domain.vessel.service import VesselService
+from app.domain.route.service import RouteService
+from app.domain.analysis.service import AnalysisService
+from app.domain.audit.service import AuditService
 
 
 # ─────────────────────────────────────────────────
@@ -104,6 +105,15 @@ async def get_cargo_service(
     )
 
 
+async def get_commodity_service(
+    db: AsyncSession = Depends(get_db),
+) -> CommodityService:
+    return CommodityService(
+        cargo_repo=CargoRepository(db),
+        audit_svc=AuditService(audit_repo=AuditRepository(db)),
+    )
+
+
 async def get_address_service(
     db: AsyncSession = Depends(get_db),
 ) -> AddressService:
@@ -135,5 +145,4 @@ async def get_analysis_service(
 ) -> AnalysisService:
     """AnalysisService 只依赖 AnalysisRepository（只读统计表）"""
     return AnalysisService(analysis_repo=analysis_repo)
-
 

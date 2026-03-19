@@ -3,7 +3,7 @@
 ——使用 APScheduler 驱动每日统计聚合——
 
 已配置任务：
-1. daily_stat_job    — 每日凌晨2:00 执行全量统计 ETL（货源 + 船舶 8 张统计表）
+1. daily_stats_job       — 每日凌晨执行货源日报 + 船舶快照聚合
 2. cleanup_stale_parsing — 每小时清理超时「解析中」的原始消息（>1小时未完成）
 """
 import logging
@@ -19,12 +19,16 @@ scheduler = AsyncIOScheduler()
 
 
 async def daily_stats_job():
-    """每日统计 ETL 任务（委托给 stat_tasks.daily_stat_job）"""
-    from app.tasks.stat_tasks import daily_stat_job
+    """每日统计 ETL 任务（委托给 app/jobs 主链）"""
+    from app.jobs.cargo_stats import run_cargo_stats
+    from app.jobs.ship_stats import run_ship_stats
 
     logger.info("[Scheduler] 开始执行每日统计聚合任务...")
     try:
-        result = await daily_stat_job()
+        result = {
+            "cargo": await run_cargo_stats(),
+            "ship": await run_ship_stats(),
+        }
         logger.info(f"[Scheduler] 每日统计聚合完成 {result}")
     except Exception as e:
         logger.error(f"[Scheduler] 每日统计聚合失败: {e}", exc_info=True)

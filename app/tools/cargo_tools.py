@@ -96,8 +96,18 @@ class CargoParseTextTool(BaseTool):
                 },
             )
         except Exception as e:
+            # Provider 未配置/运行时异常统一走降级返回，避免链路中断
             logger.error("[CargoParseTextTool] Unexpected error: %s", e)
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(
+                success=False,
+                error=str(e),
+                data={
+                    "fields": _empty_parse_result(),
+                    "template_id": template.id,
+                    "template_version": template.version,
+                    "call_result": None,
+                },
+            )
 
 
 def _empty_parse_result() -> dict:

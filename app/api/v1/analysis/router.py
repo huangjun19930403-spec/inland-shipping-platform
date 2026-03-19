@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, Query
 from app.core.dependencies import get_analysis_service
 from app.core.security import get_current_user_roles, require_roles
 from app.schemas.common import success
-from app.services.analysis_service import AnalysisService
+from app.domain.analysis.service import AnalysisService
 
 router = APIRouter()
 

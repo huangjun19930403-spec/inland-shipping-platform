@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator
-from typing import Any, Optional, List
+from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 
@@ -91,13 +91,13 @@ class RegionCreate(BaseModel):
     区域新增请求体。
     - code：由后端自动生成（RG-NNN），无需填写。
     - center_longitude / center_latitude：由 boundary_coordinates 自动计算。
-    - main_cities：由 boundary_coordinates 与行政区划表自动匹配，无需填写。
-    - main_rivers：主要水系 ID 数组，由调用方提供（可选）。
+    - city_ids：由 boundary_coordinates 与行政区划表自动匹配，无需填写。
+    - waterway_ids：主要水系 ID 数组，由调用方提供（可选）。
     - boundary_coordinates：[[经度, 纬度], ...] 格式，经度 [-180,180]，纬度 [-90,90]，至少 3 点。
     """
     name: str
     name_en: Optional[str] = None
-    main_rivers: Optional[List[int]] = None
+    waterway_ids: Optional[List[int]] = None
     boundary_coordinates: Optional[List[List[float]]] = None
     boundary_color: str = "#3388ff"
     area_color: str = "#3388ff"
@@ -114,12 +114,12 @@ class RegionUpdate(BaseModel):
     """
     区域修改请求体。
     仅允许在 status=0（停用）状态下修改；修改后需重新审核。
-    - center_* 和 main_cities 与新增一样由系统自动重算。
+    - center_* 和 city_ids 与新增一样由系统自动重算。
     - boundary_coordinates：[[经度, 纬度], ...] 格式，经度 [-180,180]，纬度 [-90,90]，至少 3 点。
     """
     name: Optional[str] = None
     name_en: Optional[str] = None
-    main_rivers: Optional[List[int]] = None
+    waterway_ids: Optional[List[int]] = None
     boundary_coordinates: Optional[List[List[float]]] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None
@@ -140,10 +140,8 @@ class RegionResponse(BaseModel):
     name_en: Optional[str] = None
     center_longitude: Optional[Decimal] = None
     center_latitude: Optional[Decimal] = None
-    main_rivers: Optional[List[Any]] = None
-    main_rivers_names: Optional[List[str]] = None
-    main_cities: Optional[List[Any]] = None
-    main_cities_names: Optional[List[str]] = None
+    waterway_ids: List[int] = []
+    city_ids: List[int] = []
     boundary_coordinates: Optional[list] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None
@@ -286,7 +284,6 @@ class TransportNodeCreate(BaseModel):
     node_type_id: int
     node_category: int = 4
     waterway_id: Optional[int] = None
-    region_id: Optional[int] = None
     province_code: Optional[str] = None
     city_code: Optional[str] = None
     district_code: Optional[str] = None
@@ -313,7 +310,6 @@ class TransportNodeUpdate(BaseModel):
     node_type_id: Optional[int] = None
     node_category: Optional[int] = None
     waterway_id: Optional[int] = None
-    region_id: Optional[int] = None
     province_code: Optional[str] = None
     city_code: Optional[str] = None
     district_code: Optional[str] = None
@@ -342,7 +338,6 @@ class TransportNodeResponse(BaseModel):
     node_type_id: int
     node_category: int
     waterway_id: Optional[int] = None
-    region_id: Optional[int] = None
     province_code: Optional[str] = None
     city_code: Optional[str] = None
     district_code: Optional[str] = None

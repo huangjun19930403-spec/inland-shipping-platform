@@ -7,7 +7,7 @@ Topic: tms.cargo.available
   TMS RQ Topic → tms_cargo_raw（幂等暂存）
                 → 节点匹配（名称/坐标/区域匹配）
                 → cargo_freight（导入主表）
-                → refresh_cargo_stats（事件驱动刷新统计）
+                → run_cargo_stats（事件驱动刷新统计）
 
 启动方式（在 main.py 的 lifespan 中注册，或独立运行）:
     python -m app.consumers.tms_cargo_consumer
@@ -296,8 +296,9 @@ async def _process_tms_message(payload: dict) -> None:
             await db.commit()
 
             # 事件驱动刷新统计
-            from app.tasks.stat_tasks import refresh_cargo_stats
-            asyncio.create_task(refresh_cargo_stats(date.today()))
+            from app.jobs.cargo_stats import run_cargo_stats
+
+            asyncio.create_task(run_cargo_stats(date.today()))
 
             logger.info(
                 f"[tms_consumer] 导入成功 message_id={message_id} "

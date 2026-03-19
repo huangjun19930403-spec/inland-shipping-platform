@@ -12,7 +12,8 @@ celery_app = Celery(
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
         "app.tasks.ai_tasks",
-        "app.tasks.stat_tasks",
+        "app.jobs.cargo_stats",
+        "app.jobs.ship_stats",
     ],
 )
 
@@ -34,7 +35,7 @@ celery_app.conf.update(
     # 定时任务（Beat调度）
     beat_schedule={
         "daily-stats-aggregation": {
-            "task": "app.tasks.stat_tasks.daily_stat_job",
+            "task": "app.jobs.cargo_stats.daily_stats_job",
             "schedule": settings.STATS_CRON_SCHEDULE,
             "options": {"queue": "analysis"},
         },
@@ -47,6 +48,6 @@ celery_app.conf.update(
     # 队列路由
     task_routes={
         "app.tasks.ai_tasks.*": {"queue": "ai"},
-        "app.tasks.stat_tasks.*": {"queue": "analysis"},
+        "app.jobs.*": {"queue": "analysis"},
     },
 )

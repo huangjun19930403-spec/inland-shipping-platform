@@ -1,0 +1,568 @@
+"""
+地址/节点业务服务层
+职责：内河运输节点、水系、区域相关业务逻辑
+规则：通过Repository访问数据，不直接操作SQLAlchemy Session
+"""
+import logging
+import uuid
+from typing import Optional
+
+from app.core.exceptions import NotFoundError, ConflictError, BadRequestError
+from app.models.address import (
+    Waterway, Region, AdminRegion, NodeType, TransportNode, NodeAlias,
+)
+from app.repositories.address_repository import AddressRepository
+from app.domain.audit.service import AuditService
+from app.utils.waterway_code_generator import WaterwayCodeGenerator
+from app.utils.region_helpers import (
+    compute_centroid,
+    filter_cities_in_polygon,
+    point_in_polygon,
+)
+
+logger = logging.getLogger(__name__)
+
+# 模块级单例：无状态工具类，整个进程复用同一实例
+_waterway_code_gen = WaterwayCodeGenerator()
+
+
+def _gen_node_type_code() -> str:
+    """生成节点类型编码（不依赖数据库，格式：NT-{12位大写十六进制}）"""
+    return f"NT-{uuid.uuid4().hex[:12].upper()}"
+
+
+def _gen_transport_node_code() -> str:
+    """生成运输节点编码（不依赖数据库，格式：TN-{12位大写十六进制}）"""
+    return f"TN-{uuid.uuid4().hex[:12].upper()}"
+
+
+class AddressService:
+    """地址/节点业务服务"""
+
+    def __init__(
+        self,
+        address_repo: AddressRepository,
+        audit_svc: AuditService,
+    ) -> None:
+        self._address = address_repo
+        self._audit_svc = audit_svc
+
+    # ─────────────────────────────────────────────────
+    # 水系
+    # ─────────────────────────────────────────────────
+
+    async def list_waterways(self, status: Optional[int] = None):
+        return await self._address.list_waterways(status=status)
+
+    async def create_waterway(self, name: str, operator_id: int, **kwargs) -> Waterway:
+        """
+        新增水系，编码由系统自动生成（WW-LL-NNN 格式）。
+
+        并发安全策略
+        ────────────
+        通过 code_sequence 表的原子 upsert 获取本次应使用的序号，
+        天然保证并发唯一性，无需重试逻辑。
+        """
+        level: int = kwargs.get("level", 1)
+        parent_id: Optional[int] = kwargs.get("parent_id")
+
+        parent_code: Optional[str] = None
+        if parent_id is not None:
+            parent_ww = await self._address.get_waterway(parent_id)
+            if not parent_ww:
+                raise NotFoundError("Waterway (parent)", parent_id)
+            parent_code = parent_ww.code
+
+        # 按 parent 维度分配序号：每个 parent 独立计数，互不影响
+        scope = f"ww:{parent_id if parent_id is not None else 'root'}"
+        seq = await self._address.next_code_seq(scope)
+        code = _waterway_code_gen.generate(
+            name=name,
+            level=level,
+            parent_id=parent_id,
+            parent_code=parent_code,
+            seq=seq,
+        )
+
+        ww = Waterway(name=name, code=code, **kwargs)
+        saved = await self._address.create_waterway(ww)
+        await self._audit_svc.submit_for_audit(
+            target_type="WATERWAY", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
+            after_data={"name": name, "code": code},
+        )
+        await self._address.save()
+        return saved
+
+    async def update_waterway(self, waterway_id: int, operator_id: int, **kwargs) -> Waterway:
+        ww = await self._address.get_waterway(waterway_id)
+        if not ww:
+            raise NotFoundError("Waterway", waterway_id)
+        before = {"name": ww.name}
+        updated = await self._address.update_waterway(waterway_id, **kwargs)
+        await self._audit_svc.submit_for_audit(
+            target_type="WATERWAY", target_id=waterway_id,
+            target_name=ww.name, action="UPDATE",
+            submitter_id=operator_id,
+            before_data=before, after_data=kwargs,
+        )
+        await self._address.save()
+        return updated
+
+    async def delete_waterway(self, waterway_id: int, operator_id: int) -> None:
+        ww = await self._address.get_waterway(waterway_id)
+        if not ww:
+            raise NotFoundError("Waterway", waterway_id)
+        await self._address.delete_waterway(waterway_id)
+        await self._audit_svc.record_operation(
+            target_type="WATERWAY", target_id=waterway_id,
+            target_name=ww.name, action="DELETE",
+            operator_id=operator_id,
+            before_data={"name": ww.name},
+        )
+        await self._address.save()
+
+    async def toggle_waterway_status(self, waterway_id: int) -> Waterway:
+        ww = await self._address.get_waterway(waterway_id)
+        if not ww:
+            raise NotFoundError("Waterway", waterway_id)
+        new_status = 0 if ww.status == 1 else 1
+        updated = await self._address.update_waterway(waterway_id, status=new_status)
+        await self._address.save()
+        return updated
+
+    async def list_waterways_paged(
+        self,
+        name: Optional[str] = None,
+        code: Optional[str] = None,
+        status: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._address.list_waterways_paged(
+            name=name, code=code, status=status, offset=offset, limit=page_size
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    # ─────────────────────────────────────────────────
+    # 商业区域
+    # ─────────────────────────────────────────────────
+
+    async def list_regions(self, status: Optional[int] = None):
+        return await self._address.list_regions(status=status)
+
+    async def list_regions_paged(
+        self,
+        name: Optional[str] = None,
+        status: Optional[int] = None,
+        audit_status: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._address.list_regions_paged(
+            name=name, status=status, audit_status=audit_status,
+            offset=offset, limit=page_size,
+        )
+        region_ids = [r.id for r in items]
+        waterway_map, city_map = await self._address.list_region_relation_maps(region_ids)
+        all_wids = sorted({wid for wids in waterway_map.values() for wid in wids})
+        all_cids = sorted({cid for cids in city_map.values() for cid in cids})
+        waterways = await self._address.get_waterways_by_ids(all_wids)
+        cities = await self._address.get_admin_regions_by_ids(all_cids)
+        waterway_by_id = {w.id: w for w in waterways}
+        city_by_id = {c.id: c for c in cities}
+
+        detail_items = []
+        for region in items:
+            waterway_ids = waterway_map.get(region.id, [])
+            city_ids = city_map.get(region.id, [])
+            rivers_info = [waterway_by_id[wid] for wid in waterway_ids if wid in waterway_by_id]
+            cities_info = [city_by_id[cid] for cid in city_ids if cid in city_by_id]
+            detail_items.append({
+                "region": region,
+                "waterway_ids": waterway_ids,
+                "city_ids": city_ids,
+                "rivers_info": rivers_info,
+                "cities_info": cities_info,
+            })
+        return {
+            "items": detail_items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    async def _resolve_region_geo(
+        self,
+        boundary_coordinates: Optional[list],
+    ) -> tuple[Optional[float], Optional[float], list[int]]:
+        if not boundary_coordinates:
+            return None, None, []
+        center_lng, center_lat = compute_centroid(boundary_coordinates)
+        city_coords = await self._address.get_city_coords()
+        city_tuples = [(row[0], float(row[1]), float(row[2])) for row in city_coords]
+        city_ids = filter_cities_in_polygon(city_tuples, boundary_coordinates)
+        return center_lng, center_lat, city_ids
+
+    async def create_region(self, name: str, operator_id: int, **kwargs) -> Region:
+        seq = await self._address.next_code_seq("region")
+        code = f"RG-{seq:03d}"
+
+        boundary = kwargs.pop("boundary_coordinates", None)
+        center_lng, center_lat, city_ids = await self._resolve_region_geo(boundary)
+
+        waterway_ids = kwargs.pop("waterway_ids", []) or []
+
+        region = Region(
+            name=name,
+            code=code,
+            boundary_coordinates=boundary,
+            center_longitude=center_lng,
+            center_latitude=center_lat,
+            submitter_id=operator_id,
+            audit_status=0,
+            status=0,
+            **kwargs,
+        )
+        saved = await self._address.create_region(region)
+        await self._address.sync_region_waterway_relations(
+            region_id=saved.id,
+            waterway_ids=waterway_ids,
+            source="MANUAL",
+        )
+        await self._address.sync_region_city_relations(
+            region_id=saved.id,
+            city_ids=city_ids,
+            source="RULE",
+        )
+        await self._audit_svc.submit_for_audit(
+            target_type="REGION", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
+            after_data={"name": name, "code": code},
+        )
+        await self._address.save()
+        return saved
+
+    async def update_region(self, region_id: int, operator_id: int, **kwargs) -> Region:
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        if region.status != 0:
+            raise BadRequestError("只能修改停用状态（status=0）的区域数据")
+
+        before = {"name": region.name, "code": region.code}
+
+        boundary = kwargs.pop("boundary_coordinates", None)
+        city_ids: Optional[list[int]] = None
+        if boundary is not None:
+            center_lng, center_lat, city_ids = await self._resolve_region_geo(boundary)
+            kwargs["boundary_coordinates"] = boundary
+            kwargs["center_longitude"] = center_lng
+            kwargs["center_latitude"] = center_lat
+
+        waterway_ids = kwargs.pop("waterway_ids", None)
+        if waterway_ids is not None:
+            waterway_ids = waterway_ids or []
+
+        kwargs["audit_status"] = 0
+
+        updated = await self._address.update_region(region_id, **kwargs)
+        if waterway_ids is not None:
+            await self._address.sync_region_waterway_relations(
+                region_id=region_id,
+                waterway_ids=waterway_ids,
+                source="MANUAL",
+            )
+        if city_ids is not None:
+            await self._address.sync_region_city_relations(
+                region_id=region_id,
+                city_ids=city_ids,
+                source="RULE",
+            )
+        after_data = dict(kwargs)
+        if waterway_ids is not None:
+            after_data["waterway_ids"] = waterway_ids
+        if city_ids is not None:
+            after_data["city_ids"] = city_ids
+        await self._audit_svc.submit_for_audit(
+            target_type="REGION", target_id=region_id,
+            target_name=region.name, action="UPDATE",
+            submitter_id=operator_id,
+            before_data=before, after_data=after_data,
+        )
+        await self._address.save()
+        return updated
+
+    async def delete_region(self, region_id: int, operator_id: int) -> None:
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        await self._address.delete_region(region_id)
+        await self._audit_svc.record_operation(
+            target_type="REGION", target_id=region_id,
+            target_name=region.name, action="DELETE", operator_id=operator_id,
+        )
+        await self._address.save()
+
+    async def toggle_region_status(self, region_id: int) -> Region:
+        region = await self._address.get_region(region_id)
+        if not region:
+            raise NotFoundError("Region", region_id)
+        new_status = 0 if region.status == 1 else 1
+        updated = await self._address.update_region(region_id, status=new_status)
+        await self._address.save()
+        return updated
+
+    async def get_nodes_in_region(self, region_id: int):
+        return await self._address.get_nodes_in_region(region_id)
+
+    # ─────────────────────────────────────────────────
+    # 行政区划
+    # ─────────────────────────────────────────────────
+
+    async def list_admin_regions(
+        self,
+        level: Optional[int] = None,
+        parent_code: Optional[str] = None,
+        parent_id: Optional[int] = None,
+    ):
+        return await self._address.list_admin_regions(
+            level=level, parent_code=parent_code, parent_id=parent_id
+        )
+
+    async def create_admin_region(self, name: str, code: str, **kwargs) -> AdminRegion:
+        region = AdminRegion(name=name, code=code, **kwargs)
+        saved = await self._address.create_admin_region(region)
+        await self._address.save()
+        return saved
+
+    async def update_admin_region(self, region_id: int, **kwargs) -> AdminRegion:
+        region = await self._address.get_admin_region(region_id)
+        if not region:
+            raise NotFoundError("AdminRegion", region_id)
+        updated = await self._address.update_admin_region(region_id, **kwargs)
+        await self._address.save()
+        return updated
+
+    # ─────────────────────────────────────────────────
+    # 节点类型（编码自动生成，不依赖数据库）
+    # ─────────────────────────────────────────────────
+
+    async def list_node_types(self, status: Optional[int] = None):
+        return await self._address.list_node_types(status=status)
+
+    async def create_node_type(self, name: str, operator_id: int, **kwargs) -> NodeType:
+        """创建节点类型，编码系统自动生成（NT-{UUID12}）"""
+        code = _gen_node_type_code()
+        nt = NodeType(name=name, code=code, **kwargs)
+        saved = await self._address.create_node_type(nt)
+        await self._address.save()
+        return saved
+
+    async def update_node_type(self, node_type_id: int, operator_id: int, **kwargs) -> NodeType:
+        nt = await self._address.get_node_type(node_type_id)
+        if not nt:
+            raise NotFoundError("NodeType", node_type_id)
+        updated = await self._address.update_node_type(node_type_id, **kwargs)
+        await self._address.save()
+        return updated
+
+    async def delete_node_type(self, node_type_id: int, operator_id: int) -> None:
+        nt = await self._address.get_node_type(node_type_id)
+        if not nt:
+            raise NotFoundError("NodeType", node_type_id)
+        await self._address.delete_node_type(node_type_id)
+        await self._address.save()
+
+    # ─────────────────────────────────────────────────
+    # 运输节点（编码自动生成，不依赖数据库）
+    # ─────────────────────────────────────────────────
+
+    async def list_nodes(
+        self,
+        audit_status: Optional[int] = None,
+        region_id: Optional[int] = None,
+        waterway_id: Optional[int] = None,
+        status: Optional[int] = None,
+        keyword: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._address.list_nodes(
+            waterway_id=waterway_id,
+            region_id=region_id,
+            audit_status=audit_status,
+            status=status,
+            keyword=keyword,
+            offset=offset,
+            limit=page_size,
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    async def search_nodes(self, q: str, page: int = 1, page_size: int = 20) -> dict:
+        offset = (page - 1) * page_size
+        items, total = await self._address.search_nodes_by_alias(q, offset=offset, limit=page_size)
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    async def get_node(self, node_id: int) -> TransportNode:
+        node = await self._address.get_node(node_id)
+        if not node:
+            raise NotFoundError("TransportNode", node_id)
+        return node
+
+    async def _assign_node_to_regions(
+        self, node_id: int, lng: float, lat: float
+    ) -> None:
+        """根据经纬度将节点自动归属到包含该点的区域（点在多边形内判断）"""
+        regions = await self._address.list_regions_with_boundaries()
+        for region in regions:
+            if region.boundary_coordinates and point_in_polygon(
+                lng, lat, region.boundary_coordinates
+            ):
+                await self._address.upsert_region_relation(region.id, node_id)
+
+    async def create_node(
+        self,
+        name: str,
+        operator_id: int,
+        waterway_id: Optional[int] = None,
+        submitter_id: Optional[int] = None,
+        latitude=None,
+        longitude=None,
+        **kwargs,
+    ) -> TransportNode:
+        """
+        创建运输节点，编码系统自动生成（TN-{UUID12}）。
+        若提供经纬度，自动检测落入哪些已启用区域并写入归属关系表。
+        """
+        code = _gen_transport_node_code()
+        node = TransportNode(
+            name=name, code=code, waterway_id=waterway_id,
+            latitude=latitude, longitude=longitude,
+            submitter_id=submitter_id or operator_id,
+            audit_status=0,
+            **kwargs,
+        )
+        saved = await self._address.create_node(node)
+
+        # 自动归属区域
+        if latitude is not None and longitude is not None:
+            try:
+                await self._assign_node_to_regions(
+                    saved.id, float(longitude), float(latitude)
+                )
+            except Exception as e:
+                logger.warning("节点区域自动归属失败 node_id=%s: %s", saved.id, e)
+
+        await self._audit_svc.submit_for_audit(
+            target_type="TRANSPORT_NODE", target_id=saved.id,
+            target_name=name, action="CREATE",
+            submitter_id=operator_id,
+            after_data={"name": name, "code": code},
+        )
+        await self._address.save()
+        return saved
+
+    async def update_node(self, node_id: int, operator_id: int, **kwargs) -> TransportNode:
+        node = await self.get_node(node_id)
+        before = {"name": node.name, "code": node.code}
+        updated = await self._address.update_node(node_id, **kwargs)
+
+        # 若更新了经纬度，重新计算区域归属
+        new_lat = kwargs.get("latitude")
+        new_lng = kwargs.get("longitude")
+        if new_lat is not None or new_lng is not None:
+            lat = new_lat if new_lat is not None else (
+                float(updated.latitude) if updated.latitude else None
+            )
+            lng = new_lng if new_lng is not None else (
+                float(updated.longitude) if updated.longitude else None
+            )
+            if lat is not None and lng is not None:
+                try:
+                    await self._address.sync_node_region_relations(node_id, [])
+                    await self._assign_node_to_regions(node_id, float(lng), float(lat))
+                except Exception as e:
+                    logger.warning("节点区域重新归属失败 node_id=%s: %s", node_id, e)
+
+        await self._audit_svc.submit_for_audit(
+            target_type="TRANSPORT_NODE", target_id=node_id,
+            target_name=node.name, action="UPDATE",
+            submitter_id=operator_id,
+            before_data=before, after_data=kwargs,
+        )
+        await self._address.save()
+        return updated
+
+    async def delete_node(self, node_id: int, operator_id: int) -> None:
+        node = await self.get_node(node_id)
+        await self._address.delete_node(node_id)
+        await self._audit_svc.record_operation(
+            target_type="TRANSPORT_NODE", target_id=node_id,
+            target_name=node.name, action="DELETE", operator_id=operator_id,
+            before_data={"name": node.name},
+        )
+        await self._address.save()
+
+    async def reassign_all_nodes(self) -> dict:
+        """
+        一键归属：重新计算所有节点与区域的关系。
+        - 有经纬度的节点：清除旧关系，重新判断落入哪些区域
+        - 无经纬度的节点：清除其旧关系（坐标丢失则无法归属）
+        返回统计摘要。
+        """
+        regions = await self._address.list_regions_with_boundaries()
+        nodes = await self._address.list_all_nodes_with_coords()
+
+        processed = 0
+        for node in nodes:
+            try:
+                lng = float(node.longitude)
+                lat = float(node.latitude)
+                matching_ids = [
+                    r.id for r in regions
+                    if r.boundary_coordinates
+                    and point_in_polygon(lng, lat, r.boundary_coordinates)
+                ]
+                await self._address.sync_node_region_relations(node.id, matching_ids)
+                processed += 1
+            except Exception as e:
+                logger.warning("归属计算失败 node_id=%s: %s", node.id, e)
+
+        await self._address.save()
+        logger.info("[AddressService] 一键归属完成，处理节点 %d 个", processed)
+        return {
+            "processed_nodes": processed,
+            "active_regions": len(regions),
+        }
+
+    # ─────────────────────────────────────────────────
+    # 节点别名
+    # ─────────────────────────────────────────────────
+
+    async def add_alias(self, node_id: int, alias_name: str, operator_id: int) -> NodeAlias:
+        node = await self.get_node(node_id)
+        alias = NodeAlias(node_id=node_id, alias_name=alias_name)
+        saved = await self._address.create_alias(alias)
+        await self._audit_svc.record_operation(
+            target_type="NODE_ALIAS", target_id=saved.id,
+            target_name=alias_name, action="CREATE", operator_id=operator_id,
+            after_data={"node_id": node_id, "node_name": node.name, "alias_name": alias_name},
+        )
+        await self._address.save()
+        return saved
+
+    async def delete_alias(self, node_id: int, alias_id: int, operator_id: int) -> None:
+        deleted = await self._address.delete_alias(alias_id)
+        if not deleted:
+            raise NotFoundError("NodeAlias", alias_id)
+        await self._audit_svc.record_operation(
+            target_type="NODE_ALIAS", target_id=alias_id,
+            target_name=str(alias_id), action="DELETE", operator_id=operator_id,
+        )
+        await self._address.save()

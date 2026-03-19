@@ -198,8 +198,9 @@ class ShipStatRegion(Base):
 
     来源：vessel_dynamic → Region（多边形边界）
     归属逻辑：
-      1. vessel_dynamic.current_node_id → transport_node.region_id（精确）
-      2. vessel_dynamic GPS → Region.boundary_coordinates 点在多边形内（Python射线法）
+      1. vessel_dynamic.current_region_id（动态直连）
+      2. vessel_dynamic.current_node_id → region_address_relation（节点主归属）
+      3. vessel_dynamic GPS → Region.boundary_coordinates 点在多边形内（Python射线法）
     刷新：Kafka AIS 更新触发（30s 节流）+ 管理员手动
     用途：区域热力地图（含多边形边界渲染）+ 区域运力对比
     """

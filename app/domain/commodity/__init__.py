@@ -1,3 +1,3 @@
-from app.services.cargo_service import CargoService
+from app.domain.commodity.service import CommodityService
 
-__all__ = ["CargoService"]
+__all__ = ["CommodityService"]

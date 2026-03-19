@@ -5,7 +5,7 @@
   1. 写入主要内河港口城市的行政区划（admin_region level=2），含经纬度
   2. 写入货品大类 → 货品类型 → 标准货品（各 5~10 条）
   3. 写入 30 条 cargo_freight 手动货源记录（不同路线、日期、货品、状态）
-  4. 触发一次 refresh_cargo_stats 统计聚合，填充分析统计表
+  4. 触发一次 run_cargo_stats 统计聚合，填充分析统计表
 
 执行方式（在项目根目录）：
     python -m scripts.seed_cargo_test_data
@@ -354,7 +354,7 @@ async def seed_cargo_freights(db, standard_map: dict) -> int:
 async def seed_all_cargo() -> None:
     """货源测试数据全量写入入口"""
     from app.core.database import AsyncSessionLocal
-    from app.tasks.stat_tasks import refresh_cargo_stats
+    from app.jobs.cargo_stats import run_cargo_stats
     from datetime import timedelta
 
     async with AsyncSessionLocal() as db:
@@ -388,7 +388,7 @@ async def seed_all_cargo() -> None:
     today = date.today()
     for i in range(7):
         stat_date = today - timedelta(days=i)
-        await refresh_cargo_stats(stat_date)
+        await run_cargo_stats(stat_date)
         print(f"      统计完成: {stat_date}")
 
     print("=== 初始化完成 ===")

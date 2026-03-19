@@ -1,3 +1,3 @@
-from app.services.analysis_service import AnalysisService
+from app.domain.analysis.service import AnalysisService
 
 __all__ = ["AnalysisService"]

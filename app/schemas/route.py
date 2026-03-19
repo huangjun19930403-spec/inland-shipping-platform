@@ -28,6 +28,35 @@ class ShippingRoutePathNodeResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────────
+# 路径分段（ShippingRoutePathSegment）
+# ─────────────────────────────────────────────────
+
+class ShippingRoutePathSegmentCreate(BaseModel):
+    sequence: int
+    segment_type: str = "WATERWAY"
+    from_node_id: Optional[int] = None
+    to_node_id: Optional[int] = None
+    distance_km: Optional[Decimal] = None
+    estimated_duration_hours: Optional[Decimal] = None
+    description: Optional[str] = None
+
+
+class ShippingRoutePathSegmentResponse(BaseModel):
+    id: int
+    path_id: int
+    sequence: int
+    segment_type: str
+    from_node_id: Optional[int] = None
+    to_node_id: Optional[int] = None
+    distance_km: Optional[Decimal] = None
+    estimated_duration_hours: Optional[Decimal] = None
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ─────────────────────────────────────────────────
 # 路线方案（ShippingRoutePath）
 # ─────────────────────────────────────────────────
 
@@ -50,6 +79,11 @@ class ShippingRoutePathNodesBatchSet(BaseModel):
     nodes: List[ShippingRoutePathNodeCreate]
 
 
+class ShippingRoutePathSegmentsBatchSet(BaseModel):
+    """批量替换路线分段"""
+    segments: List[ShippingRoutePathSegmentCreate]
+
+
 class ShippingRoutePathResponse(BaseModel):
     id: int
     route_id: int
@@ -61,6 +95,7 @@ class ShippingRoutePathResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     nodes: List[ShippingRoutePathNodeResponse] = []
+    segments: List[ShippingRoutePathSegmentResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 

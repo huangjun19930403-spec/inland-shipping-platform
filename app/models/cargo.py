@@ -1,7 +1,7 @@
 """货品和货源数据体系模型
 
-CargoFreight 替换原 CargoOpportunity，支持三路录入渠道（TMS/WECHAT_AI/MANUAL）
-和多精度位置存储（节点级/城市级/坐标级/原文）。
+`cargo_freight` 在一期定位为“货源分析记录表”，不是交易订单表。
+它支持三路录入渠道（TMS/WECHAT_AI/MANUAL）和多精度位置存储（节点级/城市级/坐标级/原文）。
 TmsCargoRaw 暂存 TMS 原始报文，供节点匹配和幂等控制。
 CargoAiParseResult 新增城市级位置字段，解耦节点强依赖。
 """
@@ -218,12 +218,16 @@ class CargoAiParseResult(Base):
 
 
 class CargoFreight(Base):
-    """货源主表（替换原 CargoOpportunity）
+    """货源分析记录主表（表名沿用 cargo_freight）
 
     支持三路录入渠道和多精度位置存储：
     - TMS:       source_type=TMS，坐标直接来自TMS报文，自动尝试节点匹配
     - WECHAT_AI: source_type=WECHAT_AI，经AI解析+操作员确认后入库
     - MANUAL:    source_type=MANUAL，操作员手动录入，城市级或节点级均可
+
+    说明：
+    - 一期不承载交易闭环，不做订单/运单/结算流程。
+    - 本表仅用于标准化后货源记录与分析。
 
     位置精度字段（origin_precision / dest_precision）：
     - NODE:        已精确关联到 transport_node

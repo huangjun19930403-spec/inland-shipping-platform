@@ -190,6 +190,44 @@ class AddressRepository(BaseRepository):
         )
         return result.scalars().unique().all()
 
+    async def list_region_relation_maps(
+        self, region_ids: list[int]
+    ) -> tuple[dict[int, list[int]], dict[int, list[int]]]:
+        """批量查询区域-水系/城市关系映射，避免分页查询时 N+1。"""
+        if not region_ids:
+            return {}, {}
+
+        waterway_rows = (
+            await self._db.execute(
+                select(RegionWaterwayRelation.region_id, RegionWaterwayRelation.waterway_id)
+                .where(RegionWaterwayRelation.region_id.in_(region_ids))
+                .order_by(
+                    RegionWaterwayRelation.region_id,
+                    RegionWaterwayRelation.is_primary.desc(),
+                    RegionWaterwayRelation.id,
+                )
+            )
+        ).all()
+        city_rows = (
+            await self._db.execute(
+                select(RegionCityRelation.region_id, RegionCityRelation.admin_region_id)
+                .where(RegionCityRelation.region_id.in_(region_ids))
+                .order_by(
+                    RegionCityRelation.region_id,
+                    RegionCityRelation.is_primary.desc(),
+                    RegionCityRelation.id,
+                )
+            )
+        ).all()
+
+        waterway_map: dict[int, list[int]] = {}
+        city_map: dict[int, list[int]] = {}
+        for rid, wid in waterway_rows:
+            waterway_map.setdefault(rid, []).append(wid)
+        for rid, cid in city_rows:
+            city_map.setdefault(rid, []).append(cid)
+        return waterway_map, city_map
+
     async def get_waterways_by_ids(self, ids: list[int]) -> Sequence[Waterway]:
         if not ids:
             return []

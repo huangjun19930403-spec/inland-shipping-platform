@@ -7,7 +7,7 @@
 """
 from sqlalchemy import (
     Column, BigInteger, Integer, String, SmallInteger,
-    DECIMAL, DateTime, ForeignKey
+    DECIMAL, DateTime, ForeignKey, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -88,6 +88,10 @@ class ShippingRoutePathNode(Base):
     path = relationship("ShippingRoutePath", back_populates="nodes")
     node = relationship("TransportNode")
 
+    __table_args__ = (
+        UniqueConstraint("path_id", "sequence", name="uk_route_path_node_sequence"),
+    )
+
 
 class ShippingRoutePathSegment(Base):
     """路线分段（支持多段水运/多式联运）"""
@@ -113,3 +117,7 @@ class ShippingRoutePathSegment(Base):
     path = relationship("ShippingRoutePath", back_populates="segments")
     from_node = relationship("TransportNode", foreign_keys=[from_node_id])
     to_node = relationship("TransportNode", foreign_keys=[to_node_id])
+
+    __table_args__ = (
+        UniqueConstraint("path_id", "sequence", name="uk_route_path_segment_sequence"),
+    )

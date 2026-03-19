@@ -46,11 +46,6 @@ class Region(Base):
     name_en = Column(String(128), comment="英文名称")
     center_longitude = Column(DECIMAL(11, 8), comment="区域中心经度（由边界坐标自动计算）")
     center_latitude = Column(DECIMAL(10, 8), comment="区域中心纬度（由边界坐标自动计算）")
-    # 以下4列保留仅用于过渡兼容，不再作为正式关系表达
-    main_rivers = Column(JSON, comment="(弃用) 主要水系ID数组，正式关系见 region_waterway_relation")
-    main_rivers_names = Column(JSON, comment="(弃用) 主要水系名称数组")
-    main_cities = Column(JSON, comment="(弃用) 主要城市ID数组，正式关系见 region_city_relation")
-    main_cities_names = Column(JSON, comment="(弃用) 主要城市名称数组")
     boundary_coordinates = Column(JSON, comment="边界坐标点序列 [[lng,lat],...]")
     boundary_color = Column(String(20), default="#3388ff", comment="边界颜色")
     area_color = Column(String(20), default="#3388ff", comment="填充颜色")
@@ -125,8 +120,6 @@ class TransportNode(Base):
     node_category = Column(SmallInteger, nullable=False, default=4,
                            comment="1=装货,2=卸货,3=中转,4=综合,5=航道")
     waterway_id = Column(BigInteger, ForeignKey("waterway.id"), comment="所属水系")
-    # 兼容字段：正式归属关系使用 region_address_relation
-    region_id = Column(BigInteger, ForeignKey("region.id"), comment="(弃用) 单值区域归属")
     province_code = Column(String(12), comment="省级行政区划代码")
     city_code = Column(String(12), comment="市级行政区划代码")
     district_code = Column(String(12), comment="区县级行政区划代码")
@@ -158,7 +151,6 @@ class TransportNode(Base):
 
     node_type = relationship("NodeType", backref="nodes")
     waterway = relationship("Waterway", backref="nodes")
-    region = relationship("Region", backref="nodes")
     aliases = relationship("NodeAlias", back_populates="node")
 
 

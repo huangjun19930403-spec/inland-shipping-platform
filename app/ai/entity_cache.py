@@ -26,7 +26,7 @@ _CACHE_TTL = 600  # 10 分钟
 async def get_nodes(db: AsyncSession) -> list[dict]:
     """获取所有运输节点（含别名），TTL 缓存。
 
-    返回格式：[{"id", "name", "code", "aliases": list[str], "waterway_id", "region_id"}]
+    返回格式：[{"id", "name", "code", "aliases": list[str], "waterway_id"}]
     """
     global _nodes, _nodes_loaded_at
     async with _lock:
@@ -77,7 +77,6 @@ async def _load_nodes(db: AsyncSession) -> list[dict]:
             "code": getattr(n, "code", "") or "",
             "aliases": [a.alias_name for a in (n.aliases or [])],
             "waterway_id": getattr(n, "waterway_id", None),
-            "region_id": getattr(n, "region_id", None),
         }
         for n in nodes
     ]

@@ -1022,7 +1022,7 @@ async def seed_regions(db) -> None:
     from sqlalchemy import select
     from app.models.address import Region
 
-    for (code, name, main_rivers, main_cities_names,
+    for (code, name, _main_rivers, _main_cities_names,
          boundary_color, area_color, center_lng, center_lat, boundary_coordinates) in REGIONS:
         res = await db.execute(select(Region).where(Region.code == code))
         if res.scalar_one_or_none():
@@ -1030,8 +1030,6 @@ async def seed_regions(db) -> None:
         region = Region(
             code=code,
             name=name,
-            main_rivers_names=main_rivers,
-            main_cities_names=main_cities_names,
             boundary_color=boundary_color,
             area_color=area_color,
             center_longitude=center_lng,
@@ -1043,6 +1041,112 @@ async def seed_regions(db) -> None:
         )
         db.add(region)
         logger.info(f"[seed] region: {name}")
+
+
+def _normalize_geo_name(text: str) -> str:
+    v = (text or "").strip()
+    for suffix in ("市", "区", "县", "自治州", "自治县"):
+        if v.endswith(suffix):
+            v = v[: -len(suffix)]
+    return v
+
+
+async def seed_region_relations(db) -> None:
+    """初始化区域关系表（region_waterway_relation / region_city_relation）"""
+    from sqlalchemy import and_, select
+    from app.models.address import (
+        AdminRegion,
+        Region,
+        RegionCityRelation,
+        RegionWaterwayRelation,
+        Waterway,
+    )
+
+    regions = (
+        await db.execute(select(Region).where(Region.deleted_at.is_(None)))
+    ).scalars().all()
+    region_by_code = {r.code: r for r in regions}
+
+    waterways = (
+        await db.execute(select(Waterway).where(Waterway.deleted_at.is_(None)))
+    ).scalars().all()
+    waterway_by_name = {w.name: w.id for w in waterways}
+
+    city_rows = (
+        await db.execute(
+            select(AdminRegion.id, AdminRegion.name).where(AdminRegion.level == 2)
+        )
+    ).all()
+    city_by_name: dict[str, int] = {}
+    city_by_norm_name: dict[str, int] = {}
+    for row in city_rows:
+        city_by_name[row.name] = row.id
+        city_by_norm_name[_normalize_geo_name(row.name)] = row.id
+
+    rw_count = 0
+    rc_count = 0
+    for code, _name, main_rivers, main_cities_names, *_rest in REGIONS:
+        region = region_by_code.get(code)
+        if not region:
+            continue
+
+        for idx, river_name in enumerate(main_rivers or []):
+            wid = waterway_by_name.get(river_name)
+            if wid is None:
+                continue
+            exists = (
+                await db.execute(
+                    select(RegionWaterwayRelation.id).where(
+                        and_(
+                            RegionWaterwayRelation.region_id == region.id,
+                            RegionWaterwayRelation.waterway_id == wid,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+            if exists:
+                continue
+            db.add(
+                RegionWaterwayRelation(
+                    region_id=region.id,
+                    waterway_id=wid,
+                    relation_type="MAIN",
+                    is_primary=1 if idx == 0 else 0,
+                    source="SEED",
+                )
+            )
+            rw_count += 1
+
+        for idx, city_name in enumerate(main_cities_names or []):
+            city_id = city_by_name.get(city_name)
+            if city_id is None:
+                city_id = city_by_norm_name.get(_normalize_geo_name(city_name))
+            if city_id is None:
+                continue
+            exists = (
+                await db.execute(
+                    select(RegionCityRelation.id).where(
+                        and_(
+                            RegionCityRelation.region_id == region.id,
+                            RegionCityRelation.admin_region_id == city_id,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+            if exists:
+                continue
+            db.add(
+                RegionCityRelation(
+                    region_id=region.id,
+                    admin_region_id=city_id,
+                    relation_type="MAIN",
+                    is_primary=1 if idx == 0 else 0,
+                    source="SEED",
+                )
+            )
+            rc_count += 1
+
+    logger.info(f"[seed] region relations: waterway={rw_count}, city={rc_count}")
 
 
 async def seed_admin_regions(db) -> dict:
@@ -1307,25 +1411,28 @@ async def seed_all() -> None:
             print("[5/12] 初始化行政区划（省市）...")
             await seed_admin_regions(db)
 
-            print("[6/12] 初始化节点类型...")
+            print("[6/12] 初始化区域关系（区域-水系/城市）...")
+            await seed_region_relations(db)
+
+            print("[7/12] 初始化节点类型...")
             type_map = await seed_node_types(db)
 
-            print(f"[7/12] 初始化运输节点（{len(TRANSPORT_NODES)}个港口）...")
+            print(f"[8/12] 初始化运输节点（{len(TRANSPORT_NODES)}个港口）...")
             await seed_transport_nodes(db, waterway_map, type_map)
 
-            print("[8/12] 初始化货品大类...")
+            print("[9/12] 初始化货品大类...")
             cat_map = await seed_commodity_categories(db)
 
-            print(f"[9/12] 初始化货品类型（{len(COMMODITY_TYPES)}种）...")
+            print(f"[10/12] 初始化货品类型（{len(COMMODITY_TYPES)}种）...")
             comm_type_map = await seed_commodity_types(db, cat_map)
 
-            print(f"[10/12] 初始化标准货品（{len(COMMODITY_STANDARDS)}条）...")
+            print(f"[11/12] 初始化标准货品（{len(COMMODITY_STANDARDS)}条）...")
             await seed_commodity_standards(db, comm_type_map)
 
-            print("[11/12] 初始化船型字典...")
+            print("[12/12] 初始化船型字典...")
             await seed_vessel_types(db)
 
-            print("[12/12] 初始化AI提示词模板...")
+            print("[13/13] 初始化AI提示词模板...")
             await seed_ai_prompt(db)
 
             await db.commit()
@@ -1349,10 +1456,10 @@ async def seed_all() -> None:
     # Refresh stats
     print("[+] 触发统计聚合...")
     try:
-        from app.tasks.stat_tasks import refresh_cargo_stats
+        from app.jobs.cargo_stats import run_cargo_stats
         today = date.today()
         for i in range(7):
-            await refresh_cargo_stats(today - timedelta(days=i))
+            await run_cargo_stats(today - timedelta(days=i))
     except Exception as e:
         logger.warning(f"[seed] 统计聚合失败: {e}")
 
