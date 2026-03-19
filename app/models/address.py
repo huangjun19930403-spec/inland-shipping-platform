@@ -7,6 +7,9 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
+# 软删公共列（直接在各模型内内联，避免多继承歧义）
+_SOFT_DELETE_COL = lambda: Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
+
 
 class Waterway(Base):
     """水系表"""
@@ -24,6 +27,12 @@ class Waterway(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=停用")
+    # 审核相关
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
+    submitter_id = Column(BigInteger, comment="提交人ID")
+    audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -35,19 +44,29 @@ class Region(Base):
     __tablename__ = "region"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(50), unique=True, nullable=False, comment="区域编码")
+    code = Column(String(50), unique=True, nullable=False, comment="区域编码（系统自动生成，格式 RG-NNN）")
     name = Column(String(64), nullable=False, comment="区域名称")
     name_en = Column(String(128), comment="英文名称")
-    center_longitude = Column(DECIMAL(11, 8), comment="区域中心经度")
-    center_latitude = Column(DECIMAL(10, 8), comment="区域中心纬度")
-    main_rivers = Column(JSON, comment="主要水系")
-    main_cities = Column(JSON, comment="主要城市")
-    boundary_coordinates = Column(JSON, comment="边界坐标点序列")
+    center_longitude = Column(DECIMAL(11, 8), comment="区域中心经度（由边界坐标自动计算）")
+    center_latitude = Column(DECIMAL(10, 8), comment="区域中心纬度（由边界坐标自动计算）")
+    main_rivers = Column(JSON, comment="主要水系 ID 数组（Waterway.id）")
+    main_rivers_names = Column(JSON, comment="主要水系名称数组（冗余，与 main_rivers 同步）")
+    main_cities = Column(JSON, comment="主要城市 ID 数组（AdminRegion.id，由边界自动计算）")
+    main_cities_names = Column(JSON, comment="主要城市名称数组（冗余，与 main_cities 同步）")
+    boundary_coordinates = Column(JSON, comment="边界坐标点序列 [[lng,lat],...]")
     boundary_color = Column(String(20), default="#3388ff", comment="边界颜色")
     area_color = Column(String(20), default="#3388ff", comment="填充颜色")
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
-    status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=停用")
+    status = Column(SmallInteger, nullable=False, default=0, comment="1=启用,0=停用")
+    # 审核相关
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
+    audit_remark = Column(String(512), comment="审核意见")
+    submitter_id = Column(BigInteger, comment="提交人ID")
+    auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -86,6 +105,12 @@ class NodeType(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
+    # 审核相关
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
+    submitter_id = Column(BigInteger, comment="提交人ID")
+    audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -119,10 +144,13 @@ class TransportNode(Base):
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1, comment="1=运营中,0=停用,2=建设中")
     # 审核相关
-    audit_status = Column(SmallInteger, default=1, comment="0=待审核,1=已通过,2=已驳回")
+    audit_status = Column(SmallInteger, nullable=False, default=0,
+                          comment="0=待审核,1=已通过,2=已驳回")
     audit_remark = Column(String(512), comment="审核意见")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
+    audited_at = Column(DateTime, comment="审核时间")
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -144,6 +172,7 @@ class NodeAlias(Base):
     source = Column(String(64), comment="别名来源")
     priority = Column(Integer, nullable=False, default=0, comment="匹配优先级")
     status = Column(SmallInteger, nullable=False, default=1)
+    deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -160,3 +189,15 @@ class RegionAddressRelation(Base):
     is_primary = Column(SmallInteger, nullable=False, default=1, comment="1=主归属")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class CodeSequence(Base):
+    """编码序列表（并发安全分配序号）"""
+    __tablename__ = "code_sequence"
+
+    scope = Column(
+        String(64),
+        primary_key=True,
+        comment="序号命名空间，如 region / ww:root / ww:{parent_id}",
+    )
+    next_val = Column(Integer, nullable=False, default=1, comment="下一个可用序号")

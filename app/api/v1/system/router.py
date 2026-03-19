@@ -155,6 +155,10 @@ async def delete_user(
     user = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    # 先删除关联角色，避免 user_id 非空约束导致 500
+    await db.execute(
+        SysUserRole.__table__.delete().where(SysUserRole.user_id == user_id)
+    )
     await db.delete(user)
     await db.commit()
     return success(message="删除成功")

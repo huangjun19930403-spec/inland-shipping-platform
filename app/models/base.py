@@ -5,12 +5,8 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
-
-class Base(DeclarativeBase):
-    """SQLAlchemy声明基类"""
-    pass
+from sqlalchemy.orm import Mapped, mapped_column
+from app.core.database import Base
 
 
 class TimestampMixin:
