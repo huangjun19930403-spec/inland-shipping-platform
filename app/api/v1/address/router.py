@@ -133,8 +133,8 @@ async def list_regions_paged(
     detail_items = []
     for item in result["items"]:
         detail = RegionDetailResponse.model_validate(item["region"])
-        detail.main_rivers_info = [_WR.model_validate(r) for r in item["rivers_info"]]
-        detail.main_cities_info = [AdminRegionResponse.model_validate(c) for c in item["cities_info"]]
+        detail.waterways_info = [_WR.model_validate(r) for r in item["rivers_info"]]
+        detail.cities_info = [AdminRegionResponse.model_validate(c) for c in item["cities_info"]]
         detail_items.append(detail)
 
     return success(data={

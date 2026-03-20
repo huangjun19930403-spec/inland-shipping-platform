@@ -121,6 +121,7 @@ async def get_vessel_service(
     return VesselService(
         vessel_repo=VesselRepository(db),
         audit_svc=AuditService(audit_repo=AuditRepository(db)),
+        address_repo=AddressRepository(db),
     )
 
 
@@ -135,5 +136,4 @@ async def get_analysis_service(
 ) -> AnalysisService:
     """AnalysisService 只依赖 AnalysisRepository（只读统计表）"""
     return AnalysisService(analysis_repo=analysis_repo)
-
 

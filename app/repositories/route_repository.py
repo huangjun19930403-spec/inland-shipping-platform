@@ -1,29 +1,36 @@
-"""
-航线数据访问层
-"""
+"""航线数据访问层"""
 from typing import Optional, Sequence, Tuple
 
-from sqlalchemy import select, and_, func, delete as sql_delete
+from sqlalchemy import and_, delete as sql_delete, func, select
 from sqlalchemy.orm import selectinload
 
-from app.models.route import ShippingRoute, ShippingRoutePath, ShippingRoutePathNode
+from app.models.route import (
+    ShippingRoute,
+    ShippingRoutePath,
+    ShippingRoutePathNode,
+    ShippingRoutePathSegment,
+)
 from app.repositories.base import BaseRepository
 
 
 class RouteRepository(BaseRepository):
     model_class = ShippingRoute
 
-    # ─────────────────────────────────────────────────
-    # ShippingRoute
-    # ─────────────────────────────────────────────────
+    def _route_load_options(self):
+        return (
+            selectinload(ShippingRoute.paths)
+            .selectinload(ShippingRoutePath.nodes),
+            selectinload(ShippingRoute.paths)
+            .selectinload(ShippingRoutePath.segments),
+        )
+
+    # ---------- ShippingRoute ----------
 
     async def get_route(self, route_id: int) -> Optional[ShippingRoute]:
         result = await self._db.execute(
             select(ShippingRoute)
             .where(ShippingRoute.id == route_id)
-            .options(
-                selectinload(ShippingRoute.paths).selectinload(ShippingRoutePath.nodes)
-            )
+            .options(*self._route_load_options())
         )
         return result.scalar_one_or_none()
 
@@ -47,15 +54,13 @@ class RouteRepository(BaseRepository):
         if conditions:
             query = query.where(and_(*conditions))
 
-        total_result = await self._db.execute(
-            select(func.count()).select_from(query.subquery())
-        )
-        total = total_result.scalar_one()
+        total = (
+            await self._db.execute(select(func.count()).select_from(query.subquery()))
+        ).scalar_one()
 
         result = await self._db.execute(
-            query.options(
-                selectinload(ShippingRoute.paths).selectinload(ShippingRoutePath.nodes)
-            )
+            query
+            .options(*self._route_load_options())
             .order_by(ShippingRoute.id.desc())
             .offset(offset)
             .limit(limit)
@@ -76,14 +81,15 @@ class RouteRepository(BaseRepository):
         await self.delete(route)
         return True
 
-    # ─────────────────────────────────────────────────
-    # ShippingRoutePath
-    # ─────────────────────────────────────────────────
+    # ---------- ShippingRoutePath ----------
 
-    async def get_path(self, path_id: int, load_nodes: bool = True) -> Optional[ShippingRoutePath]:
+    async def get_path(self, path_id: int, load_children: bool = True) -> Optional[ShippingRoutePath]:
         q = select(ShippingRoutePath).where(ShippingRoutePath.id == path_id)
-        if load_nodes:
-            q = q.options(selectinload(ShippingRoutePath.nodes))
+        if load_children:
+            q = q.options(
+                selectinload(ShippingRoutePath.nodes),
+                selectinload(ShippingRoutePath.segments),
+            )
         result = await self._db.execute(q)
         return result.scalar_one_or_none()
 
@@ -91,7 +97,10 @@ class RouteRepository(BaseRepository):
         result = await self._db.execute(
             select(ShippingRoutePath)
             .where(ShippingRoutePath.route_id == route_id)
-            .options(selectinload(ShippingRoutePath.nodes))
+            .options(
+                selectinload(ShippingRoutePath.nodes),
+                selectinload(ShippingRoutePath.segments),
+            )
             .order_by(ShippingRoutePath.sort_order)
         )
         return result.scalars().all()
@@ -104,12 +113,17 @@ class RouteRepository(BaseRepository):
         return await self.update(path, **kwargs) if path else None
 
     async def delete_path(self, path_id: int) -> bool:
-        path = await self.get_path(path_id, load_nodes=False)
+        path = await self.get_path(path_id, load_children=False)
         if not path:
             return False
         await self._db.execute(
             sql_delete(ShippingRoutePathNode).where(
                 ShippingRoutePathNode.path_id == path_id
+            )
+        )
+        await self._db.execute(
+            sql_delete(ShippingRoutePathSegment).where(
+                ShippingRoutePathSegment.path_id == path_id
             )
         )
         await self._db.delete(path)
@@ -124,15 +138,16 @@ class RouteRepository(BaseRepository):
                     ShippingRoutePathNode.path_id == p.id
                 )
             )
-        await self._db.execute(
-            sql_delete(ShippingRoutePath).where(
-                ShippingRoutePath.route_id == route_id
+            await self._db.execute(
+                sql_delete(ShippingRoutePathSegment).where(
+                    ShippingRoutePathSegment.path_id == p.id
+                )
             )
+        await self._db.execute(
+            sql_delete(ShippingRoutePath).where(ShippingRoutePath.route_id == route_id)
         )
 
-    # ─────────────────────────────────────────────────
-    # ShippingRoutePathNode
-    # ─────────────────────────────────────────────────
+    # ---------- ShippingRoutePathNode ----------
 
     async def get_path_nodes(self, path_id: int) -> Sequence[ShippingRoutePathNode]:
         result = await self._db.execute(
@@ -163,5 +178,43 @@ class RouteRepository(BaseRepository):
         await self._db.execute(
             sql_delete(ShippingRoutePathNode).where(
                 ShippingRoutePathNode.path_id == path_id
+            )
+        )
+
+    # ---------- ShippingRoutePathSegment ----------
+
+    async def get_path_segments(self, path_id: int) -> Sequence[ShippingRoutePathSegment]:
+        result = await self._db.execute(
+            select(ShippingRoutePathSegment)
+            .where(ShippingRoutePathSegment.path_id == path_id)
+            .order_by(ShippingRoutePathSegment.sequence)
+        )
+        return result.scalars().all()
+
+    async def get_path_segment(self, segment_id: int) -> Optional[ShippingRoutePathSegment]:
+        result = await self._db.execute(
+            select(ShippingRoutePathSegment).where(ShippingRoutePathSegment.id == segment_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_path_segment(self, segment: ShippingRoutePathSegment) -> ShippingRoutePathSegment:
+        return await self.create(segment)
+
+    async def update_path_segment(self, segment_id: int, **kwargs) -> Optional[ShippingRoutePathSegment]:
+        segment = await self.get_path_segment(segment_id)
+        return await self.update(segment, **kwargs) if segment else None
+
+    async def delete_path_segment(self, segment_id: int) -> bool:
+        segment = await self.get_path_segment(segment_id)
+        if not segment:
+            return False
+        await self._db.delete(segment)
+        await self._db.flush()
+        return True
+
+    async def delete_path_segments(self, path_id: int) -> None:
+        await self._db.execute(
+            sql_delete(ShippingRoutePathSegment).where(
+                ShippingRoutePathSegment.path_id == path_id
             )
         )

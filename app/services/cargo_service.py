@@ -6,6 +6,7 @@
 import logging
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 
 from app.core.exceptions import NotFoundError, ValidationError
@@ -42,6 +43,49 @@ def _parse_date(value: Optional[str]):
         return None
 
 
+def _normalize_location_precision(
+    node_id: Optional[int],
+    admin_code: Optional[str],
+    region_id: Optional[int],
+) -> str:
+    if node_id:
+        return "NODE"
+    if admin_code:
+        return "CITY"
+    if region_id:
+        return "REGION"
+    return "UNKNOWN"
+
+
+def _derive_location_match_level(origin_precision: str, dest_precision: str) -> str:
+    rank = {"UNKNOWN": 0, "REGION": 1, "CITY": 2, "NODE": 3}
+    inv = {v: k for k, v in rank.items()}
+    return inv[min(rank.get(origin_precision, 0), rank.get(dest_precision, 0))]
+
+
+def _estimate_data_quality_score(
+    location_level: str,
+    commodity_id: Optional[int],
+    tonnage: Optional[float],
+    loading_date_value,
+    contact_phone: Optional[str],
+    freight_price: Optional[float],
+) -> Decimal:
+    score = 0.0
+    score += {"NODE": 45, "CITY": 35, "REGION": 20, "UNKNOWN": 5}.get(location_level, 0)
+    if commodity_id:
+        score += 20
+    if tonnage is not None:
+        score += 15
+    if loading_date_value:
+        score += 10
+    if contact_phone:
+        score += 5
+    if freight_price is not None:
+        score += 5
+    return Decimal(str(round(min(score, 100.0), 2)))
+
+
 class CargoService:
     """
     货物业务服务
@@ -61,6 +105,23 @@ class CargoService:
         self._address = address_repo
         self._audit_svc = audit_svc
         self._ai_repo = ai_repo
+
+    async def _resolve_region_id(
+        self, node_id: Optional[int], city_code: Optional[str]
+    ) -> Optional[int]:
+        if node_id:
+            rid = await self._address.get_node_primary_region_id(node_id)
+            if rid:
+                return rid
+        if city_code:
+            return await self._address.get_primary_region_by_city_code(city_code)
+        return None
+
+    async def _resolve_city_name(self, city_code: Optional[str]) -> Optional[str]:
+        if not city_code:
+            return None
+        admin = await self._address.get_admin_region_by_code(city_code)
+        return admin.name if admin else None
 
     # ─────────────────────────────────────────────────
     # 商品分类
@@ -268,9 +329,39 @@ class CargoService:
         origin_admin_code = ov.get("origin_admin_code") or parse_result.origin_admin_code
         dest_admin_code = ov.get("dest_admin_code") or parse_result.dest_admin_code
 
-        # 推断位置精度
-        origin_precision = "NODE" if origin_node_id else ("CITY" if origin_admin_code else "UNKNOWN")
-        dest_precision = "NODE" if dest_node_id else ("CITY" if dest_admin_code else "UNKNOWN")
+        source_message_time = ov.get("source_message_time")
+        if source_message_time is None and parse_result.raw_message_id:
+            raw = await self._cargo.get_raw_message(parse_result.raw_message_id)
+            if raw:
+                source_message_time = raw.created_at
+
+        origin_region_id = await self._resolve_region_id(origin_node_id, origin_admin_code)
+        dest_region_id = await self._resolve_region_id(dest_node_id, dest_admin_code)
+        origin_admin_name = ov.get("origin_admin_name") or parse_result.origin_admin_name
+        dest_admin_name = ov.get("dest_admin_name") or parse_result.dest_admin_name
+        if not origin_admin_name:
+            origin_admin_name = await self._resolve_city_name(origin_admin_code)
+        if not dest_admin_name:
+            dest_admin_name = await self._resolve_city_name(dest_admin_code)
+
+        # 推断位置精度和分析字段
+        origin_precision = _normalize_location_precision(origin_node_id, origin_admin_code, origin_region_id)
+        dest_precision = _normalize_location_precision(dest_node_id, dest_admin_code, dest_region_id)
+        location_match_level = _derive_location_match_level(origin_precision, dest_precision)
+        tonnage_value = ov.get("tonnage") or parse_result.tonnage
+        loading_date_value = ov.get("loading_date") or parse_result.loading_date
+        freight_price_value = ov.get("freight_price") or parse_result.freight_price
+        commodity_id_value = ov.get("commodity_id") or parse_result.commodity_id
+        contact_phone_value = ov.get("contact_phone") or parse_result.contact_phone
+        data_quality_score = _estimate_data_quality_score(
+            location_level=location_match_level,
+            commodity_id=commodity_id_value,
+            tonnage=float(tonnage_value) if tonnage_value is not None else None,
+            loading_date_value=loading_date_value,
+            contact_phone=contact_phone_value,
+            freight_price=float(freight_price_value) if freight_price_value is not None else None,
+        )
+        analysis_status = "READY" if location_match_level != "UNKNOWN" else "PENDING"
 
         freight = CargoFreight(
             freight_no=_make_freight_no(),
@@ -278,22 +369,28 @@ class CargoService:
             status="CONFIRMED",
             origin_node_id=origin_node_id,
             origin_admin_code=origin_admin_code,
-            origin_admin_name=parse_result.origin_admin_name,
+            origin_admin_name=origin_admin_name,
             origin_raw_text=parse_result.origin_text,
+            origin_region_id=origin_region_id,
             origin_precision=origin_precision,
             dest_node_id=dest_node_id,
             dest_admin_code=dest_admin_code,
-            dest_admin_name=parse_result.dest_admin_name,
+            dest_admin_name=dest_admin_name,
             dest_raw_text=parse_result.dest_text,
+            dest_region_id=dest_region_id,
             dest_precision=dest_precision,
-            commodity_id=ov.get("commodity_id") or parse_result.commodity_id,
+            commodity_id=commodity_id_value,
             commodity_text=parse_result.commodity_text,
-            tonnage=ov.get("tonnage") or parse_result.tonnage,
-            loading_date=ov.get("loading_date") or parse_result.loading_date,
-            freight_price=ov.get("freight_price") or parse_result.freight_price,
+            tonnage=tonnage_value,
+            loading_date=loading_date_value,
+            freight_price=freight_price_value,
             price_type=ov.get("price_type") or parse_result.price_type,
             contact_person=ov.get("contact_person") or parse_result.contact_person,
-            contact_phone=ov.get("contact_phone") or parse_result.contact_phone,
+            contact_phone=contact_phone_value,
+            source_message_time=source_message_time,
+            location_match_level=location_match_level,
+            data_quality_score=data_quality_score,
+            analysis_status=analysis_status,
             remark=ov.get("remark"),
             raw_message_id=parse_result.raw_message_id,
             parse_result_id=result_id,
@@ -363,6 +460,7 @@ class CargoService:
         contact_phone: Optional[str] = None,
         remark: Optional[str] = None,
         source_type: str = "MANUAL",
+        source_message_time: Optional[datetime] = None,
     ) -> CargoFreight:
         """手动录入货源（MANUAL渠道）"""
         if origin_node_id:
@@ -375,8 +473,26 @@ class CargoService:
             if not node:
                 raise NotFoundError("TransportNode (destination)", dest_node_id)
 
-        origin_precision = "NODE" if origin_node_id else ("CITY" if origin_admin_code else "UNKNOWN")
-        dest_precision = "NODE" if dest_node_id else ("CITY" if dest_admin_code else "UNKNOWN")
+        origin_region_id = await self._resolve_region_id(origin_node_id, origin_admin_code)
+        dest_region_id = await self._resolve_region_id(dest_node_id, dest_admin_code)
+
+        if not origin_admin_name:
+            origin_admin_name = await self._resolve_city_name(origin_admin_code)
+        if not dest_admin_name:
+            dest_admin_name = await self._resolve_city_name(dest_admin_code)
+
+        origin_precision = _normalize_location_precision(origin_node_id, origin_admin_code, origin_region_id)
+        dest_precision = _normalize_location_precision(dest_node_id, dest_admin_code, dest_region_id)
+        location_match_level = _derive_location_match_level(origin_precision, dest_precision)
+        data_quality_score = _estimate_data_quality_score(
+            location_level=location_match_level,
+            commodity_id=commodity_id,
+            tonnage=tonnage,
+            loading_date_value=loading_date,
+            contact_phone=contact_phone,
+            freight_price=freight_price,
+        )
+        analysis_status = "READY" if location_match_level != "UNKNOWN" else "PENDING"
 
         freight = CargoFreight(
             freight_no=_make_freight_no(),
@@ -386,11 +502,13 @@ class CargoService:
             origin_admin_code=origin_admin_code,
             origin_admin_name=origin_admin_name,
             origin_raw_text=origin_raw_text,
+            origin_region_id=origin_region_id,
             origin_precision=origin_precision,
             dest_node_id=dest_node_id,
             dest_admin_code=dest_admin_code,
             dest_admin_name=dest_admin_name,
             dest_raw_text=dest_raw_text,
+            dest_region_id=dest_region_id,
             dest_precision=dest_precision,
             commodity_id=commodity_id,
             commodity_text=commodity_text,
@@ -401,6 +519,10 @@ class CargoService:
             price_unit=price_unit,
             contact_person=contact_person,
             contact_phone=contact_phone,
+            source_message_time=source_message_time,
+            location_match_level=location_match_level,
+            data_quality_score=data_quality_score,
+            analysis_status=analysis_status,
             remark=remark,
             collector_id=operator_id,
             submitter_id=operator_id,
@@ -430,6 +552,8 @@ class CargoService:
         self,
         status: Optional[str] = None,
         source_type: Optional[str] = None,
+        analysis_status: Optional[str] = None,
+        location_match_level: Optional[str] = None,
         origin_admin_code: Optional[str] = None,
         dest_admin_code: Optional[str] = None,
         commodity_id: Optional[int] = None,
@@ -441,6 +565,8 @@ class CargoService:
         items, total = await self._cargo.list_freights(
             status=status,
             source_type=source_type,
+            analysis_status=analysis_status,
+            location_match_level=location_match_level,
             origin_admin_code=origin_admin_code,
             dest_admin_code=dest_admin_code,
             commodity_id=commodity_id,

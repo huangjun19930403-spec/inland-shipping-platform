@@ -15,7 +15,7 @@ class AuditTask(Base):
     target_type = Column(String(64), nullable=False, index=True,
                          comment="审核对象类型: WATERWAY/REGION/TRANSPORT_NODE/NODE_TYPE/"
                                  "VESSEL/VESSEL_TYPE/COMMODITY_CATEGORY/"
-                                 "COMMODITY_TYPE/COMMODITY_STANDARD/CARGO_OPPORTUNITY")
+                                 "COMMODITY_TYPE/COMMODITY_STANDARD/CARGO_FREIGHT/NODE_ALIAS")
     target_id = Column(BigInteger, nullable=False, index=True, comment="被审核对象ID")
     target_name = Column(String(256), comment="被审核对象名称（快照）")
     # 审核动作
@@ -43,7 +43,7 @@ class AuditRecord(Base):
     target_type = Column(String(64), nullable=False,
                          comment="审核对象类型: TRANSPORT_NODE/COMMODITY_CATEGORY/"
                                  "COMMODITY_TYPE/COMMODITY_STANDARD/VESSEL/"
-                                 "WATERWAY/REGION/NODE_TYPE/CARGO_OPPORTUNITY")
+                                 "WATERWAY/REGION/NODE_TYPE/CARGO_FREIGHT/NODE_ALIAS")
     target_id = Column(BigInteger, nullable=False, comment="被审核对象ID")
     target_name = Column(String(256), comment="被审核对象名称（快照）")
     # 审核动作

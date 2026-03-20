@@ -1,15 +1,20 @@
-"""
-地址/节点数据访问层
-封装内河航运地理节点相关数据库操作
-"""
+"""地址/节点数据访问层"""
 from typing import Optional, Sequence, Tuple
 
-from sqlalchemy import select, and_, or_, func, delete as sql_delete, text
+from sqlalchemy import and_, delete as sql_delete, func, or_, select, text
 from sqlalchemy.orm import selectinload
 
 from app.models.address import (
-    Waterway, Region, AdminRegion, NodeType,
-    TransportNode, NodeAlias, RegionAddressRelation,
+    AdminRegion,
+    NodeAlias,
+    NodeType,
+    Region,
+    RegionAddressRelation,
+    RegionCityRelation,
+    RegionWaterwayRelation,
+    TransportNode,
+    TransportNodeProfile,
+    Waterway,
 )
 from app.repositories.base import BaseRepository
 
@@ -17,9 +22,21 @@ from app.repositories.base import BaseRepository
 class AddressRepository(BaseRepository):
     model_class = TransportNode
 
-    # ─────────────────────────────────────────────────
-    # Waterway
-    # ─────────────────────────────────────────────────
+    def _node_load_options(self):
+        return (
+            selectinload(TransportNode.aliases),
+            selectinload(TransportNode.profile),
+            selectinload(TransportNode.region_relations),
+        )
+
+    def _region_load_options(self):
+        return (
+            selectinload(Region.waterway_relations).selectinload(RegionWaterwayRelation.waterway),
+            selectinload(Region.city_relations).selectinload(RegionCityRelation.admin_region),
+            selectinload(Region.node_relations),
+        )
+
+    # ---------- Waterway ----------
 
     async def list_waterways(self, status: Optional[int] = None) -> Sequence[Waterway]:
         conditions = [Waterway.deleted_at.is_(None)]
@@ -47,16 +64,12 @@ class AddressRepository(BaseRepository):
             conditions.append(Waterway.status == status)
 
         q = select(Waterway).where(and_(*conditions))
-
-        count_result = await self._db.execute(
-            select(func.count()).select_from(q.subquery())
-        )
-        total = count_result.scalar_one()
+        total = (
+            await self._db.execute(select(func.count()).select_from(q.subquery()))
+        ).scalar_one()
 
         result = await self._db.execute(
-            q.order_by(Waterway.sort_order, Waterway.id)
-            .offset(offset)
-            .limit(limit)
+            q.order_by(Waterway.sort_order, Waterway.id).offset(offset).limit(limit)
         )
         return result.scalars().all(), total
 
@@ -84,43 +97,33 @@ class AddressRepository(BaseRepository):
         return True
 
     async def next_code_seq(self, scope: str) -> int:
-        """
-        原子获取并递增指定 scope 的序号，返回本次应使用的序号值。
-
-        使用 PostgreSQL upsert（INSERT ... ON CONFLICT DO UPDATE）保证并发安全：
-        - 首次使用某 scope：插入初始值 1，返回 1。
-        - 后续调用：原子递增 next_val，返回递增后的新值。
-
-        Args:
-            scope: 序号命名空间，如 'region'、'ww:root'、'ww:42'。
-
-        Returns:
-            本次插入应使用的唯一序号（从 1 开始递增）。
-        """
         result = await self._db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO code_sequence (scope, next_val)
                 VALUES (:scope, 1)
                 ON CONFLICT (scope)
                 DO UPDATE SET next_val = code_sequence.next_val + 1
                 RETURNING next_val
-            """),
+                """
+            ),
             {"scope": scope},
         )
         return result.scalar_one()
 
-    # ─────────────────────────────────────────────────
-    # Region（商业区域）
-    # ─────────────────────────────────────────────────
+    # ---------- Region ----------
 
     async def list_regions(self, status: Optional[int] = None) -> Sequence[Region]:
         conditions = [Region.deleted_at.is_(None)]
         if status is not None:
             conditions.append(Region.status == status)
         result = await self._db.execute(
-            select(Region).where(and_(*conditions)).order_by(Region.sort_order)
+            select(Region)
+            .where(and_(*conditions))
+            .options(*self._region_load_options())
+            .order_by(Region.sort_order)
         )
-        return result.scalars().all()
+        return result.scalars().unique().all()
 
     async def list_regions_paged(
         self,
@@ -139,23 +142,26 @@ class AddressRepository(BaseRepository):
             conditions.append(Region.audit_status == audit_status)
 
         q = select(Region).where(and_(*conditions))
-
-        count_result = await self._db.execute(
-            select(func.count()).select_from(q.subquery())
-        )
-        total = count_result.scalar_one()
+        total = (
+            await self._db.execute(select(func.count()).select_from(q.subquery()))
+        ).scalar_one()
 
         result = await self._db.execute(
-            q.order_by(Region.sort_order, Region.id).offset(offset).limit(limit)
+            q.options(*self._region_load_options())
+            .order_by(Region.sort_order, Region.id)
+            .offset(offset)
+            .limit(limit)
         )
-        return result.scalars().all(), total
+        return result.scalars().unique().all(), total
 
     async def get_region(self, region_id: int) -> Optional[Region]:
         result = await self._db.execute(
-            select(Region).where(
+            select(Region)
+            .where(
                 Region.id == region_id,
                 Region.deleted_at.is_(None),
             )
+            .options(*self._region_load_options())
         )
         return result.scalar_one_or_none()
 
@@ -176,11 +182,15 @@ class AddressRepository(BaseRepository):
     async def get_nodes_in_region(self, region_id: int) -> Sequence[TransportNode]:
         result = await self._db.execute(
             select(TransportNode)
+            .join(
+                RegionAddressRelation,
+                RegionAddressRelation.transport_node_id == TransportNode.id,
+            )
             .where(
-                TransportNode.region_id == region_id,
+                RegionAddressRelation.region_id == region_id,
                 TransportNode.deleted_at.is_(None),
             )
-            .options(selectinload(TransportNode.aliases))
+            .options(*self._node_load_options())
         )
         return result.scalars().unique().all()
 
@@ -198,15 +208,12 @@ class AddressRepository(BaseRepository):
     async def get_admin_regions_by_ids(self, ids: list[int]) -> Sequence[AdminRegion]:
         if not ids:
             return []
-        result = await self._db.execute(
-            select(AdminRegion).where(AdminRegion.id.in_(ids))
-        )
+        result = await self._db.execute(select(AdminRegion).where(AdminRegion.id.in_(ids)))
         return result.scalars().all()
 
     async def get_city_coords(self) -> Sequence[tuple]:
         result = await self._db.execute(
-            select(AdminRegion.id, AdminRegion.longitude, AdminRegion.latitude)
-            .where(
+            select(AdminRegion.id, AdminRegion.longitude, AdminRegion.latitude).where(
                 AdminRegion.level == 2,
                 AdminRegion.longitude.is_not(None),
                 AdminRegion.latitude.is_not(None),
@@ -214,8 +221,25 @@ class AddressRepository(BaseRepository):
         )
         return result.all()
 
+    async def list_city_centroids(self) -> Sequence[tuple]:
+        result = await self._db.execute(
+            select(
+                AdminRegion.id,
+                AdminRegion.code,
+                AdminRegion.name,
+                AdminRegion.parent_code,
+                AdminRegion.longitude,
+                AdminRegion.latitude,
+            ).where(
+                AdminRegion.level == 2,
+                AdminRegion.status == 1,
+                AdminRegion.longitude.is_not(None),
+                AdminRegion.latitude.is_not(None),
+            )
+        )
+        return result.all()
+
     async def list_regions_with_boundaries(self) -> Sequence[Region]:
-        """查询所有启用且有边界坐标的区域（用于节点-区域归属计算）"""
         result = await self._db.execute(
             select(Region).where(
                 Region.deleted_at.is_(None),
@@ -225,9 +249,43 @@ class AddressRepository(BaseRepository):
         )
         return result.scalars().all()
 
-    # ─────────────────────────────────────────────────
-    # AdminRegion（行政区划）
-    # ─────────────────────────────────────────────────
+    async def replace_region_waterway_relations(
+        self, region_id: int, waterway_ids: list[int], source: str = "MANUAL"
+    ) -> None:
+        await self._db.execute(
+            sql_delete(RegionWaterwayRelation).where(
+                RegionWaterwayRelation.region_id == region_id
+            )
+        )
+        for wid in sorted(set(waterway_ids)):
+            self._db.add(
+                RegionWaterwayRelation(
+                    region_id=region_id,
+                    waterway_id=wid,
+                    relation_type="MAIN",
+                    source=source,
+                )
+            )
+        await self._db.flush()
+
+    async def replace_region_city_relations(
+        self, region_id: int, admin_region_ids: list[int], source: str = "SYSTEM_GEO"
+    ) -> None:
+        await self._db.execute(
+            sql_delete(RegionCityRelation).where(RegionCityRelation.region_id == region_id)
+        )
+        for aid in sorted(set(admin_region_ids)):
+            self._db.add(
+                RegionCityRelation(
+                    region_id=region_id,
+                    admin_region_id=aid,
+                    relation_type="MAIN",
+                    source=source,
+                )
+            )
+        await self._db.flush()
+
+    # ---------- AdminRegion ----------
 
     async def list_admin_regions(
         self,
@@ -238,15 +296,14 @@ class AddressRepository(BaseRepository):
         conditions = []
         if level is not None:
             conditions.append(AdminRegion.level == level)
-        if parent_code is not None:
-            parent_res = await self._db.execute(
-                select(AdminRegion).where(AdminRegion.code == parent_code)
-            )
-            parent = parent_res.scalar_one_or_none()
-            if parent:
-                conditions.append(AdminRegion.parent_id == parent.id)
-        elif parent_id is not None:
-            conditions.append(AdminRegion.parent_id == parent_id)
+
+        resolved_parent_code = parent_code
+        if not resolved_parent_code and parent_id is not None:
+            p = await self.get_admin_region(parent_id)
+            resolved_parent_code = p.code if p else None
+
+        if resolved_parent_code:
+            conditions.append(AdminRegion.parent_code == resolved_parent_code)
 
         q = select(AdminRegion)
         if conditions:
@@ -255,8 +312,12 @@ class AddressRepository(BaseRepository):
         return result.scalars().all()
 
     async def get_admin_region(self, region_id: int) -> Optional[AdminRegion]:
+        result = await self._db.execute(select(AdminRegion).where(AdminRegion.id == region_id))
+        return result.scalar_one_or_none()
+
+    async def get_admin_region_by_code(self, code: str) -> Optional[AdminRegion]:
         result = await self._db.execute(
-            select(AdminRegion).where(AdminRegion.id == region_id)
+            select(AdminRegion).where(AdminRegion.code == code)
         )
         return result.scalar_one_or_none()
 
@@ -267,9 +328,7 @@ class AddressRepository(BaseRepository):
         region = await self.get_admin_region(region_id)
         return await self.update(region, **kwargs) if region else None
 
-    # ─────────────────────────────────────────────────
-    # NodeType
-    # ─────────────────────────────────────────────────
+    # ---------- NodeType ----------
 
     async def list_node_types(self, status: Optional[int] = None) -> Sequence[NodeType]:
         conditions = [NodeType.deleted_at.is_(None)]
@@ -303,9 +362,7 @@ class AddressRepository(BaseRepository):
         await self.delete(nt)
         return True
 
-    # ─────────────────────────────────────────────────
-    # TransportNode
-    # ─────────────────────────────────────────────────
+    # ---------- TransportNode ----------
 
     async def get_node(self, node_id: int) -> Optional[TransportNode]:
         result = await self._db.execute(
@@ -314,16 +371,18 @@ class AddressRepository(BaseRepository):
                 TransportNode.id == node_id,
                 TransportNode.deleted_at.is_(None),
             )
-            .options(selectinload(TransportNode.aliases))
+            .options(*self._node_load_options())
         )
         return result.scalar_one_or_none()
 
     async def get_node_by_code(self, code: str) -> Optional[TransportNode]:
         result = await self._db.execute(
-            select(TransportNode).where(
+            select(TransportNode)
+            .where(
                 TransportNode.code == code,
                 TransportNode.deleted_at.is_(None),
             )
+            .options(*self._node_load_options())
         )
         return result.scalar_one_or_none()
 
@@ -338,34 +397,46 @@ class AddressRepository(BaseRepository):
         offset: int = 0,
         limit: int = 50,
     ) -> Tuple[Sequence[TransportNode], int]:
-        conditions = [TransportNode.deleted_at.is_(None)]
+        node_conditions = [TransportNode.deleted_at.is_(None)]
         if waterway_id is not None:
-            conditions.append(TransportNode.waterway_id == waterway_id)
-        if region_id is not None:
-            conditions.append(TransportNode.region_id == region_id)
+            node_conditions.append(TransportNode.waterway_id == waterway_id)
         if node_type_id is not None:
-            conditions.append(TransportNode.node_type_id == node_type_id)
+            node_conditions.append(TransportNode.node_type_id == node_type_id)
         if audit_status is not None:
-            conditions.append(TransportNode.audit_status == audit_status)
+            node_conditions.append(TransportNode.audit_status == audit_status)
         if status is not None:
-            conditions.append(TransportNode.status == status)
+            node_conditions.append(TransportNode.status == status)
         if keyword:
-            conditions.append(
+            node_conditions.append(
                 or_(
                     TransportNode.name.ilike(f"%{keyword}%"),
                     TransportNode.code.ilike(f"%{keyword}%"),
                 )
             )
 
-        base_q = select(TransportNode).where(and_(*conditions))
+        base_stmt = select(TransportNode)
+        count_stmt = select(func.count(func.distinct(TransportNode.id)))
 
-        count_result = await self._db.execute(
-            select(func.count()).select_from(base_q.subquery())
-        )
-        total = count_result.scalar_one()
+        if region_id is not None:
+            base_stmt = base_stmt.join(
+                RegionAddressRelation,
+                RegionAddressRelation.transport_node_id == TransportNode.id,
+            ).where(RegionAddressRelation.region_id == region_id)
+            count_stmt = count_stmt.select_from(TransportNode).join(
+                RegionAddressRelation,
+                RegionAddressRelation.transport_node_id == TransportNode.id,
+            ).where(RegionAddressRelation.region_id == region_id)
+        else:
+            count_stmt = count_stmt.select_from(TransportNode)
+
+        base_stmt = base_stmt.where(and_(*node_conditions))
+        count_stmt = count_stmt.where(and_(*node_conditions))
+
+        total = (await self._db.execute(count_stmt)).scalar_one()
 
         result = await self._db.execute(
-            base_q.options(selectinload(TransportNode.aliases))
+            base_stmt
+            .options(*self._node_load_options())
             .order_by(TransportNode.id.desc())
             .offset(offset)
             .limit(limit)
@@ -390,15 +461,14 @@ class AddressRepository(BaseRepository):
                 TransportNode.id.in_(alias_sub),
             ),
         )
-        count_result = await self._db.execute(
-            select(func.count(TransportNode.id)).where(cond)
-        )
-        total = count_result.scalar_one()
+        total = (
+            await self._db.execute(select(func.count(TransportNode.id)).where(cond))
+        ).scalar_one()
 
         result = await self._db.execute(
             select(TransportNode)
             .where(cond)
-            .options(selectinload(TransportNode.aliases))
+            .options(*self._node_load_options())
             .order_by(TransportNode.id)
             .offset(offset)
             .limit(limit)
@@ -409,12 +479,11 @@ class AddressRepository(BaseRepository):
         result = await self._db.execute(
             select(TransportNode)
             .where(TransportNode.deleted_at.is_(None))
-            .options(selectinload(TransportNode.aliases))
+            .options(*self._node_load_options())
         )
         return result.scalars().unique().all()
 
     async def list_all_nodes_with_coords(self) -> Sequence[TransportNode]:
-        """查询所有未删除、有经纬度的节点（用于一键归属计算）"""
         result = await self._db.execute(
             select(TransportNode).where(
                 TransportNode.deleted_at.is_(None),
@@ -429,7 +498,7 @@ class AddressRepository(BaseRepository):
         await self._db.flush()
         result = await self._db.execute(
             select(TransportNode)
-            .options(selectinload(TransportNode.aliases))
+            .options(*self._node_load_options())
             .where(TransportNode.id == node.id)
         )
         return result.scalar_one()
@@ -445,9 +514,21 @@ class AddressRepository(BaseRepository):
         await self.delete(node)
         return True
 
-    # ─────────────────────────────────────────────────
-    # NodeAlias
-    # ─────────────────────────────────────────────────
+    async def upsert_node_profile(self, node_id: int, **kwargs) -> Optional[TransportNodeProfile]:
+        node = await self.get_node(node_id)
+        if not node:
+            return None
+        profile = node.profile
+        if profile is None:
+            profile = TransportNodeProfile(transport_node_id=node_id, **kwargs)
+            self._db.add(profile)
+        else:
+            for k, v in kwargs.items():
+                setattr(profile, k, v)
+        await self._db.flush()
+        return profile
+
+    # ---------- NodeAlias ----------
 
     async def get_aliases_by_node(self, node_id: int) -> Sequence[NodeAlias]:
         result = await self._db.execute(
@@ -474,9 +555,28 @@ class AddressRepository(BaseRepository):
         await self.delete(alias)
         return True
 
-    # ─────────────────────────────────────────────────
-    # RegionAddressRelation（节点-区域归属）
-    # ─────────────────────────────────────────────────
+    async def get_primary_region_by_city_code(self, city_code: str) -> Optional[int]:
+        result = await self._db.execute(
+            select(RegionCityRelation.region_id)
+            .join(
+                AdminRegion,
+                AdminRegion.id == RegionCityRelation.admin_region_id,
+            )
+            .join(Region, Region.id == RegionCityRelation.region_id)
+            .where(
+                AdminRegion.code == city_code,
+                Region.deleted_at.is_(None),
+                Region.status == 1,
+            )
+            .order_by(
+                (RegionCityRelation.relation_type == "MAIN").desc(),
+                RegionCityRelation.id.asc(),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    # ---------- RegionAddressRelation ----------
 
     async def get_region_relation(
         self, region_id: int, node_id: int
@@ -490,25 +590,48 @@ class AddressRepository(BaseRepository):
         return result.scalar_one_or_none()
 
     async def create_region_relation(
-        self, region_id: int, node_id: int, is_primary: int = 1
+        self,
+        region_id: int,
+        node_id: int,
+        is_primary: int = 1,
+        relation_type: str = "BELONGS",
+        source: str = "SYSTEM_GEO",
     ) -> RegionAddressRelation:
         relation = RegionAddressRelation(
             region_id=region_id,
             transport_node_id=node_id,
             is_primary=is_primary,
+            relation_type=relation_type,
+            source=source,
         )
         self._db.add(relation)
         await self._db.flush()
         return relation
 
-    async def upsert_region_relation(self, region_id: int, node_id: int) -> None:
-        """插入区域-节点关系（若已存在则跳过）"""
+    async def upsert_region_relation(
+        self,
+        region_id: int,
+        node_id: int,
+        is_primary: int = 1,
+        relation_type: str = "BELONGS",
+        source: str = "SYSTEM_GEO",
+    ) -> None:
         existing = await self.get_region_relation(region_id, node_id)
         if not existing:
-            await self.create_region_relation(region_id, node_id)
+            await self.create_region_relation(
+                region_id,
+                node_id,
+                is_primary=is_primary,
+                relation_type=relation_type,
+                source=source,
+            )
+        else:
+            existing.is_primary = is_primary
+            existing.relation_type = relation_type
+            existing.source = source
+            await self._db.flush()
 
     async def delete_region_relations_for_node(self, node_id: int) -> None:
-        """硬删除节点的所有区域关系（归属重算时使用）"""
         await self._db.execute(
             sql_delete(RegionAddressRelation).where(
                 RegionAddressRelation.transport_node_id == node_id
@@ -517,19 +640,44 @@ class AddressRepository(BaseRepository):
         await self._db.flush()
 
     async def sync_node_region_relations(
-        self, node_id: int, region_ids: list[int]
+        self,
+        node_id: int,
+        region_ids: list[int],
+        primary_region_id: Optional[int] = None,
+        source: str = "SYSTEM_GEO",
+        relation_type: str = "BELONGS",
     ) -> None:
-        """同步节点-区域归属：清除旧记录，按新的 region_ids 插入"""
         await self.delete_region_relations_for_node(node_id)
+        region_ids = list(dict.fromkeys(region_ids))
+        if primary_region_id is None and region_ids:
+            primary_region_id = region_ids[0]
+
         for rid in region_ids:
-            await self.create_region_relation(rid, node_id)
+            await self.create_region_relation(
+                rid,
+                node_id,
+                is_primary=1 if rid == primary_region_id else 0,
+                relation_type=relation_type,
+                source=source,
+            )
 
     async def get_node_region_relations(
         self, node_id: int
     ) -> Sequence[RegionAddressRelation]:
         result = await self._db.execute(
-            select(RegionAddressRelation).where(
-                RegionAddressRelation.transport_node_id == node_id
-            )
+            select(RegionAddressRelation)
+            .where(RegionAddressRelation.transport_node_id == node_id)
+            .order_by(RegionAddressRelation.is_primary.desc(), RegionAddressRelation.id)
         )
         return result.scalars().all()
+
+    async def get_node_primary_region_id(self, node_id: int) -> Optional[int]:
+        result = await self._db.execute(
+            select(RegionAddressRelation.region_id)
+            .where(
+                RegionAddressRelation.transport_node_id == node_id,
+                RegionAddressRelation.is_primary == 1,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()

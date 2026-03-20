@@ -206,6 +206,7 @@ class CargoManualInput(BaseModel):
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
     source_type: str = "MANUAL"
+    source_message_time: Optional[datetime] = None
     remark: Optional[str] = None
 
 
@@ -315,6 +316,10 @@ class CargoFreightResponse(BaseModel):
     parse_result_id: Optional[int] = None
     tms_external_id: Optional[str] = None
     collector_id: Optional[int] = None
+    source_message_time: Optional[datetime] = None
+    location_match_level: str
+    data_quality_score: Optional[Decimal] = None
+    analysis_status: str
     audit_status: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -338,4 +343,5 @@ class CargoConfirmRequest(BaseModel):
     price_type: Optional[int] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
+    source_message_time: Optional[datetime] = None
     remark: Optional[str] = None

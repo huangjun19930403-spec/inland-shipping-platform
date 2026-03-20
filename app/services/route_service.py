@@ -1,13 +1,14 @@
-"""
-航线业务服务层
-职责：航线管理、路线方案管理、路径节点管理
-规则：通过Repository访问数据，不直接操作SQLAlchemy Session
-"""
+"""航线业务服务层"""
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from app.core.exceptions import NotFoundError
-from app.models.route import ShippingRoute, ShippingRoutePath, ShippingRoutePathNode
+from app.models.route import (
+    ShippingRoute,
+    ShippingRoutePath,
+    ShippingRoutePathNode,
+    ShippingRoutePathSegment,
+)
 from app.repositories.route_repository import RouteRepository
 from app.utils.route_helpers import gen_route_code, gen_route_path_code
 
@@ -20,9 +21,7 @@ class RouteService:
     def __init__(self, route_repo: RouteRepository) -> None:
         self._route = route_repo
 
-    # ─────────────────────────────────────────────────
-    # 航线（ShippingRoute）
-    # ─────────────────────────────────────────────────
+    # ---------- 航线 ----------
 
     async def list_routes(
         self,
@@ -66,7 +65,6 @@ class RouteService:
         )
         saved = await self._route.create_route(route)
 
-        # 自动创建一条默认路线方案
         default_path = ShippingRoutePath(
             route_id=saved.id,
             code=gen_route_path_code(),
@@ -77,7 +75,7 @@ class RouteService:
         await self._route.create_path(default_path)
 
         await self._route.save()
-        logger.info(f"[RouteService] route created id={saved.id} name={name}")
+        logger.info("[RouteService] route created id=%s name=%s", saved.id, name)
         return await self._route.get_route(saved.id)
 
     async def update_route(self, route_id: int, **kwargs) -> ShippingRoute:
@@ -92,9 +90,7 @@ class RouteService:
         await self._route.delete_route(route_id)
         await self._route.save()
 
-    # ─────────────────────────────────────────────────
-    # 路线方案（ShippingRoutePath）
-    # ─────────────────────────────────────────────────
+    # ---------- 路线方案 ----------
 
     async def list_route_paths(self, route_id: int) -> List[ShippingRoutePath]:
         await self.get_route(route_id)
@@ -126,12 +122,10 @@ class RouteService:
         )
         saved = await self._route.create_path(path)
         await self._route.save()
-        logger.info(f"[RouteService] path created id={saved.id} route_id={route_id} name={name}")
+        logger.info("[RouteService] path created id=%s route_id=%s", saved.id, route_id)
         return await self._route.get_path(saved.id)
 
-    async def update_route_path(
-        self, route_id: int, path_id: int, **kwargs
-    ) -> ShippingRoutePath:
+    async def update_route_path(self, route_id: int, path_id: int, **kwargs) -> ShippingRoutePath:
         path = await self.get_route_path(route_id, path_id)
         await self._route.update_path(path.id, **kwargs)
         await self._route.save()
@@ -144,9 +138,7 @@ class RouteService:
             raise NotFoundError("ShippingRoutePath", path_id)
         await self._route.save()
 
-    # ─────────────────────────────────────────────────
-    # 路径节点（ShippingRoutePathNode）
-    # ─────────────────────────────────────────────────
+    # ---------- 路径节点（兼容保留） ----------
 
     async def add_path_node(
         self,
@@ -169,10 +161,7 @@ class RouteService:
         await self._route.save()
         return saved
 
-    async def set_path_nodes(
-        self, route_id: int, path_id: int, nodes: list
-    ) -> ShippingRoutePath:
-        """批量替换路线节点（先清空，再重建）"""
+    async def set_path_nodes(self, route_id: int, path_id: int, nodes: list) -> ShippingRoutePath:
         await self.get_route_path(route_id, path_id)
         await self._route.delete_path_nodes(path_id)
         for n in nodes:
@@ -187,11 +176,59 @@ class RouteService:
         await self._route.save()
         return await self._route.get_path(path_id)
 
-    async def delete_path_node(
-        self, route_id: int, path_id: int, node_id: int
-    ) -> None:
+    async def delete_path_node(self, route_id: int, path_id: int, node_id: int) -> None:
         await self.get_route_path(route_id, path_id)
         deleted = await self._route.delete_path_node(node_id)
         if not deleted:
             raise NotFoundError("ShippingRoutePathNode", node_id)
+        await self._route.save()
+
+    # ---------- 路径段（一期主表达） ----------
+
+    async def list_path_segments(self, route_id: int, path_id: int) -> List[ShippingRoutePathSegment]:
+        await self.get_route_path(route_id, path_id)
+        return list(await self._route.get_path_segments(path_id))
+
+    async def add_path_segment(
+        self,
+        route_id: int,
+        path_id: int,
+        **kwargs,
+    ) -> ShippingRoutePathSegment:
+        await self.get_route_path(route_id, path_id)
+        segment = ShippingRoutePathSegment(path_id=path_id, **kwargs)
+        saved = await self._route.create_path_segment(segment)
+        await self._route.save()
+        return saved
+
+    async def set_path_segments(self, route_id: int, path_id: int, segments: list[dict]) -> ShippingRoutePath:
+        await self.get_route_path(route_id, path_id)
+        await self._route.delete_path_segments(path_id)
+        for s in segments:
+            seg = ShippingRoutePathSegment(path_id=path_id, **s)
+            await self._route.create_path_segment(seg)
+        await self._route.save()
+        return await self._route.get_path(path_id)
+
+    async def update_path_segment(
+        self,
+        route_id: int,
+        path_id: int,
+        segment_id: int,
+        **kwargs,
+    ) -> ShippingRoutePathSegment:
+        await self.get_route_path(route_id, path_id)
+        segment = await self._route.get_path_segment(segment_id)
+        if not segment or segment.path_id != path_id:
+            raise NotFoundError("ShippingRoutePathSegment", segment_id)
+        await self._route.update_path_segment(segment_id, **kwargs)
+        await self._route.save()
+        return await self._route.get_path_segment(segment_id)
+
+    async def delete_path_segment(self, route_id: int, path_id: int, segment_id: int) -> None:
+        await self.get_route_path(route_id, path_id)
+        segment = await self._route.get_path_segment(segment_id)
+        if not segment or segment.path_id != path_id:
+            raise NotFoundError("ShippingRoutePathSegment", segment_id)
+        await self._route.delete_path_segment(segment_id)
         await self._route.save()

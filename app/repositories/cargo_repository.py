@@ -260,6 +260,8 @@ class CargoRepository(BaseRepository):
         self,
         status: Optional[str] = None,
         source_type: Optional[str] = None,
+        analysis_status: Optional[str] = None,
+        location_match_level: Optional[str] = None,
         origin_admin_code: Optional[str] = None,
         dest_admin_code: Optional[str] = None,
         commodity_id: Optional[int] = None,
@@ -272,6 +274,10 @@ class CargoRepository(BaseRepository):
             filters.append(CargoFreight.status == status)
         if source_type:
             filters.append(CargoFreight.source_type == source_type)
+        if analysis_status:
+            filters.append(CargoFreight.analysis_status == analysis_status)
+        if location_match_level:
+            filters.append(CargoFreight.location_match_level == location_match_level)
         if origin_admin_code:
             filters.append(CargoFreight.origin_admin_code == origin_admin_code)
         if dest_admin_code:

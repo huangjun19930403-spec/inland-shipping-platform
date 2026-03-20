@@ -198,8 +198,9 @@ class ShipStatRegion(Base):
 
     来源：vessel_dynamic → Region（多边形边界）
     归属逻辑：
-      1. vessel_dynamic.current_node_id → transport_node.region_id（精确）
-      2. vessel_dynamic GPS → Region.boundary_coordinates 点在多边形内（Python射线法）
+      1. vessel_dynamic.current_region_id（精确）
+      2. vessel_dynamic.current_node_id → region_address_relation（主归属）
+      3. vessel_dynamic GPS → Region.boundary_coordinates 点在多边形内（Python射线法）
     刷新：Kafka AIS 更新触发（30s 节流）+ 管理员手动
     用途：区域热力地图（含多边形边界渲染）+ 区域运力对比
     """
@@ -227,10 +228,11 @@ class ShipStatRegion(Base):
 class ShipStatCity(Base):
     """城市级热力快照
 
-    来源：vessel_dynamic → transport_node.city / GPS → admin_region 最近质心
+    来源：vessel_dynamic.current_city_code / transport_node.city_code / GPS 最近质心
     归属逻辑：
-      1. 有 current_node_id → transport_node.city 文本匹配 admin_region（精确）
-      2. 只有 GPS → 欧氏距离最近的 admin_region 市级质心（近似，内河场景可用）
+      1. current_city_code（精确）
+      2. current_node_id → transport_node.city_code（精确）
+      3. 只有 GPS → 欧氏距离最近的 admin_region 市级质心（近似，内河场景可用）
     刷新：Kafka AIS 更新触发（30s 节流）+ 管理员手动
     用途：城市气泡热力地图（经纬度+数量权重）+ 省级聚合（服务层 GROUP BY province_name）
     """

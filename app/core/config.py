@@ -46,10 +46,6 @@ class Settings(BaseSettings):
     STATS_CRON_HOUR: int = 2
     STATS_CRON_MINUTE: int = 0
 
-    # Kafka配置
-    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
-    KAFKA_VESSEL_DYNAMIC_TOPIC: str = "vessel.dynamic"
-
     # CORS配置
     ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
 

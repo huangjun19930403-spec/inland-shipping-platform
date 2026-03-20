@@ -147,6 +147,7 @@ async def create_freight(
         contact_person=data.contact_person,
         contact_phone=data.contact_phone,
         source_type=data.source_type,
+        source_message_time=data.source_message_time,
         remark=data.remark,
     )
     background_tasks.add_task(refresh_cargo_stats, date.today())
@@ -167,6 +168,8 @@ async def get_freight(
 async def list_freights(
     status: Optional[str] = Query(None, description="PENDING/CONFIRMED/CANCELLED/EXPIRED"),
     source_type: Optional[str] = Query(None, description="TMS/WECHAT_AI/MANUAL"),
+    analysis_status: Optional[str] = Query(None, description="PENDING/READY/ANALYZED/FAILED"),
+    location_match_level: Optional[str] = Query(None, description="NODE/CITY/REGION/UNKNOWN"),
     origin_admin_code: Optional[str] = Query(None, description="装货城市行政区划代码"),
     dest_admin_code: Optional[str] = Query(None, description="卸货城市行政区划代码"),
     commodity_id: Optional[int] = Query(None),
@@ -179,6 +182,8 @@ async def list_freights(
     result = await service.list_freights(
         status=status,
         source_type=source_type,
+        analysis_status=analysis_status,
+        location_match_level=location_match_level,
         origin_admin_code=origin_admin_code,
         dest_admin_code=dest_admin_code,
         commodity_id=commodity_id,

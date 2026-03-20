@@ -333,13 +333,14 @@ async def _stat_ship_region(db: AsyncSession) -> int:
     """vessel_dynamic → ship_stat_region（航运商业区域热力快照）
 
     归属逻辑：
-      1. current_node_id → transport_node.region_id（精确）
-      2. 只有 GPS → Region.boundary_coordinates 射线法（Python）
+      1. vessel_dynamic.current_region_id（精确）
+      2. current_node_id → region_address_relation（主归属）
+      3. 只有 GPS → Region.boundary_coordinates 射线法（Python）
     """
     from datetime import datetime
     from sqlalchemy import delete as sa_delete
     from app.models.vessel import Vessel, VesselDynamic
-    from app.models.address import Region, TransportNode
+    from app.models.address import Region, RegionAddressRelation
     from app.models.analysis import ShipStatRegion
 
     # Step1: 加载全部有效区域及多边形
@@ -364,26 +365,50 @@ async def _stat_ship_region(db: AsyncSession) -> int:
         for r in regions
     }
 
-    # Step2: 查所有有效船舶位置
+    # Step2: 节点主归属区域映射（node_id -> primary_region_id）
+    relation_result = await db.execute(
+        select(
+            RegionAddressRelation.transport_node_id,
+            RegionAddressRelation.region_id,
+            RegionAddressRelation.is_primary,
+            RegionAddressRelation.id,
+        ).order_by(
+            RegionAddressRelation.transport_node_id,
+            RegionAddressRelation.is_primary.desc(),
+            RegionAddressRelation.id.asc(),
+        )
+    )
+    node_region_map: dict[int, int] = {}
+    for rel in relation_result.all():
+        if rel.transport_node_id not in node_region_map:
+            node_region_map[rel.transport_node_id] = rel.region_id
+
+    # Step3: 查所有有效船舶位置
     rows_result = await db.execute(
         select(
+            VesselDynamic.current_region_id,
+            VesselDynamic.current_node_id,
             VesselDynamic.current_longitude,
             VesselDynamic.current_latitude,
             Vessel.deadweight,
-            TransportNode.region_id,
         )
         .join(Vessel, Vessel.id == VesselDynamic.vessel_id)
-        .outerjoin(TransportNode, TransportNode.id == VesselDynamic.current_node_id)
         .where(and_(Vessel.data_status == 1, Vessel.is_deleted == 0))
     )
 
-    # Step3: 归区域
+    # Step4: 归区域
     buckets: dict[int, dict] = {}
     for row in rows_result.all():
         rid = None
-        # 优先：通过节点直接取 region_id
-        if row.region_id:
-            rid = row.region_id
+
+        # 优先：动态直连区域ID
+        if row.current_region_id and row.current_region_id in region_meta:
+            rid = row.current_region_id
+        # 次优：通过节点-区域关系表取主归属
+        elif row.current_node_id:
+            mapped_rid = node_region_map.get(row.current_node_id)
+            if mapped_rid in region_meta:
+                rid = mapped_rid
         # 兜底：GPS 射线法
         elif row.current_longitude and row.current_latitude:
             lon = float(row.current_longitude)
@@ -398,7 +423,7 @@ async def _stat_ship_region(db: AsyncSession) -> int:
             b["vessel_count"] += 1
             b["total_deadweight"] += float(row.deadweight or 0)
 
-    # Step4: 全量替换
+    # Step5: 全量替换
     total = sum(b["vessel_count"] for b in buckets.values()) or 1
     now = datetime.now()
     new_rows = []
@@ -428,8 +453,9 @@ async def _stat_ship_city(db: AsyncSession) -> int:
     """vessel_dynamic → ship_stat_city（城市级热力快照）
 
     归属逻辑：
-      1. 有 current_node_id → transport_node.city 文本匹配 admin_region（精确）
-      2. 只有 GPS → 欧氏距离最近的 admin_region 市级质心（近似）
+      1. vessel_dynamic.current_city_code（精确）
+      2. current_node_id → transport_node.city_code（次优）
+      3. 只有 GPS → 欧氏距离最近的 admin_region 市级质心（近似）
     """
     from datetime import datetime
     from sqlalchemy import delete as sa_delete
@@ -448,7 +474,7 @@ async def _stat_ship_city(db: AsyncSession) -> int:
         logger.warning("[stat_tasks] ship_city: 无市级行政区数据，跳过")
         return 0
 
-    city_by_name: dict[str, AdminRegion] = {c.name: c for c in cities}
+    city_by_code: dict[str, AdminRegion] = {c.code: c for c in cities}
     city_list = [
         (c.code, c.name, "", float(c.longitude), float(c.latitude))
         for c in cities if c.longitude and c.latitude
@@ -470,43 +496,34 @@ async def _stat_ship_city(db: AsyncSession) -> int:
         for c in cities if c.longitude and c.latitude
     ]
 
-    # Step2: 有 current_node_id 的船 → 按 transport_node.city 聚合
-    node_agg_result = await db.execute(
+    # Step2: 节点映射（node_id -> city_code）
+    node_result = await db.execute(
         select(
-            TransportNode.city.label("city_name"),
-            TransportNode.province.label("province_name"),
-            func.count(Vessel.id).label("vessel_count"),
-            func.coalesce(func.sum(Vessel.deadweight), 0).label("total_deadweight"),
-        )
-        .join(VesselDynamic, VesselDynamic.vessel_id == Vessel.id)
-        .join(TransportNode, TransportNode.id == VesselDynamic.current_node_id)
-        .where(
+            TransportNode.id,
+            TransportNode.city_code,
+        ).where(
             and_(
-                Vessel.data_status == 1,
-                Vessel.is_deleted == 0,
-                VesselDynamic.current_node_id.isnot(None),
-                TransportNode.city.isnot(None),
                 TransportNode.deleted_at.is_(None),
+                TransportNode.city_code.isnot(None),
             )
         )
-        .group_by(TransportNode.city, TransportNode.province)
     )
+    node_city_map = {r.id: r.city_code for r in node_result.all()}
 
-    # Step3: 只有 GPS（无节点）的船
-    gps_result = await db.execute(
+    # Step3: 查询全部有效动态
+    rows_result = await db.execute(
         select(
+            VesselDynamic.current_city_code,
+            VesselDynamic.current_node_id,
             VesselDynamic.current_longitude,
             VesselDynamic.current_latitude,
             Vessel.deadweight,
         )
-        .join(Vessel, Vessel.id == VesselDynamic.vessel_id)
+        .join(VesselDynamic, VesselDynamic.vessel_id == Vessel.id)
         .where(
             and_(
                 Vessel.data_status == 1,
                 Vessel.is_deleted == 0,
-                VesselDynamic.current_node_id.is_(None),
-                VesselDynamic.current_longitude.isnot(None),
-                VesselDynamic.current_latitude.isnot(None),
             )
         )
     )
@@ -514,41 +531,47 @@ async def _stat_ship_city(db: AsyncSession) -> int:
     # Step4: 合并统计
     city_buckets: dict[str, dict] = {}
 
-    for row in node_agg_result.all():
-        admin = city_by_name.get(row.city_name)
-        key = row.city_name
-        if key not in city_buckets:
-            city_buckets[key] = {
-                "city_code": admin.code if admin else "",
-                "city_name": row.city_name,
-                "province_name": row.province_name or "",
-                "longitude": float(admin.longitude) if admin and admin.longitude else None,
-                "latitude": float(admin.latitude) if admin and admin.latitude else None,
-                "vessel_count": 0,
-                "total_deadweight": 0.0,
-            }
-        city_buckets[key]["vessel_count"] += row.vessel_count
-        city_buckets[key]["total_deadweight"] += float(row.total_deadweight or 0)
+    for row in rows_result.all():
+        city_code = None
+        city_meta: Optional[AdminRegion] = None
 
-    for row in gps_result.all():
-        matched = _find_nearest_city(
-            float(row.current_longitude), float(row.current_latitude), city_list
-        )
-        if not matched:
+        if row.current_city_code and row.current_city_code in city_by_code:
+            city_code = row.current_city_code
+            city_meta = city_by_code[city_code]
+        elif row.current_node_id:
+            node_city_code = node_city_map.get(row.current_node_id)
+            if node_city_code and node_city_code in city_by_code:
+                city_code = node_city_code
+                city_meta = city_by_code[city_code]
+        elif row.current_longitude and row.current_latitude:
+            matched = _find_nearest_city(
+                float(row.current_longitude),
+                float(row.current_latitude),
+                city_list,
+            )
+            if matched:
+                code, _, _, _, _ = matched
+                city_code = code
+                city_meta = city_by_code.get(code)
+
+        if not city_code or not city_meta:
             continue
-        code, name, province_name, lon, lat = matched
-        if name not in city_buckets:
-            city_buckets[name] = {
-                "city_code": code,
-                "city_name": name,
+
+        province_name = province_by_code.get(city_meta.parent_code, "")
+        bucket = city_buckets.setdefault(
+            city_code,
+            {
+                "city_code": city_code,
+                "city_name": city_meta.name,
                 "province_name": province_name,
-                "longitude": lon,
-                "latitude": lat,
+                "longitude": float(city_meta.longitude) if city_meta.longitude else None,
+                "latitude": float(city_meta.latitude) if city_meta.latitude else None,
                 "vessel_count": 0,
                 "total_deadweight": 0.0,
-            }
-        city_buckets[name]["vessel_count"] += 1
-        city_buckets[name]["total_deadweight"] += float(row.deadweight or 0)
+            },
+        )
+        bucket["vessel_count"] += 1
+        bucket["total_deadweight"] += float(row.deadweight or 0)
 
     # Step5: 全量替换
     total = sum(b["vessel_count"] for b in city_buckets.values()) or 1
@@ -739,10 +762,10 @@ async def refresh_vessel_static_stats() -> dict:
 
 
 async def refresh_vessel_dynamic_stats() -> dict:
-    """刷新船舶动态统计（Kafka AIS 更新后节流触发）
+    """刷新船舶动态统计（动态位置变化后的快照刷新）
 
     覆盖：ship_stat_region、ship_stat_city
-    调用方：vessel_dynamic_consumer.py（30s 节流）
+    调用方：业务服务或管理端手动触发
     """
     from app.core.database import AsyncSessionLocal
 

@@ -1,15 +1,24 @@
 """船舶数据体系模型"""
 from sqlalchemy import (
-    Column, BigInteger, Integer, String, Text, Integer, SmallInteger,
-    DECIMAL, DateTime, JSON, ForeignKey
+    Column,
+    BigInteger,
+    Integer,
+    String,
+    SmallInteger,
+    DECIMAL,
+    DateTime,
+    JSON,
+    ForeignKey,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from app.core.database import Base
 
 
 class VesselTypeDict(Base):
     """船舶类型字典表"""
+
     __tablename__ = "vessel_type_dict"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -23,8 +32,7 @@ class VesselTypeDict(Base):
     description = Column(String(512), comment="描述")
     sort_order = Column(Integer, nullable=False, default=0)
     status = Column(SmallInteger, nullable=False, default=1)
-    audit_status = Column(SmallInteger, nullable=False, default=0,
-                          comment="0=待审核,1=已通过,2=已驳回")
+    audit_status = Column(SmallInteger, nullable=False, default=0, comment="0=待审核,1=已通过,2=已驳回")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
     audited_at = Column(DateTime, comment="审核时间")
@@ -35,6 +43,7 @@ class VesselTypeDict(Base):
 
 class Vessel(Base):
     """船舶主档案表"""
+
     __tablename__ = "vessel"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -43,7 +52,7 @@ class Vessel(Base):
     mmsi = Column(String(20), comment="AIS编号/MMSI")
     call_sign = Column(String(32), comment="船舶呼号")
     vessel_type_id = Column(BigInteger, ForeignKey("vessel_type_dict.id"), comment="船舶类型")
-    # 船舶尺度
+
     deadweight = Column(Integer, comment="载重吨(DWT)")
     gross_tonnage = Column(DECIMAL(12, 2), comment="总吨")
     net_tonnage = Column(DECIMAL(12, 2), comment="净吨")
@@ -51,22 +60,21 @@ class Vessel(Base):
     breadth = Column(DECIMAL(8, 2), comment="船宽(m)")
     depth = Column(DECIMAL(8, 2), comment="型深(m)")
     max_draft = Column(DECIMAL(8, 3), comment="最大吃水(m)")
-    # 建造信息
+
     build_year = Column(Integer, comment="建造年份")
     build_country = Column(String(64), comment="建造国家")
     build_city = Column(String(64), comment="建造地")
     home_port = Column(String(128), comment="船籍港")
     flag = Column(String(32), default="中国", comment="船旗国")
-    # 船东信息
+
     owner_name = Column(String(128), comment="船东名称")
     contact_phone = Column(String(32), comment="联系电话")
-    # 状态管理
+
     data_status = Column(SmallInteger, default=1, comment="1=有效,0=注销")
     is_deleted = Column(SmallInteger, default=0)
     deleted_at = Column(DateTime, nullable=True, default=None, comment="软删时间，NULL=未删除")
-    # 审核相关
-    audit_status = Column(SmallInteger, nullable=False, default=0,
-                          comment="0=待审核,1=已通过,2=已驳回")
+
+    audit_status = Column(SmallInteger, nullable=False, default=0, comment="0=待审核,1=已通过,2=已驳回")
     audit_remark = Column(String(512), comment="审核意见")
     submitter_id = Column(BigInteger, comment="提交人ID")
     auditor_id = Column(BigInteger, comment="审核人ID")
@@ -82,6 +90,7 @@ class Vessel(Base):
 
 class VesselNameHistory(Base):
     """船舶历史船名表"""
+
     __tablename__ = "vessel_name_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -98,6 +107,7 @@ class VesselNameHistory(Base):
 
 class VesselAisHistory(Base):
     """船舶AIS历史表（MMSI变更记录）"""
+
     __tablename__ = "vessel_ais_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -114,25 +124,38 @@ class VesselAisHistory(Base):
 
 class VesselDynamic(Base):
     """船舶动态信息表（每船只保留最新一条）"""
+
     __tablename__ = "vessel_dynamic"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    vessel_id = Column(BigInteger, ForeignKey("vessel.id"), nullable=True, unique=True,
-                       comment="每船唯一一条最新动态")
+    vessel_id = Column(BigInteger, ForeignKey("vessel.id"), nullable=True, unique=True, comment="每船唯一一条最新动态")
     mmsi = Column(String(20), unique=True, nullable=True, comment="MMSI号（动态更新的唯一键）")
-    # 位置信息
+
     current_longitude = Column(DECIMAL(11, 8), comment="当前经度")
     current_latitude = Column(DECIMAL(10, 8), comment="当前纬度")
     current_node_id = Column(BigInteger, ForeignKey("transport_node.id"), comment="当前所在节点")
-    # 状态信息
-    vessel_status = Column(String(32), default="UNDERWAY",
-                           comment="EMPTY/LOADED/IN_PORT/ANCHORED/UNDERWAY/MAINTENANCE")
+    current_region_id = Column(BigInteger, ForeignKey("region.id"), comment="当前位置所属区域")
+    current_city_code = Column(String(12), ForeignKey("admin_region.code"), comment="当前位置所属城市行政区划代码")
+    position_match_type = Column(
+        String(32),
+        default="UNKNOWN",
+        comment="NODE/CITY_CENTROID/CITY_REGION_RELATION/REGION_POLYGON/MANUAL/UNKNOWN",
+    )
+    position_match_distance_m = Column(DECIMAL(10, 2), comment="位置匹配距离(米)")
+
+    vessel_status = Column(
+        String(32),
+        default="UNDERWAY",
+        comment="EMPTY/LOADED/IN_PORT/ANCHORED/UNDERWAY/MAINTENANCE",
+    )
     current_draft = Column(DECIMAL(8, 3), comment="当前吃水(m)")
     dest_node_id = Column(BigInteger, ForeignKey("transport_node.id"), comment="目的港节点")
     eta = Column(DateTime, comment="预计到达时间")
     speed = Column(DECIMAL(5, 2), comment="当前航速(节)")
     heading = Column(DECIMAL(5, 2), comment="当前船首向(度)")
     cargo_info = Column(String(256), comment="当前载货信息")
+    data_source = Column(String(32), default="MANUAL", comment="AIS/API/MANUAL/IMPORT")
+    reported_at = Column(DateTime, comment="动态上报时间")
     remark = Column(String(512), comment="备注")
     updated_by = Column(BigInteger, comment="更新人ID")
     created_at = Column(DateTime, server_default=func.now())
@@ -140,4 +163,6 @@ class VesselDynamic(Base):
 
     vessel = relationship("Vessel", back_populates="dynamic")
     current_node = relationship("TransportNode", foreign_keys=[current_node_id])
+    current_region = relationship("Region", foreign_keys=[current_region_id])
+    current_city = relationship("AdminRegion", foreign_keys=[current_city_code], primaryjoin="VesselDynamic.current_city_code==AdminRegion.code")
     dest_node = relationship("TransportNode", foreign_keys=[dest_node_id])

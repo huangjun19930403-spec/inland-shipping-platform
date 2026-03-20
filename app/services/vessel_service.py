@@ -5,12 +5,16 @@
 """
 import asyncio
 import logging
+from datetime import datetime
+from math import cos, radians, sqrt
 from typing import Optional
 
 from app.core.exceptions import NotFoundError, ConflictError
 from app.models.vessel import Vessel, VesselTypeDict, VesselNameHistory, VesselAisHistory, VesselDynamic
+from app.repositories.address_repository import AddressRepository
 from app.repositories.vessel_repository import VesselRepository
 from app.services.audit_service import AuditService
+from app.utils.region_helpers import point_in_polygon
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +39,99 @@ def _schedule_static_stat_refresh_task() -> None:
 class VesselService:
     """船舶业务服务"""
 
-    def __init__(self, vessel_repo: VesselRepository, audit_svc: AuditService) -> None:
+    def __init__(
+        self,
+        vessel_repo: VesselRepository,
+        audit_svc: AuditService,
+        address_repo: Optional[AddressRepository] = None,
+    ) -> None:
         self._vessel = vessel_repo
         self._audit_svc = audit_svc
+        self._address = address_repo
 
     @staticmethod
     def _schedule_static_stat_refresh() -> None:
         """调度后台 Task 刷新 DWT / 船龄分布快照（fire-and-forget）"""
         _schedule_static_stat_refresh_task()
+
+    @staticmethod
+    def _distance_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+        """近似平面距离（米），用于城市质心粗匹配。"""
+        mean_lat = radians((lat1 + lat2) / 2.0)
+        kx = 111320 * cos(mean_lat)
+        ky = 110540
+        return sqrt(((lon1 - lon2) * kx) ** 2 + ((lat1 - lat2) * ky) ** 2)
+
+    async def _enrich_dynamic_kwargs(self, kwargs: dict) -> dict:
+        """补齐一期动态分析字段，保证写入结构与统计逻辑一致。"""
+        if self._address is None:
+            kwargs.setdefault("reported_at", datetime.now())
+            kwargs.setdefault("data_source", "MANUAL")
+            return kwargs
+
+        node_id = kwargs.get("current_node_id")
+        lon = kwargs.get("current_longitude")
+        lat = kwargs.get("current_latitude")
+
+        if node_id:
+            node = await self._address.get_node(node_id)
+            if node:
+                if not kwargs.get("current_city_code") and node.city_code:
+                    kwargs["current_city_code"] = node.city_code
+                if not kwargs.get("current_region_id"):
+                    rid = await self._address.get_node_primary_region_id(node.id)
+                    if rid:
+                        kwargs["current_region_id"] = rid
+                kwargs.setdefault("position_match_type", "NODE")
+                kwargs.setdefault("position_match_distance_m", 0)
+
+        if lon is not None and lat is not None:
+            lon_f = float(lon)
+            lat_f = float(lat)
+
+            if not kwargs.get("current_city_code"):
+                city_rows = await self._address.list_city_centroids()
+                nearest = None
+                min_dist = None
+                for row in city_rows:
+                    if row.longitude is None or row.latitude is None:
+                        continue
+                    dist = self._distance_m(
+                        lon_f,
+                        lat_f,
+                        float(row.longitude),
+                        float(row.latitude),
+                    )
+                    if min_dist is None or dist < min_dist:
+                        min_dist = dist
+                        nearest = row
+                if nearest:
+                    kwargs["current_city_code"] = nearest.code
+                    kwargs.setdefault("position_match_type", "CITY_CENTROID")
+                    kwargs.setdefault("position_match_distance_m", round(min_dist or 0, 2))
+
+            if not kwargs.get("current_region_id") and kwargs.get("current_city_code"):
+                rid = await self._address.get_primary_region_by_city_code(kwargs["current_city_code"])
+                if rid:
+                    kwargs["current_region_id"] = rid
+                    kwargs.setdefault("position_match_type", "CITY_REGION_RELATION")
+
+            if not kwargs.get("current_region_id"):
+                regions = await self._address.list_regions_with_boundaries()
+                for region in regions:
+                    if region.boundary_coordinates and point_in_polygon(
+                        lon_f,
+                        lat_f,
+                        region.boundary_coordinates,
+                    ):
+                        kwargs["current_region_id"] = region.id
+                        kwargs.setdefault("position_match_type", "REGION_POLYGON")
+                        kwargs.setdefault("position_match_distance_m", 0)
+                        break
+
+        kwargs.setdefault("reported_at", datetime.now())
+        kwargs.setdefault("data_source", "MANUAL")
+        return kwargs
 
     # ─────────────────────────────────────────────────
     # 船型字典
@@ -270,6 +359,7 @@ class VesselService:
 
     async def update_dynamic(self, vessel_id: int, operator_id: int, **kwargs) -> VesselDynamic:
         await self.get_vessel(vessel_id)
+        kwargs = await self._enrich_dynamic_kwargs(kwargs)
         dynamic = await self._vessel.upsert_dynamic(vessel_id, **kwargs)
         await self._vessel.save()
         return dynamic
@@ -280,6 +370,7 @@ class VesselService:
         """以 MMSI 为键更新船舶动态（REST 接口和 Kafka 消费者共用）"""
         vessel = await self._vessel.get_vessel_by_mmsi(mmsi)
         vessel_id = vessel.id if vessel else None
+        kwargs = await self._enrich_dynamic_kwargs(kwargs)
         kwargs["updated_by"] = operator_id
         dynamic = await self._vessel.upsert_dynamic_by_mmsi(mmsi, vessel_id, **kwargs)
         await self._vessel.save()

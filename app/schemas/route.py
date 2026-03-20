@@ -1,12 +1,12 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict
 
 
-# ─────────────────────────────────────────────────
-# 路径节点（ShippingRoutePathNode）
-# ─────────────────────────────────────────────────
+# ---------- 路径节点（兼容） ----------
+
 
 class ShippingRoutePathNodeCreate(BaseModel):
     node_id: int
@@ -27,9 +27,63 @@ class ShippingRoutePathNodeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ─────────────────────────────────────────────────
-# 路线方案（ShippingRoutePath）
-# ─────────────────────────────────────────────────
+# ---------- 路径段（一期主表达） ----------
+
+
+class ShippingRoutePathSegmentCreate(BaseModel):
+    sequence: int
+    segment_type: str = "WATERWAY"
+    transport_mode: str = "WATERWAY"
+    from_node_id: Optional[int] = None
+    to_node_id: Optional[int] = None
+    waterway_id: Optional[int] = None
+    via_region_id: Optional[int] = None
+    distance_km: Optional[Decimal] = None
+    duration_hours: Optional[Decimal] = None
+    cost_factor: Optional[Decimal] = None
+    remark: Optional[str] = None
+
+
+class ShippingRoutePathSegmentUpdate(BaseModel):
+    sequence: Optional[int] = None
+    segment_type: Optional[str] = None
+    transport_mode: Optional[str] = None
+    from_node_id: Optional[int] = None
+    to_node_id: Optional[int] = None
+    waterway_id: Optional[int] = None
+    via_region_id: Optional[int] = None
+    distance_km: Optional[Decimal] = None
+    duration_hours: Optional[Decimal] = None
+    cost_factor: Optional[Decimal] = None
+    remark: Optional[str] = None
+
+
+class ShippingRoutePathSegmentResponse(BaseModel):
+    id: int
+    path_id: int
+    sequence: int
+    segment_type: str
+    transport_mode: str
+    from_node_id: Optional[int] = None
+    to_node_id: Optional[int] = None
+    waterway_id: Optional[int] = None
+    via_region_id: Optional[int] = None
+    distance_km: Optional[Decimal] = None
+    duration_hours: Optional[Decimal] = None
+    cost_factor: Optional[Decimal] = None
+    remark: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ShippingRoutePathSegmentsBatchSet(BaseModel):
+    segments: List[ShippingRoutePathSegmentCreate]
+
+
+# ---------- 路线方案 ----------
+
 
 class ShippingRoutePathCreate(BaseModel):
     name: str
@@ -46,7 +100,6 @@ class ShippingRoutePathUpdate(BaseModel):
 
 
 class ShippingRoutePathNodesBatchSet(BaseModel):
-    """批量替换路线节点"""
     nodes: List[ShippingRoutePathNodeCreate]
 
 
@@ -61,13 +114,13 @@ class ShippingRoutePathResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     nodes: List[ShippingRoutePathNodeResponse] = []
+    segments: List[ShippingRoutePathSegmentResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
 
-# ─────────────────────────────────────────────────
-# 航线（ShippingRoute）
-# ─────────────────────────────────────────────────
+# ---------- 航线 ----------
+
 
 class ShippingRouteCreate(BaseModel):
     name: str

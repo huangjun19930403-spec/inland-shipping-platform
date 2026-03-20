@@ -43,13 +43,14 @@ _TARGET_TABLE_MAP = {
     "WATERWAY":            "waterway",
     "REGION":              "region",
     "TRANSPORT_NODE":      "transport_node",
+    "NODE_ALIAS":          "node_alias",
     "NODE_TYPE":           "node_type",
     "VESSEL":              "vessel",
     "VESSEL_TYPE":         "vessel_type_dict",
     "COMMODITY_CATEGORY":  "commodity_category",
     "COMMODITY_TYPE":      "commodity_type",
     "COMMODITY_STANDARD":  "commodity_standard",
-    "CARGO_OPPORTUNITY":   "cargo_opportunity",
+    "CARGO_FREIGHT":       "cargo_freight",
 }
 
 # 审批通过后需要同时将 status 置为 1 的表（启用状态）

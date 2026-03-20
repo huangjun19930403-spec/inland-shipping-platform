@@ -9,7 +9,7 @@ from typing import Any, Generic, Optional, Sequence, Type, TypeVar
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.base import Base
+from app.core.database import Base
 
 ModelT = TypeVar("ModelT", bound=Base)
 

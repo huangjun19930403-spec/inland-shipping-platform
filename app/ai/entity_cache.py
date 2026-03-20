@@ -26,7 +26,8 @@ _CACHE_TTL = 600  # 10 分钟
 async def get_nodes(db: AsyncSession) -> list[dict]:
     """获取所有运输节点（含别名），TTL 缓存。
 
-    返回格式：[{"id", "name", "code", "aliases": list[str], "waterway_id", "region_id"}]
+    返回格式：
+    [{"id", "name", "code", "aliases": list[str], "waterway_id", "region_ids", "primary_region_id"}]
     """
     global _nodes, _nodes_loaded_at
     async with _lock:
@@ -67,7 +68,10 @@ async def _load_nodes(db: AsyncSession) -> list[dict]:
     result = await db.execute(
         select(TransportNode)
         .where(TransportNode.deleted_at.is_(None))
-        .options(selectinload(TransportNode.aliases))
+        .options(
+            selectinload(TransportNode.aliases),
+            selectinload(TransportNode.region_relations),
+        )
     )
     nodes = result.scalars().unique().all()
     return [
@@ -77,7 +81,15 @@ async def _load_nodes(db: AsyncSession) -> list[dict]:
             "code": getattr(n, "code", "") or "",
             "aliases": [a.alias_name for a in (n.aliases or [])],
             "waterway_id": getattr(n, "waterway_id", None),
-            "region_id": getattr(n, "region_id", None),
+            "region_ids": [r.region_id for r in (n.region_relations or [])],
+            "primary_region_id": next(
+                (
+                    r.region_id
+                    for r in (n.region_relations or [])
+                    if getattr(r, "is_primary", 0) == 1
+                ),
+                (n.region_relations[0].region_id if n.region_relations else None),
+            ),
         }
         for n in nodes
     ]

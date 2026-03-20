@@ -282,6 +282,22 @@ class CargoFreight(Base):
                              comment="TMS系统原始单号（TMS渠道）")
     tms_raw_data = Column(JSON, nullable=True, comment="TMS原始报文快照")
     collector_id = Column(BigInteger, nullable=True, comment="采集员/录入员ID")
+    source_message_time = Column(DateTime, nullable=True, comment="来源消息时间（用于时效分析）")
+
+    # ── 一期分析支撑字段 ──
+    location_match_level = Column(
+        String(20),
+        nullable=False,
+        default="UNKNOWN",
+        comment="NODE/CITY/REGION/UNKNOWN",
+    )
+    data_quality_score = Column(DECIMAL(5, 2), nullable=False, default=0, comment="数据质量评分 0-100")
+    analysis_status = Column(
+        String(20),
+        nullable=False,
+        default="READY",
+        comment="PENDING/READY/ANALYZED/FAILED",
+    )
 
     # ── 审核流程 ──
     audit_status = Column(SmallInteger, nullable=False, default=0,
@@ -306,6 +322,9 @@ class CargoFreight(Base):
         Index("ix_cargo_freight_dest_city", "dest_admin_code"),
         Index("ix_cargo_freight_source", "source_type"),
         Index("ix_cargo_freight_status", "status"),
+        Index("ix_cargo_freight_analysis_status", "analysis_status"),
+        Index("ix_cargo_freight_location_level", "location_match_level"),
+        Index("ix_cargo_freight_source_message_time", "source_message_time"),
         Index("ix_cargo_freight_created", "created_at"),
     )
 

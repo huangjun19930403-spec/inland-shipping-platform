@@ -1,17 +1,16 @@
-from pydantic import BaseModel, field_validator
-from typing import Any, Optional, List
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, List, Optional
+
+from pydantic import BaseModel, field_validator
 
 
 # ---------- Waterway ----------
 
+
 class WaterwayCreate(BaseModel):
-    """
-    水系新增请求体。
-    code 字段已移除——编码由后端依据 HJ 932-2017 规则自动生成（WW-LL-NNN），
-    响应中的 WaterwayResponse.code 即为系统生成的编码。
-    """
+    """水系新增请求体。"""
+
     name: str
     name_en: Optional[str] = None
     level: int = 1
@@ -59,15 +58,8 @@ class WaterwayResponse(BaseModel):
 
 # ---------- Region ----------
 
+
 def _validate_boundary_coordinates(v: Optional[List]) -> Optional[List]:
-    """
-    校验区域边界坐标列表。
-    规则：
-    - None 表示不传边界，直接放行。
-    - 至少 3 个顶点（构成有效多边形）。
-    - 每个顶点格式为 [经度, 纬度]，共 2 个数值。
-    - 经度范围：[-180, 180]；纬度范围：[-90, 90]。
-    """
     if v is None:
         return v
     if len(v) < 3:
@@ -87,17 +79,9 @@ def _validate_boundary_coordinates(v: Optional[List]) -> Optional[List]:
 
 
 class RegionCreate(BaseModel):
-    """
-    区域新增请求体。
-    - code：由后端自动生成（RG-NNN），无需填写。
-    - center_longitude / center_latitude：由 boundary_coordinates 自动计算。
-    - main_cities：由 boundary_coordinates 与行政区划表自动匹配，无需填写。
-    - main_rivers：主要水系 ID 数组，由调用方提供（可选）。
-    - boundary_coordinates：[[经度, 纬度], ...] 格式，经度 [-180,180]，纬度 [-90,90]，至少 3 点。
-    """
     name: str
     name_en: Optional[str] = None
-    main_rivers: Optional[List[int]] = None
+    waterway_ids: Optional[List[int]] = None
     boundary_coordinates: Optional[List[List[float]]] = None
     boundary_color: str = "#3388ff"
     area_color: str = "#3388ff"
@@ -111,15 +95,9 @@ class RegionCreate(BaseModel):
 
 
 class RegionUpdate(BaseModel):
-    """
-    区域修改请求体。
-    仅允许在 status=0（停用）状态下修改；修改后需重新审核。
-    - center_* 和 main_cities 与新增一样由系统自动重算。
-    - boundary_coordinates：[[经度, 纬度], ...] 格式，经度 [-180,180]，纬度 [-90,90]，至少 3 点。
-    """
     name: Optional[str] = None
     name_en: Optional[str] = None
-    main_rivers: Optional[List[int]] = None
+    waterway_ids: Optional[List[int]] = None
     boundary_coordinates: Optional[List[List[float]]] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None
@@ -133,17 +111,14 @@ class RegionUpdate(BaseModel):
 
 
 class RegionResponse(BaseModel):
-    """区域基础响应（含审核字段）。"""
     id: int
     code: str
     name: str
     name_en: Optional[str] = None
     center_longitude: Optional[Decimal] = None
     center_latitude: Optional[Decimal] = None
-    main_rivers: Optional[List[Any]] = None
-    main_rivers_names: Optional[List[str]] = None
-    main_cities: Optional[List[Any]] = None
-    main_cities_names: Optional[List[str]] = None
+    waterway_ids: List[int] = []
+    city_ids: List[int] = []
     boundary_coordinates: Optional[list] = None
     boundary_color: Optional[str] = None
     area_color: Optional[str] = None
@@ -162,6 +137,7 @@ class RegionResponse(BaseModel):
 
 
 # ---------- AdminRegion ----------
+
 
 class AdminRegionCreate(BaseModel):
     code: str
@@ -208,15 +184,14 @@ class AdminRegionResponse(BaseModel):
 
 
 class RegionDetailResponse(RegionResponse):
-    """分页查询时使用的扩展响应：将 ID 数组展开为完整的水系 / 城市对象。"""
-    main_rivers_info: List[WaterwayResponse] = []
-    main_cities_info: List[AdminRegionResponse] = []
+    waterways_info: List[WaterwayResponse] = []
+    cities_info: List[AdminRegionResponse] = []
 
 
 # ---------- NodeType ----------
 
+
 class NodeTypeCreate(BaseModel):
-    """节点类型新增请求体。code 由系统自动生成（NT-{UUID12}），无需填写。"""
     name: str
     name_en: Optional[str] = None
     transport_mode: str = "WATERWAY"
@@ -254,6 +229,7 @@ class NodeTypeResponse(BaseModel):
 
 # ---------- NodeAlias ----------
 
+
 class NodeAliasCreate(BaseModel):
     node_id: int
     alias_name: str
@@ -279,29 +255,46 @@ class NodeAliasResponse(BaseModel):
 
 # ---------- TransportNode ----------
 
+
+class TransportNodeProfileInput(BaseModel):
+    river_km: Optional[Decimal] = None
+    max_tonnage: Optional[int] = None
+    berth_count: Optional[int] = None
+    annual_throughput: Optional[str] = None
+    extra_attributes: Optional[Any] = None
+
+
+class TransportNodeProfileResponse(TransportNodeProfileInput):
+    id: Optional[int] = None
+    transport_node_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
 class TransportNodeCreate(BaseModel):
-    """运输节点新增请求体。code 由系统自动生成（TN-{UUID12}），无需填写。"""
     name: str
     name_en: Optional[str] = None
     node_type_id: int
     node_category: int = 4
     waterway_id: Optional[int] = None
-    region_id: Optional[int] = None
+    region_ids: Optional[List[int]] = None
+    primary_region_id: Optional[int] = None
     province: Optional[str] = None
     city: Optional[str] = None
     district: Optional[str] = None
+    province_code: Optional[str] = None
+    city_code: Optional[str] = None
+    district_code: Optional[str] = None
     address: Optional[str] = None
     longitude: Optional[Decimal] = None
     latitude: Optional[Decimal] = None
     node_level: int = 3
     is_hot_node: int = 0
-    river_km: Optional[Decimal] = None
-    max_tonnage: Optional[int] = None
-    berth_count: Optional[int] = None
-    annual_throughput: Optional[str] = None
     description: Optional[str] = None
     sort_order: int = 0
     status: int = 1
+    profile: Optional[TransportNodeProfileInput] = None
 
 
 class TransportNodeUpdate(BaseModel):
@@ -310,22 +303,23 @@ class TransportNodeUpdate(BaseModel):
     node_type_id: Optional[int] = None
     node_category: Optional[int] = None
     waterway_id: Optional[int] = None
-    region_id: Optional[int] = None
+    region_ids: Optional[List[int]] = None
+    primary_region_id: Optional[int] = None
     province: Optional[str] = None
     city: Optional[str] = None
     district: Optional[str] = None
+    province_code: Optional[str] = None
+    city_code: Optional[str] = None
+    district_code: Optional[str] = None
     address: Optional[str] = None
     longitude: Optional[Decimal] = None
     latitude: Optional[Decimal] = None
     node_level: Optional[int] = None
     is_hot_node: Optional[int] = None
-    river_km: Optional[Decimal] = None
-    max_tonnage: Optional[int] = None
-    berth_count: Optional[int] = None
-    annual_throughput: Optional[str] = None
     description: Optional[str] = None
     sort_order: Optional[int] = None
     status: Optional[int] = None
+    profile: Optional[TransportNodeProfileInput] = None
 
 
 class TransportNodeResponse(BaseModel):
@@ -336,19 +330,19 @@ class TransportNodeResponse(BaseModel):
     node_type_id: int
     node_category: int
     waterway_id: Optional[int] = None
-    region_id: Optional[int] = None
+    primary_region_id: Optional[int] = None
+    region_ids: List[int] = []
     province: Optional[str] = None
     city: Optional[str] = None
     district: Optional[str] = None
+    province_code: Optional[str] = None
+    city_code: Optional[str] = None
+    district_code: Optional[str] = None
     address: Optional[str] = None
     longitude: Optional[Decimal] = None
     latitude: Optional[Decimal] = None
     node_level: int
     is_hot_node: int
-    river_km: Optional[Decimal] = None
-    max_tonnage: Optional[int] = None
-    berth_count: Optional[int] = None
-    annual_throughput: Optional[str] = None
     description: Optional[str] = None
     sort_order: int
     status: int
@@ -358,6 +352,7 @@ class TransportNodeResponse(BaseModel):
     auditor_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    profile: Optional[TransportNodeProfileResponse] = None
     aliases: List[NodeAliasResponse] = []
 
     class Config:

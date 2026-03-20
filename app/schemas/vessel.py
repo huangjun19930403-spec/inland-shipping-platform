@@ -1,10 +1,12 @@
-from pydantic import BaseModel
-from typing import Optional, List, Any
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Optional
+
+from pydantic import BaseModel
 
 
 # ---------- VesselTypeDict ----------
+
 
 class VesselTypeDictCreate(BaseModel):
     code: str
@@ -53,6 +55,7 @@ class VesselTypeDictResponse(BaseModel):
 
 
 # ---------- Vessel ----------
+
 
 class VesselCreate(BaseModel):
     vessel_no: str
@@ -134,10 +137,15 @@ class VesselResponse(BaseModel):
 
 # ---------- VesselDynamic ----------
 
+
 class VesselDynamicUpdate(BaseModel):
     current_longitude: Optional[Decimal] = None
     current_latitude: Optional[Decimal] = None
     current_node_id: Optional[int] = None
+    current_region_id: Optional[int] = None
+    current_city_code: Optional[str] = None
+    position_match_type: Optional[str] = None
+    position_match_distance_m: Optional[Decimal] = None
     vessel_status: Optional[str] = None
     current_draft: Optional[Decimal] = None
     dest_node_id: Optional[int] = None
@@ -145,6 +153,8 @@ class VesselDynamicUpdate(BaseModel):
     speed: Optional[Decimal] = None
     heading: Optional[Decimal] = None
     cargo_info: Optional[str] = None
+    data_source: Optional[str] = None
+    reported_at: Optional[datetime] = None
     remark: Optional[str] = None
 
 
@@ -155,6 +165,10 @@ class VesselDynamicResponse(BaseModel):
     current_longitude: Optional[Decimal] = None
     current_latitude: Optional[Decimal] = None
     current_node_id: Optional[int] = None
+    current_region_id: Optional[int] = None
+    current_city_code: Optional[str] = None
+    position_match_type: Optional[str] = None
+    position_match_distance_m: Optional[Decimal] = None
     vessel_status: str
     current_draft: Optional[Decimal] = None
     dest_node_id: Optional[int] = None
@@ -162,6 +176,8 @@ class VesselDynamicResponse(BaseModel):
     speed: Optional[Decimal] = None
     heading: Optional[Decimal] = None
     cargo_info: Optional[str] = None
+    data_source: Optional[str] = None
+    reported_at: Optional[datetime] = None
     remark: Optional[str] = None
     updated_by: Optional[int] = None
     created_at: Optional[datetime] = None
@@ -172,6 +188,7 @@ class VesselDynamicResponse(BaseModel):
 
 
 # ---------- History ----------
+
 
 class VesselNameHistoryResponse(BaseModel):
     id: int
@@ -199,18 +216,23 @@ class VesselAisHistoryResponse(BaseModel):
         from_attributes = True
 
 
-# ---------- Kafka 消息体 ----------
+# ---------- 动态消息体 ----------
+
 
 class VesselDynamicKafkaMessage(BaseModel):
-    """Kafka Topic: vessel.dynamic — 船舶 AIS 动态消息体"""
-    mmsi: str                                          # 必填：MMSI 号（唯一标识）
-    current_longitude: Optional[Decimal] = None       # 当前经度
-    current_latitude: Optional[Decimal] = None        # 当前纬度
-    vessel_status: Optional[str] = None               # EMPTY/LOADED/IN_PORT/ANCHORED/UNDERWAY/MAINTENANCE
-    current_draft: Optional[Decimal] = None           # 当前吃水(m)
-    speed: Optional[Decimal] = None                   # 当前航速(节)
-    heading: Optional[Decimal] = None                 # 船首向(度)
-    cargo_info: Optional[str] = None                  # 载货信息
-    eta: Optional[datetime] = None                    # 预计到达时间
-    dest_node_id: Optional[int] = None                # 目的港节点ID
+    mmsi: str
+    current_longitude: Optional[Decimal] = None
+    current_latitude: Optional[Decimal] = None
+    current_node_id: Optional[int] = None
+    current_region_id: Optional[int] = None
+    current_city_code: Optional[str] = None
+    vessel_status: Optional[str] = None
+    current_draft: Optional[Decimal] = None
+    speed: Optional[Decimal] = None
+    heading: Optional[Decimal] = None
+    cargo_info: Optional[str] = None
+    eta: Optional[datetime] = None
+    dest_node_id: Optional[int] = None
+    data_source: Optional[str] = None
+    reported_at: Optional[datetime] = None
     remark: Optional[str] = None
