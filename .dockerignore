@@ -1,0 +1,10 @@
+.git
+.idea
+__pycache__
+.DS_Store
+__MACOSX
+.venv
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*

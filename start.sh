@@ -1,48 +1,51 @@
 #!/bin/bash
-# =====================================================
-# 内河航运平台启动脚本
-# =====================================================
-set -e
+set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
-echo "=================================================="
-echo "  中国内河航运数据采集与分析平台"
-echo "=================================================="
+resolve_python311() {
+  local candidate resolved output
+  for candidate in "${PYTHON_BIN:-}" /opt/homebrew/bin/python3.11 python3.11 /usr/local/bin/python3.11; do
+    [ -n "$candidate" ] || continue
+    if command -v "$candidate" >/dev/null 2>&1; then
+      resolved="$(command -v "$candidate")"
+    elif [ -x "$candidate" ]; then
+      resolved="$candidate"
+    else
+      continue
+    fi
+    output="$("$resolved" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)"
+    if [ "$output" = "3.11" ]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  done
+  return 1
+}
 
-# 检查Python
-if ! command -v python3 &>/dev/null; then
-    echo "[ERROR] 未找到 python3，请先安装 Python 3.9+"
+PYTHON_BIN="$(resolve_python311 || true)"
+
+if [ -z "$PYTHON_BIN" ]; then
+  echo "[ERROR] A working Python 3.11 interpreter is required."
+  exit 1
+fi
+
+if [ -d ".venv" ]; then
+  VENV_VERSION="$(.venv/bin/python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  if [ "$VENV_VERSION" != "3.11" ]; then
+    echo "[ERROR] Existing .venv uses Python $VENV_VERSION. Remove it and recreate with Python 3.11."
     exit 1
+  fi
+else
+  echo "[INFO] Creating virtual environment..."
+  "$PYTHON_BIN" -m venv .venv
 fi
 
-# 创建虚拟环境（如不存在）
-if [ ! -d ".venv" ]; then
-    echo "[INFO] 创建虚拟环境..."
-    python3 -m venv .venv
-fi
-
-# 激活虚拟环境
 source .venv/bin/activate
 
-# 安装依赖
-echo "[INFO] 安装/更新依赖..."
-pip install -q -r requirements.txt
+echo "[INFO] Installing dependencies..."
+pip install -q -r requirements.txt -r requirements-dev.txt
 
-# 设置ANTHROPIC_API_KEY提示
-if [ -z "$ANTHROPIC_API_KEY" ] && grep -q "your-anthropic-api-key-here" .env 2>/dev/null; then
-    echo ""
-    echo "[WARN] 未配置 ANTHROPIC_API_KEY，AI解析功能将降级为规则匹配模式。"
-    echo "       请编辑 .env 文件，填入真实的 Anthropic API Key 以启用完整AI能力。"
-    echo ""
-fi
-
-echo "[INFO] 启动服务..."
-echo "[INFO] 服务地址: http://localhost:8000"
-echo "[INFO] API文档:  http://localhost:8000/docs"
-echo "[INFO] 默认账号: admin / Admin@2026"
-echo ""
-
-# 启动
+echo "[INFO] Starting API server on http://127.0.0.1:8000"
 uvicorn main:app --reload --host 0.0.0.0 --port 8000

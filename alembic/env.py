@@ -1,6 +1,6 @@
 """
 Alembic环境配置
-支持异步SQLAlchemy (asyncpg/aiosqlite)
+支持异步 SQLAlchemy（SQLite / MySQL）
 """
 import asyncio
 from logging.config import fileConfig
@@ -16,7 +16,18 @@ from app.core.config import settings
 
 # 导入所有模型（确保Alembic能检测到所有表）
 from app.core.database import Base
-from app.models import system, address, cargo, vessel, route, analysis, audit, ai  # noqa: F401
+from app.models import (  # noqa: F401
+    address,
+    analysis,
+    audit,
+    commodity,
+    common,
+    dictionary,
+    freight,
+    route,
+    ship,
+    system,
+)
 
 # Alembic配置对象
 config = context.config

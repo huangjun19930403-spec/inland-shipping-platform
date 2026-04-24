@@ -1,0 +1,83 @@
+[
+  {
+    "code": "STD_SAND_STONE_AGGREGATE",
+    "type_code": "SAND_STONE_AGGREGATE",
+    "name": "砂石骨料",
+    "short_name": "骨料",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["石子", "石料", "机制砂", "河砂"]
+  },
+  {
+    "code": "STD_LIMESTONE",
+    "type_code": "LIMESTONE",
+    "name": "石灰石",
+    "short_name": "石灰石",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["灰石", "石灰岩"]
+  },
+  {
+    "code": "STD_CEMENT_CLINKER",
+    "type_code": "CEMENT_CLINKER",
+    "name": "水泥熟料",
+    "short_name": "熟料",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["熟料", "水泥熟料"]
+  },
+  {
+    "code": "STD_COAL",
+    "type_code": "COAL",
+    "name": "煤炭",
+    "short_name": "煤",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["煤", "动力煤", "电煤"]
+  },
+  {
+    "code": "STD_STEEL",
+    "type_code": "STEEL",
+    "name": "钢材",
+    "short_name": "钢",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["钢", "钢铁", "型钢"]
+  },
+  {
+    "code": "STD_GRAIN",
+    "type_code": "GRAIN",
+    "name": "粮食",
+    "short_name": "粮食",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["谷物", "粮"]
+  },
+  {
+    "code": "STD_LOG_TIMBER",
+    "type_code": "LOG_TIMBER",
+    "name": "木材",
+    "short_name": "木材",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["原木", "木料"]
+  },
+  {
+    "code": "STD_IRON_ORE",
+    "type_code": "IRON_ORE",
+    "name": "铁矿石",
+    "short_name": "铁矿",
+    "main_unit": "吨",
+    "is_active": true,
+    "aliases": ["铁矿", "矿石"]
+  },
+  {
+    "code": "STD_CONTAINER",
+    "type_code": "CONTAINER",
+    "name": "集装箱货",
+    "short_name": "集装箱",
+    "main_unit": "箱",
+    "is_active": true,
+    "aliases": ["箱货", "集装箱"]
+  }
+]

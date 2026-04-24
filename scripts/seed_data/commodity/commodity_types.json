@@ -1,0 +1,51 @@
+[
+  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "SAND_STONE_AGGREGATE", "name": "砂石骨料", "sort_order": 10},
+  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "STONE_POWDER", "name": "石粉", "sort_order": 20},
+  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "LIMESTONE", "name": "石灰石", "sort_order": 30},
+  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "CEMENT_CLINKER", "name": "水泥熟料", "sort_order": 40},
+  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "CEMENT_RAW_MATERIAL", "name": "水泥原材料", "sort_order": 50},
+  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "GRAVEL", "name": "碎石/砾石", "sort_order": 60},
+  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "READY_MIX_DRY_MATERIAL", "name": "干混建材原料", "sort_order": 70},
+
+  {"category_code": "ENERGY_FUEL", "code": "COAL", "name": "煤炭", "sort_order": 10},
+  {"category_code": "ENERGY_FUEL", "code": "COKE", "name": "焦炭", "sort_order": 20},
+  {"category_code": "ENERGY_FUEL", "code": "COAL_PRODUCTS", "name": "煤制品", "sort_order": 30},
+  {"category_code": "ENERGY_FUEL", "code": "CRUDE_OIL", "name": "原油", "sort_order": 40},
+  {"category_code": "ENERGY_FUEL", "code": "REFINED_OIL", "name": "成品油", "sort_order": 50},
+  {"category_code": "ENERGY_FUEL", "code": "OTHER_LIQUID_FUEL", "name": "其他液体燃料", "sort_order": 60},
+
+  {"category_code": "METAL_AND_METALLURGY", "code": "IRON_ORE", "name": "铁矿石", "sort_order": 10},
+  {"category_code": "METAL_AND_METALLURGY", "code": "NONFERROUS_ORE", "name": "有色矿石", "sort_order": 20},
+  {"category_code": "METAL_AND_METALLURGY", "code": "STEEL", "name": "钢材", "sort_order": 30},
+  {"category_code": "METAL_AND_METALLURGY", "code": "SCRAP_STEEL", "name": "废钢", "sort_order": 40},
+  {"category_code": "METAL_AND_METALLURGY", "code": "FERROALLOY", "name": "铁合金", "sort_order": 50},
+  {"category_code": "METAL_AND_METALLURGY", "code": "NONFERROUS_METAL", "name": "有色金属材料", "sort_order": 60},
+
+  {"category_code": "GRAIN_AND_AGRI", "code": "GRAIN", "name": "粮食", "sort_order": 10},
+  {"category_code": "GRAIN_AND_AGRI", "code": "RICE", "name": "稻谷/大米", "sort_order": 20},
+  {"category_code": "GRAIN_AND_AGRI", "code": "WHEAT_CORN", "name": "小麦玉米", "sort_order": 30},
+  {"category_code": "GRAIN_AND_AGRI", "code": "SOYBEAN_FEED", "name": "大豆及饲料原料", "sort_order": 40},
+  {"category_code": "GRAIN_AND_AGRI", "code": "AGRICULTURAL_PRODUCTS", "name": "农产品", "sort_order": 50},
+  {"category_code": "GRAIN_AND_AGRI", "code": "COTTON", "name": "棉花", "sort_order": 60},
+
+  {"category_code": "WOOD_AND_PAPER", "code": "LOG_TIMBER", "name": "原木/木材", "sort_order": 10},
+  {"category_code": "WOOD_AND_PAPER", "code": "WOOD_PRODUCTS", "name": "木制品", "sort_order": 20},
+  {"category_code": "WOOD_AND_PAPER", "code": "PULP", "name": "纸浆", "sort_order": 30},
+  {"category_code": "WOOD_AND_PAPER", "code": "PAPER_PRODUCTS", "name": "纸品", "sort_order": 40},
+
+  {"category_code": "CHEMICALS", "code": "CHEMICAL_RAW_MATERIAL", "name": "化工原料", "sort_order": 10},
+  {"category_code": "CHEMICALS", "code": "CHEMICAL_PRODUCTS", "name": "化工制品", "sort_order": 20},
+  {"category_code": "CHEMICALS", "code": "FERTILIZER", "name": "化肥", "sort_order": 30},
+  {"category_code": "CHEMICALS", "code": "SALT_CHEMICAL", "name": "盐化工原料", "sort_order": 40},
+  {"category_code": "CHEMICALS", "code": "HAZARDOUS_CHEMICAL", "name": "危化货物", "sort_order": 50},
+
+  {"category_code": "CONTAINERIZED_CARGO", "code": "CONTAINER", "name": "集装箱货", "sort_order": 10},
+  {"category_code": "CONTAINERIZED_CARGO", "code": "OPEN_TOP_CONTAINER_CARGO", "name": "开顶箱货物", "sort_order": 20},
+  {"category_code": "CONTAINERIZED_CARGO", "code": "PALLETIZED_CARGO", "name": "托盘化货物", "sort_order": 30},
+  {"category_code": "CONTAINERIZED_CARGO", "code": "UNITIZED_GENERAL_CARGO", "name": "单元化件杂货", "sort_order": 40},
+
+  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "GENERAL_CARGO", "name": "件杂货", "sort_order": 10},
+  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "MACHINERY_EQUIPMENT", "name": "机械设备", "sort_order": 20},
+  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "PROJECT_CARGO", "name": "工程项目货", "sort_order": 30},
+  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "VEHICLE_CARGO", "name": "车辆类货物", "sort_order": 40}
+]

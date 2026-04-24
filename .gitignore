@@ -3,33 +3,48 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv*/
 venv/
 dist/
 build/
 *.egg
+.mypy_cache/
+.ruff_cache/
 
-# 数据库（开发环境本地数据不提交）
+# Local databases
 *.db
+*.db-*
+*.db-journal
 *.sqlite
+*.sqlite-*
 *.sqlite3
+*.sqlite3-*
 
-# 环境配置（含API Key，绝不提交！）
+# Environment files
 .env
 .env.production
 .env.local
+.env.*.local
 
-# 编辑器
+# Editors
 .idea/
+.vscode/
 *.swp
 *.swo
 
 # macOS
 .DS_Store
+__MACOSX/
 
-# 测试覆盖率
+# Test and coverage
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 .pytest_cache/
 
-# 日志
+# Logs
 *.log
+logs/
+*.pid
+*.tmp

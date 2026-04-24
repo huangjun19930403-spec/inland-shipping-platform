@@ -1,43 +1,26 @@
-# 内河航运平台 — 开发命令
-.PHONY: dev seed migrate migrate-create test lint
+VENV ?= .venv
+PYTHON ?= python3.12
+VENV_PYTHON := $(VENV)/bin/python
+VENV_PIP := $(VENV)/bin/pip
+VENV_UVICORN := $(VENV)/bin/uvicorn
+VENV_ALEMBIC := $(VENV)/bin/alembic
 
-# 启动开发服务器
-dev:
-	uvicorn main:app --reload --host 0.0.0.0 --port 8000
+.PHONY: install migrate seed dev clean
 
-# 初始化种子数据
-seed:
-	python -m scripts.seed_data
+install:
+	@if [ ! -d "$(VENV)" ]; then $(PYTHON) -m venv $(VENV); fi
+	$(VENV_PIP) install -r requirements.txt -r requirements-dev.txt
 
-# 执行数据库迁移
 migrate:
-	alembic upgrade head
+	$(VENV_ALEMBIC) upgrade head
 
-# 生成迁移文件（用法: make migrate-create msg="add new column"）
-migrate-create:
-	alembic revision --autogenerate -m "$(msg)"
+seed:
+	PYTHONPATH=. $(VENV_PYTHON) -m scripts.seed_system_init
 
-# 回滚迁移
-migrate-rollback:
-	alembic downgrade -1
+dev:
+	PYTHONPATH=. $(VENV_UVICORN) main:app --host 0.0.0.0 --port 8000 --reload
 
-# 运行测试
-test:
-	pytest tests/ -v
-
-# 启动Celery Worker（需要Redis）
-celery-worker:
-	celery -A app.tasks.celery_app worker --loglevel=info -Q ai,analysis,dispatch
-
-# 启动Celery Beat调度器（需要Redis）
-celery-beat:
-	celery -A app.tasks.celery_app beat --loglevel=info
-
-# 代码格式检查
-lint:
-	ruff check app/ --fix
-
-# 清理缓存
 clean:
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; true
-	find . -type f -name "*.pyc" -delete 2>/dev/null; true
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+	find . -type f -name "*.pyc" -delete
+	find . -type f -name ".DS_Store" -delete

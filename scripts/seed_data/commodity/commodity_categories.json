@@ -1,0 +1,10 @@
+[
+  {"code": "MINERAL_BUILDING_MATERIAL", "name": "矿建建材", "description": "矿建建材类标准分类", "sort_order": 10},
+  {"code": "ENERGY_FUEL", "name": "能源燃料", "description": "能源燃料类标准分类", "sort_order": 20},
+  {"code": "METAL_AND_METALLURGY", "name": "金属与冶金原料", "description": "金属与冶金原料类标准分类", "sort_order": 30},
+  {"code": "GRAIN_AND_AGRI", "name": "粮食与农产品", "description": "粮食与农产品类标准分类", "sort_order": 40},
+  {"code": "WOOD_AND_PAPER", "name": "木材与纸品", "description": "木材与纸品类标准分类", "sort_order": 50},
+  {"code": "CHEMICALS", "name": "化工原料与制品", "description": "化工原料与制品类标准分类", "sort_order": 60},
+  {"code": "CONTAINERIZED_CARGO", "name": "集装箱与单元化货类", "description": "集装箱与单元化货类标准分类", "sort_order": 70},
+  {"code": "GENERAL_CARGO_AND_EQUIPMENT", "name": "件杂货与设备", "description": "件杂货与设备类标准分类", "sort_order": 80}
+]

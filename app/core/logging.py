@@ -1,7 +1,4 @@
-"""
-结构化日志配置模块
-统一日志格式、级别和输出目标
-"""
+"""结构化日志配置。"""
 import logging
 import sys
 from typing import Any
@@ -57,8 +54,8 @@ def setup_logging() -> None:
 
     root_logger.addHandler(handler)
 
-    # 抑制第三方库的冗余日志
-    for noisy in ("httpx", "httpcore", "anthropic", "sqlalchemy.engine"):
+    # 抑制第三方库冗余日志
+    for noisy in ("httpx", "httpcore", "sqlalchemy.engine"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)

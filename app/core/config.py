@@ -1,52 +1,69 @@
+"""应用基础配置（非 AI 模块化单体）。"""
+
+from __future__ import annotations
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
-import os
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
     # 应用基础配置
-    APP_NAME: str = "中国内河航运数据采集与分析平台"
-    APP_VERSION: str = "2.0.0"
+    APP_NAME: str = "Inland Shipping Platform"
+    APP_VERSION: str = "3.0.0-non-ai-baseline"
     DEBUG: bool = True
 
-    # 数据库配置
+    # 数据库
     DATABASE_URL: str = "sqlite+aiosqlite:///./inland_shipping.db"
 
-    # JWT配置
-    SECRET_KEY: str = "inland-shipping-platform-secret-key-2026"
+    # 认证
+    SECRET_KEY: str = "inland-shipping-platform-secret-key"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
-    # AI配置
-    AI_PROVIDER: str = "anthropic"  # anthropic / openai / deepseek / tongyi
-    # Anthropic
-    ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY", "")
-    AI_MODEL: str = "claude-sonnet-4-6"
-    # OpenAI / DeepSeek（deepseek 复用 openai SDK，仅 base_url 不同）
-    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_BASE_URL: Optional[str] = None
-    DEEPSEEK_API_KEY: Optional[str] = os.getenv("DEEPSEEK_API_KEY", "")
-    # 通义千问（DashScope）
-    DASHSCOPE_API_KEY: Optional[str] = os.getenv("DASHSCOPE_API_KEY", "")
-    TONGYI_MODEL: str = "qwen-turbo"
-    # 公共参数
-    AI_MAX_TOKENS: int = 2048
-    AI_TEMPERATURE: float = 0.1
-    AI_CONFIDENCE_THRESHOLD: int = 60  # AI解析置信度阈值
+    # CORS
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "*",
+    ]
 
-    # Celery配置（生产环境需Redis）
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    # Elasticsearch
+    ES_TIMEOUT_SECONDS: float = 10.0
+    ES_HISTORY_TIMEOUT_SECONDS: float = 30.0
+    ES_R_SCHEME: str = "http"
+    ES_R_HOST: str = ""
+    ES_R_PORT: int = 80
+    ES_R_USER: str = "elastic"
+    ES_R_PASSWORD: str = ""
+    ES_R_INDEX: str = "ship_positions"
+    ES_SCHEME: str = "http"
+    ES_HOST: str = ""
+    ES_PORT: int = 80
+    ES_USER: str = "elastic"
+    ES_PASSWORD: str = ""
+    ES_HISTORY_INDEX_PREFIX: str = "ship_locations_"
 
-    # 定时任务配置（Celery Beat crontab格式）
-    STATS_CRON_SCHEDULE: str = "0 2 * * *"  # 每日凌晨2点
-    # 兼容旧版APScheduler配置
-    STATS_CRON_HOUR: int = 2
-    STATS_CRON_MINUTE: int = 0
+    # 高德
+    ROUTE_GEOMETRY_MODE: str = "real"  # real / mock / fallback
+    ROUTE_GEOMETRY_TIMEOUT_SECONDS: float = 8.0
+    ROUTE_AMAP_WEB_API_KEY: str = ""
+    AMAP_JS_API_KEY: str = ""
+    AMAP_SECURITY_JS_CODE: str = ""
 
-    # CORS配置
-    ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
+    # HiFleet
+    HIFLEET_ENABLED: bool = False
+    HIFLEET_BASE_URL: str = "https://www.hifleet.com"
+    HIFLEET_LOGIN_URL: str = "/hifleetapi/generalUserLoginAction.do"
+    HIFLEET_ROUTE_URL: str = "/hifleetrouteapi/getNewRoute"
+    HIFLEET_CHECK_LOGIN_URL: str = "/hifleetapi/queryAlertRsCount.do"
+    HIFLEET_USERNAME: str = ""
+    HIFLEET_PASSWORD: str = ""
+    HIFLEET_TIMEOUT_SECONDS: float = 8.0
+    HIFLEET_RELOGIN_CHECK_ENABLED: bool = True
+
 
 settings = Settings()
+

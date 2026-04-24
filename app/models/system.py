@@ -1,78 +1,181 @@
-"""系统基础数据模型"""
-from sqlalchemy import (
-    Column, BigInteger, Integer, String, SmallInteger, DateTime, ForeignKey
-)
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from app.core.database import Base
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 
 
-class SysRole(Base):
-    """系统角色表"""
-    __tablename__ = "sys_role"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(32), unique=True, nullable=False,
-                  comment="SUPER_ADMIN/ADMIN/OPERATOR/COLLECTOR")
-    name = Column(String(64), nullable=False, comment="角色名称")
-    description = Column(String(256), comment="角色描述")
-    status = Column(SmallInteger, nullable=False, default=1)
-    sort_order = Column(SmallInteger, nullable=False, default=0)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    users = relationship(
-        "SysUserRole",
-        back_populates="role",
-        cascade="all, delete-orphan",
-    )
-
-
-class SysUser(Base):
-    """系统用户表"""
+class SysUser(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "sys_user"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    username = Column(String(64), unique=True, nullable=False, comment="用户名（登录名）")
-    real_name = Column(String(64), nullable=False, comment="真实姓名")
-    password_hash = Column(String(256), nullable=False, comment="密码哈希")
-    phone = Column(String(32), comment="手机号")
-    email = Column(String(128), comment="邮箱")
-    department = Column(String(64), comment="部门")
-    avatar = Column(String(256), comment="头像URL")
-    # 微信小程序绑定
-    wx_open_id = Column(String(64), comment="微信OpenID")
-    wx_bound = Column(SmallInteger, default=0, comment="0=未绑定,1=已绑定")
-    # 状态
-    status = Column(SmallInteger, nullable=False, default=1, comment="1=启用,0=停用")
-    last_login_at = Column(DateTime, comment="最后登录时间")
-    created_by = Column(BigInteger, comment="创建人ID")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    real_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    mobile_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_login_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    roles = relationship(
-        "SysUserRole",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
+
+class SysRole(Base, TimestampMixin):
+    __tablename__ = "sys_role"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    role_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    role_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class SysUserRole(Base):
-    """用户角色关联表"""
     __tablename__ = "sys_user_role"
+    __table_args__ = (UniqueConstraint("user_id", "role_id", name="uk_sys_user_role"),)
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(
-        BigInteger,
-        ForeignKey("sys_user.id", ondelete="CASCADE"),
-        nullable=False,
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_user.id"), nullable=False, index=True
     )
-    role_id = Column(
-        BigInteger,
-        ForeignKey("sys_role.id", ondelete="CASCADE"),
-        nullable=False,
+    role_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_role.id"), nullable=False, index=True
     )
-    created_at = Column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
-    user = relationship("SysUser", back_populates="roles")
-    role = relationship("SysRole", back_populates="users")
+
+class SysPermission(Base, TimestampMixin):
+    __tablename__ = "sys_permission"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    permission_code: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    permission_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    permission_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    action_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class SysRolePermission(Base):
+    __tablename__ = "sys_role_permission"
+    __table_args__ = (
+        UniqueConstraint("role_id", "permission_id", name="uk_sys_role_permission"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    role_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_role.id"), nullable=False, index=True
+    )
+    permission_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_permission.id"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class SysMenu(Base, TimestampMixin):
+    __tablename__ = "sys_menu"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("sys_menu.id"), nullable=True
+    )
+    menu_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    menu_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    menu_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    route_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    component_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    visible_flag: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class SysRoleMenu(Base):
+    __tablename__ = "sys_role_menu"
+    __table_args__ = (UniqueConstraint("role_id", "menu_id", name="uk_sys_role_menu"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    role_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_role.id"), nullable=False, index=True
+    )
+    menu_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_menu.id"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class SysDataScope(Base, TimestampMixin):
+    __tablename__ = "sys_data_scope"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    scope_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    scope_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    data_scope_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    region_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("region.id"), nullable=True)
+    city_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    node_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class SysRoleDataScope(Base):
+    __tablename__ = "sys_role_data_scope"
+    __table_args__ = (
+        UniqueConstraint("role_id", "data_scope_id", name="uk_sys_role_data_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    role_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_role.id"), nullable=False, index=True
+    )
+    data_scope_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_data_scope.id"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class SysUserStatusLog(Base):
+    __tablename__ = "sys_user_status_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_user.id"), nullable=False, index=True
+    )
+    from_status_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    to_status_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    operator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class SysLoginLog(Base):
+    __tablename__ = "sys_login_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("sys_user.id"), nullable=True, index=True
+    )
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    login_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    login_result_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    login_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    logout_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    config_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    config_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    config_value: Mapped[str] = mapped_column(Text, nullable=False)
+    value_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    config_group_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
