@@ -441,6 +441,42 @@ class SystemConfigRepository:
     async def get_config_by_key(self, config_key: str) -> SystemConfig | None:
         return await self.db.scalar(select(SystemConfig).where(SystemConfig.config_key == config_key))
 
+    async def get_config_for_runtime(
+        self,
+        config_key: str,
+        profile_code: str | None = None,
+    ) -> SystemConfig | None:
+        stmt = select(SystemConfig).where(
+            SystemConfig.config_key == config_key,
+            SystemConfig.config_status_code == "ACTIVE",
+        )
+        if profile_code:
+            stmt = stmt.where(SystemConfig.config_profile_code == profile_code)
+        stmt = stmt.order_by(
+            SystemConfig.config_profile_code.asc(),
+            SystemConfig.sort_order.asc(),
+            SystemConfig.id.asc(),
+        ).limit(1)
+        return (await self.db.execute(stmt)).scalars().first()
+
+    async def list_configs_by_group_for_runtime(
+        self,
+        group_code: str,
+        profile_code: str | None = None,
+        include_inactive: bool = False,
+    ) -> list[SystemConfig]:
+        stmt = select(SystemConfig).where(SystemConfig.config_group_code == group_code)
+        if not include_inactive:
+            stmt = stmt.where(SystemConfig.config_status_code == "ACTIVE")
+        if profile_code:
+            stmt = stmt.where(SystemConfig.config_profile_code == profile_code)
+        stmt = stmt.order_by(
+            SystemConfig.config_profile_code.asc(),
+            SystemConfig.sort_order.asc(),
+            SystemConfig.config_key.asc(),
+        )
+        return list((await self.db.execute(stmt)).scalars().all())
+
     async def list_configs(
         self,
         keyword: str | None,

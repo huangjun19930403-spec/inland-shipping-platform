@@ -43,6 +43,18 @@ docs/                      # 后端核心文档
 - 跨域：`ALLOWED_ORIGINS`
 - 外部集成：`ES_*`、`ES_R_*`、`ROUTE_AMAP_WEB_API_KEY`、`HIFLEET_*`
 
+`system` 模块提供 `RuntimeConfigService` 作为统一运行时读取入口，规则为：
+
+1. DB 优先：优先读取 `system_config` 中 `ACTIVE` 配置
+2. ENV/settings 回退：DB 无值或空值时回退 `settings`
+3. default 兜底：仍无值时使用调用方默认值
+
+说明：
+
+- 内部服务读取时可拿到敏感配置真实值（用于后续集成调用）。
+- API 响应层仍遵循敏感值隐藏规则，不泄露明文。
+- 当前阶段不包含连接测试执行与真实加密能力。
+
 ## 5. 启动与初始化
 
 本地最小流程：

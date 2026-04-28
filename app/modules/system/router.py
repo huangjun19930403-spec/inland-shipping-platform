@@ -32,6 +32,7 @@ from app.modules.system.schemas import (
     RolePermissionReplaceRequest,
     RoleResponse,
     RoleUpdateRequest,
+    RuntimeConfigValueResponse,
     SystemConfigCreateRequest,
     SystemConfigListQuery,
     SystemConfigResponse,
@@ -46,6 +47,7 @@ from app.modules.system.schemas import (
     UserStatusLogResponse,
     UserUpdateRequest,
 )
+from app.modules.system.runtime_config import RuntimeConfigService
 from app.modules.system.service import (
     AuthService,
     DataScopeService,
@@ -416,6 +418,26 @@ async def get_config_detail(
     _ = current_user
     service = SystemConfigService(db)
     return await service.get_config_detail(config_key)
+
+
+@system_router.get("/runtime-configs/{config_key}", response_model=RuntimeConfigValueResponse)
+async def get_runtime_config_value(
+    config_key: str,
+    profile_code: str | None = None,
+    default: str | None = None,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = RuntimeConfigService(db)
+    resolved = await service.resolve_value(config_key, default, profile_code=profile_code)
+    response_value = "" if resolved.sensitive_flag == 1 else resolved.value
+    return RuntimeConfigValueResponse(
+        config_key=resolved.key,
+        profile_code=resolved.profile_code,
+        value=response_value,
+        source=resolved.source,
+    )
 
 
 @system_router.post("/configs", response_model=SystemConfigResponse)

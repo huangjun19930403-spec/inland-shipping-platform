@@ -339,6 +339,13 @@ class SystemConfigResponse(BaseModel):
     created_at: datetime
 
 
+class RuntimeConfigValueResponse(BaseModel):
+    config_key: str
+    profile_code: str | None
+    value: str | None
+    source: str
+
+
 class LoginLogListQuery(BaseModel):
     keyword: str | None = None
     login_result: str | None = None

@@ -46,6 +46,7 @@
 - `GET /system/data-scopes/all`：全部数据权限
 - `GET /system/configs`：系统配置分页
 - `GET /system/configs/{config_key}`：系统配置详情
+- `GET /system/runtime-configs/{config_key}`：运行时配置读取诊断
 - `POST /system/configs`：创建系统配置
 - `PUT /system/configs/{config_key}`：更新系统配置
 - `GET /system/login-logs`：登录日志分页
@@ -75,6 +76,21 @@
   - 同时 `config_value_masked` 返回掩码值（用于前端展示）。
   - 当 `sensitive_flag!=1` 时，`config_value` 返回原值，`config_value_masked` 为 `null`。
 - `last_test_*` 字段当前为连接测试结果占位字段，本阶段不提供连接测试执行接口。
+
+#### /system/runtime-configs/{config_key}（阶段 1B）
+
+- 用途：运行时配置读取诊断（DB 优先、ENV 回退、default 兜底）。
+- 查询参数：
+  - `profile_code`（可选）
+  - `default`（可选）
+- 返回字段：
+  - `config_key`
+  - `profile_code`
+  - `value`
+  - `source`（`DB/ENV/DEFAULT/EMPTY`）
+- 敏感配置规则：
+  - 当命中 DB 且 `sensitive_flag=1` 时，`source` 仍为 `DB`，但 `value` 返回空字符串。
+  - 非敏感配置按原值返回。
 
 ## 3. Dictionary
 
