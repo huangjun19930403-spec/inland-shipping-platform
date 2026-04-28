@@ -121,14 +121,40 @@ def _to_data_scope_response(row) -> DataScopeResponse:
     )
 
 
+def _mask_config_value(value: str | None) -> str:
+    if not value:
+        return "****"
+    if len(value) <= 4:
+        return "****"
+    return f"******{value[-4:]}"
+
+
 def _to_system_config_response(row) -> SystemConfigResponse:
+    sensitive = int(row.sensitive_flag or 0) == 1
+    if sensitive:
+        config_value = ""
+        config_value_masked = _mask_config_value(row.config_value)
+    else:
+        config_value = row.config_value
+        config_value_masked = None
+
     return SystemConfigResponse(
         id=row.id,
         config_key=row.config_key,
         config_name=row.config_name,
-        config_value=row.config_value,
+        config_value=config_value,
+        config_value_masked=config_value_masked,
         value_type_code=row.value_type_code,
         config_group_code=row.config_group_code,
+        config_profile_code=row.config_profile_code,
+        sensitive_flag=row.sensitive_flag,
+        encrypted_flag=row.encrypted_flag,
+        editable_flag=row.editable_flag,
+        sort_order=row.sort_order,
+        config_status_code=row.config_status_code,
+        last_test_status_code=row.last_test_status_code,
+        last_test_message=row.last_test_message,
+        last_tested_at=row.last_tested_at,
         description=row.description,
         updated_by=row.updated_by,
         updated_at=row.updated_at,
@@ -645,10 +671,19 @@ class SystemConfigService:
         self,
         keyword: str | None,
         group_code: str | None,
+        profile_code: str | None,
+        status_code: str | None,
         page: int,
         page_size: int,
     ) -> PageResponse[SystemConfigResponse]:
-        items, total = await self.repo.list_configs(keyword, group_code, page, page_size)
+        items, total = await self.repo.list_configs(
+            keyword,
+            group_code,
+            profile_code,
+            status_code,
+            page,
+            page_size,
+        )
         return PageResponse[SystemConfigResponse](
             total=total,
             page=page,
@@ -670,10 +705,22 @@ class SystemConfigService:
         if await self.repo.get_config_by_key(payload.config_key.strip()):
             raise ConflictError(f"config_key already exists: {payload.config_key}")
         now = datetime.utcnow()
+        profile_code = (payload.config_profile_code or "DEFAULT").strip() or "DEFAULT"
+        status_code = (payload.config_status_code or "ACTIVE").strip() or "ACTIVE"
+        payload_data = payload.model_dump()
         row = await self.repo.create_config(
             {
-                **payload.model_dump(),
+                **payload_data,
                 "config_key": payload.config_key.strip(),
+                "config_profile_code": profile_code,
+                "sensitive_flag": payload.sensitive_flag,
+                "encrypted_flag": 0,
+                "editable_flag": payload.editable_flag,
+                "sort_order": payload.sort_order,
+                "config_status_code": status_code,
+                "last_test_status_code": None,
+                "last_test_message": None,
+                "last_tested_at": None,
                 "updated_by": operator_id,
                 "updated_at": now,
                 "created_at": now,
@@ -691,6 +738,14 @@ class SystemConfigService:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             raise ValidationError("no update fields provided")
+        if "config_profile_code" in updates:
+            updates["config_profile_code"] = updates["config_profile_code"].strip()
+            if not updates["config_profile_code"]:
+                raise ValidationError("config_profile_code cannot be empty")
+        if "config_status_code" in updates:
+            updates["config_status_code"] = updates["config_status_code"].strip()
+            if not updates["config_status_code"]:
+                raise ValidationError("config_status_code cannot be empty")
         updates["updated_by"] = operator_id
         updates["updated_at"] = datetime.utcnow()
         row = await self.repo.update_config(config_key, updates)

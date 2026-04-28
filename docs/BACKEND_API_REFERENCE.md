@@ -50,6 +50,32 @@
 - `PUT /system/configs/{config_key}`：更新系统配置
 - `GET /system/login-logs`：登录日志分页
 
+#### /system/configs 补充说明（阶段 1A）
+
+- `GET /system/configs` 支持查询参数：
+  - `keyword`
+  - `group_code`
+  - `profile_code`（映射到 `config_profile_code`）
+  - `status_code`（映射到 `config_status_code`）
+  - `page`
+  - `page_size`
+- 返回字段新增：
+  - `config_value_masked`
+  - `config_profile_code`
+  - `sensitive_flag`
+  - `encrypted_flag`
+  - `editable_flag`
+  - `sort_order`
+  - `config_status_code`
+  - `last_test_status_code`
+  - `last_test_message`
+  - `last_tested_at`
+- 敏感值响应规则：
+  - 当 `sensitive_flag=1` 时，`config_value` 固定返回空字符串，真实值不明文返回。
+  - 同时 `config_value_masked` 返回掩码值（用于前端展示）。
+  - 当 `sensitive_flag!=1` 时，`config_value` 返回原值，`config_value_masked` 为 `null`。
+- `last_test_*` 字段当前为连接测试结果占位字段，本阶段不提供连接测试执行接口。
+
 ## 3. Dictionary
 
 - `GET /dictionary/dicts`：字典列表

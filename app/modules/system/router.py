@@ -397,7 +397,14 @@ async def list_configs(
 ):
     _ = current_user
     service = SystemConfigService(db)
-    return await service.list_configs(query.keyword, query.group_code, query.page, query.page_size)
+    return await service.list_configs(
+        query.keyword,
+        query.group_code,
+        query.profile_code,
+        query.status_code,
+        query.page,
+        query.page_size,
+    )
 
 
 @system_router.get("/configs/{config_key}", response_model=SystemConfigResponse)

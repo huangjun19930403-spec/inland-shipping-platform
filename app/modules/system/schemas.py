@@ -283,6 +283,8 @@ class DataScopeResponse(BaseModel):
 class SystemConfigListQuery(BaseModel):
     keyword: str | None = None
     group_code: str | None = None
+    profile_code: str | None = None
+    status_code: str | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=200)
 
@@ -293,6 +295,11 @@ class SystemConfigCreateRequest(BaseModel):
     config_value: str
     value_type_code: str = Field(min_length=1, max_length=64)
     config_group_code: str = Field(min_length=1, max_length=64)
+    config_profile_code: str = Field(default="DEFAULT", min_length=1, max_length=64)
+    sensitive_flag: int = Field(default=0, ge=0, le=1)
+    editable_flag: int = Field(default=1, ge=0, le=1)
+    sort_order: int = 0
+    config_status_code: str = Field(default="ACTIVE", min_length=1, max_length=64)
     description: str | None = Field(default=None, max_length=512)
 
 
@@ -301,6 +308,11 @@ class SystemConfigUpdateRequest(BaseModel):
     config_value: str | None = None
     value_type_code: str | None = Field(default=None, min_length=1, max_length=64)
     config_group_code: str | None = Field(default=None, min_length=1, max_length=64)
+    config_profile_code: str | None = Field(default=None, min_length=1, max_length=64)
+    sensitive_flag: int | None = Field(default=None, ge=0, le=1)
+    editable_flag: int | None = Field(default=None, ge=0, le=1)
+    sort_order: int | None = None
+    config_status_code: str | None = Field(default=None, min_length=1, max_length=64)
     description: str | None = Field(default=None, max_length=512)
 
 
@@ -309,8 +321,18 @@ class SystemConfigResponse(BaseModel):
     config_key: str
     config_name: str
     config_value: str
+    config_value_masked: str | None
     value_type_code: str
     config_group_code: str
+    config_profile_code: str
+    sensitive_flag: int
+    encrypted_flag: int
+    editable_flag: int
+    sort_order: int
+    config_status_code: str
+    last_test_status_code: str | None
+    last_test_message: str | None
+    last_tested_at: datetime | None
     description: str | None
     updated_by: int | None
     updated_at: datetime

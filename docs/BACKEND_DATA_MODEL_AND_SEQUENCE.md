@@ -98,6 +98,25 @@
 - `sys_login_log`
 - `system_config`
 
+## 2.9 system_config 元数据扩展（阶段 1A）
+
+`system_config` 已从简单 key-value 表扩展为配置中心元数据表，除原有
+`config_key/config_name/config_value/value_type_code/config_group_code` 外，补充：
+
+- `config_profile_code`：配置 profile（如 `SYSTEM/AMAP/HIFLEET/ES`）
+- `sensitive_flag`：是否敏感值（1 为敏感）
+- `encrypted_flag`：加密标记占位（本阶段仅元数据标记）
+- `editable_flag`：是否可编辑
+- `sort_order`：列表排序
+- `config_status_code`：配置状态（如 `ACTIVE`）
+- `last_test_status_code/last_test_message/last_tested_at`：连接测试结果占位
+
+说明：
+
+- 本阶段只扩展元数据真值，不引入独立 profile 表。
+- 本阶段不负责运行时读取优先级（DB/env 回退）。
+- 本阶段不负责连接测试执行，仅保留测试结果字段占位。
+
 ## 3. code_sequence 真值结构
 
 `CodeSequence` 字段（`app/models/common.py`）：

@@ -445,6 +445,8 @@ class SystemConfigRepository:
         self,
         keyword: str | None,
         group_code: str | None,
+        profile_code: str | None,
+        status_code: str | None,
         page: int,
         page_size: int,
     ) -> tuple[list[SystemConfig], int]:
@@ -459,10 +461,19 @@ class SystemConfigRepository:
             )
         if group_code:
             stmt = stmt.where(SystemConfig.config_group_code == group_code)
+        if profile_code:
+            stmt = stmt.where(SystemConfig.config_profile_code == profile_code)
+        if status_code:
+            stmt = stmt.where(SystemConfig.config_status_code == status_code)
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         items = (
             await self.db.execute(
-                stmt.order_by(SystemConfig.config_group_code.asc(), SystemConfig.config_key.asc())
+                stmt.order_by(
+                    SystemConfig.config_group_code.asc(),
+                    SystemConfig.config_profile_code.asc(),
+                    SystemConfig.sort_order.asc(),
+                    SystemConfig.config_key.asc(),
+                )
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )

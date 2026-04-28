@@ -437,6 +437,15 @@ SYSTEM_CONFIGS = [
         "config_value": "Inland Shipping Platform",
         "value_type_code": "STRING",
         "config_group_code": "SYSTEM",
+        "config_profile_code": "SYSTEM",
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 10,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
         "description": "系统展示名称",
     },
     {
@@ -445,6 +454,15 @@ SYSTEM_CONFIGS = [
         "config_value": "Asia/Shanghai",
         "value_type_code": "STRING",
         "config_group_code": "SYSTEM",
+        "config_profile_code": "SYSTEM",
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 20,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
         "description": "系统默认时区",
     },
 ]
@@ -597,6 +615,15 @@ async def seed_system_base() -> None:
                     config_value=config_item["config_value"],
                     value_type_code=config_item["value_type_code"],
                     config_group_code=config_item["config_group_code"],
+                    config_profile_code=config_item["config_profile_code"],
+                    sensitive_flag=config_item["sensitive_flag"],
+                    encrypted_flag=config_item["encrypted_flag"],
+                    editable_flag=config_item["editable_flag"],
+                    sort_order=config_item["sort_order"],
+                    config_status_code=config_item["config_status_code"],
+                    last_test_status_code=config_item["last_test_status_code"],
+                    last_test_message=config_item["last_test_message"],
+                    last_tested_at=config_item["last_tested_at"],
                     description=config_item["description"],
                     updated_by=None,
                     updated_at=now,
@@ -608,6 +635,15 @@ async def seed_system_base() -> None:
                 config.config_value = config_item["config_value"]
                 config.value_type_code = config_item["value_type_code"]
                 config.config_group_code = config_item["config_group_code"]
+                config.config_profile_code = config_item["config_profile_code"]
+                config.sensitive_flag = config_item["sensitive_flag"]
+                config.encrypted_flag = config_item["encrypted_flag"]
+                config.editable_flag = config_item["editable_flag"]
+                config.sort_order = config_item["sort_order"]
+                config.config_status_code = config_item["config_status_code"]
+                config.last_test_status_code = config_item["last_test_status_code"]
+                config.last_test_message = config_item["last_test_message"]
+                config.last_tested_at = config_item["last_tested_at"]
                 config.description = config_item["description"]
                 config.updated_at = now
 
