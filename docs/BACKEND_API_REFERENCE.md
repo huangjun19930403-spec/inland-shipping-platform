@@ -47,6 +47,7 @@
 - `GET /system/configs`：系统配置分页
 - `GET /system/configs/{config_key}`：系统配置详情
 - `GET /system/runtime-configs/{config_key}`：运行时配置读取诊断
+- `POST /system/config-tests/{profile_code}`：外部集成连接测试
 - `POST /system/configs`：创建系统配置
 - `PUT /system/configs/{config_key}`：更新系统配置
 - `GET /system/login-logs`：登录日志分页
@@ -95,7 +96,27 @@
   - `source` 仍真实返回 `DB/ENV/DEFAULT/EMPTY`，用于排查读取来源。
 - 阶段 1C-1 说明：
   - AMap / HiFleet / ES 客户端已支持注入 `RuntimeConfigService`，可复用该诊断接口对 key 来源进行排查。
-  - 连接测试接口尚未提供，将在后续阶段补充。
+
+#### /system/config-tests/{profile_code}（阶段 1C-2）
+
+- 用途：执行外部集成连接测试，并回写 `system_config.last_test_*` 结果字段。
+- 支持 `profile_code`：
+  - `AMAP`
+  - `HIFLEET`
+  - `ES_REALTIME`
+  - `ES_HISTORY`
+- Request：
+  - `timeout_seconds`（可选）
+  - `remark`（可选）
+- Response：
+  - `profile_code`
+  - `status_code`（`SUCCESS/FAILED/SKIPPED`）
+  - `message`
+  - `tested_at`
+  - `affected_config_count`
+- 安全规则：
+  - `message` 不应包含敏感配置明文。
+  - `GET /system/configs` 仍按既有敏感值掩码规则返回，不泄露密码/密钥。
 
 ## 3. Dictionary
 

@@ -346,6 +346,19 @@ class RuntimeConfigValueResponse(BaseModel):
     source: str
 
 
+class ConfigTestRequest(BaseModel):
+    timeout_seconds: float | None = Field(default=None, gt=0, le=60)
+    remark: str | None = Field(default=None, max_length=256)
+
+
+class ConfigTestResponse(BaseModel):
+    profile_code: str
+    status_code: str
+    message: str
+    tested_at: datetime
+    affected_config_count: int
+
+
 class LoginLogListQuery(BaseModel):
     keyword: str | None = None
     login_result: str | None = None

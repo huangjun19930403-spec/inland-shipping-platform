@@ -57,6 +57,15 @@ docs/                      # 后端核心文档
 - 即使 DB 配置值为空并回退到 ENV，诊断接口仍会隐藏敏感值；隐藏只发生在 API 响应层，内部读取不受影响。
 - 当前阶段不包含连接测试执行与真实加密能力。
 
+`system` 模块新增 `ConfigTestService`，支持外部集成连接测试：
+
+- `AMAP`
+- `HIFLEET`（AMMS）
+- `ES_REALTIME`
+- `ES_HISTORY`
+
+测试结果直接写回 `system_config` 的 `last_test_status_code / last_test_message / last_tested_at`。当前阶段不新增测试日志表，也不提供前端配置中心页面。
+
 外部集成配置 key 已统一收口在 `app/integrations/config_keys.py`，用于避免分散硬编码。
 
 ## 5. 启动与初始化
@@ -85,7 +94,7 @@ docs/                      # 后端核心文档
 - 注入时：按 DB 优先、settings/.env 回退读取运行时配置。
 - 未注入时：保持原有 `settings` 读取路径，兼容现有调用点。
 
-外部依赖未配置不会改变后端正式业务模型语义，但会影响相关接口真实数据能力。当前仍未提供连接测试 handler，也未提供前端配置中心页面。
+外部依赖未配置不会改变后端正式业务模型语义，但会影响相关接口真实数据能力。
 
 ## 7. 开发约束
 

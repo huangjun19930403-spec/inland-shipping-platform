@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.system import (
@@ -532,6 +532,29 @@ class SystemConfigRepository:
         await self.db.flush()
         await self.db.refresh(entity)
         return entity
+
+    async def update_test_result_by_profile(
+        self,
+        profile_code: str,
+        status_code: str,
+        message: str,
+        tested_at: datetime,
+    ) -> int:
+        message_clean = (message or "")[:512]
+        result = await self.db.execute(
+            update(SystemConfig)
+            .where(
+                SystemConfig.config_profile_code == profile_code,
+                SystemConfig.config_status_code == "ACTIVE",
+            )
+            .values(
+                last_test_status_code=status_code,
+                last_test_message=message_clean,
+                last_tested_at=tested_at,
+            )
+        )
+        await self.db.flush()
+        return int(result.rowcount or 0)
 
 
 class SysLoginLogRepository:

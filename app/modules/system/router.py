@@ -9,6 +9,8 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.modules.system.schemas import (
     ChangeMyPasswordRequest,
+    ConfigTestRequest,
+    ConfigTestResponse,
     CurrentUserMenuTreeResponse,
     CurrentUserResponse,
     DataScopeListQuery,
@@ -47,6 +49,7 @@ from app.modules.system.schemas import (
     UserStatusLogResponse,
     UserUpdateRequest,
 )
+from app.modules.system.config_test import ConfigTestService
 from app.modules.system.runtime_config import RuntimeConfigService
 from app.modules.system.service import (
     AuthService,
@@ -438,6 +441,19 @@ async def get_runtime_config_value(
         value=response_value,
         source=resolved.source,
     )
+
+
+@system_router.post("/config-tests/{profile_code}", response_model=ConfigTestResponse)
+async def test_config_profile(
+    profile_code: str,
+    body: ConfigTestRequest | None = None,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ConfigTestService(db)
+    payload = body or ConfigTestRequest()
+    return await service.test_profile(profile_code, payload)
 
 
 @system_router.post("/configs", response_model=SystemConfigResponse)
