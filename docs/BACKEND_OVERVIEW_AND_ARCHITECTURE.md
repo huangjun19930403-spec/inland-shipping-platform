@@ -96,7 +96,14 @@ docs/                      # 后端核心文档
 
 外部依赖未配置不会改变后端正式业务模型语义，但会影响相关接口真实数据能力。
 
-## 7. 开发约束
+## 7. 菜单与路由对齐约束
+
+- 菜单 seed 维护左侧导航和可见入口；隐藏详情页仍由前端静态路由维护。
+- `visible_flag=1` 且 `menu_type_code=MENU` 的 seed 菜单，需要在前端 `routes.ts` 中存在对应路由。
+- 目录分组使用 `menu_type_code=DIRECTORY`，用于导航层级归类，不强制绑定具体页面。
+- 详细规则见 `docs/MENU_ROUTE_SEED_ALIGNMENT.md`。
+
+## 8. 开发约束
 
 - 业务实现仅允许写入 `app/modules/*`
 - `app/api/v1` 仅做 router 聚合装配

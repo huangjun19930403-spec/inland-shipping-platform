@@ -23,6 +23,7 @@ from app.modules.system.schemas import (
     MenuListQuery,
     MenuResponse,
     MenuTreeNodeResponse,
+    MenuUpdateRequest,
     PageResponse,
     PermissionListQuery,
     PermissionResponse,

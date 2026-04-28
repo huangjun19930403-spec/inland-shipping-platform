@@ -602,6 +602,20 @@ class MenuService:
         self.db = db
         self.repo = SysMenuRepository(db)
 
+    @staticmethod
+    def _clean_required_str(value: str, field_name: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValidationError(f"{field_name} cannot be empty")
+        return cleaned
+
+    @staticmethod
+    def _clean_optional_str(value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
     async def list_menus(
         self,
         keyword: str | None,
@@ -621,16 +635,67 @@ class MenuService:
         return _build_menu_tree_response(await self.repo.build_menu_tree())
 
     async def create_menu(self, payload: MenuCreateRequest) -> MenuResponse:
-        if await self.repo.get_menu_by_code(payload.menu_code.strip()):
-            raise ConflictError(f"menu_code already exists: {payload.menu_code}")
-        row = await self.repo.create_menu(payload.model_dump())
+        menu_code = self._clean_required_str(payload.menu_code, "menu_code")
+        menu_name = self._clean_required_str(payload.menu_name, "menu_name")
+        menu_type_code = self._clean_required_str(payload.menu_type_code, "menu_type_code")
+        status_code = self._clean_required_str(payload.status_code, "status_code")
+        route_path = self._clean_optional_str(payload.route_path)
+        component_path = self._clean_optional_str(payload.component_path)
+        icon = self._clean_optional_str(payload.icon)
+        parent_id = payload.parent_id
+
+        if payload.visible_flag not in {0, 1}:
+            raise ValidationError("visible_flag must be 0 or 1")
+
+        if parent_id is not None and await self.repo.get_menu_by_id(parent_id) is None:
+            raise NotFoundError("SysMenu", parent_id)
+
+        if await self.repo.get_menu_by_code(menu_code):
+            raise ConflictError(f"menu_code already exists: {menu_code}")
+
+        row = await self.repo.create_menu(
+            {
+                "parent_id": parent_id,
+                "menu_code": menu_code,
+                "menu_name": menu_name,
+                "menu_type_code": menu_type_code,
+                "route_path": route_path,
+                "component_path": component_path,
+                "icon": icon,
+                "sort_order": payload.sort_order,
+                "visible_flag": payload.visible_flag,
+                "status_code": status_code,
+            }
+        )
         await self.db.commit()
         return _to_menu_response(row)
 
     async def update_menu(self, menu_id: int, payload: MenuUpdateRequest) -> MenuResponse:
-        updates = payload.model_dump(exclude_none=True)
+        updates = payload.model_dump(exclude_unset=True)
         if not updates:
             raise ValidationError("no update fields provided")
+        if "parent_id" in updates:
+            parent_id = updates["parent_id"]
+            if parent_id == menu_id:
+                raise ValidationError("parent_id cannot be self")
+            if parent_id is not None and await self.repo.get_menu_by_id(parent_id) is None:
+                raise NotFoundError("SysMenu", parent_id)
+        if "visible_flag" in updates and updates["visible_flag"] not in {0, 1}:
+            raise ValidationError("visible_flag must be 0 or 1")
+        if "menu_name" in updates:
+            updates["menu_name"] = self._clean_required_str(updates["menu_name"], "menu_name")
+        if "menu_type_code" in updates:
+            updates["menu_type_code"] = self._clean_required_str(
+                updates["menu_type_code"], "menu_type_code"
+            )
+        if "status_code" in updates:
+            updates["status_code"] = self._clean_required_str(updates["status_code"], "status_code")
+        if "route_path" in updates:
+            updates["route_path"] = self._clean_optional_str(updates["route_path"])
+        if "component_path" in updates:
+            updates["component_path"] = self._clean_optional_str(updates["component_path"])
+        if "icon" in updates:
+            updates["icon"] = self._clean_optional_str(updates["icon"])
         row = await self.repo.update_menu(menu_id, updates)
         if row is None:
             raise NotFoundError("SysMenu", menu_id)

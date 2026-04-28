@@ -52,6 +52,24 @@
 - `PUT /system/configs/{config_key}`：更新系统配置
 - `GET /system/login-logs`：登录日志分页
 
+#### /system/menus 与 /system/menus/tree（阶段 1E）
+
+- `GET /system/menus`
+  - 用途：菜单分页查询（后台菜单管理页）。
+  - 常用查询参数：`keyword`、`status_code`、`page`、`page_size`。
+- `GET /system/menus/tree`
+  - 用途：返回树结构菜单，供左侧树与父级菜单选择器使用。
+- `POST /system/menus`
+  - 用途：新增菜单。
+  - 核心字段：`parent_id`、`menu_code`、`menu_name`、`menu_type_code`、`route_path`、`component_path`、`icon`、`sort_order`、`visible_flag`、`status_code`。
+  - 约束：`menu_code` 唯一；`visible_flag` 仅允许 `0/1`；`parent_id` 非空时必须存在。
+- `PUT /system/menus/{menu_id}`
+  - 用途：更新菜单（不允许改 `menu_code`）。
+  - 核心字段：`parent_id`、`menu_name`、`menu_type_code`、`route_path`、`component_path`、`icon`、`sort_order`、`visible_flag`、`status_code`。
+  - 约束：`parent_id` 不能指向自身；`parent_id` 非空时必须存在；空更新会返回业务校验错误。
+
+菜单与路由对齐规则见文档：`docs/MENU_ROUTE_SEED_ALIGNMENT.md`。
+
 #### /system/configs 补充说明（阶段 1A）
 
 - `GET /system/configs` 支持查询参数：
@@ -76,7 +94,7 @@
   - 当 `sensitive_flag=1` 时，`config_value` 固定返回空字符串，真实值不明文返回。
   - 同时 `config_value_masked` 返回掩码值（用于前端展示）。
   - 当 `sensitive_flag!=1` 时，`config_value` 返回原值，`config_value_masked` 为 `null`。
-- `last_test_*` 字段当前为连接测试结果占位字段，本阶段不提供连接测试执行接口。
+- `last_test_*` 字段用于记录连接测试结果，占位与回写由 `/system/config-tests/{profile_code}` 配合完成。
 - 阶段 1C-1 已在 seed 中补齐 AMap / HiFleet / ES 的 `INTEGRATION` 配置项，后续外部集成通过统一 key 读取。
 
 #### /system/runtime-configs/{config_key}（阶段 1B）
