@@ -76,6 +76,7 @@
   - 同时 `config_value_masked` 返回掩码值（用于前端展示）。
   - 当 `sensitive_flag!=1` 时，`config_value` 返回原值，`config_value_masked` 为 `null`。
 - `last_test_*` 字段当前为连接测试结果占位字段，本阶段不提供连接测试执行接口。
+- 阶段 1C-1 已在 seed 中补齐 AMap / HiFleet / ES 的 `INTEGRATION` 配置项，后续外部集成通过统一 key 读取。
 
 #### /system/runtime-configs/{config_key}（阶段 1B）
 
@@ -91,6 +92,9 @@
 - 敏感配置规则：
   - 当命中 DB 且 `sensitive_flag=1` 时，`source` 仍为 `DB`，但 `value` 返回空字符串。
   - 非敏感配置按原值返回。
+- 阶段 1C-1 说明：
+  - AMap / HiFleet / ES 客户端已支持注入 `RuntimeConfigService`，可复用该诊断接口对 key 来源进行排查。
+  - 连接测试接口尚未提供，将在后续阶段补充。
 
 ## 3. Dictionary
 

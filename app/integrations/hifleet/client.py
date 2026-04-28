@@ -2,15 +2,25 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
 
 from app.core.config import settings
 from app.core.exceptions import InternalError, ValidationError
 from app.core.status_enums import RouteGeometrySource, RouteGeometryStatus
+from app.integrations.config_keys import (
+    AMAP_ROUTE_GEOMETRY_TIMEOUT_SECONDS,
+    HIFLEET_BASE_URL,
+    HIFLEET_CONFIG_PROFILE,
+    HIFLEET_ROUTE_URL,
+    HIFLEET_TIMEOUT_SECONDS,
+)
 from app.integrations.hifleet.session_manager import HifleetSessionManager
 from app.integrations.http.route_geometry_types import RouteGeometryQuery, RouteGeometryResult
+
+if TYPE_CHECKING:
+    from app.modules.system.runtime_config import RuntimeConfigService
 
 _DEFAULT_SESSION_MANAGER = HifleetSessionManager()
 
@@ -21,30 +31,68 @@ class HifleetRouteClient:
     def __init__(
         self,
         *,
+        runtime_config: RuntimeConfigService | None = None,
         session_manager: Optional[HifleetSessionManager] = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
         max_retries: int = 1,
         concurrency_limit: int = 2,
     ) -> None:
+        self._runtime_config = runtime_config
         self._transport = transport
-        self._session = session_manager or (
-            HifleetSessionManager(transport=transport) if transport is not None else _DEFAULT_SESSION_MANAGER
-        )
+        if session_manager is not None:
+            self._session = session_manager
+        elif runtime_config is not None:
+            self._session = HifleetSessionManager(transport=transport, runtime_config=runtime_config)
+        elif transport is not None:
+            self._session = HifleetSessionManager(transport=transport)
+        else:
+            self._session = _DEFAULT_SESSION_MANAGER
         self._max_retries = max(0, max_retries)
         self._semaphore = asyncio.Semaphore(max(1, concurrency_limit))
 
-    @staticmethod
-    def _route_url() -> str:
-        route_url = (settings.HIFLEET_ROUTE_URL or "").strip()
+    async def _route_url(self) -> str:
+        if self._runtime_config is not None:
+            route_url = (
+                await self._runtime_config.get_value(
+                    HIFLEET_ROUTE_URL,
+                    settings.HIFLEET_ROUTE_URL or "",
+                    profile_code=HIFLEET_CONFIG_PROFILE,
+                )
+                or ""
+            ).strip()
+            base_url = (
+                await self._runtime_config.get_value(
+                    HIFLEET_BASE_URL,
+                    settings.HIFLEET_BASE_URL or "",
+                    profile_code=HIFLEET_CONFIG_PROFILE,
+                )
+                or ""
+            ).strip().rstrip("/")
+        else:
+            route_url = (settings.HIFLEET_ROUTE_URL or "").strip()
+            base_url = (settings.HIFLEET_BASE_URL or "").strip().rstrip("/")
+
         if not route_url:
             raise ValidationError("未配置 AMMS 路径接口地址")
         if route_url.startswith("http://") or route_url.startswith("https://"):
             return route_url
-        base = (settings.HIFLEET_BASE_URL or "").strip().rstrip("/")
-        return f"{base}/{route_url.lstrip('/')}"
+        return f"{base_url}/{route_url.lstrip('/')}"
 
-    @staticmethod
-    def _timeout() -> float:
+    async def _timeout(self) -> float:
+        default_timeout = float(settings.HIFLEET_TIMEOUT_SECONDS or settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0)
+        if self._runtime_config is not None:
+            timeout = await self._runtime_config.get_float(
+                HIFLEET_TIMEOUT_SECONDS,
+                default_timeout,
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            if timeout > 0:
+                return float(timeout)
+            fallback_timeout = await self._runtime_config.get_float(
+                AMAP_ROUTE_GEOMETRY_TIMEOUT_SECONDS,
+                float(settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0),
+            )
+            return float(fallback_timeout)
         return float(settings.HIFLEET_TIMEOUT_SECONDS or settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0)
 
     @staticmethod
@@ -122,16 +170,20 @@ class HifleetRouteClient:
 
     async def _call_route_api(self, query: RouteGeometryQuery) -> dict[str, Any]:
         client = await self._session._client()
+        route_url = await self._route_url()
+        timeout = await self._timeout()
+        headers = await self._session._default_headers()
+        version = self._session._version()
         response = await client.post(
-            self._route_url(),
+            route_url,
             data={
                 "start": f"{query.origin_lon},{query.origin_lat}",
                 "end": f"{query.dest_lon},{query.dest_lat}",
                 "arcticroute": "0",
             },
-            params={"_v": self._session._version()},
-            headers=self._session._default_headers(),
-            timeout=self._timeout(),
+            params={"_v": version},
+            headers=headers,
+            timeout=timeout,
         )
         if response.status_code >= 400:
             raise InternalError(

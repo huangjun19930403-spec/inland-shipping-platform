@@ -6,14 +6,28 @@ import json
 import logging
 import random
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urljoin
 
 import httpx
 
 from app.core.config import settings
 from app.core.exceptions import InternalError, ValidationError
+from app.integrations.config_keys import (
+    HIFLEET_BASE_URL,
+    HIFLEET_CHECK_LOGIN_URL,
+    HIFLEET_CONFIG_PROFILE,
+    HIFLEET_ENABLED,
+    HIFLEET_LOGIN_URL,
+    HIFLEET_PASSWORD,
+    HIFLEET_RELOGIN_CHECK_ENABLED,
+    HIFLEET_TIMEOUT_SECONDS,
+    HIFLEET_USERNAME,
+)
 from app.integrations.http import get_shared_http_client
+
+if TYPE_CHECKING:
+    from app.modules.system.runtime_config import RuntimeConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +46,13 @@ class HifleetSessionManager:
     def __init__(
         self,
         *,
+        runtime_config: RuntimeConfigService | None = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
         login_failure_backoff_seconds: float = 30.0,
         check_login_cooldown_seconds: float = 180.0,
         max_retries: int = 1,
     ) -> None:
+        self._runtime_config = runtime_config
         self._transport = transport
         self._login_failure_backoff_seconds = max(1.0, login_failure_backoff_seconds)
         self._check_login_cooldown_seconds = max(1.0, check_login_cooldown_seconds)
@@ -57,67 +73,124 @@ class HifleetSessionManager:
             },
         )
 
-    @staticmethod
-    def _enabled() -> bool:
+    async def _enabled(self) -> bool:
+        if self._runtime_config is not None:
+            return await self._runtime_config.get_bool(
+                HIFLEET_ENABLED,
+                bool(settings.HIFLEET_ENABLED),
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
         return bool(settings.HIFLEET_ENABLED)
 
-    @staticmethod
-    def _base_url() -> str:
+    async def _base_url(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                HIFLEET_BASE_URL,
+                settings.HIFLEET_BASE_URL or "",
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return (value or "").strip().rstrip("/")
         return (settings.HIFLEET_BASE_URL or "").strip().rstrip("/")
 
-    @staticmethod
-    def _login_url() -> str:
+    async def _login_url(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                HIFLEET_LOGIN_URL,
+                settings.HIFLEET_LOGIN_URL or "",
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return (value or "").strip()
         return (settings.HIFLEET_LOGIN_URL or "").strip()
 
-    @staticmethod
-    def _check_login_url() -> str:
+    async def _check_login_url(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                HIFLEET_CHECK_LOGIN_URL,
+                settings.HIFLEET_CHECK_LOGIN_URL or "",
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return (value or "").strip()
         return (settings.HIFLEET_CHECK_LOGIN_URL or "").strip()
 
-    @staticmethod
-    def _username() -> str:
+    async def _username(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                HIFLEET_USERNAME,
+                settings.HIFLEET_USERNAME or "",
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return (value or "").strip()
         return (settings.HIFLEET_USERNAME or "").strip()
 
-    @staticmethod
-    def _password() -> str:
+    async def _password(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                HIFLEET_PASSWORD,
+                settings.HIFLEET_PASSWORD or "",
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return value or ""
         return settings.HIFLEET_PASSWORD or ""
 
-    @staticmethod
-    def _timeout() -> float:
+    async def _timeout(self) -> float:
+        default_timeout = float(settings.HIFLEET_TIMEOUT_SECONDS or settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0)
+        if self._runtime_config is not None:
+            return float(
+                await self._runtime_config.get_float(
+                    HIFLEET_TIMEOUT_SECONDS,
+                    default_timeout,
+                    profile_code=HIFLEET_CONFIG_PROFILE,
+                )
+            )
         return float(settings.HIFLEET_TIMEOUT_SECONDS or settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0)
 
-    @staticmethod
-    def _relogin_check_enabled() -> bool:
+    async def _relogin_check_enabled(self) -> bool:
+        if self._runtime_config is not None:
+            return await self._runtime_config.get_bool(
+                HIFLEET_RELOGIN_CHECK_ENABLED,
+                bool(settings.HIFLEET_RELOGIN_CHECK_ENABLED),
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
         return bool(settings.HIFLEET_RELOGIN_CHECK_ENABLED)
 
     @staticmethod
     def _version() -> str:
         return "5.3.703"
 
-    def _check_basic_config(self) -> None:
-        if not self._enabled():
+    async def _check_basic_config(self) -> None:
+        enabled = await self._enabled()
+        base_url = await self._base_url()
+        login_url = await self._login_url()
+        check_login_url = await self._check_login_url()
+        username = await self._username()
+        password = await self._password()
+
+        if not enabled:
             raise ValidationError("AMMS 路径服务未启用")
-        if not self._base_url():
+        if not base_url:
             raise ValidationError("未配置 AMMS 路径服务基础地址")
-        if not self._login_url():
+        if not login_url:
             raise ValidationError("未配置 AMMS 登录地址")
-        if not self._check_login_url():
+        if not check_login_url:
             raise ValidationError("未配置 AMMS 登录校验地址")
-        if not (self._username() and self._password()):
+        if not (username and password):
             raise ValidationError("未配置 AMMS 登录账号或密码，当前路径服务不可用")
 
-    def _url(self, endpoint: str) -> str:
+    async def _url(self, endpoint: str) -> str:
         if endpoint.startswith("http://") or endpoint.startswith("https://"):
             return endpoint
-        return urljoin(f"{self._base_url()}/", endpoint.lstrip("/"))
+        base_url = await self._base_url()
+        return urljoin(f"{base_url}/", endpoint.lstrip("/"))
 
-    def _default_headers(self) -> dict[str, str]:
+    async def _default_headers(self) -> dict[str, str]:
+        base_url = await self._base_url()
         return {
             "User-Agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
             ),
             "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Referer": f"{self._base_url()}/",
+            "Referer": f"{base_url}/",
         }
 
     @staticmethod
@@ -165,12 +238,14 @@ class HifleetSessionManager:
         context: str,
     ) -> dict[str, Any]:
         client = await self._client()
+        request_headers = headers or await self._default_headers()
+        timeout = await self._timeout()
         response = await client.post(
             url,
             data=data,
             params={"_v": self._version()},
-            headers=headers or self._default_headers(),
-            timeout=self._timeout(),
+            headers=request_headers,
+            timeout=timeout,
         )
         if response.status_code >= 400:
             raise InternalError(
@@ -180,11 +255,13 @@ class HifleetSessionManager:
 
     async def _get_json(self, url: str, *, context: str) -> dict[str, Any]:
         client = await self._client()
+        request_headers = await self._default_headers()
+        timeout = await self._timeout()
         response = await client.get(
             url,
             params={"_v": self._version()},
-            headers=self._default_headers(),
-            timeout=self._timeout(),
+            headers=request_headers,
+            timeout=timeout,
         )
         if response.status_code >= 400:
             raise InternalError(
@@ -193,16 +270,20 @@ class HifleetSessionManager:
         return self._decode_response_json(response, context)
 
     async def _login_once(self) -> None:
-        self._check_basic_config()
+        await self._check_basic_config()
+        login_url = await self._login_url()
+        username = await self._username()
+        password = await self._password()
+        default_headers = await self._default_headers()
         payload = await self._post_form(
-            self._url(self._login_url()),
+            await self._url(login_url),
             {
                 "id": str(random.random()),
-                "email": self._username(),
-                "password": self._password(),
+                "email": username,
+                "password": password,
             },
             headers={
-                **self._default_headers(),
+                **default_headers,
                 "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
             },
             context="登录",
@@ -236,17 +317,18 @@ class HifleetSessionManager:
         await task
 
     async def check_session(self) -> bool:
-        self._check_basic_config()
+        await self._check_basic_config()
         if not self._logged_in:
             return False
-        if not self._relogin_check_enabled():
+        if not await self._relogin_check_enabled():
             return True
 
         now = datetime.utcnow()
         if self._last_check_at and (now - self._last_check_at).total_seconds() < self._check_login_cooldown_seconds:
             return True
 
-        payload = await self._get_json(self._url(self._check_login_url()), context="登录态校验")
+        check_login_url = await self._check_login_url()
+        payload = await self._get_json(await self._url(check_login_url), context="登录态校验")
         self._last_check_at = now
         if str(payload.get("status")) == "0":
             self._logged_in = False
@@ -254,7 +336,7 @@ class HifleetSessionManager:
         return True
 
     async def ensure_session(self, *, force_login: bool = False) -> None:
-        self._check_basic_config()
+        await self._check_basic_config()
         if force_login:
             self._logged_in = False
 

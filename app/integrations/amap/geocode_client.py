@@ -5,13 +5,17 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import httpx
 
 from app.core.config import settings
 from app.core.exceptions import InternalError, ValidationError
+from app.integrations.config_keys import AMAP_CONFIG_PROFILE, AMAP_ROUTE_WEB_API_KEY
 from app.integrations.http import get_shared_http_client
+
+if TYPE_CHECKING:
+    from app.modules.system.runtime_config import RuntimeConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +41,12 @@ class AmapGeocodeClient:
     def __init__(
         self,
         *,
+        runtime_config: RuntimeConfigService | None = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.4,
     ) -> None:
+        self._runtime_config = runtime_config
         self._transport = transport
         self._max_retries = max(0, max_retries)
         self._retry_backoff_seconds = max(0.0, retry_backoff_seconds)
@@ -51,8 +57,14 @@ class AmapGeocodeClient:
             transport=self._transport,
         )
 
-    @staticmethod
-    def _key() -> str:
+    async def _key(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                AMAP_ROUTE_WEB_API_KEY,
+                settings.ROUTE_AMAP_WEB_API_KEY or "",
+                profile_code=AMAP_CONFIG_PROFILE,
+            )
+            return (value or "").strip()
         return (settings.ROUTE_AMAP_WEB_API_KEY or "").strip()
 
     @staticmethod
@@ -67,7 +79,7 @@ class AmapGeocodeClient:
         return text or None
 
     async def reverse_geocode(self, *, longitude: float, latitude: float) -> ReverseGeocodeResult:
-        key = self._key()
+        key = await self._key()
         if not key:
             raise ValidationError("未配置高德 Web 服务 Key，无法进行逆地理编码")
 

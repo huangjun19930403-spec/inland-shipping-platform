@@ -2,15 +2,23 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
 
 from app.core.config import settings
 from app.core.exceptions import InternalError, ValidationError
 from app.core.status_enums import RouteGeometrySource, RouteGeometryStatus
+from app.integrations.config_keys import (
+    AMAP_CONFIG_PROFILE,
+    AMAP_ROUTE_GEOMETRY_TIMEOUT_SECONDS,
+    AMAP_ROUTE_WEB_API_KEY,
+)
 from app.integrations.http import get_shared_http_client
 from app.integrations.http.route_geometry_types import RouteGeometryQuery, RouteGeometryResult
+
+if TYPE_CHECKING:
+    from app.modules.system.runtime_config import RuntimeConfigService
 
 
 class AmapRouteClient:
@@ -19,10 +27,12 @@ class AmapRouteClient:
     def __init__(
         self,
         *,
+        runtime_config: RuntimeConfigService | None = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
         max_retries: int = 1,
         retry_backoff_seconds: float = 0.5,
     ) -> None:
+        self._runtime_config = runtime_config
         self._transport = transport
         self._max_retries = max(0, max_retries)
         self._retry_backoff_seconds = max(0.0, retry_backoff_seconds)
@@ -30,12 +40,25 @@ class AmapRouteClient:
     async def _client(self) -> httpx.AsyncClient:
         return await get_shared_http_client("amap-route", transport=self._transport)
 
-    @staticmethod
-    def _key() -> str:
+    async def _key(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                AMAP_ROUTE_WEB_API_KEY,
+                settings.ROUTE_AMAP_WEB_API_KEY or "",
+                profile_code=AMAP_CONFIG_PROFILE,
+            )
+            return (value or "").strip()
         return (settings.ROUTE_AMAP_WEB_API_KEY or "").strip()
 
-    @staticmethod
-    def _timeout() -> float:
+    async def _timeout(self) -> float:
+        default_timeout = float(settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0)
+        if self._runtime_config is not None:
+            timeout_value = await self._runtime_config.get_float(
+                AMAP_ROUTE_GEOMETRY_TIMEOUT_SECONDS,
+                default_timeout,
+                profile_code=AMAP_CONFIG_PROFILE,
+            )
+            return float(timeout_value)
         return float(settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0)
 
     @staticmethod
@@ -56,12 +79,14 @@ class AmapRouteClient:
         return points
 
     async def generate(self, query: RouteGeometryQuery) -> RouteGeometryResult:
-        if not self._key():
+        key = await self._key()
+        timeout = await self._timeout()
+        if not key:
             raise ValidationError("未配置 ROUTE_AMAP_WEB_API_KEY，无法生成高德轨迹")
 
         client = await self._client()
         params = {
-            "key": self._key(),
+            "key": key,
             "origin": f"{query.origin_lon},{query.origin_lat}",
             "destination": f"{query.dest_lon},{query.dest_lat}",
             "show_fields": "polyline",
@@ -71,7 +96,7 @@ class AmapRouteClient:
         last_error: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
-                response = await client.get(url, params=params, timeout=self._timeout())
+                response = await client.get(url, params=params, timeout=timeout)
                 response.raise_for_status()
                 payload = response.json()
                 break
