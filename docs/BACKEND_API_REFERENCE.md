@@ -90,8 +90,9 @@
   - `value`
   - `source`（`DB/ENV/DEFAULT/EMPTY`）
 - 敏感配置规则：
-  - 当命中 DB 且 `sensitive_flag=1` 时，`source` 仍为 `DB`，但 `value` 返回空字符串。
-  - 非敏感配置按原值返回。
+  - 如果 key 被识别为敏感，`value` 固定返回空字符串（不区分 `DB/ENV/DEFAULT/EMPTY` 来源）。
+  - 敏感识别来源包括：`system_config.sensitive_flag` 与后端内置敏感 key 集合。
+  - `source` 仍真实返回 `DB/ENV/DEFAULT/EMPTY`，用于排查读取来源。
 - 阶段 1C-1 说明：
   - AMap / HiFleet / ES 客户端已支持注入 `RuntimeConfigService`，可复用该诊断接口对 key 来源进行排查。
   - 连接测试接口尚未提供，将在后续阶段补充。

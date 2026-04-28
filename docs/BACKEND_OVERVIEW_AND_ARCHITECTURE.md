@@ -53,6 +53,8 @@ docs/                      # 后端核心文档
 
 - 内部服务读取时可拿到敏感配置真实值（用于后续集成调用）。
 - API 响应层仍遵循敏感值隐藏规则，不泄露明文。
+- `RuntimeConfigService` 对敏感配置采用“双重识别”：`system_config.sensitive_flag` 元数据 + 后端内置敏感 key 集合。
+- 即使 DB 配置值为空并回退到 ENV，诊断接口仍会隐藏敏感值；隐藏只发生在 API 响应层，内部读取不受影响。
 - 当前阶段不包含连接测试执行与真实加密能力。
 
 外部集成配置 key 已统一收口在 `app/integrations/config_keys.py`，用于避免分散硬编码。

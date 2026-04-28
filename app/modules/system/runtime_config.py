@@ -9,7 +9,31 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.integrations.config_keys import (
+    AMAP_JS_API_KEY,
+    AMAP_ROUTE_WEB_API_KEY,
+    AMAP_SECURITY_JS_CODE,
+    ES_PASSWORD,
+    ES_R_PASSWORD,
+    HIFLEET_PASSWORD,
+    HIFLEET_USERNAME,
+)
 from app.modules.system.repository import SystemConfigRepository
+
+SENSITIVE_RUNTIME_CONFIG_KEYS = {
+    AMAP_ROUTE_WEB_API_KEY,
+    AMAP_JS_API_KEY,
+    AMAP_SECURITY_JS_CODE,
+    HIFLEET_USERNAME,
+    HIFLEET_PASSWORD,
+    ES_PASSWORD,
+    ES_R_PASSWORD,
+}
+
+
+def _is_sensitive_runtime_key(key: str) -> bool:
+    key_clean = (key or "").strip()
+    return key_clean in SENSITIVE_RUNTIME_CONFIG_KEYS
 
 
 @dataclass(frozen=True)
@@ -46,13 +70,17 @@ class RuntimeConfigService:
             )
 
         row = await self.repo.get_config_for_runtime(key_clean, profile_code=profile_clean)
+        metadata_sensitive_flag = int(row.sensitive_flag or 0) if row is not None else 0
+        known_sensitive_flag = 1 if _is_sensitive_runtime_key(key_clean) else 0
+        sensitive_flag = 1 if metadata_sensitive_flag == 1 or known_sensitive_flag == 1 else 0
+
         if row is not None and row.config_value != "":
             return RuntimeConfigResolvedValue(
                 key=key_clean,
                 profile_code=profile_clean,
                 value=row.config_value,
                 source="DB",
-                sensitive_flag=int(row.sensitive_flag or 0),
+                sensitive_flag=sensitive_flag,
             )
 
         if hasattr(settings, key_clean):
@@ -62,7 +90,7 @@ class RuntimeConfigService:
                 profile_code=profile_clean,
                 value=str(settings_value),
                 source="ENV",
-                sensitive_flag=0,
+                sensitive_flag=sensitive_flag,
             )
 
         return RuntimeConfigResolvedValue(
@@ -70,7 +98,7 @@ class RuntimeConfigService:
             profile_code=profile_clean,
             value=default,
             source="DEFAULT" if default is not None else "EMPTY",
-            sensitive_flag=0,
+            sensitive_flag=sensitive_flag,
         )
 
     async def get_value(
