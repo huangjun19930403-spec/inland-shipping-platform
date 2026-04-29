@@ -59,8 +59,12 @@
 - `/freight/list`
 - `/freight/manual-create`
 - `/route/list`
-- `/route/plans`
 - `/analysis/cargo`
 - `/analysis/ships`
 - `/analysis/jobs`
 - `/audit/tasks`
+
+阶段 4F 调整：
+
+- `/route/plans` 不再作为可见菜单入口，方案设计必须从具体航线工作台进入。
+- `ROUTE_PLANS` seed 记录保留历史兼容，但 `visible_flag=0`，前端静态路由也会 redirect 到 `/route/list`。

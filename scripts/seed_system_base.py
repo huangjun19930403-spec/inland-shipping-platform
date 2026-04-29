@@ -397,14 +397,14 @@ MENUS = [
     },
     {
         "menu_code": "ROUTE_PLANS",
-        "menu_name": "方案",
+        "menu_name": "方案（已合并至航线工作台）",
         "menu_type_code": "MENU",
         "parent_code": "ROUTE_ROOT",
         "route_path": "/route/plans",
         "component_path": "modules/route/pages/RouteListPage",
         "icon": "Connection",
         "sort_order": 2,
-        "visible_flag": 1,
+        "visible_flag": 0,
         "status_code": "ACTIVE",
     },
     {
