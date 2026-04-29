@@ -12,6 +12,7 @@
 4. `seed_commodity_taxonomy`
 5. `seed_commodity_standards`
 6. `seed_system_base`
+7. `seed_route_map_e2e`
 
 统一入口：
 
@@ -60,6 +61,10 @@ demo freight/ship/route/analysis 数据不在正式初始化链中。
 - `scripts/seed_system_base.py`
   - 初始化系统基础对象（管理员、角色、权限、菜单、系统配置最小集合）
 
+- `scripts/seed_route_map_e2e.py`
+  - 初始化航线地图 E2E 稳定基线数据（起终业务区域、区域边界、航线、路径方案、航段、点位）
+  - 数据以 `E2E_*` 编码前缀标识，仅用于本地开发/CI/Playwright 验收链路
+
 - `scripts/seed_system_init.py`
   - 统一串联上述正式初始化步骤
 
@@ -105,6 +110,35 @@ PYTHONPATH=. python -m scripts.seed_system_init
 - 阶段 2A 为本地联调预置了 AMap 测试 Key（`AMAP_JS_API_KEY`、`AMAP_SECURITY_JS_CODE`、`ROUTE_AMAP_WEB_API_KEY`）。
 - 这些 Key 仅用于测试环境；上线前必须替换为正式 Key，并建议在高德控制台轮换测试 Key。
 - `ROUTE_AMAP_WEB_API_KEY` 属于后端 WebService 密钥，不通过前端地图配置接口下发。
+
+## 8. 航线地图 E2E 稳定基线（阶段 3D）
+
+`seed_route_map_e2e.py` 由 `seed_system_init.py` 自动接入，提供稳定的航线地图自动化验收数据：
+
+- 起终业务区域：
+  - `E2E_ROUTE_ORIGIN`
+  - `E2E_ROUTE_DEST`
+- 航线：
+  - `E2E_ROUTE_MAP`
+- 路径方案：
+  - `E2E_ROUTE_PLAN_MAP`
+- 方案内至少 2 条航段、每条至少 3 个点位：
+  - 航段 1：有 `geometry_json`（LineString）
+  - 航段 2：`geometry_json` 为空，依赖点位 fallback 连线
+
+幂等策略：
+
+- 区域按 `code`
+- 航线按 `code`
+- 方案按 `plan_code`
+- 航段按 `(plan_id, segment_no)`
+- 点位按 `(segment_id, point_no)`
+- 区域边界按 `(region_id, version_no)`，并维护 `is_current/current_boundary_version_id`
+
+边界说明：
+
+- 仅更新/维护 `E2E_*` 专属测试数据，不影响非 E2E 业务记录。
+- 用途限定为本地开发、CI、Playwright 自动化验收，不作为生产业务主数据来源。
 
 ## 7. MENUS 收口范围（阶段 1）
 

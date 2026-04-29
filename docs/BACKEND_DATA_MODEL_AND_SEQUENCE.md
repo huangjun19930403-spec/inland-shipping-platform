@@ -175,3 +175,29 @@
 - `sys_permission.permission_code`
 - `sys_menu.menu_code`
 - `sys_data_scope.scope_code`
+
+## 6. 阶段 3D 航线地图 E2E 基线数据
+
+为保障航线地图 Playwright 验收稳定性，初始化链新增 `scripts/seed_route_map_e2e.py`。
+
+该脚本在不新增表结构、不改业务接口前提下，为以下既有表写入幂等测试基线：
+
+- `region`
+- `region_boundary_version`
+- `shipping_route`
+- `shipping_route_plan`
+- `shipping_route_plan_segment`
+- `shipping_route_plan_segment_point`
+
+关键业务标识：
+
+- `E2E_ROUTE_ORIGIN`
+- `E2E_ROUTE_DEST`
+- `E2E_ROUTE_MAP`
+- `E2E_ROUTE_PLAN_MAP`
+
+用途边界：
+
+- 仅用于本地开发、CI 与 E2E 自动化验证。
+- 不改变正式业务逻辑，不依赖固定自增 ID。
+- 通过业务编码与组合键幂等 upsert，重复执行不重复插入。
