@@ -102,6 +102,9 @@ PYTHONPATH=. python -m scripts.seed_system_init
 - 仅纳入运行期可维护配置与外部集成配置。
 - 不将所有 ENV 变量搬入 `system_config`。
 - 启动级配置（数据库、JWT、CORS、环境开关）仍由 ENV/settings 维护。
+- 阶段 2A 为本地联调预置了 AMap 测试 Key（`AMAP_JS_API_KEY`、`AMAP_SECURITY_JS_CODE`、`ROUTE_AMAP_WEB_API_KEY`）。
+- 这些 Key 仅用于测试环境；上线前必须替换为正式 Key，并建议在高德控制台轮换测试 Key。
+- `ROUTE_AMAP_WEB_API_KEY` 属于后端 WebService 密钥，不通过前端地图配置接口下发。
 
 ## 7. MENUS 收口范围（阶段 1）
 

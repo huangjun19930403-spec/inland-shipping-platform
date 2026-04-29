@@ -346,6 +346,17 @@ class RuntimeConfigValueResponse(BaseModel):
     source: str
 
 
+class FrontendMapConfigResponse(BaseModel):
+    provider: str
+    amap_js_api_key: str
+    amap_security_js_code: str
+    configured: bool
+    default_center_lng: float
+    default_center_lat: float
+    default_zoom: int
+    message: str | None = None
+
+
 class ConfigTestRequest(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0, le=60)
     remark: str | None = Field(default=None, max_length=256)

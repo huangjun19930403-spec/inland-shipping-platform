@@ -68,6 +68,12 @@ docs/                      # 后端核心文档
 
 外部集成配置 key 已统一收口在 `app/integrations/config_keys.py`，用于避免分散硬编码。
 
+阶段 2A 新增前端地图配置接口 `GET /api/v1/system/frontend-map-config`：
+
+- 地址/航线/分析等前端地图能力统一通过该接口获取浏览器地图加载配置。
+- 该接口仅返回 `AMAP_JS_API_KEY / AMAP_SECURITY_JS_CODE` 与默认中心点参数。
+- 不返回后端 `ROUTE_AMAP_WEB_API_KEY` 等 WebService 密钥。
+
 ## 5. 启动与初始化
 
 本地最小流程：

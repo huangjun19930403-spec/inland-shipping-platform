@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.integrations.config_keys import AMAP_CONFIG_PROFILE, AMAP_JS_API_KEY, AMAP_SECURITY_JS_CODE
 from app.modules.system.schemas import (
     ChangeMyPasswordRequest,
     ConfigTestRequest,
@@ -19,6 +20,7 @@ from app.modules.system.schemas import (
     LoginLogResponse,
     LoginRequest,
     LoginResponse,
+    FrontendMapConfigResponse,
     MenuCreateRequest,
     MenuListQuery,
     MenuResponse,
@@ -441,6 +443,41 @@ async def get_runtime_config_value(
         profile_code=resolved.profile_code,
         value=response_value,
         source=resolved.source,
+    )
+
+
+@system_router.get("/frontend-map-config", response_model=FrontendMapConfigResponse)
+async def get_frontend_map_config(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    runtime_config = RuntimeConfigService(db)
+
+    # 前端地图专用配置接口：仅返回浏览器加载地图所需配置，不返回后端 WebService 密钥。
+    js_key = await runtime_config.get_value(
+        AMAP_JS_API_KEY,
+        "",
+        profile_code=AMAP_CONFIG_PROFILE,
+    )
+    security_js_code = await runtime_config.get_value(
+        AMAP_SECURITY_JS_CODE,
+        "",
+        profile_code=AMAP_CONFIG_PROFILE,
+    )
+
+    js_key_value = (js_key or "").strip()
+    security_code_value = (security_js_code or "").strip()
+
+    return FrontendMapConfigResponse(
+        provider="AMAP",
+        amap_js_api_key=js_key_value,
+        amap_security_js_code=security_code_value,
+        configured=bool(js_key_value),
+        default_center_lng=120.5853,
+        default_center_lat=31.2989,
+        default_zoom=8,
+        message=None if js_key_value else "AMAP_JS_API_KEY 未配置",
     )
 
 

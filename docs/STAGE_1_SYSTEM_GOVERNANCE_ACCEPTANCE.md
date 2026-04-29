@@ -202,3 +202,9 @@ rm -f inland_shipping.db
 - `POST /api/v1/system/config-tests/HIFLEET`
 - `GET /api/v1/system/menus`
 - `GET /api/v1/system/menus/tree`
+
+## 11. 阶段 2A 衔接说明
+
+- 阶段 2A 新增 `GET /api/v1/system/frontend-map-config`，用于前端地图加载读取 AMap JS 配置。
+- 该接口只返回前端地图加载所需字段，不返回 `ROUTE_AMAP_WEB_API_KEY` 等后端服务密钥。
+- `seed_system_base.py` 中预置的 AMap 测试 Key 仅用于联调验证，上线前必须替换并建议轮换。

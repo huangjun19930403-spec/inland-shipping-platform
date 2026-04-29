@@ -60,6 +60,12 @@
 - `HIFLEET_*`
 - `ES_REALTIME / ES_HISTORY` 连接配置
 
+阶段 2A 说明：
+
+- 前端地图配置通过 `GET /api/v1/system/frontend-map-config` 获取。
+- 该接口只返回 `AMAP_JS_API_KEY` 与 `AMAP_SECURITY_JS_CODE`，不返回 `ROUTE_AMAP_WEB_API_KEY`。
+- 当前 seed 中预置的 AMap Key 为测试用途，生产上线前必须替换。
+
 ## 7. 后续扩展规则
 
 新增外部集成时，按以下步骤收口：

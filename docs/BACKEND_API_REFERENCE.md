@@ -47,6 +47,7 @@
 - `GET /system/configs`：系统配置分页
 - `GET /system/configs/{config_key}`：系统配置详情
 - `GET /system/runtime-configs/{config_key}`：运行时配置读取诊断
+- `GET /system/frontend-map-config`：前端地图加载配置
 - `POST /system/config-tests/{profile_code}`：外部集成连接测试
 - `POST /system/configs`：创建系统配置
 - `PUT /system/configs/{config_key}`：更新系统配置
@@ -129,6 +130,27 @@
   - `source` 仍真实返回 `DB/ENV/DEFAULT/EMPTY`，用于排查读取来源。
 - 阶段 1C-1 说明：
   - AMap / HiFleet / ES 客户端已支持注入 `RuntimeConfigService`，可复用该诊断接口对 key 来源进行排查。
+
+#### /system/frontend-map-config（阶段 2A）
+
+- 用途：前端地图组件加载配置读取（登录态可访问）。
+- 返回字段：
+  - `provider`
+  - `amap_js_api_key`
+  - `amap_security_js_code`
+  - `configured`
+  - `default_center_lng`
+  - `default_center_lat`
+  - `default_zoom`
+  - `message`
+- 规则：
+  - `provider` 固定返回 `AMAP`。
+  - `configured=true` 表示 `amap_js_api_key` 非空。
+  - 如果 JS Key 未配置，返回 `configured=false` 且 `message=AMAP_JS_API_KEY 未配置`。
+- 安全边界：
+  - 该接口只返回前端 JS 地图加载所需配置。
+  - 不返回 `ROUTE_AMAP_WEB_API_KEY` 等后端 WebService 密钥。
+  - 通用 `/system/configs` 的敏感掩码规则保持不变。
 
 #### /system/config-tests/{profile_code}（阶段 1C-2）
 

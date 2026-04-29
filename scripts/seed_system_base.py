@@ -514,7 +514,7 @@ SYSTEM_CONFIGS = [
     {
         "config_key": AMAP_ROUTE_WEB_API_KEY,
         "config_name": "高德 Web 服务 Key",
-        "config_value": "",
+        "config_value": "6126e8af272dc5d772c90910c36b6965",
         "value_type_code": "STRING",
         "config_group_code": "INTEGRATION",
         "config_profile_code": AMAP_CONFIG_PROFILE,
@@ -565,7 +565,7 @@ SYSTEM_CONFIGS = [
     {
         "config_key": AMAP_JS_API_KEY,
         "config_name": "高德 JS API Key",
-        "config_value": "",
+        "config_value": "643f134d8bbba9790f4b1daf5dfe3316",
         "value_type_code": "STRING",
         "config_group_code": "INTEGRATION",
         "config_profile_code": AMAP_CONFIG_PROFILE,
@@ -582,7 +582,7 @@ SYSTEM_CONFIGS = [
     {
         "config_key": AMAP_SECURITY_JS_CODE,
         "config_name": "高德 JS 安全密钥",
-        "config_value": "",
+        "config_value": "408a336d2f81c4127769ae6fc992a8a8",
         "value_type_code": "STRING",
         "config_group_code": "INTEGRATION",
         "config_profile_code": AMAP_CONFIG_PROFILE,
