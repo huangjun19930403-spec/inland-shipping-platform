@@ -945,6 +945,35 @@ def upgrade() -> None:
     with op.batch_alter_table('shipping_route_plan', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_shipping_route_plan_route_id'), ['route_id'], unique=False)
 
+    op.create_table('shipping_route_plan_node',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('plan_id', sa.BigInteger(), nullable=False),
+    sa.Column('node_order', sa.Integer(), nullable=False),
+    sa.Column('node_kind_code', sa.String(length=64), nullable=False),
+    sa.Column('transport_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('constraint_point_id', sa.BigInteger(), nullable=True),
+    sa.Column('region_id', sa.BigInteger(), nullable=True),
+    sa.Column('longitude', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('latitude', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('display_name', sa.String(length=128), nullable=False),
+    sa.Column('role_code', sa.String(length=64), nullable=True),
+    sa.Column('next_transport_mode_code', sa.String(length=64), nullable=True),
+    sa.Column('remark', sa.String(length=512), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['constraint_point_id'], ['navigation_constraint_point.id'], ),
+    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
+    sa.ForeignKeyConstraint(['region_id'], ['region.id'], ),
+    sa.ForeignKeyConstraint(['transport_node_id'], ['transport_node.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('plan_id', 'node_order', name='uk_route_plan_node_order')
+    )
+    with op.batch_alter_table('shipping_route_plan_node', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_constraint_point_id'), ['constraint_point_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_plan_id'), ['plan_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_region_id'), ['region_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_transport_node_id'), ['transport_node_id'], unique=False)
+
     op.create_table('sys_role_data_scope',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('role_id', sa.BigInteger(), nullable=False),
@@ -1311,6 +1340,13 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_plan_id'))
 
     op.drop_table('shipping_route_plan_segment')
+    with op.batch_alter_table('shipping_route_plan_node', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_transport_node_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_region_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_plan_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_constraint_point_id'))
+
+    op.drop_table('shipping_route_plan_node')
     with op.batch_alter_table('freight', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_origin_region_id_cache'))
         batch_op.drop_index(batch_op.f('ix_freight_origin_node_id'))

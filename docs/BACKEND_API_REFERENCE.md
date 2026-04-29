@@ -330,6 +330,10 @@
 - `PUT /route/plans/{plan_id}/status`
 - `PUT /route/{route_id}/plans/{plan_id}/activate`
 
+- `GET /route/plans/{plan_id}/nodes`
+- `PUT /route/plans/{plan_id}/nodes`
+- `POST /route/plans/{plan_id}/nodes/preview-segments`
+
 - `GET /route/plans/{plan_id}/segments`
 - `POST /route/plans/{plan_id}/segments`
 - `PUT /route/segments/{segment_id}`
@@ -345,7 +349,22 @@
 - `POST /route/plans/{plan_id}/geometry/refresh`
 - `POST /route/segments/{segment_id}/geometry/refresh`
 
-### 8.1 阶段 4B 产品化重构审计结论
+### 8.1 阶段 4D 路径节点串接口
+
+- `GET /route/plans/{plan_id}/nodes`
+  - 用途：查询路径方案节点串。
+  - 返回：`RoutePlanNodeResponse[]`。
+- `PUT /route/plans/{plan_id}/nodes`
+  - 用途：整体替换路径方案节点串。
+  - 请求：`{ nodes: RoutePlanNodeUpsertItem[] }`。
+  - 规则：节点顺序从 1 开始连续；节点类型严格区分区域锚点、运输节点、通航约束点、手工坐标点。
+- `POST /route/plans/{plan_id}/nodes/preview-segments`
+  - 用途：基于相邻节点预览可生成航段。
+  - 返回：`RoutePlanPreviewSegmentResponse[]`。
+  - 边界：不创建真实航段，不生成 geometry，不调用路径规划。
+  - 如果起点节点未配置下一段运输方式，返回 `transport_mode_code=UNKNOWN`、`can_generate=false`、`message=运输方式未配置`。
+
+### 8.2 阶段 4B 产品化重构审计结论
 
 阶段 4B 审计文档：`docs/STAGE_4B_ROUTE_PRODUCTIZATION_AUDIT.md`。
 

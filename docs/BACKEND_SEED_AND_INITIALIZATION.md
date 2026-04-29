@@ -12,7 +12,8 @@
 4. `seed_commodity_taxonomy`
 5. `seed_commodity_standards`
 6. `seed_system_base`
-7. `seed_route_map_e2e`
+7. `seed_navigation_constraints`
+8. `seed_route_map_e2e`
 
 统一入口：
 
@@ -62,7 +63,7 @@ demo freight/ship/route/analysis 数据不在正式初始化链中。
   - 初始化系统基础对象（管理员、角色、权限、菜单、系统配置最小集合）
 
 - `scripts/seed_route_map_e2e.py`
-  - 初始化航线地图 E2E 稳定基线数据（起终业务区域、区域边界、航线、路径方案、航段、点位）
+  - 初始化航线地图 E2E 稳定基线数据（起终业务区域、区域边界、航线、路径方案、路径节点串、航段、点位）
   - 数据以 `E2E_*` 编码前缀标识，仅用于本地开发/CI/Playwright 验收链路
 
 - `scripts/seed_system_init.py`
@@ -155,6 +156,29 @@ PYTHONPATH=. python -m scripts.seed_system_init
 - 仅维护 `E2E_CONSTRAINT_*` 专属数据，不影响非 E2E 业务记录。
 
 该 seed 同时依赖 `NAVIGATION_CONSTRAINT_TYPE` 字典项，用于约束类型选择和前端筛选展示。
+
+## 10. 路径节点串 E2E 基线（阶段 4D）
+
+`seed_route_map_e2e.py` 在 `E2E_ROUTE_PLAN_MAP` 中写入稳定路径节点串：
+
+- `E2E起点区域`：`REGION_ANCHOR`
+- `E2E起点水路节点`：`MANUAL_POINT`
+- `E2E桥梁约束点`：`CONSTRAINT_POINT`，引用 `E2E_CONSTRAINT_BRIDGE`
+- `E2E中间手工点`：`MANUAL_POINT`
+- `E2E终点区域`：`REGION_ANCHOR`
+
+幂等策略：
+
+- 仅清理并重建 `E2E_ROUTE_PLAN_MAP` 对应 plan 下的 `shipping_route_plan_node`。
+- 不影响任何非 E2E plan。
+- 不删除、不改写既有 E2E 航段和点位，确保阶段 3 地图联动 E2E 继续稳定。
+
+边界说明：
+
+- 阶段 4D 只提供节点串与 preview。
+- 不自动生成真实航段。
+- 不刷新 geometry。
+- 不调用高德、HiFleet/AMMS 路径规划。
 
 ## 7. MENUS 收口范围（阶段 1）
 

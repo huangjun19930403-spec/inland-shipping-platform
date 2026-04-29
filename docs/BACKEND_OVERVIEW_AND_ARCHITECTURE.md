@@ -158,3 +158,14 @@ docs/                      # 后端核心文档
 - `NavigationConstraintProfile`：吨位、吃水、水深、净空、船宽、船长、通行时间窗口、规则 JSON 和业务提示。
 
 该模块属于地址/基础数据能力，为后续 RoutePlanNode 和约束影响分析提供数据来源。本阶段不新增航线接口，不做路径规划，不做自动生成航段。
+
+## 12. 阶段 4D 路径节点串基础能力
+
+阶段 4D 新增 `ShippingRoutePlanNode`，作为路径方案设计的节点串底座：
+
+- 路径节点可引用区域锚点、运输节点、通航约束点或手工坐标点。
+- 后端提供 nodes 查询、整体替换、相邻节点航段 preview。
+- Preview 仅返回可生成航段的结构化说明，不创建真实航段，不生成 geometry。
+- 旧 `ShippingRoutePlanSegment / ShippingRoutePlanSegmentPoint` 接口继续保留，用于兼容现有地图展示与高级维护能力。
+
+该阶段是后续 4E 方案设计页和 4F 自动生成航段的前置基础。

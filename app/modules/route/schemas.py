@@ -154,6 +154,53 @@ class RoutePlanResponse(BaseModel):
     updated_at: datetime
 
 
+class RoutePlanNodeResponse(BaseModel):
+    id: int
+    plan_id: int
+    node_order: int
+    node_kind_code: str
+    transport_node_id: int | None
+    constraint_point_id: int | None
+    region_id: int | None
+    longitude: Decimal | None
+    latitude: Decimal | None
+    display_name: str
+    role_code: str | None
+    next_transport_mode_code: str | None
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RoutePlanNodeUpsertItem(BaseModel):
+    node_order: int = Field(ge=1)
+    node_kind_code: str = Field(min_length=1, max_length=64)
+    transport_node_id: int | None = None
+    constraint_point_id: int | None = None
+    region_id: int | None = None
+    longitude: Decimal | None = None
+    latitude: Decimal | None = None
+    display_name: str = Field(min_length=1, max_length=128)
+    role_code: str | None = Field(default=None, max_length=64)
+    next_transport_mode_code: str | None = Field(default=None, max_length=64)
+    remark: str | None = Field(default=None, max_length=512)
+
+
+class RoutePlanNodeReplaceRequest(BaseModel):
+    nodes: list[RoutePlanNodeUpsertItem] = Field(min_length=2)
+
+
+class RoutePlanPreviewSegmentResponse(BaseModel):
+    segment_no: int
+    start_node_order: int
+    end_node_order: int
+    start_display_name: str
+    end_display_name: str
+    transport_mode_code: str | None
+    can_generate: bool
+    message: str | None = None
+
+
 class RouteSegmentCreateRequest(BaseModel):
     segment_no: int = Field(ge=1)
     segment_type_code: str = Field(min_length=1, max_length=64)

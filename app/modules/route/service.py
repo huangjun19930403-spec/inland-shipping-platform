@@ -14,6 +14,7 @@ from app.integrations.http.route_geometry_types import RouteGeometryQuery, Route
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.route.repository import (
     RouteNodeLookupRepository,
+    ShippingRoutePlanNodeRepository,
     ShippingRoutePlanRepository,
     ShippingRoutePlanSegmentPointRepository,
     ShippingRoutePlanSegmentRepository,
@@ -24,12 +25,18 @@ from app.modules.route.schemas import (
     RouteDetailResponse,
     RouteGeometryRefreshResponse,
     RoutePlanDetailResponse,
+    RoutePlanNodeResponse,
+    RoutePlanPreviewSegmentResponse,
     RoutePlanResponse,
     RoutePlanSummaryResponse,
     RouteResponse,
     RouteSegmentPointResponse,
     RouteSegmentResponse,
 )
+
+NODE_KIND_CODES = {"REGION_ANCHOR", "TRANSPORT_NODE", "CONSTRAINT_POINT", "MANUAL_POINT"}
+NODE_ROLE_CODES = {"START", "PASS", "TRANSFER", "END"}
+TRANSPORT_MODE_CODES = {"WATER", "ROAD", "RAIL", "MANUAL", "UNKNOWN"}
 
 
 def _to_decimal(value) -> Decimal | None:
@@ -114,6 +121,26 @@ def _to_point_response(entity) -> RouteSegmentPointResponse:
         longitude=entity.longitude,
         latitude=entity.latitude,
         stay_minutes=entity.stay_minutes,
+        remark=entity.remark,
+        created_at=entity.created_at,
+        updated_at=entity.updated_at,
+    )
+
+
+def _to_plan_node_response(entity) -> RoutePlanNodeResponse:
+    return RoutePlanNodeResponse(
+        id=entity.id,
+        plan_id=entity.plan_id,
+        node_order=entity.node_order,
+        node_kind_code=entity.node_kind_code,
+        transport_node_id=entity.transport_node_id,
+        constraint_point_id=entity.constraint_point_id,
+        region_id=entity.region_id,
+        longitude=entity.longitude,
+        latitude=entity.latitude,
+        display_name=entity.display_name,
+        role_code=entity.role_code,
+        next_transport_mode_code=entity.next_transport_mode_code,
         remark=entity.remark,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
@@ -307,6 +334,179 @@ class ShippingRoutePlanService:
         if not ok:
             raise NotFoundError("ShippingRoutePlan", plan_id)
         await self.db.commit()
+
+
+class ShippingRoutePlanNodeService:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+        self.plan_repo = ShippingRoutePlanRepository(db)
+        self.node_repo = ShippingRoutePlanNodeRepository(db)
+        self.lookup_repo = RouteNodeLookupRepository(db)
+
+    async def list_plan_nodes(self, plan_id: int) -> list[RoutePlanNodeResponse]:
+        plan = await self.plan_repo.get_plan_by_id(plan_id)
+        if plan is None:
+            raise NotFoundError("ShippingRoutePlan", plan_id)
+        rows = await self.node_repo.list_plan_nodes(plan_id)
+        return [_to_plan_node_response(item) for item in rows]
+
+    async def replace_plan_nodes(self, plan_id: int, payload) -> list[RoutePlanNodeResponse]:
+        plan = await self.plan_repo.get_plan_by_id(plan_id)
+        if plan is None:
+            raise NotFoundError("ShippingRoutePlan", plan_id)
+
+        normalized = await self._normalize_and_validate_nodes(payload.nodes)
+        rows = await self.node_repo.replace_plan_nodes(plan_id, normalized)
+        await self.db.commit()
+        return [_to_plan_node_response(item) for item in rows]
+
+    async def preview_segments_from_nodes(self, plan_id: int) -> list[RoutePlanPreviewSegmentResponse]:
+        plan = await self.plan_repo.get_plan_by_id(plan_id)
+        if plan is None:
+            raise NotFoundError("ShippingRoutePlan", plan_id)
+        nodes = await self.node_repo.list_plan_nodes(plan_id)
+        if len(nodes) < 2:
+            raise ValidationError("plan nodes less than 2, cannot preview segments")
+
+        previews: list[RoutePlanPreviewSegmentResponse] = []
+        for index in range(len(nodes) - 1):
+            start = nodes[index]
+            end = nodes[index + 1]
+            transport_mode = (start.next_transport_mode_code or "").strip().upper() or "UNKNOWN"
+            reasons: list[str] = []
+            if transport_mode == "UNKNOWN":
+                reasons.append("运输方式未配置")
+            if not self._has_locator(start):
+                reasons.append(f"起点 {start.display_name} 缺少可定位依据")
+            if not self._has_locator(end):
+                reasons.append(f"终点 {end.display_name} 缺少可定位依据")
+            previews.append(
+                RoutePlanPreviewSegmentResponse(
+                    segment_no=index + 1,
+                    start_node_order=start.node_order,
+                    end_node_order=end.node_order,
+                    start_display_name=start.display_name,
+                    end_display_name=end.display_name,
+                    transport_mode_code=transport_mode,
+                    can_generate=not reasons,
+                    message="；".join(reasons) if reasons else None,
+                )
+            )
+        return previews
+
+    async def _normalize_and_validate_nodes(self, nodes) -> list[dict]:
+        if len(nodes) < 2:
+            raise ValidationError("route plan nodes must contain at least 2 items")
+
+        orders = sorted(item.node_order for item in nodes)
+        expected = list(range(1, len(nodes) + 1))
+        if orders != expected:
+            raise ValidationError("node_order must start from 1 and be continuous")
+
+        rows: list[dict] = []
+        for item in sorted(nodes, key=lambda node: node.node_order):
+            display_name = item.display_name.strip()
+            if not display_name:
+                raise ValidationError("display_name cannot be empty")
+            node_kind = item.node_kind_code.strip().upper()
+            if node_kind not in NODE_KIND_CODES:
+                raise ValidationError(f"unsupported node_kind_code: {item.node_kind_code}")
+
+            role_code = item.role_code.strip().upper() if item.role_code else None
+            if role_code and role_code not in NODE_ROLE_CODES:
+                raise ValidationError(f"unsupported role_code: {item.role_code}")
+
+            transport_mode = (
+                item.next_transport_mode_code.strip().upper()
+                if item.next_transport_mode_code
+                else None
+            )
+            if transport_mode == "":
+                transport_mode = None
+            if transport_mode and transport_mode not in TRANSPORT_MODE_CODES:
+                raise ValidationError(
+                    f"unsupported next_transport_mode_code: {item.next_transport_mode_code}"
+                )
+
+            await self._validate_node_reference(item, node_kind)
+
+            rows.append(
+                {
+                    "node_order": item.node_order,
+                    "node_kind_code": node_kind,
+                    "transport_node_id": item.transport_node_id,
+                    "constraint_point_id": item.constraint_point_id,
+                    "region_id": item.region_id,
+                    "longitude": item.longitude,
+                    "latitude": item.latitude,
+                    "display_name": display_name,
+                    "role_code": role_code,
+                    "next_transport_mode_code": transport_mode,
+                    "remark": item.remark,
+                }
+            )
+        return rows
+
+    async def _validate_node_reference(self, item, node_kind: str) -> None:
+        reference_values = [
+            item.transport_node_id is not None,
+            item.constraint_point_id is not None,
+            item.region_id is not None,
+        ]
+        if sum(reference_values) > 1:
+            raise ValidationError("transport_node_id, constraint_point_id, region_id cannot be filled together")
+
+        has_lng = item.longitude is not None
+        has_lat = item.latitude is not None
+
+        if node_kind == "TRANSPORT_NODE":
+            if item.transport_node_id is None or item.constraint_point_id is not None or item.region_id is not None:
+                raise ValidationError("TRANSPORT_NODE 只能填写 transport_node_id")
+            if has_lng or has_lat:
+                raise ValidationError("TRANSPORT_NODE 不允许填写 longitude/latitude")
+            if await self.lookup_repo.get_node(item.transport_node_id) is None:
+                raise NotFoundError("TransportNode", item.transport_node_id)
+            return
+
+        if node_kind == "CONSTRAINT_POINT":
+            if item.constraint_point_id is None or item.transport_node_id is not None or item.region_id is not None:
+                raise ValidationError("CONSTRAINT_POINT 只能填写 constraint_point_id")
+            if has_lng or has_lat:
+                raise ValidationError("CONSTRAINT_POINT 不允许填写 longitude/latitude")
+            if await self.lookup_repo.get_constraint_point(item.constraint_point_id) is None:
+                raise NotFoundError("NavigationConstraintPoint", item.constraint_point_id)
+            return
+
+        if node_kind == "REGION_ANCHOR":
+            if item.region_id is None or item.transport_node_id is not None or item.constraint_point_id is not None:
+                raise ValidationError("REGION_ANCHOR 只能填写 region_id")
+            if has_lng or has_lat:
+                raise ValidationError("REGION_ANCHOR 不允许填写 longitude/latitude")
+            if await self.lookup_repo.get_region(item.region_id) is None:
+                raise NotFoundError("Region", item.region_id)
+            return
+
+        if node_kind == "MANUAL_POINT":
+            if item.transport_node_id is not None or item.constraint_point_id is not None or item.region_id is not None:
+                raise ValidationError("MANUAL_POINT 只能填写 longitude/latitude")
+            if not has_lng or not has_lat:
+                raise ValidationError("MANUAL_POINT 必须填写 longitude/latitude")
+            lng = Decimal(str(item.longitude))
+            lat = Decimal(str(item.latitude))
+            if lng < Decimal("-180") or lng > Decimal("180") or lat < Decimal("-90") or lat > Decimal("90"):
+                raise ValidationError("MANUAL_POINT 经纬度不合法")
+
+    @staticmethod
+    def _has_locator(node) -> bool:
+        if node.node_kind_code == "MANUAL_POINT":
+            return node.longitude is not None and node.latitude is not None
+        if node.node_kind_code == "TRANSPORT_NODE":
+            return node.transport_node_id is not None
+        if node.node_kind_code == "CONSTRAINT_POINT":
+            return node.constraint_point_id is not None
+        if node.node_kind_code == "REGION_ANCHOR":
+            return node.region_id is not None
+        return False
 
 
 class ShippingRouteSegmentService:

@@ -19,6 +19,7 @@ from app.models.address import (
 from app.models.route import (
     ShippingRoute,
     ShippingRoutePlan,
+    ShippingRoutePlanNode,
     ShippingRoutePlanSegment,
     ShippingRoutePlanSegmentPoint,
 )
@@ -96,6 +97,7 @@ __all__ = [
     "NavigationConstraintProfile",
     "ShippingRoute",
     "ShippingRoutePlan",
+    "ShippingRoutePlanNode",
     "ShippingRoutePlanSegment",
     "ShippingRoutePlanSegmentPoint",
     "CommodityCategory",

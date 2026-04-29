@@ -6,13 +6,14 @@ import asyncio
 from decimal import Decimal
 from typing import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.database import AsyncSessionLocal
-from app.models.address import Region, RegionBoundaryVersion
+from app.models.address import NavigationConstraintPoint, Region, RegionBoundaryVersion
 from app.models.route import (
     ShippingRoute,
     ShippingRoutePlan,
+    ShippingRoutePlanNode,
     ShippingRoutePlanSegment,
     ShippingRoutePlanSegmentPoint,
 )
@@ -21,6 +22,7 @@ E2E_ORIGIN_REGION_CODE = "E2E_ROUTE_ORIGIN"
 E2E_DEST_REGION_CODE = "E2E_ROUTE_DEST"
 E2E_ROUTE_CODE = "E2E_ROUTE_MAP"
 E2E_PLAN_CODE = "E2E_ROUTE_PLAN_MAP"
+E2E_CONSTRAINT_BRIDGE_CODE = "E2E_CONSTRAINT_BRIDGE"
 
 
 def _polygon_geometry(points: list[list[float]]) -> dict:
@@ -305,6 +307,93 @@ async def _upsert_point(
     return row
 
 
+async def _replace_plan_nodes(
+    session,
+    *,
+    plan: ShippingRoutePlan,
+    origin_region: Region,
+    dest_region: Region,
+    bridge_point: NavigationConstraintPoint,
+) -> list[ShippingRoutePlanNode]:
+    await session.execute(
+        delete(ShippingRoutePlanNode).where(ShippingRoutePlanNode.plan_id == plan.id)
+    )
+    nodes_payload = [
+        {
+            "node_order": 1,
+            "node_kind_code": "REGION_ANCHOR",
+            "transport_node_id": None,
+            "constraint_point_id": None,
+            "region_id": origin_region.id,
+            "longitude": None,
+            "latitude": None,
+            "display_name": "E2E起点区域",
+            "role_code": "START",
+            "next_transport_mode_code": "WATER",
+            "remark": "E2E 路径节点串起点区域锚点",
+        },
+        {
+            "node_order": 2,
+            "node_kind_code": "MANUAL_POINT",
+            "transport_node_id": None,
+            "constraint_point_id": None,
+            "region_id": None,
+            "longitude": _as_decimal(120.58),
+            "latitude": _as_decimal(31.30),
+            "display_name": "E2E起点水路节点",
+            "role_code": "PASS",
+            "next_transport_mode_code": "WATER",
+            "remark": "E2E 手工水路节点",
+        },
+        {
+            "node_order": 3,
+            "node_kind_code": "CONSTRAINT_POINT",
+            "transport_node_id": None,
+            "constraint_point_id": bridge_point.id,
+            "region_id": None,
+            "longitude": None,
+            "latitude": None,
+            "display_name": "E2E桥梁约束点",
+            "role_code": "PASS",
+            "next_transport_mode_code": "WATER",
+            "remark": "E2E 通航约束点路径节点",
+        },
+        {
+            "node_order": 4,
+            "node_kind_code": "MANUAL_POINT",
+            "transport_node_id": None,
+            "constraint_point_id": None,
+            "region_id": None,
+            "longitude": _as_decimal(120.34),
+            "latitude": _as_decimal(31.50),
+            "display_name": "E2E中间手工点",
+            "role_code": "PASS",
+            "next_transport_mode_code": "WATER",
+            "remark": "E2E 中间手工坐标点",
+        },
+        {
+            "node_order": 5,
+            "node_kind_code": "REGION_ANCHOR",
+            "transport_node_id": None,
+            "constraint_point_id": None,
+            "region_id": dest_region.id,
+            "longitude": None,
+            "latitude": None,
+            "display_name": "E2E终点区域",
+            "role_code": "END",
+            "next_transport_mode_code": None,
+            "remark": "E2E 路径节点串终点区域锚点",
+        },
+    ]
+    nodes: list[ShippingRoutePlanNode] = []
+    for payload in nodes_payload:
+        row = ShippingRoutePlanNode(plan_id=plan.id, **payload)
+        session.add(row)
+        nodes.append(row)
+    await session.flush()
+    return nodes
+
+
 async def seed_route_map_e2e() -> None:
     origin_polygon = _polygon_geometry(
         [
@@ -382,6 +471,23 @@ async def seed_route_map_e2e() -> None:
         )
         plan = await _upsert_plan(session, route_id=route.id)
 
+        bridge_point = await session.scalar(
+            select(NavigationConstraintPoint).where(
+                NavigationConstraintPoint.code == E2E_CONSTRAINT_BRIDGE_CODE
+            )
+        )
+        if bridge_point is None:
+            raise RuntimeError(
+                f"{E2E_CONSTRAINT_BRIDGE_CODE} not found, run seed_navigation_constraints first"
+            )
+        plan_nodes = await _replace_plan_nodes(
+            session,
+            plan=plan,
+            origin_region=origin_region,
+            dest_region=dest_region,
+            bridge_point=bridge_point,
+        )
+
         segment1 = await _upsert_segment(
             session,
             plan_id=plan.id,
@@ -448,7 +554,7 @@ async def seed_route_map_e2e() -> None:
         print(
             "[seed_route_map_e2e] "
             f"route_code={route.code} plan_code={plan.plan_code} "
-            f"segment_count={len(segment_rows)} point_count={point_count}"
+            f"node_count={len(plan_nodes)} segment_count={len(segment_rows)} point_count={point_count}"
         )
 
 

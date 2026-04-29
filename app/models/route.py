@@ -62,6 +62,35 @@ class ShippingRoutePlan(Base, TimestampMixin):
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
+class ShippingRoutePlanNode(Base, TimestampMixin):
+    __tablename__ = "shipping_route_plan_node"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "node_order", name="uk_route_plan_node_order"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("shipping_route_plan.id"), nullable=False, index=True
+    )
+    node_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    node_kind_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    transport_node_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True
+    )
+    constraint_point_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_constraint_point.id"), nullable=True, index=True
+    )
+    region_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("region.id"), nullable=True, index=True
+    )
+    longitude: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    role_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    next_transport_mode_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
 class ShippingRoutePlanSegment(Base, TimestampMixin):
     __tablename__ = "shipping_route_plan_segment"
     __table_args__ = (

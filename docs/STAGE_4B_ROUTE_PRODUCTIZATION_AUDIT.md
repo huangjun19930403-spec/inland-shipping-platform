@@ -173,3 +173,15 @@
 - 通航约束点继续作为独立基础数据维护，不与 `TransportNode` 混用。
 - 后端继续复用 `/address/constraint-points` 语义入口，并补充 Profile upsert 与状态更新接口。
 - 本阶段仍不做 RoutePlanNode、路径节点串、自动生成航段、约束影响分析或路径规划。
+
+## 17. 阶段 4D 落地补充
+
+阶段 4D 按本审计建议落地 `RoutePlanNode` 路径节点串基础能力：
+
+- 新增 `shipping_route_plan_node`，将“路径经过哪些节点”从底层航段表单中抽离出来。
+- 支持 `REGION_ANCHOR / TRANSPORT_NODE / CONSTRAINT_POINT / MANUAL_POINT` 四类路径节点。
+- `NavigationConstraintPoint` 可作为空间约束节点参与路径节点串，但仍不具备装卸/中转作业能力。
+- 提供 nodes 查询、整体替换和相邻节点航段 preview。
+- Preview 不保存真实航段，不生成 geometry，不调用路径规划。
+
+阶段 4D 不删除旧航段/点位接口，也不重构完整方案设计页；后续 4E 再将路径节点串升级为正式方案设计交互。

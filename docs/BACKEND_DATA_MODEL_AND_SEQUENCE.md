@@ -69,6 +69,7 @@
 ### 2.6 航线与方案
 - `shipping_route`
 - `shipping_route_plan`
+- `shipping_route_plan_node`
 - `shipping_route_plan_segment`
 - `shipping_route_plan_segment_point`
 
@@ -230,3 +231,24 @@
 - `NavigationConstraintPoint` 不是 `TransportNode`，不具备装卸、中转、堆场等作业能力。
 - 后续 RoutePlanNode 可引用通航约束点作为路径节点来源，但不能把它当作运输作业节点。
 - 本阶段不做约束影响分析，不生成航段，不引入 RoutePlanNode。
+
+## 9. 阶段 4D RoutePlanNode 路径节点串
+
+阶段 4D 新增 `shipping_route_plan_node`，用于保存路径方案中的路径节点串。
+
+核心字段：
+
+- `plan_id`：所属路径方案。
+- `node_order`：节点顺序，从 1 开始连续。
+- `node_kind_code`：`REGION_ANCHOR/TRANSPORT_NODE/CONSTRAINT_POINT/MANUAL_POINT`。
+- `transport_node_id`：运输作业节点引用。
+- `constraint_point_id`：通航约束点引用。
+- `region_id`：区域锚点引用。
+- `longitude/latitude`：手工坐标点经纬度。
+- `next_transport_mode_code`：当前节点到下一个节点的运输方式。
+
+定位：
+
+- `shipping_route_plan_node` 是方案设计输入。
+- `shipping_route_plan_segment` 与 `shipping_route_plan_segment_point` 仍保留为结果/高级维护对象。
+- 阶段 4D 只做节点串与 preview，不生成真实航段。

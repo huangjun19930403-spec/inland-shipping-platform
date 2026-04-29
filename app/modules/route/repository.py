@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.address import NavigationConstraintPoint, TransportNode
+from app.models.address import NavigationConstraintPoint, Region, TransportNode
 from app.models.route import (
     ShippingRoute,
     ShippingRoutePlan,
+    ShippingRoutePlanNode,
     ShippingRoutePlanSegment,
     ShippingRoutePlanSegmentPoint,
 )
@@ -183,6 +184,43 @@ class ShippingRoutePlanRepository:
         return await self.db.scalar(stmt) is not None
 
 
+class ShippingRoutePlanNodeRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def list_plan_nodes(self, plan_id: int) -> list[ShippingRoutePlanNode]:
+        rows = (
+            await self.db.execute(
+                select(ShippingRoutePlanNode)
+                .where(ShippingRoutePlanNode.plan_id == plan_id)
+                .order_by(ShippingRoutePlanNode.node_order.asc(), ShippingRoutePlanNode.id.asc())
+            )
+        ).scalars().all()
+        return list(rows)
+
+    async def clear_plan_nodes(self, plan_id: int) -> None:
+        await self.db.execute(
+            delete(ShippingRoutePlanNode).where(ShippingRoutePlanNode.plan_id == plan_id)
+        )
+        await self.db.flush()
+
+    async def replace_plan_nodes(
+        self,
+        plan_id: int,
+        rows: list[dict[str, Any]],
+    ) -> list[ShippingRoutePlanNode]:
+        await self.clear_plan_nodes(plan_id)
+        entities: list[ShippingRoutePlanNode] = []
+        for item in rows:
+            entity = ShippingRoutePlanNode(plan_id=plan_id, **item)
+            self.db.add(entity)
+            entities.append(entity)
+        await self.db.flush()
+        for entity in entities:
+            await self.db.refresh(entity)
+        return await self.list_plan_nodes(plan_id)
+
+
 class ShippingRoutePlanSegmentRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -313,4 +351,9 @@ class RouteNodeLookupRepository:
     async def get_constraint_point(self, constraint_point_id: int) -> NavigationConstraintPoint | None:
         return await self.db.scalar(
             select(NavigationConstraintPoint).where(NavigationConstraintPoint.id == constraint_point_id)
+        )
+
+    async def get_region(self, region_id: int) -> Region | None:
+        return await self.db.scalar(
+            select(Region).where(Region.id == region_id, Region.deleted_at.is_(None))
         )

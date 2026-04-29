@@ -18,6 +18,9 @@ from app.modules.route.schemas import (
     RoutePlanCreateRequest,
     RoutePlanDetailResponse,
     RoutePlanListQuery,
+    RoutePlanNodeReplaceRequest,
+    RoutePlanNodeResponse,
+    RoutePlanPreviewSegmentResponse,
     RoutePlanResponse,
     RoutePlanStatusChangeRequest,
     RoutePlanUpdateRequest,
@@ -35,6 +38,7 @@ from app.modules.route.schemas import (
 )
 from app.modules.route.service import (
     RouteGeometryService,
+    ShippingRoutePlanNodeService,
     ShippingRoutePlanService,
     ShippingRoutePointService,
     ShippingRouteSegmentService,
@@ -186,6 +190,40 @@ async def activate_plan(
     service = ShippingRoutePlanService(db)
     await service.activate_plan(route_id, plan_id)
     return {"ok": True}
+
+
+@router.get("/plans/{plan_id}/nodes", response_model=list[RoutePlanNodeResponse])
+async def list_plan_nodes(
+    plan_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRoutePlanNodeService(db)
+    return await service.list_plan_nodes(plan_id)
+
+
+@router.put("/plans/{plan_id}/nodes", response_model=list[RoutePlanNodeResponse])
+async def replace_plan_nodes(
+    plan_id: int,
+    body: RoutePlanNodeReplaceRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRoutePlanNodeService(db)
+    return await service.replace_plan_nodes(plan_id, body)
+
+
+@router.post("/plans/{plan_id}/nodes/preview-segments", response_model=list[RoutePlanPreviewSegmentResponse])
+async def preview_segments_from_plan_nodes(
+    plan_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRoutePlanNodeService(db)
+    return await service.preview_segments_from_nodes(plan_id)
 
 
 @router.get("/plans/{plan_id}/segments", response_model=list[RouteSegmentResponse])
