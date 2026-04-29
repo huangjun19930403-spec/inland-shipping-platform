@@ -339,6 +339,21 @@
 - `POST /route/plans/{plan_id}/geometry/refresh`
 - `POST /route/segments/{segment_id}/geometry/refresh`
 
+### 8.1 阶段 4B 产品化重构审计结论
+
+阶段 4B 审计文档：`docs/STAGE_4B_ROUTE_PRODUCTIZATION_AUDIT.md`。
+
+当前 Route API 仍以航段/点位 CRUD 与 geometry refresh 为主，适合基础维护和调试，但不符合业务用户的路径方案设计心智。后续建议：
+
+- 保留航线与方案基础 CRUD。
+- 将航段/点位新增、编辑、删除、排序接口降级为高级调试或兼容接口。
+- 新增路径节点串接口：`/route/plans/{plan_id}/nodes`。
+- 新增节点串预览/生成航段接口：`/route/plans/{plan_id}/nodes/preview-segments`、`/route/plans/{plan_id}/nodes/generate-segments`。
+- 将 `geometry/refresh` 重构为 `geometry/preview` 与 `geometry/generate`，明确“预览不保存”和“确认生成保存”。
+- 后续再增加约束影响分析接口，用于记录航段受哪些通航约束点影响。
+
+阶段 4B 不新增接口，以上为后续 4C-4H 的设计基线。
+
 ## 9. Analysis
 
 - `GET /analysis/cargo/daily`

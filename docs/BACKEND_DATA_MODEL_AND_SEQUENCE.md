@@ -201,3 +201,17 @@
 - 仅用于本地开发、CI 与 E2E 自动化验证。
 - 不改变正式业务逻辑，不依赖固定自增 ID。
 - 通过业务编码与组合键幂等 upsert，重复执行不重复插入。
+
+## 7. 阶段 4B 航线产品化模型重构方向
+
+阶段 4B 审计结论见 `docs/STAGE_4B_ROUTE_PRODUCTIZATION_AUDIT.md`。
+
+当前航线模型可支撑基础 CRUD 与地图只读展示，但不应把 `shipping_route_plan_segment` 和 `shipping_route_plan_segment_point` 作为业务用户的主维护对象。后续模型演进建议：
+
+- 新增 `RoutePlanNode / RoutePlanStop`：表达用户维护的路径节点串。
+- 扩展 `shipping_route_plan_segment`：表达由相邻路径节点生成的航段结果，补充 `geometry_status / geometry_source / geometry_message / provider_code / generated_at` 等生成状态字段。
+- 保留旧的航段起终节点与约束点字段用于兼容历史数据，但前端主流程应隐藏。
+- 扩展通航约束点能力：优先新增 `NavigationConstraintProfile` 承载吨位、吃水、净空、宽度、规则 JSON 等约束能力字段。
+- 后续新增 `RouteSegmentConstraintImpact`：保存 geometry 生成后匹配到的通航约束影响结果。
+
+上述调整预计从后续 4D 起涉及 migration；阶段 4B 仅固化审计方案，不修改现有表结构。
