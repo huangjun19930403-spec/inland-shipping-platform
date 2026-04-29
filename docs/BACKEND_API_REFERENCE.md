@@ -4,10 +4,24 @@
 
 - Base URL: `/api/v1`
 - 认证方式：`Authorization: Bearer <access_token>`
+- 请求追踪：客户端可传 `X-Request-ID`，后端会在响应头回写 `X-Request-ID`
 - 无需登录的接口：
   - `POST /api/v1/auth/login`
   - `GET /health`
   - `GET /docs`
+
+错误响应（阶段 4A）统一包含：
+
+- `code`
+- `message`
+- `data`
+- `request_id`
+
+说明：
+
+- `AppException`、`422` 校验错误、未捕获 `500` 均会回传 `request_id`，可用于日志定位。
+- `500` 错误默认返回 `code=500000`、`message=internal server error`。
+- `DEBUG=true` 时，`500` 的 `data` 可能包含 `exception_type/exception_message`；不返回堆栈文本。
 
 ## 2. Auth & System
 

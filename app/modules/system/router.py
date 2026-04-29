@@ -82,6 +82,7 @@ async def login(
         password=body.password,
         client_ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+        request_id=getattr(request.state, "request_id", None),
     )
 
 

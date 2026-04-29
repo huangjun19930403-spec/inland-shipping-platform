@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, ConflictError, NotFoundError, ValidationError
+from app.core.logging import get_logger
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.modules.system.repository import (
     SysDataScopeRepository,
@@ -44,6 +45,8 @@ from app.modules.system.schemas import (
     UserStatusLogResponse,
     UserUpdateRequest,
 )
+
+logger = get_logger("backend.system.auth")
 
 
 def _to_user_response(row) -> UserResponse:
@@ -243,14 +246,24 @@ class AuthService:
         password: str,
         client_ip: str | None,
         user_agent: str | None,
+        request_id: str | None = None,
     ) -> LoginResponse:
         now = datetime.utcnow()
-        user = await self.user_repo.get_user_by_username(username.strip())
+        username_value = username.strip()
+        logger.info(
+            "auth login attempt: request_id=%s username=%s client_ip=%s user_agent=%s",
+            request_id,
+            username_value,
+            client_ip,
+            user_agent,
+        )
+
+        user = await self.user_repo.get_user_by_username(username_value)
         if user is None:
             await self.login_log_repo.create_login_log(
                 {
                     "user_id": None,
-                    "username": username.strip(),
+                    "username": username_value,
                     "login_ip": client_ip,
                     "user_agent": user_agent,
                     "login_result_code": "FAILED",
@@ -260,6 +273,12 @@ class AuthService:
                 }
             )
             await self.db.commit()
+            logger.warning(
+                "auth login failed: request_id=%s username=%s client_ip=%s reason=user_not_found",
+                request_id,
+                username_value,
+                client_ip,
+            )
             raise AuthenticationError("用户名或密码错误")
 
         if not verify_password(password, user.password_hash):
@@ -276,6 +295,12 @@ class AuthService:
                 }
             )
             await self.db.commit()
+            logger.warning(
+                "auth login failed: request_id=%s username=%s client_ip=%s reason=password_mismatch",
+                request_id,
+                user.username,
+                client_ip,
+            )
             raise AuthenticationError("用户名或密码错误")
 
         status = (user.status_code or "").upper()
@@ -293,6 +318,13 @@ class AuthService:
                 }
             )
             await self.db.commit()
+            logger.warning(
+                "auth login rejected: request_id=%s username=%s client_ip=%s reason=status_%s",
+                request_id,
+                user.username,
+                client_ip,
+                status,
+            )
             raise AuthenticationError("当前账号状态不可登录")
 
         await self.user_repo.update_user(
@@ -313,6 +345,13 @@ class AuthService:
         )
         token = create_access_token({"sub": str(user.id), "username": user.username})
         await self.db.commit()
+        logger.info(
+            "auth login success: request_id=%s user_id=%s username=%s client_ip=%s",
+            request_id,
+            user.id,
+            user.username,
+            client_ip,
+        )
         return LoginResponse(
             access_token=token,
             token_type="bearer",

@@ -89,6 +89,17 @@ docs/                      # 后端核心文档
 3. 执行正式 seed 链
 4. 启动 `uvicorn`
 
+## 5.1 请求追踪与错误诊断（阶段 4A）
+
+- 后端对每个请求透传或生成 `request_id`（`X-Request-ID`），并在响应头回写 `X-Request-ID`。
+- `AppException`、`RequestValidationError` 与未捕获异常响应均包含 `request_id` 字段，便于前后端联合排查。
+- 新增全局未捕获异常处理：
+  - 后端日志使用 `logger.exception(...)` 记录完整堆栈
+  - 日志包含 `request_id / method / path / client_ip`
+  - 对前端返回统一 `500000` 错误结构，不回传堆栈
+- `DEBUG=true` 时，500 响应 `data` 可包含 `exception_type / exception_message`，生产环境建议关闭 DEBUG。
+- 登录链路（`/auth/login -> /auth/me -> /auth/me/menus`）可通过同一个 `request_id` 在 Network 与后端日志中对齐定位。
+
 ## 6. 外部依赖边界
 
 - AMap：航线几何刷新
