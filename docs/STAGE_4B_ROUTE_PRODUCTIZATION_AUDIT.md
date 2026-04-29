@@ -164,3 +164,12 @@
 - 本阶段不新增 migration。
 - 本阶段不新增后端接口。
 - 本阶段不新增前端路由。
+
+## 16. 阶段 4C 落地补充
+
+阶段 4C 已按本审计建议优先产品化通航约束点基础数据：
+
+- 新增 `NavigationConstraintProfile` 一对一 Profile 表，承载吨位、吃水、水深、净空、船宽、船长、通行窗口、规则 JSON 等约束能力。
+- 通航约束点继续作为独立基础数据维护，不与 `TransportNode` 混用。
+- 后端继续复用 `/address/constraint-points` 语义入口，并补充 Profile upsert 与状态更新接口。
+- 本阶段仍不做 RoutePlanNode、路径节点串、自动生成航段、约束影响分析或路径规划。

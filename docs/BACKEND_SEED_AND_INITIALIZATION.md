@@ -140,6 +140,22 @@ PYTHONPATH=. python -m scripts.seed_system_init
 - 仅更新/维护 `E2E_*` 专属测试数据，不影响非 E2E 业务记录。
 - 用途限定为本地开发、CI、Playwright 自动化验收，不作为生产业务主数据来源。
 
+## 9. 通航约束点 E2E 基线（阶段 4C）
+
+`seed_navigation_constraints.py` 由 `seed_system_init.py` 自动接入，提供通航约束点管理页面和后续路径节点串能力所需的稳定基础数据：
+
+- `E2E_CONSTRAINT_LOCK`：船闸约束点，带吨位、吃水、船宽、船长、通行时间窗口 Profile。
+- `E2E_CONSTRAINT_BRIDGE`：桥梁净空约束点，带净空和船宽 Profile。
+- `E2E_CONSTRAINT_SHALLOW`：浅滩/水深约束点，带最小水深、最大允许吃水和富余水深 Profile。
+
+幂等策略：
+
+- 通航约束点按 `code` upsert。
+- Profile 按 `constraint_point_id` upsert。
+- 仅维护 `E2E_CONSTRAINT_*` 专属数据，不影响非 E2E 业务记录。
+
+该 seed 同时依赖 `NAVIGATION_CONSTRAINT_TYPE` 字典项，用于约束类型选择和前端筛选展示。
+
 ## 7. MENUS 收口范围（阶段 1）
 
 - `MENUS` 维护左侧导航可见入口和目录节点。

@@ -227,3 +227,23 @@ class NavigationConstraintPoint(Base, TimestampMixin):
     severity_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+
+
+class NavigationConstraintProfile(Base, TimestampMixin):
+    __tablename__ = "navigation_constraint_profile"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    constraint_point_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("navigation_constraint_point.id"), unique=True, nullable=False, index=True
+    )
+    max_tonnage: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    max_allowed_draft_m: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    min_water_depth_m: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    under_keel_clearance_m: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    max_air_draft_m: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    max_beam_m: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    max_length_m: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    allowed_time_window: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    restriction_rule_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    rule_description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    warning_message: Mapped[str | None] = mapped_column(String(512), nullable=True)

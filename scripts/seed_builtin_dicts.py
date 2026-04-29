@@ -43,7 +43,7 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "ROUTE_STATUS", "dict_name": "航线状态", "items": _items("DRAFT", "ACTIVE", "INACTIVE")},
     {"dict_code": "ROUTE_PLAN_SEGMENT_TYPE", "dict_name": "路线分段类型", "items": _items("NAVIGATION_SEGMENT", "TRANSFER_SEGMENT", "PASSAGE_SEGMENT")},
     {"dict_code": "ROUTE_SEGMENT_POINT_TYPE", "dict_name": "分段点位类型", "items": _items("NODE", "CONSTRAINT_POINT", "LOCK", "SERVICE_POINT")},
-    {"dict_code": "NAVIGATION_CONSTRAINT_TYPE", "dict_name": "通航约束类型", "items": _items("LOW_BRIDGE", "HEIGHT_LIMIT", "WIDTH_LIMIT", "DRAFT_LIMIT", "PASSAGE_RESTRICTION")},
+    {"dict_code": "NAVIGATION_CONSTRAINT_TYPE", "dict_name": "通航约束类型", "items": _items("LOCK", "BRIDGE", "SHALLOW", "RESTRICTED_AREA", "FORBIDDEN_AREA", "DRAFT_LIMIT", "WIDTH_LIMIT", "HEIGHT_LIMIT", "LOW_BRIDGE", "PASSAGE_RESTRICTION")},
     {"dict_code": "SOURCE_TYPE", "dict_name": "来源类型", "items": _items("MANUAL", "IMPORT", "TMS", "WECHAT", "SYSTEM")},
     {"dict_code": "SOURCE_CHANNEL", "dict_name": "来源渠道", "items": _items("MANUAL_FORM", "IMPORT_FILE", "TMS_API", "WECHAT_TEXT", "SYSTEM_SYNC")},
     {"dict_code": "PROVIDER_CODE", "dict_name": "提供方编码", "items": _items("AMAP", "HIFLEET")},

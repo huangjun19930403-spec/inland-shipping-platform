@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -242,6 +242,8 @@ class TransportNodeDetailResponse(BaseModel):
 
 class NavigationConstraintPointListQuery(BaseModel):
     keyword: str | None = None
+    constraint_type_code: str | None = Field(default=None, max_length=64)
+    city_code: str | None = Field(default=None, max_length=12)
     status: int | None = Field(default=None, ge=0, le=1)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=500)
@@ -292,3 +294,44 @@ class NavigationConstraintPointResponse(BaseModel):
     status: int
     created_at: datetime
     updated_at: datetime
+
+
+class NavigationConstraintProfileUpsertRequest(BaseModel):
+    max_tonnage: Decimal | None = None
+    max_allowed_draft_m: Decimal | None = None
+    min_water_depth_m: Decimal | None = None
+    under_keel_clearance_m: Decimal | None = None
+    max_air_draft_m: Decimal | None = None
+    max_beam_m: Decimal | None = None
+    max_length_m: Decimal | None = None
+    allowed_time_window: str | None = Field(default=None, max_length=256)
+    restriction_rule_json: dict[str, Any] | None = None
+    rule_description: str | None = Field(default=None, max_length=512)
+    warning_message: str | None = Field(default=None, max_length=512)
+
+
+class NavigationConstraintProfileResponse(BaseModel):
+    id: int
+    constraint_point_id: int
+    max_tonnage: Decimal | None
+    max_allowed_draft_m: Decimal | None
+    min_water_depth_m: Decimal | None
+    under_keel_clearance_m: Decimal | None
+    max_air_draft_m: Decimal | None
+    max_beam_m: Decimal | None
+    max_length_m: Decimal | None
+    allowed_time_window: str | None
+    restriction_rule_json: dict[str, Any] | None
+    rule_description: str | None
+    warning_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NavigationConstraintPointDetailResponse(BaseModel):
+    point: NavigationConstraintPointResponse
+    profile: NavigationConstraintProfileResponse | None
+
+
+class NavigationConstraintPointStatusChangeRequest(BaseModel):
+    status: int = Field(ge=0, le=1)

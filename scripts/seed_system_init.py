@@ -9,6 +9,7 @@ from scripts.seed_builtin_dicts import seed_builtin_dicts
 from scripts.seed_code_sequences import seed_code_sequences
 from scripts.seed_commodity_standards import seed_commodity_standards
 from scripts.seed_commodity_taxonomy import seed_commodity_taxonomy
+from scripts.seed_navigation_constraints import seed_navigation_constraints
 from scripts.seed_route_map_e2e import seed_route_map_e2e
 from scripts.seed_system_base import seed_system_base
 
@@ -20,6 +21,7 @@ async def seed_system_init() -> None:
     await seed_commodity_taxonomy()
     await seed_commodity_standards()
     await seed_system_base()
+    await seed_navigation_constraints()
     await seed_route_map_e2e()
 
 

@@ -215,3 +215,18 @@
 - 后续新增 `RouteSegmentConstraintImpact`：保存 geometry 生成后匹配到的通航约束影响结果。
 
 上述调整预计从后续 4D 起涉及 migration；阶段 4B 仅固化审计方案，不修改现有表结构。
+
+## 8. 阶段 4C 通航约束点 Profile
+
+阶段 4C 新增 `navigation_constraint_profile`，与 `navigation_constraint_point` 通过 `constraint_point_id` 一对一关联。
+
+模型分工：
+
+- `navigation_constraint_point`：维护约束点的空间位置和基础属性，例如编码、名称、约束类型、经纬度、有效期、风险等级和状态。
+- `navigation_constraint_profile`：维护约束能力，例如最大吨位、最大允许吃水、最小水深、富余水深、净空、船宽、船长、通行时间窗口、规则 JSON、规则说明和业务提示。
+
+业务边界：
+
+- `NavigationConstraintPoint` 不是 `TransportNode`，不具备装卸、中转、堆场等作业能力。
+- 后续 RoutePlanNode 可引用通航约束点作为路径节点来源，但不能把它当作运输作业节点。
+- 本阶段不做约束影响分析，不生成航段，不引入 RoutePlanNode。

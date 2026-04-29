@@ -146,6 +146,29 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code')
     )
+    op.create_table('navigation_constraint_profile',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('constraint_point_id', sa.BigInteger(), nullable=False),
+    sa.Column('max_tonnage', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('max_allowed_draft_m', sa.Numeric(precision=8, scale=2), nullable=True),
+    sa.Column('min_water_depth_m', sa.Numeric(precision=8, scale=2), nullable=True),
+    sa.Column('under_keel_clearance_m', sa.Numeric(precision=8, scale=2), nullable=True),
+    sa.Column('max_air_draft_m', sa.Numeric(precision=8, scale=2), nullable=True),
+    sa.Column('max_beam_m', sa.Numeric(precision=8, scale=2), nullable=True),
+    sa.Column('max_length_m', sa.Numeric(precision=8, scale=2), nullable=True),
+    sa.Column('allowed_time_window', sa.String(length=256), nullable=True),
+    sa.Column('restriction_rule_json', sa.JSON(), nullable=True),
+    sa.Column('rule_description', sa.String(length=512), nullable=True),
+    sa.Column('warning_message', sa.String(length=512), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['constraint_point_id'], ['navigation_constraint_point.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('constraint_point_id', name='uk_navigation_constraint_profile_point')
+    )
+    with op.batch_alter_table('navigation_constraint_profile', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_constraint_profile_constraint_point_id'), ['constraint_point_id'], unique=False)
+
     op.create_table('region',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('code', sa.String(length=32), nullable=False),
@@ -1489,6 +1512,10 @@ def downgrade() -> None:
     op.drop_table('ship_profile')
     op.drop_table('ship_import_batch')
     op.drop_table('region')
+    with op.batch_alter_table('navigation_constraint_profile', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_constraint_profile_constraint_point_id'))
+
+    op.drop_table('navigation_constraint_profile')
     op.drop_table('navigation_constraint_point')
     op.drop_table('commodity_category')
     op.drop_table('code_sequence')

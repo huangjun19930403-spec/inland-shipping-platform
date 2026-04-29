@@ -14,9 +14,13 @@ from app.modules.address.schemas import (
     BusinessRegionResponse,
     BusinessRegionUpdateRequest,
     NavigationConstraintPointCreateRequest,
+    NavigationConstraintPointDetailResponse,
     NavigationConstraintPointListQuery,
     NavigationConstraintPointResponse,
+    NavigationConstraintPointStatusChangeRequest,
     NavigationConstraintPointUpdateRequest,
+    NavigationConstraintProfileResponse,
+    NavigationConstraintProfileUpsertRequest,
     NodeAliasReplaceRequest,
     NodeCodeListReplaceRequest,
     PageResponse,
@@ -265,10 +269,17 @@ async def list_constraint_points(
     db: AsyncSession = Depends(get_db),
 ):
     service = NavigationConstraintPointService(db)
-    return await service.list_constraint_points(query.keyword, query.status, query.page, query.page_size)
+    return await service.list_constraint_points(
+        query.keyword,
+        query.constraint_type_code,
+        query.city_code,
+        query.status,
+        query.page,
+        query.page_size,
+    )
 
 
-@router.get("/constraint-points/{point_id}", response_model=NavigationConstraintPointResponse)
+@router.get("/constraint-points/{point_id}", response_model=NavigationConstraintPointDetailResponse)
 async def get_constraint_point_detail(
     point_id: int,
     db: AsyncSession = Depends(get_db),
@@ -294,3 +305,24 @@ async def update_constraint_point(
 ):
     service = NavigationConstraintPointService(db)
     return await service.update_constraint_point(point_id, body)
+
+
+@router.put("/constraint-points/{point_id}/profile", response_model=NavigationConstraintProfileResponse)
+async def upsert_constraint_point_profile(
+    point_id: int,
+    body: NavigationConstraintProfileUpsertRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = NavigationConstraintPointService(db)
+    return await service.upsert_constraint_profile(point_id, body)
+
+
+@router.put("/constraint-points/{point_id}/status")
+async def change_constraint_point_status(
+    point_id: int,
+    body: NavigationConstraintPointStatusChangeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = NavigationConstraintPointService(db)
+    await service.change_constraint_point_status(point_id, body)
+    return {"ok": True}

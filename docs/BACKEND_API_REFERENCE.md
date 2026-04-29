@@ -238,6 +238,12 @@
 - `GET /address/constraint-points/{point_id}`
 - `POST /address/constraint-points`
 - `PUT /address/constraint-points/{point_id}`
+- `PUT /address/constraint-points/{point_id}/profile`
+- `PUT /address/constraint-points/{point_id}/status`
+
+阶段 4C 起，`GET /address/constraint-points/{point_id}` 返回 `{ point, profile }`，其中 `point` 为基础通航约束点，`profile` 为一对一约束能力档案。列表、创建、更新基础点位接口保持兼容。
+
+`NavigationConstraintProfile` 用于维护最大吨位、最大允许吃水、最小水深、富余水深、净空、船宽、船长、通行时间窗口、复杂规则 JSON、规则说明和业务提示。通航约束点不等同于运输节点，不具备装卸/中转作业能力。
 
 ## 5. Commodity
 

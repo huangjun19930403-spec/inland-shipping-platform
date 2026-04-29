@@ -14,6 +14,7 @@ from app.models.address import (
     TransportNodePackagingForm,
     TransportNodeHandlingMode,
     NavigationConstraintPoint,
+    NavigationConstraintProfile,
 )
 from app.models.route import (
     ShippingRoute,
@@ -92,6 +93,7 @@ __all__ = [
     "TransportNodePackagingForm",
     "TransportNodeHandlingMode",
     "NavigationConstraintPoint",
+    "NavigationConstraintProfile",
     "ShippingRoute",
     "ShippingRoutePlan",
     "ShippingRoutePlanSegment",

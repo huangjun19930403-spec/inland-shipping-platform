@@ -17,8 +17,12 @@ from app.modules.address.schemas import (
     BusinessRegionResponse,
     BusinessRegionUpdateRequest,
     NavigationConstraintPointCreateRequest,
+    NavigationConstraintPointDetailResponse,
     NavigationConstraintPointResponse,
+    NavigationConstraintPointStatusChangeRequest,
     NavigationConstraintPointUpdateRequest,
+    NavigationConstraintProfileResponse,
+    NavigationConstraintProfileUpsertRequest,
     PageResponse,
     RegionBoundaryVersionCreateRequest,
     RegionBoundaryVersionResponse,
@@ -410,6 +414,26 @@ def _to_constraint_point_response(row) -> NavigationConstraintPointResponse:
     )
 
 
+def _to_constraint_profile_response(row) -> NavigationConstraintProfileResponse:
+    return NavigationConstraintProfileResponse(
+        id=row.id,
+        constraint_point_id=row.constraint_point_id,
+        max_tonnage=row.max_tonnage,
+        max_allowed_draft_m=row.max_allowed_draft_m,
+        min_water_depth_m=row.min_water_depth_m,
+        under_keel_clearance_m=row.under_keel_clearance_m,
+        max_air_draft_m=row.max_air_draft_m,
+        max_beam_m=row.max_beam_m,
+        max_length_m=row.max_length_m,
+        allowed_time_window=row.allowed_time_window,
+        restriction_rule_json=row.restriction_rule_json,
+        rule_description=row.rule_description,
+        warning_message=row.warning_message,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 class NavigationConstraintPointService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -419,11 +443,20 @@ class NavigationConstraintPointService:
     async def list_constraint_points(
         self,
         keyword: str | None,
+        constraint_type_code: str | None,
+        city_code: str | None,
         status: int | None,
         page: int,
         page_size: int,
     ) -> PageResponse[NavigationConstraintPointResponse]:
-        rows, total = await self.repo.list_constraint_points(keyword, status, page, page_size)
+        rows, total = await self.repo.list_constraint_points(
+            keyword,
+            constraint_type_code,
+            city_code,
+            status,
+            page,
+            page_size,
+        )
         return PageResponse[NavigationConstraintPointResponse](
             total=total,
             page=page,
@@ -431,11 +464,15 @@ class NavigationConstraintPointService:
             items=[_to_constraint_point_response(item) for item in rows],
         )
 
-    async def get_constraint_point_detail(self, point_id: int) -> NavigationConstraintPointResponse:
+    async def get_constraint_point_detail(self, point_id: int) -> NavigationConstraintPointDetailResponse:
         row = await self.repo.get_constraint_point(point_id)
         if row is None:
             raise NotFoundError("NavigationConstraintPoint", point_id)
-        return _to_constraint_point_response(row)
+        profile = await self.repo.get_constraint_profile(point_id)
+        return NavigationConstraintPointDetailResponse(
+            point=_to_constraint_point_response(row),
+            profile=_to_constraint_profile_response(profile) if profile is not None else None,
+        )
 
     async def create_constraint_point(
         self,
@@ -449,6 +486,29 @@ class NavigationConstraintPointService:
         if await self.repo.get_constraint_point_by_code(code):
             raise ConflictError(f"constraint point code already exists: {code}")
         row = await self.repo.create_constraint_point(data)
+        await self.db.commit()
+        return _to_constraint_point_response(row)
+
+    async def upsert_constraint_profile(
+        self,
+        point_id: int,
+        payload: NavigationConstraintProfileUpsertRequest,
+    ) -> NavigationConstraintProfileResponse:
+        point = await self.repo.get_constraint_point(point_id)
+        if point is None:
+            raise NotFoundError("NavigationConstraintPoint", point_id)
+        profile = await self.repo.upsert_constraint_profile(point_id, payload.model_dump())
+        await self.db.commit()
+        return _to_constraint_profile_response(profile)
+
+    async def change_constraint_point_status(
+        self,
+        point_id: int,
+        payload: NavigationConstraintPointStatusChangeRequest,
+    ) -> NavigationConstraintPointResponse:
+        row = await self.repo.change_constraint_point_status(point_id, payload.status)
+        if row is None:
+            raise NotFoundError("NavigationConstraintPoint", point_id)
         await self.db.commit()
         return _to_constraint_point_response(row)
 

@@ -244,6 +244,18 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
+        "menu_code": "ADDRESS_CONSTRAINT_POINTS",
+        "menu_name": "通航约束点",
+        "menu_type_code": "MENU",
+        "parent_code": "ADDRESS_ROOT",
+        "route_path": "/address/constraint-points",
+        "component_path": "modules/address/pages/ConstraintPointListPage",
+        "icon": "Aim",
+        "sort_order": 4,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
         "menu_code": "COMMODITY_ROOT",
         "menu_name": "货品管理",
         "menu_type_code": "DIRECTORY",

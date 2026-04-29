@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.address import (
     AdminRegion,
     AdminRegionBoundary,
+    NavigationConstraintProfile,
     NavigationConstraintPoint,
     NodeAlias,
     Region,
@@ -450,6 +451,8 @@ class NavigationConstraintPointRepository:
     async def list_constraint_points(
         self,
         keyword: str | None,
+        constraint_type_code: str | None,
+        city_code: str | None,
         status: int | None,
         page: int,
         page_size: int,
@@ -466,6 +469,10 @@ class NavigationConstraintPointRepository:
             )
         if status is not None:
             stmt = stmt.where(NavigationConstraintPoint.status == status)
+        if constraint_type_code:
+            stmt = stmt.where(NavigationConstraintPoint.constraint_type_code == constraint_type_code)
+        if city_code:
+            stmt = stmt.where(NavigationConstraintPoint.city_code == city_code)
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (
             await self.db.execute(
@@ -481,6 +488,13 @@ class NavigationConstraintPointRepository:
             select(NavigationConstraintPoint).where(NavigationConstraintPoint.id == point_id)
         )
 
+    async def get_constraint_profile(self, point_id: int) -> NavigationConstraintProfile | None:
+        return await self.db.scalar(
+            select(NavigationConstraintProfile).where(
+                NavigationConstraintProfile.constraint_point_id == point_id
+            )
+        )
+
     async def get_constraint_point_by_code(self, code: str) -> NavigationConstraintPoint | None:
         return await self.db.scalar(
             select(NavigationConstraintPoint).where(NavigationConstraintPoint.code == code)
@@ -489,6 +503,35 @@ class NavigationConstraintPointRepository:
     async def create_constraint_point(self, data: dict[str, Any]) -> NavigationConstraintPoint:
         entity = NavigationConstraintPoint(**data)
         self.db.add(entity)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def upsert_constraint_profile(
+        self,
+        point_id: int,
+        data: dict[str, Any],
+    ) -> NavigationConstraintProfile:
+        entity = await self.get_constraint_profile(point_id)
+        if entity is None:
+            entity = NavigationConstraintProfile(constraint_point_id=point_id, **data)
+            self.db.add(entity)
+        else:
+            for key, value in data.items():
+                setattr(entity, key, value)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def change_constraint_point_status(
+        self,
+        point_id: int,
+        status: int,
+    ) -> NavigationConstraintPoint | None:
+        entity = await self.get_constraint_point(point_id)
+        if entity is None:
+            return None
+        entity.status = status
         await self.db.flush()
         await self.db.refresh(entity)
         return entity

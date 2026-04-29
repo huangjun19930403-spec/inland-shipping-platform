@@ -50,6 +50,7 @@
 - `/address/admin-regions`
 - `/address/regions`
 - `/address/nodes`
+- `/address/constraint-points`
 - `/commodity/categories`
 - `/commodity/types`
 - `/commodity/standards`
