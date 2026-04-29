@@ -64,7 +64,7 @@ docs/                      # 后端核心文档
 - `ES_REALTIME`
 - `ES_HISTORY`
 
-测试结果直接写回 `system_config` 的 `last_test_status_code / last_test_message / last_tested_at`。当前阶段不新增测试日志表，也不提供前端配置中心页面。
+测试结果直接写回 `system_config` 的 `last_test_status_code / last_test_message / last_tested_at`。当前阶段不新增测试日志表。
 
 外部集成配置 key 已统一收口在 `app/integrations/config_keys.py`，用于避免分散硬编码。
 
@@ -110,3 +110,13 @@ docs/                      # 后端核心文档
 - 不恢复旧平铺 `services/repositories/schemas` 结构
 - 不恢复 AI/workflow/workspace/ship_analysis 历史域
 - 不在当前基线上新增与真值文档无关的业务表与业务模块
+
+## 9. 阶段 1 治理文档
+
+阶段 1 收口后，治理规则以以下文档为准：
+
+- `docs/STAGE_1_SYSTEM_GOVERNANCE_ACCEPTANCE.md`
+- `docs/ENV_RUNTIME_CONFIG_BOUNDARY.md`
+- `docs/MENU_ROUTE_SEED_ALIGNMENT.md`
+
+其中 `system` 模块承担配置中心、菜单管理、连接测试、运行时配置读取职责；`integrations` 通过可选注入 `RuntimeConfigService` 读取配置。

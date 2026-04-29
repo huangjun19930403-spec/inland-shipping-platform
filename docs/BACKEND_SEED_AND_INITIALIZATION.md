@@ -86,3 +86,26 @@ PYTHONPATH=. python -m scripts.seed_system_init
 - 正式初始化应按固定顺序执行，避免外键与字典依赖冲突
 - 同一环境重复执行时，脚本应尽量幂等（按唯一键更新或跳过）
 - `code_sequence` 与系统基础对象初始化必须在业务数据写入前完成
+
+## 6. SYSTEM_CONFIGS 收口范围（阶段 1）
+
+`seed_system_base.py` 中 `SYSTEM_CONFIGS` 当前覆盖以下 profile：
+
+- `SYSTEM`
+- `AMAP`
+- `HIFLEET`
+- `ES_REALTIME`
+- `ES_HISTORY`
+
+说明：
+
+- 仅纳入运行期可维护配置与外部集成配置。
+- 不将所有 ENV 变量搬入 `system_config`。
+- 启动级配置（数据库、JWT、CORS、环境开关）仍由 ENV/settings 维护。
+
+## 7. MENUS 收口范围（阶段 1）
+
+- `MENUS` 维护左侧导航可见入口和目录节点。
+- `menu_type_code=DIRECTORY` 的节点可不设置 `route_path/component_path`。
+- 详情页、编辑页等 `hidden route` 不进入 seed，由前端 `routes.ts` 维护并通过 `activeMenu` 归属。
+- 菜单与路由对齐规则见 `docs/MENU_ROUTE_SEED_ALIGNMENT.md`。

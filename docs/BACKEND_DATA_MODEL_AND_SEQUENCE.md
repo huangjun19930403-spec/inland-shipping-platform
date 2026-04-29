@@ -98,7 +98,7 @@
 - `sys_login_log`
 - `system_config`
 
-## 2.9 system_config 元数据扩展（阶段 1A）
+## 2.9 system_config 元数据扩展（阶段 1 收口）
 
 `system_config` 已从简单 key-value 表扩展为配置中心元数据表，除原有
 `config_key/config_name/config_value/value_type_code/config_group_code` 外，补充：
@@ -113,9 +113,9 @@
 
 说明：
 
-- 本阶段只扩展元数据真值，不引入独立 profile 表。
-- 本阶段不负责运行时读取优先级（DB/env 回退）。
-- 本阶段不负责连接测试执行，仅保留测试结果字段占位。
+- 阶段 1 不引入独立 profile 表，profile 仍由 `config_profile_code` 字段表达。
+- 运行时读取优先级由 `RuntimeConfigService` 负责：DB 优先 -> ENV/settings 回退 -> default -> EMPTY。
+- 连接测试由 `ConfigTestService` 执行，结果回写本表 `last_test_*` 字段。
 
 ## 3. code_sequence 真值结构
 

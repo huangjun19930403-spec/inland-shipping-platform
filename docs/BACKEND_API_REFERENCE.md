@@ -52,6 +52,21 @@
 - `PUT /system/configs/{config_key}`：更新系统配置
 - `GET /system/login-logs`：登录日志分页
 
+#### 阶段 1 系统治理接口范围
+
+阶段 1 系统治理相关接口固定为以下四组：
+
+- 配置中心：`/system/configs*`
+- 运行时诊断：`/system/runtime-configs/{config_key}`
+- 连接测试：`/system/config-tests/{profile_code}`
+- 菜单管理：`/system/menus*`
+
+详细边界与职责见：
+
+- `docs/STAGE_1_SYSTEM_GOVERNANCE_ACCEPTANCE.md`
+- `docs/ENV_RUNTIME_CONFIG_BOUNDARY.md`
+- `docs/MENU_ROUTE_SEED_ALIGNMENT.md`
+
 #### /system/menus 与 /system/menus/tree（阶段 1E）
 
 - `GET /system/menus`

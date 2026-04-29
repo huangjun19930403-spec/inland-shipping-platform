@@ -17,6 +17,7 @@
 - seed 中 `visible_flag=1` 且 `menu_type_code="MENU"` 的 `route_path`，必须存在于前端静态路由中。
 - 前端可见入口页面应在 seed 中存在对应菜单项。
 - 隐藏详情页（如 `/ship/detail/:id`）不强制进入 seed。
+- `/dashboard` 在前端路由实现为根布局子路径 `path: 'dashboard'`，对外访问路径仍按 `/dashboard` 对齐。
 
 ## 4. 命名规则
 
@@ -34,3 +35,31 @@
 
 - 当前阶段仍采用前端静态路由，不做菜单完全驱动路由。
 - 不引入自动 AST 对齐或动态路由下发机制。
+
+## 7. 阶段 1 关键入口清单
+
+以下可见入口必须长期保持 seed 与静态路由同步：
+
+- `/dashboard`
+- `/system/users`
+- `/system/roles`
+- `/system/menus`
+- `/system/configs`
+- `/dictionary/dicts`
+- `/dictionary/code-sequences`
+- `/address/admin-regions`
+- `/address/regions`
+- `/address/nodes`
+- `/commodity/categories`
+- `/commodity/types`
+- `/commodity/standards`
+- `/ship/list`
+- `/ship/import/batches`
+- `/freight/list`
+- `/freight/manual-create`
+- `/route/list`
+- `/route/plans`
+- `/analysis/cargo`
+- `/analysis/ships`
+- `/analysis/jobs`
+- `/audit/tasks`
