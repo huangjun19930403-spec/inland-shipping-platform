@@ -13,7 +13,9 @@ from app.modules.address.repository import (
     RegionRepository,
     TransportNodeRepository,
 )
+from app.modules.address.geometry import normalize_boundary_geometry, normalize_boundary_source_type
 from app.modules.address.schemas import (
+    AdminRegionBoundaryResponse,
     AdminRegionResponse,
     BusinessRegionCreateRequest,
     BusinessRegionResponse,
@@ -90,13 +92,46 @@ def _to_region_response(row, labels: DictLabelMap | None = None) -> BusinessRegi
     )
 
 
-def _to_boundary_response(row) -> RegionBoundaryVersionResponse:
+def _to_admin_boundary_response(
+    row,
+    admin_region,
+    labels: DictLabelMap | None = None,
+) -> AdminRegionBoundaryResponse:
+    labels = labels or {}
+    source_code = normalize_boundary_source_type(row.boundary_source_type_code)
+    return AdminRegionBoundaryResponse(
+        id=row.id,
+        admin_region_id=row.admin_region_id,
+        admin_code=admin_region.code,
+        admin_name=admin_region.name,
+        version_no=row.version_no,
+        boundary_source_type_code=source_code,
+        boundary_source_type_name=dict_label(labels, "BOUNDARY_SOURCE_TYPE", source_code),
+        geometry_json=normalize_boundary_geometry(row.geometry_json),
+        center_longitude=row.center_longitude,
+        center_latitude=row.center_latitude,
+        area_km2=row.area_km2,
+        is_current=row.is_current,
+        effective_from=row.effective_from,
+        effective_to=row.effective_to,
+        imported_by=row.imported_by,
+        imported_at=row.imported_at,
+        remark=row.remark,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_boundary_response(row, labels: DictLabelMap | None = None) -> RegionBoundaryVersionResponse:
+    labels = labels or {}
+    source_code = normalize_boundary_source_type(row.boundary_source_type_code)
     return RegionBoundaryVersionResponse(
         id=row.id,
         region_id=row.region_id,
         version_no=row.version_no,
-        boundary_source_type_code=row.boundary_source_type_code,
-        geometry_json=row.geometry_json,
+        boundary_source_type_code=source_code,
+        boundary_source_type_name=dict_label(labels, "BOUNDARY_SOURCE_TYPE", source_code),
+        geometry_json=normalize_boundary_geometry(row.geometry_json),
         center_longitude=row.center_longitude,
         center_latitude=row.center_latitude,
         area_km2=row.area_km2,
@@ -175,6 +210,24 @@ class AdminRegionService:
             raise NotFoundError("AdminRegion", admin_code)
         return _to_admin_region_response(row)
 
+    async def list_boundary_versions(self, admin_code: str) -> list[AdminRegionBoundaryResponse]:
+        row = await self.repo.get_region_by_code(admin_code)
+        if row is None:
+            raise NotFoundError("AdminRegion", admin_code)
+        labels = await load_dict_label_map(self.db, ["BOUNDARY_SOURCE_TYPE"])
+        boundaries = await self.repo.list_boundaries(row.id)
+        return [_to_admin_boundary_response(item, row, labels) for item in boundaries]
+
+    async def get_current_boundary(self, admin_code: str) -> AdminRegionBoundaryResponse | None:
+        row = await self.repo.get_region_by_code(admin_code)
+        if row is None:
+            raise NotFoundError("AdminRegion", admin_code)
+        labels = await load_dict_label_map(self.db, ["BOUNDARY_SOURCE_TYPE"])
+        boundary = await self.repo.get_current_boundary(row.id)
+        if boundary is None:
+            return None
+        return _to_admin_boundary_response(boundary, row, labels)
+
     async def list_city_options(self) -> list[AdminRegionResponse]:
         rows = await self.repo.list_cities()
         return [_to_admin_region_response(row) for row in rows]
@@ -241,8 +294,22 @@ class BusinessRegionService:
         return _to_region_response(entity, labels)
 
     async def list_region_boundary_versions(self, region_id: int) -> list[RegionBoundaryVersionResponse]:
+        region = await self.repo.get_business_region(region_id)
+        if region is None:
+            raise NotFoundError("Region", region_id)
         rows = await self.repo.list_region_boundaries(region_id)
-        return [_to_boundary_response(row) for row in rows]
+        labels = await load_dict_label_map(self.db, ["BOUNDARY_SOURCE_TYPE"])
+        return [_to_boundary_response(row, labels) for row in rows]
+
+    async def get_current_region_boundary(self, region_id: int) -> RegionBoundaryVersionResponse | None:
+        region = await self.repo.get_business_region(region_id)
+        if region is None:
+            raise NotFoundError("Region", region_id)
+        labels = await load_dict_label_map(self.db, ["BOUNDARY_SOURCE_TYPE"])
+        row = await self.repo.get_current_region_boundary(region_id)
+        if row is None:
+            return None
+        return _to_boundary_response(row, labels)
 
     async def create_region_boundary_version(
         self,
@@ -256,7 +323,8 @@ class BusinessRegionService:
         if payload.is_current:
             await self.repo.set_current_boundary_version(region_id, entity.id)
         await self.db.commit()
-        return _to_boundary_response(entity)
+        labels = await load_dict_label_map(self.db, ["BOUNDARY_SOURCE_TYPE"])
+        return _to_boundary_response(entity, labels)
 
     async def set_current_boundary(self, region_id: int, version_id: int) -> None:
         ok = await self.repo.set_current_boundary_version(region_id, version_id)

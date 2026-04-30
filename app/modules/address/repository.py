@@ -64,6 +64,33 @@ class AdminRegionRepository:
     async def get_region_by_code(self, admin_code: str) -> AdminRegion | None:
         return await self.db.scalar(select(AdminRegion).where(AdminRegion.code == admin_code))
 
+    async def list_boundaries(self, admin_region_id: int) -> list[AdminRegionBoundary]:
+        return list(
+            (
+                await self.db.execute(
+                    select(AdminRegionBoundary)
+                    .where(AdminRegionBoundary.admin_region_id == admin_region_id)
+                    .order_by(
+                        AdminRegionBoundary.version_no.desc(),
+                        AdminRegionBoundary.id.desc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def get_current_boundary(self, admin_region_id: int) -> AdminRegionBoundary | None:
+        return await self.db.scalar(
+            select(AdminRegionBoundary)
+            .where(
+                AdminRegionBoundary.admin_region_id == admin_region_id,
+                AdminRegionBoundary.is_current.is_(True),
+            )
+            .order_by(AdminRegionBoundary.version_no.desc(), AdminRegionBoundary.id.desc())
+            .limit(1)
+        )
+
     async def get_children(self, parent_code: str) -> list[AdminRegion]:
         return list(
             (
@@ -175,6 +202,29 @@ class RegionRepository:
             )
             .scalars()
             .all()
+        )
+
+    async def get_current_region_boundary(self, region_id: int) -> RegionBoundaryVersion | None:
+        region = await self.get_business_region(region_id)
+        if region is None:
+            return None
+        if region.current_boundary_version_id:
+            boundary = await self.db.scalar(
+                select(RegionBoundaryVersion).where(
+                    RegionBoundaryVersion.id == region.current_boundary_version_id,
+                    RegionBoundaryVersion.region_id == region_id,
+                )
+            )
+            if boundary is not None:
+                return boundary
+        return await self.db.scalar(
+            select(RegionBoundaryVersion)
+            .where(
+                RegionBoundaryVersion.region_id == region_id,
+                RegionBoundaryVersion.is_current.is_(True),
+            )
+            .order_by(RegionBoundaryVersion.version_no.desc(), RegionBoundaryVersion.id.desc())
+            .limit(1)
         )
 
     async def create_boundary_version(self, region_id: int, data: dict[str, Any]) -> RegionBoundaryVersion:

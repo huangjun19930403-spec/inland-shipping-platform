@@ -12,10 +12,11 @@ from sqlalchemy import func, select
 
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import get_current_user
-from app.models.address import AdminRegion, NavigationConstraintPoint, Region, TransportNode
+from app.models.address import AdminRegion, AdminRegionBoundary, NavigationConstraintPoint, Region, RegionBoundaryVersion, TransportNode
 from app.models.commodity import CommodityStandard
 from app.models.common import CodeSequence
 from app.models.dictionary import StdDict, StdDictItem
+from app.modules.address.service import AdminRegionService, BusinessRegionService
 from app.modules.commodity.service import CommodityStandardService
 from main import app
 
@@ -53,6 +54,25 @@ def _route_requires_auth(route: APIRoute) -> bool:
 
 def _result(name: str, ok: bool, detail: str) -> CheckResult:
     return CheckResult(name=name, ok=ok, detail=detail)
+
+
+def _is_renderable_geojson(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    geometry_type = str(value.get("type") or "")
+    if geometry_type == "Polygon":
+        return bool(value.get("coordinates"))
+    if geometry_type == "MultiPolygon":
+        return bool(value.get("coordinates"))
+    if geometry_type == "Feature":
+        return _is_renderable_geojson(value.get("geometry"))
+    if geometry_type == "FeatureCollection":
+        features = value.get("features")
+        return isinstance(features, list) and any(
+            isinstance(feature, dict) and _is_renderable_geojson(feature.get("geometry"))
+            for feature in features
+        )
+    return False
 
 
 async def verify() -> list[CheckResult]:
@@ -251,6 +271,71 @@ async def verify() -> list[CheckResult]:
             "standards": await session.scalar(select(func.count()).select_from(CommodityStandard)),
         }
         results.append(_result("foundation sample data exists", all((value or 0) > 0 for value in counts.values()), str(counts)))
+
+        admin_boundary_row = await session.scalar(
+            select(AdminRegionBoundary)
+            .where(AdminRegionBoundary.is_current.is_(True))
+            .order_by(AdminRegionBoundary.id.asc())
+            .limit(1)
+        )
+        admin_boundary_ok = True
+        admin_boundary_detail = "no admin boundary seed"
+        if admin_boundary_row is not None:
+            admin_region = await session.scalar(select(AdminRegion).where(AdminRegion.id == admin_boundary_row.admin_region_id))
+            if admin_region is None:
+                admin_boundary_ok = False
+                admin_boundary_detail = f"orphan boundary={admin_boundary_row.id}"
+            else:
+                current = await AdminRegionService(session).get_current_boundary(admin_region.code)
+                admin_boundary_ok = bool(
+                    current
+                    and current.boundary_source_type_name
+                    and _is_renderable_geojson(current.geometry_json)
+                )
+                admin_boundary_detail = (
+                    f"{admin_region.code}:"
+                    f"{current.boundary_source_type_code if current else '-'}:"
+                    f"{current.geometry_json.get('type') if current else '-'}"
+                )
+        results.append(_result("admin region current boundary returns GeoJSON", admin_boundary_ok, admin_boundary_detail))
+
+        admin_boundary_payloads = (
+            await session.execute(select(AdminRegionBoundary.geometry_json))
+        ).scalars().all()
+        legacy_admin_wkt = sum(
+            1
+            for geometry in admin_boundary_payloads
+            if isinstance(geometry, dict) and geometry.get("wkt")
+        )
+        results.append(
+            _result(
+                "admin boundary seed stores renderable GeoJSON",
+                legacy_admin_wkt == 0,
+                f"legacy_wkt_wrappers={legacy_admin_wkt}",
+            )
+        )
+
+        business_boundary_row = await session.scalar(
+            select(RegionBoundaryVersion)
+            .where(RegionBoundaryVersion.is_current.is_(True))
+            .order_by(RegionBoundaryVersion.id.asc())
+            .limit(1)
+        )
+        business_boundary_ok = True
+        business_boundary_detail = "no business boundary seed"
+        if business_boundary_row is not None:
+            current = await BusinessRegionService(session).get_current_region_boundary(business_boundary_row.region_id)
+            business_boundary_ok = bool(
+                current
+                and current.boundary_source_type_name
+                and _is_renderable_geojson(current.geometry_json)
+            )
+            business_boundary_detail = (
+                f"region={business_boundary_row.region_id}:"
+                f"{current.boundary_source_type_code if current else '-'}:"
+                f"{current.geometry_json.get('type') if current else '-'}"
+            )
+        results.append(_result("business region current boundary returns GeoJSON", business_boundary_ok, business_boundary_detail))
 
     return results
 

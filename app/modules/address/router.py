@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.modules.address.schemas import (
+    AdminRegionBoundaryResponse,
     AdminRegionQuery,
     AdminRegionResponse,
     BusinessRegionCreateRequest,
@@ -62,6 +63,24 @@ async def get_admin_region_detail(
 ):
     service = AdminRegionService(db)
     return await service.get_admin_region_detail(admin_code)
+
+
+@router.get("/admin-regions/{admin_code}/boundaries", response_model=list[AdminRegionBoundaryResponse])
+async def list_admin_region_boundaries(
+    admin_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminRegionService(db)
+    return await service.list_boundary_versions(admin_code)
+
+
+@router.get("/admin-regions/{admin_code}/current-boundary", response_model=AdminRegionBoundaryResponse | None)
+async def get_current_admin_region_boundary(
+    admin_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminRegionService(db)
+    return await service.get_current_boundary(admin_code)
 
 
 @router.get("/admin-regions/{admin_code}/children", response_model=list[AdminRegionResponse])
@@ -132,6 +151,15 @@ async def list_region_boundaries(
 ):
     service = BusinessRegionService(db)
     return await service.list_region_boundary_versions(region_id)
+
+
+@router.get("/regions/{region_id}/current-boundary", response_model=RegionBoundaryVersionResponse | None)
+async def get_current_region_boundary(
+    region_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = BusinessRegionService(db)
+    return await service.get_current_region_boundary(region_id)
 
 
 @router.post("/regions/{region_id}/boundaries", response_model=RegionBoundaryVersionResponse)

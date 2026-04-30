@@ -41,6 +41,28 @@ class AdminRegionResponse(BaseModel):
     status: int
 
 
+class AdminRegionBoundaryResponse(BaseModel):
+    id: int
+    admin_region_id: int
+    admin_code: str
+    admin_name: str
+    version_no: int
+    boundary_source_type_code: str
+    boundary_source_type_name: str | None
+    geometry_json: dict
+    center_longitude: Decimal | None
+    center_latitude: Decimal | None
+    area_km2: Decimal | None
+    is_current: bool
+    effective_from: datetime | None
+    effective_to: datetime | None
+    imported_by: int | None
+    imported_at: datetime | None
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class BusinessRegionListQuery(BaseModel):
     keyword: str | None = None
     status: int | None = Field(default=None, ge=0, le=1)
@@ -103,6 +125,7 @@ class RegionBoundaryVersionResponse(BaseModel):
     region_id: int
     version_no: int
     boundary_source_type_code: str
+    boundary_source_type_name: str | None
     geometry_json: dict
     center_longitude: Decimal | None
     center_latitude: Decimal | None

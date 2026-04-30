@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.models.address import AdminRegion, AdminRegionBoundary
+from app.modules.address.geometry import normalize_boundary_geometry, normalize_boundary_source_type
 
 
 ADMIN_REGION_DATA_FILE = (
@@ -119,35 +120,49 @@ async def seed_admin_regions() -> None:
                     AdminRegionBoundary.version_no == version_no,
                 )
             )
-            if existed_boundary is not None:
-                continue
-            geometry_wkt = boundary.get("geometry_wkt")
             geometry_json = boundary.get("geometry_json")
             if geometry_json is None:
-                geometry_json = {
-                    "wkt": geometry_wkt,
-                    "bbox_json": boundary.get("bbox_json"),
-                }
-
-            session.add(
-                AdminRegionBoundary(
-                    admin_region_id=region_id,
-                    version_no=version_no,
-                    boundary_source_type_code=boundary.get("source_type_code")
-                    or boundary.get("boundary_source_type_code")
-                    or "STANDARD_MAP_EXTRACTION",
-                    geometry_json=geometry_json,
-                    center_longitude=boundary.get("center_lon") or boundary.get("center_longitude"),
-                    center_latitude=boundary.get("center_lat") or boundary.get("center_latitude"),
-                    area_km2=boundary.get("area_km2"),
-                    is_current=bool(boundary.get("is_current", True)),
-                    effective_from=None,
-                    effective_to=None,
-                    imported_by=None,
-                    imported_at=None,
-                    remark=boundary.get("remark"),
-                )
+                geometry_json = boundary.get("geometry_wkt")
+            geometry_json = normalize_boundary_geometry(geometry_json)
+            source_type_code = normalize_boundary_source_type(
+                boundary.get("source_type_code") or boundary.get("boundary_source_type_code")
             )
+            is_current = bool(boundary.get("is_current", True))
+
+            payload = {
+                "version_no": version_no,
+                "boundary_source_type_code": source_type_code,
+                "geometry_json": geometry_json,
+                "center_longitude": boundary.get("center_lon") or boundary.get("center_longitude"),
+                "center_latitude": boundary.get("center_lat") or boundary.get("center_latitude"),
+                "area_km2": boundary.get("area_km2"),
+                "is_current": is_current,
+                "effective_from": None,
+                "effective_to": None,
+                "imported_by": None,
+                "imported_at": None,
+                "remark": boundary.get("remark"),
+            }
+
+            if existed_boundary is None:
+                existed_boundary = AdminRegionBoundary(
+                    admin_region_id=region_id,
+                    **payload,
+                )
+                session.add(existed_boundary)
+                await session.flush()
+            else:
+                for key, value in payload.items():
+                    setattr(existed_boundary, key, value)
+
+            if is_current:
+                rows = (
+                    await session.execute(
+                        select(AdminRegionBoundary).where(AdminRegionBoundary.admin_region_id == region_id)
+                    )
+                ).scalars().all()
+                for row in rows:
+                    row.is_current = row.id == existed_boundary.id
         await session.commit()
 
 
