@@ -4,6 +4,8 @@ Base URL: `/api/v1`
 
 认证方式：`Authorization: Bearer <access_token>`。响应统一包含请求追踪能力，后端会回写 `X-Request-ID`。
 
+基础数据接口默认要求登录，包括 `dictionary`、`address`、`commodity` 下的只读元数据和 options 接口。
+
 ## Auth / System
 
 - `POST /auth/login`
@@ -40,6 +42,8 @@ Base URL: `/api/v1`
 - `GET /dictionary/code-sequences`
 - `GET /dictionary/code-sequences/{business_code}`
 
+内置字典包含 `COMMODITY_UNIT` 和 `DANGEROUS_GOODS_LEVEL`，业务接口默认返回 code 与中文 name，前端主视觉应展示中文名。
+
 ## Address
 
 - `GET /address/admin-regions`
@@ -71,6 +75,8 @@ Base URL: `/api/v1`
 - `PUT /address/constraint-points/{point_id}/profile`
 - `PUT /address/constraint-points/{point_id}/status`
 
+业务区域、地址节点、通航约束点新增时由后端自动生成编码。地址节点创建和编辑根据 `city_code` 自动回填 `city_region_id`，响应补充行政区划、节点类型、生命周期、状态等中文名字段。
+
 ## Commodity
 
 - `GET /commodity/metadata`
@@ -85,6 +91,8 @@ Base URL: `/api/v1`
 - `PUT /commodity/standards/{standard_id}/ship-type-rules`
 - `PUT /commodity/standards/{standard_id}/node-type-rules`
 - `PUT /commodity/standards/{standard_id}/handling-mode-rules`
+
+标准货品新增时由后端自动生成编码。创建接口只接收核心字段，主单位字段为 `main_unit_code`，响应补充 `main_unit_name`、`dangerous_grade_name` 和 `audit_status_name`。
 
 ## Ship
 

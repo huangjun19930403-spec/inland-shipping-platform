@@ -56,13 +56,9 @@ class CommodityStandardListQuery(BaseModel):
 
 class CommodityStandardCreateRequest(BaseModel):
     type_id: int
-    code: str | None = Field(default=None, max_length=32)
     name: str = Field(min_length=1, max_length=128)
     short_name: str | None = Field(default=None, max_length=64)
-    english_name: str | None = Field(default=None, max_length=256)
-    main_unit: str = Field(min_length=1, max_length=32)
-    density_range_desc: str | None = Field(default=None, max_length=128)
-    dangerous_grade_code: str | None = Field(default=None, max_length=64)
+    main_unit_code: str = Field(min_length=1, max_length=32)
     is_active: bool = True
 
 
@@ -71,7 +67,7 @@ class CommodityStandardUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     short_name: str | None = Field(default=None, max_length=64)
     english_name: str | None = Field(default=None, max_length=256)
-    main_unit: str | None = Field(default=None, min_length=1, max_length=32)
+    main_unit_code: str | None = Field(default=None, min_length=1, max_length=32)
     density_range_desc: str | None = Field(default=None, max_length=128)
     dangerous_grade_code: str | None = Field(default=None, max_length=64)
     is_active: bool | None = None
@@ -108,11 +104,14 @@ class CommodityStandardResponse(BaseModel):
     name: str
     short_name: str | None
     english_name: str | None
-    main_unit: str
+    main_unit_code: str
+    main_unit_name: str | None
     density_range_desc: str | None
     dangerous_grade_code: str | None
+    dangerous_grade_name: str | None
     is_active: bool
     audit_status: str
+    audit_status_name: str | None
     created_at: datetime
     updated_at: datetime
 

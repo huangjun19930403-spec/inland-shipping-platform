@@ -26,6 +26,18 @@ def _load_json(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _unit_code(row: dict, fallback: str = "TON") -> str:
+    raw = str(row.get("main_unit_code") or row.get("main_unit") or fallback).strip()
+    return {
+        "吨": "TON",
+        "立方米": "CUBIC_METER",
+        "件": "PIECE",
+        "箱": "BOX",
+        "车": "TRUCK",
+        "船次": "VOYAGE",
+    }.get(raw, raw or fallback)
+
+
 async def seed_commodity_standards() -> None:
     standards = _load_json(COMMODITY_STANDARD_FILE)
     if not standards:
@@ -58,7 +70,7 @@ async def seed_commodity_standards() -> None:
                     name=name,
                     short_name=row.get("short_name"),
                     english_name=row.get("english_name"),
-                    main_unit=row.get("main_unit") or "吨",
+                    main_unit_code=_unit_code(row),
                     density_range_desc=row.get("density_range_desc"),
                     dangerous_grade_code=row.get("dangerous_grade_code"),
                     is_active=bool(row.get("is_active", True)),
@@ -70,7 +82,7 @@ async def seed_commodity_standards() -> None:
                 entity.name = name
                 entity.short_name = row.get("short_name")
                 entity.english_name = row.get("english_name")
-                entity.main_unit = row.get("main_unit") or entity.main_unit
+                entity.main_unit_code = _unit_code(row, entity.main_unit_code)
                 entity.density_range_desc = row.get("density_range_desc")
                 entity.dangerous_grade_code = row.get("dangerous_grade_code")
                 entity.is_active = bool(row.get("is_active", True))

@@ -50,7 +50,7 @@ class CommodityStandard(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     short_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     english_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    main_unit: Mapped[str] = mapped_column(String(32), nullable=False)
+    main_unit_code: Mapped[str] = mapped_column(String(32), nullable=False)
     density_range_desc: Mapped[str | None] = mapped_column(String(128), nullable=True)
     dangerous_grade_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

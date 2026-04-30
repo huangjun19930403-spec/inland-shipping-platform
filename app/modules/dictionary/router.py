@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.modules.dictionary.schemas import (
     CodeSequenceResponse,
     DictCreateRequest,
@@ -22,7 +23,7 @@ from app.modules.dictionary.schemas import (
 )
 from app.modules.dictionary.service import CodeSequenceService, DictionaryItemService, DictionaryService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/dicts", response_model=PageResponse[DictResponse])

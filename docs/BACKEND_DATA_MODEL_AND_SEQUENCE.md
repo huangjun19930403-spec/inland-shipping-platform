@@ -2,7 +2,7 @@
 
 ## 数据模型真值
 
-以 `app/models/*` 和 Alembic head 为准。最终迁移链保留历史迁移文件并以 `0006_final_legacy_cleanup` 删除废弃表。
+以 `app/models/*` 和 Alembic head 为准。最终迁移链保留历史迁移文件，`0006_final_legacy_cleanup` 删除废弃表，`0007_foundation_dictionary_codes` 将标准货品主单位收敛为字典编码。
 
 ## 核心表分组
 
@@ -42,6 +42,8 @@
 - `commodity_handling_mode_rule`
 
 货品分类和类型为标准货品依赖元数据，只通过 `/commodity/metadata` 提供只读聚合。
+
+`commodity_standard.main_unit_code` 使用 `COMMODITY_UNIT` 字典，不再保存自由文本主单位；危险等级使用 `DANGEROUS_GOODS_LEVEL` 字典，业务响应同时返回 code 和中文 name。
 
 ### 船舶
 

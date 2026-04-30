@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.models.address import AdminRegion
 from app.modules.address.repository import (
     AdminRegionRepository,
     NavigationConstraintPointRepository,
@@ -36,6 +38,15 @@ from app.modules.address.schemas import (
     TransportNodeUpdateRequest,
 )
 from app.modules.dictionary.service import CodeSequenceService
+from app.modules.dictionary.labels import (
+    DictLabelMap,
+    RegionLabelMap,
+    dict_label,
+    load_admin_region_label_map,
+    load_dict_label_map,
+    region_label,
+    status_name,
+)
 
 
 def _to_admin_region_response(row) -> AdminRegionResponse:
@@ -55,18 +66,22 @@ def _to_admin_region_response(row) -> AdminRegionResponse:
     )
 
 
-def _to_region_response(row) -> BusinessRegionResponse:
+def _to_region_response(row, labels: DictLabelMap | None = None) -> BusinessRegionResponse:
+    labels = labels or {}
     return BusinessRegionResponse(
         id=row.id,
         code=row.code,
         name=row.name,
         short_name=row.short_name,
         region_type_code=row.region_type_code,
+        region_type_name=dict_label(labels, "REGION_TYPE", row.region_type_code),
         description=row.description,
         sort_order=row.sort_order,
         status=row.status,
+        status_name=status_name(row.status),
         current_boundary_version_id=row.current_boundary_version_id,
         audit_status=row.audit_status,
+        audit_status_name=dict_label(labels, "AUDIT_STATUS", row.audit_status),
         submitter_id=row.submitter_id,
         auditor_id=row.auditor_id,
         audited_at=row.audited_at,
@@ -96,25 +111,38 @@ def _to_boundary_response(row) -> RegionBoundaryVersionResponse:
     )
 
 
-def _to_node_response(row) -> TransportNodeResponse:
+def _to_node_response(
+    row,
+    dict_labels: DictLabelMap | None = None,
+    region_labels: RegionLabelMap | None = None,
+) -> TransportNodeResponse:
+    dict_labels = dict_labels or {}
+    region_labels = region_labels or {}
     return TransportNodeResponse(
         id=row.id,
         code=row.code,
         name=row.name,
         short_name=row.short_name,
         node_type_code=row.node_type_code,
+        node_type_name=dict_label(dict_labels, "NODE_TYPE", row.node_type_code),
         province_code=row.province_code,
+        province_name=region_label(region_labels, row.province_code),
         city_code=row.city_code,
+        city_name=region_label(region_labels, row.city_code),
         district_code=row.district_code,
+        district_name=region_label(region_labels, row.district_code),
         city_region_id=row.city_region_id,
         address=row.address,
         longitude=row.longitude,
         latitude=row.latitude,
         status=row.status,
+        status_name=status_name(row.status),
         lifecycle_status_code=row.lifecycle_status_code,
+        lifecycle_status_name=dict_label(dict_labels, "PROFILE_STATUS", row.lifecycle_status_code),
         sort_order=row.sort_order,
         is_hot_node=row.is_hot_node,
         audit_status=row.audit_status,
+        audit_status_name=dict_label(dict_labels, "AUDIT_STATUS", row.audit_status),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -174,25 +202,25 @@ class BusinessRegionService:
         page_size: int,
     ) -> PageResponse[BusinessRegionResponse]:
         items, total = await self.repo.list_business_regions(keyword, status, page, page_size)
+        labels = await load_dict_label_map(self.db, ["REGION_TYPE", "AUDIT_STATUS"])
         return PageResponse[BusinessRegionResponse](
             total=total,
             page=page,
             page_size=page_size,
-            items=[_to_region_response(item) for item in items],
+            items=[_to_region_response(item, labels) for item in items],
         )
 
     async def create_region(self, payload: BusinessRegionCreateRequest) -> BusinessRegionResponse:
         data = payload.model_dump(exclude_none=True)
-        code = (payload.code or "").strip()
-        if not code:
-            code = await self.sequence_service.next_code("REGION_CODE")
+        code = await self.sequence_service.next_code("REGION_CODE")
         data["code"] = code
         existed = await self.repo.get_business_region_by_code(code)
         if existed is not None:
             raise ConflictError(f"region code already exists: {code}")
         entity = await self.repo.create_business_region(data)
         await self.db.commit()
-        return _to_region_response(entity)
+        labels = await load_dict_label_map(self.db, ["REGION_TYPE", "AUDIT_STATUS"])
+        return _to_region_response(entity, labels)
 
     async def update_region(self, region_id: int, payload: BusinessRegionUpdateRequest) -> BusinessRegionResponse:
         updates = payload.model_dump(exclude_none=True)
@@ -202,13 +230,15 @@ class BusinessRegionService:
         if entity is None:
             raise NotFoundError("Region", region_id)
         await self.db.commit()
-        return _to_region_response(entity)
+        labels = await load_dict_label_map(self.db, ["REGION_TYPE", "AUDIT_STATUS"])
+        return _to_region_response(entity, labels)
 
     async def get_region_detail(self, region_id: int) -> BusinessRegionResponse:
         entity = await self.repo.get_business_region(region_id)
         if entity is None:
             raise NotFoundError("Region", region_id)
-        return _to_region_response(entity)
+        labels = await load_dict_label_map(self.db, ["REGION_TYPE", "AUDIT_STATUS"])
+        return _to_region_response(entity, labels)
 
     async def list_region_boundary_versions(self, region_id: int) -> list[RegionBoundaryVersionResponse]:
         rows = await self.repo.list_region_boundaries(region_id)
@@ -270,6 +300,28 @@ class TransportNodeService:
         self.repo = TransportNodeRepository(db)
         self.sequence_service = CodeSequenceService(db)
 
+    async def _resolve_city_region_id(self, city_code: str | None) -> int:
+        if not city_code:
+            raise ValidationError("city_code is required")
+        city = await self.db.scalar(
+            select(AdminRegion).where(
+                AdminRegion.code == city_code,
+                AdminRegion.level == 2,
+                AdminRegion.status == 1,
+            )
+        )
+        if city is None:
+            raise ValidationError(f"city_code not found in admin regions: {city_code}")
+        return int(city.id)
+
+    async def _node_label_context(self, rows: list) -> tuple[DictLabelMap, RegionLabelMap]:
+        dict_labels = await load_dict_label_map(self.db, ["NODE_TYPE", "PROFILE_STATUS", "AUDIT_STATUS"])
+        region_codes: list[str | None] = []
+        for row in rows:
+            region_codes.extend([row.province_code, row.city_code, row.district_code])
+        region_labels = await load_admin_region_label_map(self.db, region_codes)
+        return dict_labels, region_labels
+
     async def list_nodes(
         self,
         keyword: str | None,
@@ -280,34 +332,38 @@ class TransportNodeService:
         page_size: int,
     ) -> PageResponse[TransportNodeResponse]:
         items, total = await self.repo.list_nodes(keyword, city_code, status, category_code, page, page_size)
+        dict_labels, region_labels = await self._node_label_context(items)
         return PageResponse[TransportNodeResponse](
             total=total,
             page=page,
             page_size=page_size,
-            items=[_to_node_response(item) for item in items],
+            items=[_to_node_response(item, dict_labels, region_labels) for item in items],
         )
 
     async def create_node(self, payload: TransportNodeCreateRequest) -> TransportNodeResponse:
         data = payload.model_dump(exclude_none=True)
-        code = (payload.code or "").strip()
-        if not code:
-            code = await self.sequence_service.next_code("NODE_CODE")
+        code = await self.sequence_service.next_code("NODE_CODE")
         data["code"] = code
+        data["city_region_id"] = await self._resolve_city_region_id(payload.city_code)
         if await self.repo.get_node_by_code(code):
             raise ConflictError(f"node code already exists: {code}")
         entity = await self.repo.create_node(data)
         await self.db.commit()
-        return _to_node_response(entity)
+        dict_labels, region_labels = await self._node_label_context([entity])
+        return _to_node_response(entity, dict_labels, region_labels)
 
     async def update_node(self, node_id: int, payload: TransportNodeUpdateRequest) -> TransportNodeResponse:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             raise ValidationError("no update fields provided")
+        if "city_code" in updates:
+            updates["city_region_id"] = await self._resolve_city_region_id(updates["city_code"])
         entity = await self.repo.update_node(node_id, updates)
         if entity is None:
             raise NotFoundError("TransportNode", node_id)
         await self.db.commit()
-        return _to_node_response(entity)
+        dict_labels, region_labels = await self._node_label_context([entity])
+        return _to_node_response(entity, dict_labels, region_labels)
 
     async def get_node_detail(self, node_id: int) -> TransportNodeDetailResponse:
         node = await self.repo.get_node(node_id)
@@ -318,6 +374,7 @@ class TransportNodeService:
         business_codes = await self.repo.list_node_business_categories(node_id)
         packaging_codes = await self.repo.list_node_packaging_forms(node_id)
         handling_codes = await self.repo.list_node_handling_modes(node_id)
+        dict_labels, region_labels = await self._node_label_context([node])
 
         profile_payload = None
         if profile is not None:
@@ -337,7 +394,7 @@ class TransportNodeService:
             )
 
         return TransportNodeDetailResponse(
-            node=_to_node_response(node),
+            node=_to_node_response(node, dict_labels, region_labels),
             profile=profile_payload,
             aliases=[row.alias_name for row in aliases],
             aliases_meta=[
@@ -405,14 +462,23 @@ class TransportNodeService:
         await self.db.commit()
 
 
-def _to_constraint_point_response(row) -> NavigationConstraintPointResponse:
+def _to_constraint_point_response(
+    row,
+    dict_labels: DictLabelMap | None = None,
+    region_labels: RegionLabelMap | None = None,
+) -> NavigationConstraintPointResponse:
+    dict_labels = dict_labels or {}
+    region_labels = region_labels or {}
     return NavigationConstraintPointResponse(
         id=row.id,
         code=row.code,
         name=row.name,
         constraint_type_code=row.constraint_type_code,
+        constraint_type_name=dict_label(dict_labels, "NAVIGATION_CONSTRAINT_TYPE", row.constraint_type_code),
         province_code=row.province_code,
+        province_name=region_label(region_labels, row.province_code),
         city_code=row.city_code,
+        city_name=region_label(region_labels, row.city_code),
         longitude=row.longitude,
         latitude=row.latitude,
         valid_from=row.valid_from,
@@ -420,6 +486,7 @@ def _to_constraint_point_response(row) -> NavigationConstraintPointResponse:
         severity_level=row.severity_level,
         description=row.description,
         status=row.status,
+        status_name=status_name(row.status),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -451,6 +518,14 @@ class NavigationConstraintPointService:
         self.repo = NavigationConstraintPointRepository(db)
         self.sequence_service = CodeSequenceService(db)
 
+    async def _point_label_context(self, rows: list) -> tuple[DictLabelMap, RegionLabelMap]:
+        dict_labels = await load_dict_label_map(self.db, ["NAVIGATION_CONSTRAINT_TYPE"])
+        region_codes: list[str | None] = []
+        for row in rows:
+            region_codes.extend([row.province_code, row.city_code])
+        region_labels = await load_admin_region_label_map(self.db, region_codes)
+        return dict_labels, region_labels
+
     async def list_constraint_points(
         self,
         keyword: str | None,
@@ -468,11 +543,12 @@ class NavigationConstraintPointService:
             page,
             page_size,
         )
+        dict_labels, region_labels = await self._point_label_context(rows)
         return PageResponse[NavigationConstraintPointResponse](
             total=total,
             page=page,
             page_size=page_size,
-            items=[_to_constraint_point_response(item) for item in rows],
+            items=[_to_constraint_point_response(item, dict_labels, region_labels) for item in rows],
         )
 
     async def get_constraint_point_detail(self, point_id: int) -> NavigationConstraintPointDetailResponse:
@@ -480,8 +556,9 @@ class NavigationConstraintPointService:
         if row is None:
             raise NotFoundError("NavigationConstraintPoint", point_id)
         profile = await self.repo.get_constraint_profile(point_id)
+        dict_labels, region_labels = await self._point_label_context([row])
         return NavigationConstraintPointDetailResponse(
-            point=_to_constraint_point_response(row),
+            point=_to_constraint_point_response(row, dict_labels, region_labels),
             profile=_to_constraint_profile_response(profile) if profile is not None else None,
         )
 
@@ -490,15 +567,14 @@ class NavigationConstraintPointService:
         payload: NavigationConstraintPointCreateRequest,
     ) -> NavigationConstraintPointResponse:
         data = payload.model_dump(exclude_none=True)
-        code = (payload.code or "").strip()
-        if not code:
-            code = await self.sequence_service.next_code("NAV_CONSTRAINT_POINT_CODE")
+        code = await self.sequence_service.next_code("NAV_CONSTRAINT_POINT_CODE")
         data["code"] = code
         if await self.repo.get_constraint_point_by_code(code):
             raise ConflictError(f"constraint point code already exists: {code}")
         row = await self.repo.create_constraint_point(data)
         await self.db.commit()
-        return _to_constraint_point_response(row)
+        dict_labels, region_labels = await self._point_label_context([row])
+        return _to_constraint_point_response(row, dict_labels, region_labels)
 
     async def upsert_constraint_profile(
         self,
@@ -521,7 +597,8 @@ class NavigationConstraintPointService:
         if row is None:
             raise NotFoundError("NavigationConstraintPoint", point_id)
         await self.db.commit()
-        return _to_constraint_point_response(row)
+        dict_labels, region_labels = await self._point_label_context([row])
+        return _to_constraint_point_response(row, dict_labels, region_labels)
 
     async def update_constraint_point(
         self,
@@ -535,4 +612,5 @@ class NavigationConstraintPointService:
         if row is None:
             raise NotFoundError("NavigationConstraintPoint", point_id)
         await self.db.commit()
-        return _to_constraint_point_response(row)
+        dict_labels, region_labels = await self._point_label_context([row])
+        return _to_constraint_point_response(row, dict_labels, region_labels)

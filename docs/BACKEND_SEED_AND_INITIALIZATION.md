@@ -30,6 +30,7 @@ python -m scripts.verify_local_acceptance
 ## 数据边界
 
 - seed 必须幂等，重复运行应更新或跳过同一业务编码。
+- `seed_builtin_dicts` 内置 `COMMODITY_UNIT`、`DANGEROUS_GOODS_LEVEL`，用于标准货品主单位和危险等级中文展示。
 - 货品分类和货品类型作为标准货品依赖的基础元数据保留，不提供复杂业务 CRUD。
 - 船舶导入批次、旧统计表和旧 E2E 航线数据已从最终初始化链移除。
 - `purge_legacy_e2e_data` 会清理旧 `E2E_%` 主业务数据，避免污染本地验收。
@@ -54,3 +55,5 @@ python -m scripts.verify_local_acceptance
 - 废弃接口未注册。
 - 菜单不包含旧入口。
 - 主业务数据不包含 `E2E_%` 编码。
+
+`scripts.verify_foundation_data_acceptance` 是基础数据专项只读验收脚本，检查基础数据 router 登录约束、自动编码序列、单位和危险等级字典、标准货品单位 code、节点城市关系和基础样例数据。

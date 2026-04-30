@@ -49,7 +49,6 @@ class BusinessRegionListQuery(BaseModel):
 
 
 class BusinessRegionCreateRequest(BaseModel):
-    code: str | None = Field(default=None, max_length=32)
     name: str = Field(min_length=1, max_length=128)
     short_name: str | None = Field(default=None, max_length=64)
     region_type_code: str = Field(min_length=1, max_length=64)
@@ -73,11 +72,14 @@ class BusinessRegionResponse(BaseModel):
     name: str
     short_name: str | None
     region_type_code: str
+    region_type_name: str | None
     description: str | None
     sort_order: int
     status: int
+    status_name: str | None
     current_boundary_version_id: int | None
     audit_status: str
+    audit_status_name: str | None
     submitter_id: int | None
     auditor_id: int | None
     audited_at: datetime | None
@@ -140,14 +142,13 @@ class TransportNodeListQuery(BaseModel):
 
 
 class TransportNodeCreateRequest(BaseModel):
-    code: str | None = Field(default=None, max_length=32)
     name: str = Field(min_length=1, max_length=128)
     short_name: str | None = Field(default=None, max_length=64)
     node_type_code: str = Field(min_length=1, max_length=64)
     province_code: str = Field(min_length=1, max_length=12)
     city_code: str = Field(min_length=1, max_length=12)
     district_code: str | None = Field(default=None, max_length=12)
-    city_region_id: int
+    city_region_id: int | None = None
     address: str | None = Field(default=None, max_length=256)
     longitude: Decimal | None = None
     latitude: Decimal | None = None
@@ -164,7 +165,6 @@ class TransportNodeUpdateRequest(BaseModel):
     province_code: str | None = Field(default=None, min_length=1, max_length=12)
     city_code: str | None = Field(default=None, min_length=1, max_length=12)
     district_code: str | None = Field(default=None, max_length=12)
-    city_region_id: int | None = None
     address: str | None = Field(default=None, max_length=256)
     longitude: Decimal | None = None
     latitude: Decimal | None = None
@@ -200,18 +200,25 @@ class TransportNodeResponse(BaseModel):
     name: str
     short_name: str | None
     node_type_code: str
+    node_type_name: str | None
     province_code: str
+    province_name: str | None
     city_code: str
+    city_name: str | None
     district_code: str | None
+    district_name: str | None
     city_region_id: int
     address: str | None
     longitude: Decimal | None
     latitude: Decimal | None
     status: int
+    status_name: str | None
     lifecycle_status_code: str
+    lifecycle_status_name: str | None
     sort_order: int
     is_hot_node: bool
     audit_status: str
+    audit_status_name: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -259,7 +266,6 @@ class NavigationConstraintPointListQuery(BaseModel):
 
 
 class NavigationConstraintPointCreateRequest(BaseModel):
-    code: str | None = Field(default=None, max_length=32)
     name: str = Field(min_length=1, max_length=128)
     constraint_type_code: str = Field(min_length=1, max_length=64)
     province_code: str | None = Field(default=None, max_length=12)
@@ -292,8 +298,11 @@ class NavigationConstraintPointResponse(BaseModel):
     code: str
     name: str
     constraint_type_code: str
+    constraint_type_name: str | None
     province_code: str | None
+    province_name: str | None
     city_code: str | None
+    city_name: str | None
     longitude: Decimal
     latitude: Decimal
     valid_from: datetime | None
@@ -301,6 +310,7 @@ class NavigationConstraintPointResponse(BaseModel):
     severity_level: int | None
     description: str | None
     status: int
+    status_name: str | None
     created_at: datetime
     updated_at: datetime
 

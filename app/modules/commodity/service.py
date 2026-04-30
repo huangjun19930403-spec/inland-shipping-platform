@@ -11,6 +11,7 @@ from app.modules.commodity.repository import (
     CommodityTypeRepository,
 )
 from app.modules.dictionary.service import CodeSequenceService
+from app.modules.dictionary.labels import DictLabelMap, dict_label, load_dict_label_map
 from app.modules.commodity.schemas import (
     CommodityAliasReplaceRequest,
     CommodityAttributeReplaceRequest,
@@ -53,7 +54,8 @@ def _type_response(row) -> CommodityTypeResponse:
     )
 
 
-def _standard_response(row) -> CommodityStandardResponse:
+def _standard_response(row, labels: DictLabelMap | None = None) -> CommodityStandardResponse:
+    labels = labels or {}
     return CommodityStandardResponse(
         id=row.id,
         type_id=row.type_id,
@@ -61,11 +63,14 @@ def _standard_response(row) -> CommodityStandardResponse:
         name=row.name,
         short_name=row.short_name,
         english_name=row.english_name,
-        main_unit=row.main_unit,
+        main_unit_code=row.main_unit_code,
+        main_unit_name=dict_label(labels, "COMMODITY_UNIT", row.main_unit_code),
         density_range_desc=row.density_range_desc,
         dangerous_grade_code=row.dangerous_grade_code,
+        dangerous_grade_name=dict_label(labels, "DANGEROUS_GOODS_LEVEL", row.dangerous_grade_code),
         is_active=row.is_active,
         audit_status=row.audit_status,
+        audit_status_name=dict_label(labels, "AUDIT_STATUS", row.audit_status),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -101,24 +106,30 @@ class CommodityStandardService:
         page_size: int,
     ) -> PageResponse[CommodityStandardResponse]:
         items, total = await self.repo.list_standards(category_id, type_id, keyword, status, page, page_size)
+        labels = await load_dict_label_map(
+            self.db,
+            ["COMMODITY_UNIT", "DANGEROUS_GOODS_LEVEL", "AUDIT_STATUS"],
+        )
         return PageResponse[CommodityStandardResponse](
             total=total,
             page=page,
             page_size=page_size,
-            items=[_standard_response(item) for item in items],
+            items=[_standard_response(item, labels) for item in items],
         )
 
     async def create_standard(self, payload: CommodityStandardCreateRequest) -> CommodityStandardResponse:
         data = payload.model_dump(exclude_none=True)
-        code = (payload.code or "").strip()
-        if not code:
-            code = await self.sequence_service.next_code("COMMODITY_STANDARD_CODE")
+        code = await self.sequence_service.next_code("COMMODITY_STANDARD_CODE")
         data["code"] = code
         if await self.repo.get_standard_by_code(code):
             raise ConflictError(f"commodity standard code already exists: {code}")
         item = await self.repo.create_standard(data)
         await self.db.commit()
-        return _standard_response(item)
+        labels = await load_dict_label_map(
+            self.db,
+            ["COMMODITY_UNIT", "DANGEROUS_GOODS_LEVEL", "AUDIT_STATUS"],
+        )
+        return _standard_response(item, labels)
 
     async def update_standard(self, standard_id: int, payload: CommodityStandardUpdateRequest) -> CommodityStandardResponse:
         updates = payload.model_dump(exclude_none=True)
@@ -128,7 +139,11 @@ class CommodityStandardService:
         if item is None:
             raise NotFoundError("CommodityStandard", standard_id)
         await self.db.commit()
-        return _standard_response(item)
+        labels = await load_dict_label_map(
+            self.db,
+            ["COMMODITY_UNIT", "DANGEROUS_GOODS_LEVEL", "AUDIT_STATUS"],
+        )
+        return _standard_response(item, labels)
 
     async def get_standard_detail(self, standard_id: int) -> CommodityStandardDetailResponse:
         item = await self.repo.get_standard(standard_id)
@@ -136,8 +151,12 @@ class CommodityStandardService:
             raise NotFoundError("CommodityStandard", standard_id)
 
         attributes = await self.repo.list_attributes(standard_id)
+        labels = await load_dict_label_map(
+            self.db,
+            ["COMMODITY_UNIT", "DANGEROUS_GOODS_LEVEL", "AUDIT_STATUS"],
+        )
         return CommodityStandardDetailResponse(
-            standard=_standard_response(item),
+            standard=_standard_response(item, labels),
             aliases=await self.repo.list_aliases(standard_id),
             attributes=[
                 {
