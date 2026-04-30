@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.modules.dictionary.schemas import (
+    CodeSequenceCreateRequest,
     CodeSequenceResponse,
+    CodeSequenceUpdateRequest,
     DictCreateRequest,
     DictItemCreateRequest,
     DictItemListQuery,
@@ -144,6 +146,15 @@ async def list_code_sequences(
     return await service.list_sequences(keyword, page, page_size)
 
 
+@router.post("/code-sequences", response_model=CodeSequenceResponse)
+async def create_code_sequence(
+    body: CodeSequenceCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = CodeSequenceService(db)
+    return await service.create_sequence(body)
+
+
 @router.get("/code-sequences/{business_code}", response_model=CodeSequenceResponse)
 async def get_code_sequence_detail(
     business_code: str,
@@ -151,3 +162,13 @@ async def get_code_sequence_detail(
 ):
     service = CodeSequenceService(db)
     return await service.get_sequence_detail(business_code)
+
+
+@router.put("/code-sequences/{business_code}", response_model=CodeSequenceResponse)
+async def update_code_sequence(
+    business_code: str,
+    body: CodeSequenceUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = CodeSequenceService(db)
+    return await service.update_sequence(business_code, body)
