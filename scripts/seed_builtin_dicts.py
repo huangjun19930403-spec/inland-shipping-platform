@@ -1,4 +1,4 @@
-"""内置标准字典初始化脚本（非 AI 正式库）。"""
+"""内置标准字典初始化脚本。"""
 
 from __future__ import annotations
 

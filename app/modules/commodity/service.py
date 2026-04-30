@@ -14,17 +14,14 @@ from app.modules.dictionary.service import CodeSequenceService
 from app.modules.commodity.schemas import (
     CommodityAliasReplaceRequest,
     CommodityAttributeReplaceRequest,
-    CommodityCategoryCreateRequest,
+    CommodityMetadataResponse,
     CommodityCategoryResponse,
-    CommodityCategoryUpdateRequest,
     CommodityRuleCodeReplaceRequest,
     CommodityStandardCreateRequest,
     CommodityStandardDetailResponse,
     CommodityStandardResponse,
     CommodityStandardUpdateRequest,
-    CommodityTypeCreateRequest,
     CommodityTypeResponse,
-    CommodityTypeUpdateRequest,
     PageResponse,
 )
 
@@ -74,105 +71,18 @@ def _standard_response(row) -> CommodityStandardResponse:
     )
 
 
-class CommodityCategoryService:
+class CommodityMetadataService:
     def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-        self.repo = CommodityCategoryRepository(db)
-        self.sequence_service = CodeSequenceService(db)
+        self.category_repo = CommodityCategoryRepository(db)
+        self.type_repo = CommodityTypeRepository(db)
 
-    async def list_categories(
-        self,
-        keyword: str | None,
-        status: int | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[CommodityCategoryResponse]:
-        items, total = await self.repo.list_categories(keyword, status, page, page_size)
-        return PageResponse[CommodityCategoryResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_category_response(item) for item in items],
+    async def get_metadata(self) -> CommodityMetadataResponse:
+        categories, _ = await self.category_repo.list_categories(None, 1, 1, 500)
+        types, _ = await self.type_repo.list_types(None, None, 1, 1, 500)
+        return CommodityMetadataResponse(
+            categories=[_category_response(item) for item in categories],
+            types=[_type_response(item) for item in types],
         )
-
-    async def create_category(self, payload: CommodityCategoryCreateRequest) -> CommodityCategoryResponse:
-        data = payload.model_dump(exclude_none=True)
-        code = (payload.code or "").strip()
-        if not code:
-            code = await self.sequence_service.next_code("COMMODITY_CATEGORY_CODE")
-        data["code"] = code
-        if await self.repo.get_category_by_code(code):
-            raise ConflictError(f"commodity category code already exists: {code}")
-        item = await self.repo.create_category(data)
-        await self.db.commit()
-        return _category_response(item)
-
-    async def update_category(self, category_id: int, payload: CommodityCategoryUpdateRequest) -> CommodityCategoryResponse:
-        updates = payload.model_dump(exclude_none=True)
-        if not updates:
-            raise ValidationError("no update fields provided")
-        item = await self.repo.update_category(category_id, updates)
-        if item is None:
-            raise NotFoundError("CommodityCategory", category_id)
-        await self.db.commit()
-        return _category_response(item)
-
-    async def get_category_detail(self, category_id: int) -> CommodityCategoryResponse:
-        item = await self.repo.get_category(category_id)
-        if item is None:
-            raise NotFoundError("CommodityCategory", category_id)
-        return _category_response(item)
-
-
-class CommodityTypeService:
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-        self.repo = CommodityTypeRepository(db)
-        self.sequence_service = CodeSequenceService(db)
-
-    async def list_types(
-        self,
-        category_id: int | None,
-        keyword: str | None,
-        status: int | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[CommodityTypeResponse]:
-        items, total = await self.repo.list_types(category_id, keyword, status, page, page_size)
-        return PageResponse[CommodityTypeResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_type_response(item) for item in items],
-        )
-
-    async def create_type(self, payload: CommodityTypeCreateRequest) -> CommodityTypeResponse:
-        data = payload.model_dump(exclude_none=True)
-        code = (payload.code or "").strip()
-        if not code:
-            code = await self.sequence_service.next_code("COMMODITY_TYPE_CODE")
-        data["code"] = code
-        if await self.repo.get_type_by_code(code):
-            raise ConflictError(f"commodity type code already exists: {code}")
-        item = await self.repo.create_type(data)
-        await self.db.commit()
-        return _type_response(item)
-
-    async def update_type(self, type_id: int, payload: CommodityTypeUpdateRequest) -> CommodityTypeResponse:
-        updates = payload.model_dump(exclude_none=True)
-        if not updates:
-            raise ValidationError("no update fields provided")
-        item = await self.repo.update_type(type_id, updates)
-        if item is None:
-            raise NotFoundError("CommodityType", type_id)
-        await self.db.commit()
-        return _type_response(item)
-
-    async def get_type_detail(self, type_id: int) -> CommodityTypeResponse:
-        item = await self.repo.get_type(type_id)
-        if item is None:
-            raise NotFoundError("CommodityType", type_id)
-        return _type_response(item)
 
 
 class CommodityStandardService:

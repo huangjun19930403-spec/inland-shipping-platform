@@ -13,16 +13,6 @@ from app.modules.analysis.schemas import (
     AnalysisJobRunQuery,
     AnalysisJobRunResponse,
     AnalysisOverviewResponse,
-    CargoChannelDailyQuery,
-    CargoChannelDailyResponse,
-    CargoCityDailyQuery,
-    CargoCityDailyResponse,
-    CargoCommodityDailyQuery,
-    CargoCommodityDailyResponse,
-    CargoDailyQuery,
-    CargoDailyResponse,
-    CargoFlowDailyQuery,
-    CargoFlowDailyResponse,
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowMapItem,
@@ -31,16 +21,9 @@ from app.modules.analysis.schemas import (
     PageResponse,
     PriceAnalysisOverviewResponse,
     RegionAnalysisOverviewResponse,
-    ShipCityDailyQuery,
-    ShipCityDailyResponse,
-    ShipFlowDailyQuery,
-    ShipFlowDailyResponse,
     ShipAnalysisOverviewResponse,
-    StatJobRunDetailResponse,
-    StatJobRunListQuery,
-    StatJobRunResponse,
 )
-from app.modules.analysis.service import AnalysisDashboardService, CargoAnalysisService, ShipAnalysisService, StatJobRunService
+from app.modules.analysis.service import AnalysisDashboardService
 
 router = APIRouter()
 
@@ -264,132 +247,6 @@ async def get_price_analysis_overview(
     _ = current_user
     service = AnalysisDashboardService(db)
     return await service.price_overview(query.date_from, query.date_to)
-
-
-@router.get("/cargo/daily", response_model=PageResponse[CargoDailyResponse])
-async def list_cargo_daily(
-    query: CargoDailyQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = CargoAnalysisService(db)
-    return await service.list_cargo_daily(
-        stat_date_from=query.stat_date_from,
-        stat_date_to=query.stat_date_to,
-        source_type=query.source_type,
-        source_channel=query.source_channel,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.get("/cargo/cities", response_model=PageResponse[CargoCityDailyResponse])
-async def list_cargo_city_daily(
-    query: CargoCityDailyQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = CargoAnalysisService(db)
-    return await service.list_cargo_city_daily(
-        stat_date_from=query.stat_date_from,
-        stat_date_to=query.stat_date_to,
-        city_code=query.city_code,
-        role_type=query.role_type,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.get("/cargo/flows", response_model=PageResponse[CargoFlowDailyResponse])
-async def list_cargo_flow_daily(
-    query: CargoFlowDailyQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = CargoAnalysisService(db)
-    return await service.list_cargo_flow_daily(
-        stat_date_from=query.stat_date_from,
-        stat_date_to=query.stat_date_to,
-        origin_city_code=query.origin_city_code,
-        destination_city_code=query.destination_city_code,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.get("/cargo/commodities", response_model=PageResponse[CargoCommodityDailyResponse])
-async def list_cargo_commodity_daily(
-    query: CargoCommodityDailyQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = CargoAnalysisService(db)
-    return await service.list_cargo_commodity_daily(
-        stat_date_from=query.stat_date_from,
-        stat_date_to=query.stat_date_to,
-        commodity_category_id=query.commodity_category_id,
-        commodity_type_id=query.commodity_type_id,
-        commodity_standard_id=query.commodity_standard_id,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.get("/cargo/channels", response_model=PageResponse[CargoChannelDailyResponse])
-async def list_cargo_channel_daily(
-    query: CargoChannelDailyQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = CargoAnalysisService(db)
-    return await service.list_cargo_channel_daily(
-        stat_date_from=query.stat_date_from,
-        stat_date_to=query.stat_date_to,
-        source_type=query.source_type,
-        source_channel=query.source_channel,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.get("/ships/cities", response_model=PageResponse[ShipCityDailyResponse])
-async def list_ship_city_daily(
-    query: ShipCityDailyQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipAnalysisService(db)
-    return await service.list_ship_city_daily(
-        stat_date_from=query.stat_date_from,
-        stat_date_to=query.stat_date_to,
-        city_code=query.city_code,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.get("/ships/flows", response_model=PageResponse[ShipFlowDailyResponse])
-async def list_ship_flow_daily(
-    query: ShipFlowDailyQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipAnalysisService(db)
-    return await service.list_ship_flow_daily(
-        stat_date_from=query.stat_date_from,
-        stat_date_to=query.stat_date_to,
-        origin_city_code=query.origin_city_code,
-        destination_city_code=query.destination_city_code,
-        page=query.page,
-        page_size=query.page_size,
-    )
 
 
 @router.get("/jobs", response_model=PageResponse[AnalysisJobRunResponse])

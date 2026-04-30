@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import get_password_hash
@@ -147,6 +147,15 @@ ROLE_MENU_CODES = {
         "FREIGHT_CANDIDATES",
         "FREIGHT_SOURCE_INBOUNDS",
     ],
+}
+
+LEGACY_MENU_CODES = {
+    "COMMODITY_ROOT",
+    "COMMODITY_CATEGORIES",
+    "COMMODITY_TYPES",
+    "SHIP_IMPORT_BATCHES",
+    "ROUTE_PLANS",
+    "ANALYSIS_CARGO",
 }
 
 PERMISSIONS = [
@@ -366,41 +375,6 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "COMMODITY_ROOT",
-        "menu_name": "货品管理",
-        "menu_type_code": "DIRECTORY",
-        "route_path": None,
-        "component_path": None,
-        "icon": "Box",
-        "sort_order": 40,
-        "visible_flag": 0,
-        "status_code": "ACTIVE",
-    },
-    {
-        "menu_code": "COMMODITY_CATEGORIES",
-        "menu_name": "分类",
-        "menu_type_code": "MENU",
-        "parent_code": "COMMODITY_ROOT",
-        "route_path": "/commodity/categories",
-        "component_path": "modules/commodity/pages/CategoryListPage",
-        "icon": "Box",
-        "sort_order": 1,
-        "visible_flag": 0,
-        "status_code": "ACTIVE",
-    },
-    {
-        "menu_code": "COMMODITY_TYPES",
-        "menu_name": "类型",
-        "menu_type_code": "MENU",
-        "parent_code": "COMMODITY_ROOT",
-        "route_path": "/commodity/types",
-        "component_path": "modules/commodity/pages/TypeListPage",
-        "icon": "List",
-        "sort_order": 2,
-        "visible_flag": 0,
-        "status_code": "ACTIVE",
-    },
-    {
         "menu_code": "COMMODITY_STANDARDS",
         "menu_name": "标准货品管理",
         "menu_type_code": "MENU",
@@ -433,18 +407,6 @@ MENUS = [
         "icon": "Ship",
         "sort_order": 1,
         "visible_flag": 1,
-        "status_code": "ACTIVE",
-    },
-    {
-        "menu_code": "SHIP_IMPORT_BATCHES",
-        "menu_name": "导入批次",
-        "menu_type_code": "MENU",
-        "parent_code": "SHIP_ROOT",
-        "route_path": "/ship/import/batches",
-        "component_path": "modules/ship/pages/ShipImportBatchListPage",
-        "icon": "Upload",
-        "sort_order": 2,
-        "visible_flag": 0,
         "status_code": "ACTIVE",
     },
     {
@@ -542,18 +504,6 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "ROUTE_PLANS",
-        "menu_name": "方案（已合并至航线规划）",
-        "menu_type_code": "MENU",
-        "parent_code": "ROUTE_ROOT",
-        "route_path": "/route/plans",
-        "component_path": "modules/route/pages/RouteListPage",
-        "icon": "Connection",
-        "sort_order": 2,
-        "visible_flag": 0,
-        "status_code": "ACTIVE",
-    },
-    {
         "menu_code": "ANALYSIS_ROOT",
         "menu_name": "数据分析",
         "menu_type_code": "DIRECTORY",
@@ -562,18 +512,6 @@ MENUS = [
         "icon": "DataAnalysis",
         "sort_order": 80,
         "visible_flag": 1,
-        "status_code": "ACTIVE",
-    },
-    {
-        "menu_code": "ANALYSIS_CARGO",
-        "menu_name": "货源统计（已合并至货源分析）",
-        "menu_type_code": "MENU",
-        "parent_code": "ANALYSIS_ROOT",
-        "route_path": "/analysis/cargo",
-        "component_path": "modules/analysis/pages/AnalysisFreightPage",
-        "icon": "DataLine",
-        "sort_order": 1,
-        "visible_flag": 0,
         "status_code": "ACTIVE",
     },
     {
@@ -1358,6 +1296,15 @@ async def seed_system_base() -> None:
                 permission.description = item["description"]
             permission_ids.append(int(permission.id))
             permission_id_by_code[item["permission_code"]] = int(permission.id)
+
+        legacy_menu_ids = (
+            (await session.execute(select(SysMenu.id).where(SysMenu.menu_code.in_(LEGACY_MENU_CODES))))
+            .scalars()
+            .all()
+        )
+        if legacy_menu_ids:
+            await session.execute(delete(SysRoleMenu).where(SysRoleMenu.menu_id.in_(legacy_menu_ids)))
+            await session.execute(delete(SysMenu).where(SysMenu.id.in_(legacy_menu_ids)))
 
         menu_id_by_code: dict[str, int] = {}
         for item in MENUS:

@@ -9,105 +9,24 @@ from app.core.database import get_db
 from app.modules.commodity.schemas import (
     CommodityAliasReplaceRequest,
     CommodityAttributeReplaceRequest,
-    CommodityCategoryCreateRequest,
-    CommodityCategoryListQuery,
-    CommodityCategoryResponse,
-    CommodityCategoryUpdateRequest,
+    CommodityMetadataResponse,
     CommodityRuleCodeReplaceRequest,
     CommodityStandardCreateRequest,
     CommodityStandardDetailResponse,
     CommodityStandardListQuery,
     CommodityStandardResponse,
     CommodityStandardUpdateRequest,
-    CommodityTypeCreateRequest,
-    CommodityTypeListQuery,
-    CommodityTypeResponse,
-    CommodityTypeUpdateRequest,
     PageResponse,
 )
-from app.modules.commodity.service import CommodityCategoryService, CommodityStandardService, CommodityTypeService
+from app.modules.commodity.service import CommodityMetadataService, CommodityStandardService
 
 router = APIRouter()
 
 
-@router.get("/categories", response_model=PageResponse[CommodityCategoryResponse])
-async def list_categories(
-    query: CommodityCategoryListQuery = Depends(),
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityCategoryService(db)
-    return await service.list_categories(query.keyword, query.status, query.page, query.page_size)
-
-
-@router.get("/categories/{category_id}", response_model=CommodityCategoryResponse)
-async def get_category_detail(
-    category_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityCategoryService(db)
-    return await service.get_category_detail(category_id)
-
-
-@router.post("/categories", response_model=CommodityCategoryResponse)
-async def create_category(
-    body: CommodityCategoryCreateRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityCategoryService(db)
-    return await service.create_category(body)
-
-
-@router.put("/categories/{category_id}", response_model=CommodityCategoryResponse)
-async def update_category(
-    category_id: int,
-    body: CommodityCategoryUpdateRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityCategoryService(db)
-    return await service.update_category(category_id, body)
-
-
-@router.get("/types", response_model=PageResponse[CommodityTypeResponse])
-async def list_types(
-    query: CommodityTypeListQuery = Depends(),
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityTypeService(db)
-    return await service.list_types(
-        query.category_id,
-        query.keyword,
-        query.status,
-        query.page,
-        query.page_size,
-    )
-
-
-@router.get("/types/{type_id}", response_model=CommodityTypeResponse)
-async def get_type_detail(
-    type_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityTypeService(db)
-    return await service.get_type_detail(type_id)
-
-
-@router.post("/types", response_model=CommodityTypeResponse)
-async def create_type(
-    body: CommodityTypeCreateRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityTypeService(db)
-    return await service.create_type(body)
-
-
-@router.put("/types/{type_id}", response_model=CommodityTypeResponse)
-async def update_type(
-    type_id: int,
-    body: CommodityTypeUpdateRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    service = CommodityTypeService(db)
-    return await service.update_type(type_id, body)
+@router.get("/metadata", response_model=CommodityMetadataResponse)
+async def get_commodity_metadata(db: AsyncSession = Depends(get_db)):
+    service = CommodityMetadataService(db)
+    return await service.get_metadata()
 
 
 @router.get("/standards", response_model=PageResponse[CommodityStandardResponse])
@@ -229,4 +148,3 @@ async def replace_handling_mode_rules(
     service = CommodityStandardService(db)
     await service.replace_handling_mode_rules(standard_id, body)
     return {"ok": True}
-

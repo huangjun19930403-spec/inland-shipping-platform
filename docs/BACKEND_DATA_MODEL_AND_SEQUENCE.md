@@ -1,25 +1,19 @@
-# BACKEND DATA MODEL AND SEQUENCE
+# Backend Data Model And Sequence
 
-## 1. 数据模型真值范围
+## 数据模型真值
 
-当前后端数据库真值以 `app/models/*` 为准，迁移链收口为单一初始迁移：  
-`alembic/versions/0001_initial_schema.py`。
+以 `app/models/*` 和 Alembic head 为准。最终迁移链保留历史迁移文件并以 `0006_final_legacy_cleanup` 删除废弃表。
 
-不包含历史链路：
+## 核心表分组
 
-- `ai_*`
-- `freight_candidate / freight_clue / freight_batch_task / freight_workflow*`
-- `freight_tms_inbound / manual_feedback`
-- `waterway / region_waterway_relation / region_address_relation`
+### 通用与字典
 
-## 2. 正式表分组
-
-### 2.1 通用与字典
 - `std_dict`
 - `std_dict_item`
 - `code_sequence`
 
-### 2.2 地址与空间
+### 地址与空间
+
 - `admin_region`
 - `admin_region_boundary`
 - `region`
@@ -32,8 +26,10 @@
 - `transport_node_packaging_form`
 - `transport_node_handling_mode`
 - `navigation_constraint_point`
+- `navigation_constraint_profile`
 
-### 2.3 货品
+### 货品
+
 - `commodity_category`
 - `commodity_type`
 - `commodity_standard`
@@ -45,7 +41,10 @@
 - `commodity_node_type_rule`
 - `commodity_handling_mode_rule`
 
-### 2.4 船舶
+货品分类和类型为标准货品依赖元数据，只通过 `/commodity/metadata` 提供只读聚合。
+
+### 船舶
+
 - `ship_profile`
 - `ship_capacity`
 - `ship_operation`
@@ -55,36 +54,53 @@
 - `ship_certificate_file`
 - `ship_name_history`
 - `ship_mmsi_history`
-- `ship_import_batch`
-- `ship_import_raw`
-- `ship_import_record`
-- `ship_dynamic`（扩展事实表，非当前主流程核心）
+- `ship_dynamic`
 
-### 2.5 正式货源
+船舶导入批次表已删除。后续如重新需要导入能力，应按轻量技术日志重新设计，不作为核心产品对象。
+
+### 货源采集
+
 - `freight`
 - `freight_contact`
 - `freight_source_attachment`
 - `freight_tag_relation`
+- `freight_source_inbound`
+- `freight_ai_parse_task`
+- `freight_clue`
+- `freight_candidate`
+- `freight_candidate_feedback`
 
-### 2.6 航线与方案
+手工录入直达正式货源；微信/TMS/批量原文进入来源接入，经通义千问解析后进入候选池，由人工确认生成正式货源。
+
+### 航线规划
+
 - `shipping_route`
 - `shipping_route_plan`
-- `shipping_route_plan_node`
-- `shipping_route_plan_segment`
-- `shipping_route_plan_segment_point`
+- `shipping_route_line`
+- `shipping_route_line_node`
+- `shipping_route_line_segment`
+- `shipping_route_line_track`
 
-### 2.7 统计与分析
-- `cargo_channel_daily`
-- `stat_cargo_daily`
-- `stat_cargo_city_daily`
-- `stat_cargo_flow_daily`
-- `stat_cargo_commodity_daily`
-- `stat_ship_city_daily`
-- `stat_ship_flow_daily`
-- `stat_job_run`
+### 数据分析
 
-### 2.8 审核与系统
+- `analysis_indicator_definition`
+- `analysis_bucket_definition`
+- `analysis_snapshot`
+- `analysis_job_run`
+- `fact_freight_daily`
+- `fact_freight_flow_daily`
+- `fact_freight_commodity_daily`
+- `fact_freight_price_daily`
+- `fact_ship_daily`
+- `fact_ship_flow_daily`
+- `fact_region_daily`
+
+旧 `stat_*`、`cargo_channel_daily`、`stat_job_run` 表已删除。
+
+### 审核与系统
+
 - `audit_task`
+- `audit_task_snapshot`
 - `audit_record`
 - `sys_user`
 - `sys_role`
@@ -99,162 +115,34 @@
 - `sys_login_log`
 - `system_config`
 
-## 2.9 system_config 元数据扩展（阶段 1 收口）
+## 编码序列
 
-`system_config` 已从简单 key-value 表扩展为配置中心元数据表，除原有
-`config_key/config_name/config_value/value_type_code/config_group_code` 外，补充：
+保留自动编号的业务对象：
 
-- `config_profile_code`：配置 profile（如 `SYSTEM/AMAP/HIFLEET/ES`）
-- `sensitive_flag`：是否敏感值（1 为敏感）
-- `encrypted_flag`：加密标记占位（本阶段仅元数据标记）
-- `editable_flag`：是否可编辑
-- `sort_order`：列表排序
-- `config_status_code`：配置状态（如 `ACTIVE`）
-- `last_test_status_code/last_test_message/last_tested_at`：连接测试结果占位
+- `REGION_CODE`
+- `NODE_CODE`
+- `NAV_CONSTRAINT_POINT_CODE`
+- `ROUTE_CODE`
+- `ROUTE_PLAN_CODE`
+- `ROUTE_LINE_CODE`
+- `COMMODITY_STANDARD_CODE`
+- `FREIGHT_NO`
+- `AUDIT_TASK_NO`
 
-说明：
+不再提供货品分类、货品类型、船舶导入批次的业务创建编号。
 
-- 阶段 1 不引入独立 profile 表，profile 仍由 `config_profile_code` 字段表达。
-- 运行时读取优先级由 `RuntimeConfigService` 负责：DB 优先 -> ENV/settings 回退 -> default -> EMPTY。
-- 连接测试由 `ConfigTestService` 执行，结果回写本表 `last_test_*` 字段。
+## 删除对象
 
-## 3. code_sequence 真值结构
+最终基线不再包含：
 
-`CodeSequence` 字段（`app/models/common.py`）：
-
-- `biz_code`（唯一）
-- `biz_name`
-- `target_table`
-- `target_column`
-- `prefix`
-- `date_format`
-- `separator`
-- `current_value`
-- `value_length`
-- `step`
-- `reset_rule`（`NONE`/`DAY`/`MONTH`/`YEAR`）
-- `is_enabled`
-- `remark`
-
-统一生成入口：
-
-- `CodeSequenceRepository.next_code`
-- `CodeSequenceService.next_code`
-
-生成规则：
-
-1. 按 `reset_rule` 判断是否重置序列
-2. `current_value += step`
-3. 按 `prefix + date_part + serial_part` 生成编码  
-   - `date_part` 由 `date_format` 决定  
-   - `serial_part` 按 `value_length` 左侧补零  
-   - `separator` 控制连接符
-
-## 4. 自动编号接入对象
-
-以下对象在创建时“未显式传编码”会走 `code_sequence` 自动生成：
-
-- `region.code` → `REGION_CODE`
-- `transport_node.code` → `NODE_CODE`
-- `navigation_constraint_point.code` → `NAV_CONSTRAINT_POINT_CODE`
-- `shipping_route.code` → `ROUTE_CODE`
-- `shipping_route_plan.plan_code` → `ROUTE_PLAN_CODE`
-- `commodity_category.code` → `COMMODITY_CATEGORY_CODE`
-- `commodity_type.code` → `COMMODITY_TYPE_CODE`
-- `commodity_standard.code` → `COMMODITY_STANDARD_CODE`
-- `freight.freight_no` → `FREIGHT_NO`
-- `audit_task.task_no` → `AUDIT_TASK_NO`
-- `ship_import_batch.batch_no` → `SHIP_IMPORT_BATCH_NO`
-
-## 5. 明确不接入自动编号
-
-- `admin_region.code`
-- `ship_profile.ais_id`
-- `ship_profile.current_mmsi`
-- `ship_certificate.certificate_no`
-- `sys_role.role_code`
-- `sys_permission.permission_code`
-- `sys_menu.menu_code`
-- `sys_data_scope.scope_code`
-
-## 6. 阶段 3D 航线地图 E2E 基线数据
-
-为保障航线地图 Playwright 验收稳定性，初始化链新增 `scripts/seed_route_map_e2e.py`。
-
-该脚本在不新增表结构、不改业务接口前提下，为以下既有表写入幂等测试基线：
-
-- `region`
-- `region_boundary_version`
-- `shipping_route`
-- `shipping_route_plan`
-- `shipping_route_plan_segment`
-- `shipping_route_plan_segment_point`
-
-关键业务标识：
-
-- `E2E_ROUTE_ORIGIN`
-- `E2E_ROUTE_DEST`
-- `E2E_ROUTE_MAP`
-- `E2E_ROUTE_PLAN_MAP`
-
-用途边界：
-
-- 仅用于本地开发、CI 与 E2E 自动化验证。
-- 不改变正式业务逻辑，不依赖固定自增 ID。
-- 通过业务编码与组合键幂等 upsert，重复执行不重复插入。
-
-## 7. 阶段 4B 航线产品化模型重构方向
-
-阶段 4B 审计结论见 `docs/STAGE_4B_ROUTE_PRODUCTIZATION_AUDIT.md`。
-
-当前航线模型可支撑基础 CRUD 与地图只读展示，但不应把 `shipping_route_plan_segment` 和 `shipping_route_plan_segment_point` 作为业务用户的主维护对象。后续模型演进建议：
-
-- 新增 `RoutePlanNode / RoutePlanStop`：表达用户维护的路径节点串。
-- 扩展 `shipping_route_plan_segment`：表达由相邻路径节点生成的航段结果，补充 `geometry_status / geometry_source / geometry_message / provider_code / generated_at` 等生成状态字段。
-- 保留旧的航段起终节点与约束点字段用于兼容历史数据，但前端主流程应隐藏。
-- 扩展通航约束点能力：优先新增 `NavigationConstraintProfile` 承载吨位、吃水、净空、宽度、规则 JSON 等约束能力字段。
-- 后续新增 `RouteSegmentConstraintImpact`：保存 geometry 生成后匹配到的通航约束影响结果。
-
-上述调整预计从后续 4D 起涉及 migration；阶段 4B 仅固化审计方案，不修改现有表结构。
-
-## 8. 阶段 4C 通航约束点 Profile
-
-阶段 4C 新增 `navigation_constraint_profile`，与 `navigation_constraint_point` 通过 `constraint_point_id` 一对一关联。
-
-模型分工：
-
-- `navigation_constraint_point`：维护约束点的空间位置和基础属性，例如编码、名称、约束类型、经纬度、有效期、风险等级和状态。
-- `navigation_constraint_profile`：维护约束能力，例如最大吨位、最大允许吃水、最小水深、富余水深、净空、船宽、船长、通行时间窗口、规则 JSON、规则说明和业务提示。
-
-业务边界：
-
-- `NavigationConstraintPoint` 不是 `TransportNode`，不具备装卸、中转、堆场等作业能力。
-- 后续 RoutePlanNode 可引用通航约束点作为路径节点来源，但不能把它当作运输作业节点。
-- 本阶段不做约束影响分析，不生成航段，不引入 RoutePlanNode。
-
-## 9. 阶段 4D RoutePlanNode 路径节点串
-
-阶段 4D 新增 `shipping_route_plan_node`，用于保存路径方案中的路径节点串。
-
-核心字段：
-
-- `plan_id`：所属路径方案。
-- `node_order`：节点顺序，从 1 开始连续。
-- `node_kind_code`：`REGION_ANCHOR/TRANSPORT_NODE/CONSTRAINT_POINT/MANUAL_POINT`。
-- `transport_node_id`：运输作业节点引用。
-- `constraint_point_id`：通航约束点引用。
-- `region_id`：区域锚点引用。
-- `longitude/latitude`：手工坐标点经纬度。
-- `next_transport_mode_code`：当前节点到下一个节点的运输方式。
-
-定位：
-
-- `shipping_route_plan_node` 是方案设计输入。
-- `shipping_route_plan_segment` 与 `shipping_route_plan_segment_point` 仍保留为结果/高级维护对象。
-- 阶段 4D 只做节点串与 preview，不生成真实航段。
-
-## Stage 4G 航线规划数据模型
-
-航线规划主模型已调整为：`shipping_route`、`shipping_route_plan`、`shipping_route_line`、`shipping_route_line_node`、`shipping_route_line_segment`、`shipping_route_line_track`。
-
-`shipping_route_plan_node`、`shipping_route_plan_segment`、`shipping_route_plan_segment_point` 已从 clean migration 中移除。新增编码序列 `ROUTE_LINE_CODE` 用于路线编码。
+- `ship_import_batch`
+- `ship_import_raw`
+- `ship_import_record`
+- `stat_cargo_daily`
+- `stat_cargo_city_daily`
+- `stat_cargo_flow_daily`
+- `stat_cargo_commodity_daily`
+- `cargo_channel_daily`
+- `stat_ship_city_daily`
+- `stat_ship_flow_daily`
+- `stat_job_run`

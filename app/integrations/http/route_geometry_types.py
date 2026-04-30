@@ -1,4 +1,4 @@
-"""路线几何查询/结果对象（非 AI 版本）。"""
+"""路线几何查询/结果对象。"""
 
 from __future__ import annotations
 

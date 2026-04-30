@@ -1,64 +1,41 @@
 # Inland Shipping Platform Backend
 
-非 AI 正式业务后端基线（模块化单体）。当前仅保留正式业务域：字典、系统、审核、地址、货品、船舶、货源、航线、分析。
+内河航运数据分析平台后端，采用 FastAPI + SQLAlchemy + Alembic 的模块化单体结构。当前基线覆盖基础数据、船舶、货源采集、航线规划、数据分析、审核治理和系统管理，支持本地一键重建 seed 并运行最终验收脚本。
 
-## 当前模块
+## Modules
 
-- `dictionary`
-- `system`（含 `auth`）
-- `audit`
-- `address`
-- `commodity`
-- `ship`
-- `freight`
-- `route`
-- `analysis`
+- `dictionary`: 字典、字典项、编码序列
+- `system` / `auth`: 登录、用户、角色、菜单、配置、日志
+- `audit`: 审核队列、对象快照、字段差异、审核记录
+- `address`: 行政区划、业务区域、运输节点、通航约束点
+- `commodity`: 货品分类/类型只读元数据、标准货品、别名和规则
+- `ship`: 船舶主档、尺度载重、运营、主体联系人、证照、历史
+- `freight`: 正式货源、来源接入、通义千问解析任务、候选确认
+- `route`: 航线、运输方案、路线结构、轨迹预览
+- `analysis`: 指标、事实表、快照、分析任务和图表/地图接口
 
-## 目录结构
-
-```text
-app/
-  core/                 # 配置、数据库、异常、日志、安全
-  integrations/         # amap / hifleet / es / http
-  models/               # ORM 真值
-  modules/              # 业务实现层（router/service/repository/schemas）
-  api/v1/               # 路由聚合装配层
-scripts/
-  seed_*.py             # 正式初始化链
-  seed_data/            # 正式初始化数据源
-alembic/
-docs/
-```
-
-## 环境变量
-
-- 复制 `.env.example` 为 `.env` 后再启动。
-- 变量说明与运行边界见文档：
-  - [BACKEND_OVERVIEW_AND_ARCHITECTURE.md](/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/docs/BACKEND_OVERVIEW_AND_ARCHITECTURE.md)
-  - [BACKEND_SEED_AND_INITIALIZATION.md](/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/docs/BACKEND_SEED_AND_INITIALIZATION.md)
-
-## Migration
+## Local Setup
 
 ```bash
 alembic upgrade head
-```
-
-## 正式 Seed 初始化
-
-```bash
 python -m scripts.seed_system_init
-```
-
-## 启动方式
-
-```bash
+python -m scripts.verify_local_acceptance
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 - OpenAPI: `http://127.0.0.1:8000/docs`
 - Health: `http://127.0.0.1:8000/health`
 
-## Docs 阅读顺序
+通义千问配置通过环境变量读取，seed 不写入真实密钥：
+
+```bash
+AI_PROVIDER=DASHSCOPE_QWEN
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+DASHSCOPE_MODEL=qwen-plus
+DASHSCOPE_API_KEY=...
+```
+
+## Final Docs
 
 1. [BACKEND_OVERVIEW_AND_ARCHITECTURE.md](/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/docs/BACKEND_OVERVIEW_AND_ARCHITECTURE.md)
 2. [BACKEND_DATA_MODEL_AND_SEQUENCE.md](/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/docs/BACKEND_DATA_MODEL_AND_SEQUENCE.md)

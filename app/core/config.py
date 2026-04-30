@@ -1,4 +1,4 @@
-"""应用基础配置（非 AI 模块化单体）。"""
+"""应用基础配置。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # 应用基础配置
     APP_NAME: str = "Inland Shipping Platform"
-    APP_VERSION: str = "3.0.0-non-ai-baseline"
+    APP_VERSION: str = "3.0.0"
     DEBUG: bool = True
 
     # 数据库

@@ -211,7 +211,6 @@ async def seed_analysis_samples() -> None:
                 await session.execute(
                     select(TransportNode)
                     .where(TransportNode.deleted_at.is_(None), TransportNode.status == 1)
-                    .where(~TransportNode.code.like("E2E%"), ~TransportNode.name.like("%E2E%"))
                     .order_by(TransportNode.is_hot_node.desc(), TransportNode.sort_order.asc(), TransportNode.id.asc())
                 )
             ).scalars().all()

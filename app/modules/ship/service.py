@@ -16,9 +16,6 @@ from app.modules.ship.repository import (
     ShipCapacityRepository,
     ShipCertificateRepository,
     ShipContactRepository,
-    ShipImportBatchRepository,
-    ShipImportRawRepository,
-    ShipImportRecordRepository,
     ShipMmsiHistoryRepository,
     ShipNameHistoryRepository,
     ShipOperationRepository,
@@ -32,10 +29,6 @@ from app.modules.ship.schemas import (
     ShipCertificateResponse,
     ShipContactResponse,
     ShipDetailResponse,
-    ShipImportBatchDetailResponse,
-    ShipImportBatchResponse,
-    ShipImportRawResponse,
-    ShipImportRecordResponse,
     ShipMmsiHistoryResponse,
     ShipNameHistoryResponse,
     ShipOperationResponse,
@@ -274,49 +267,6 @@ def _to_mmsi_history_response(row) -> ShipMmsiHistoryResponse:
         start_date=row.start_date,
         end_date=row.end_date,
         source_type_code=row.source_type_code,
-        created_at=row.created_at,
-    )
-
-
-def _to_import_batch_response(row) -> ShipImportBatchResponse:
-    return ShipImportBatchResponse(
-        id=row.id,
-        batch_no=row.batch_no,
-        source_type_code=row.source_type_code,
-        total_count=row.total_count,
-        success_count=row.success_count,
-        failed_count=row.failed_count,
-        status_code=row.status_code,
-        started_at=row.started_at,
-        finished_at=row.finished_at,
-        operator_id=row.operator_id,
-        remark=row.remark,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-    )
-
-
-def _to_import_raw_response(row) -> ShipImportRawResponse:
-    return ShipImportRawResponse(
-        id=row.id,
-        batch_id=row.batch_id,
-        row_no=row.row_no,
-        raw_payload_json=row.raw_payload_json,
-        parse_status_code=row.parse_status_code,
-        parse_message=row.parse_message,
-        created_at=row.created_at,
-    )
-
-
-def _to_import_record_response(row) -> ShipImportRecordResponse:
-    return ShipImportRecordResponse(
-        id=row.id,
-        batch_id=row.batch_id,
-        raw_id=row.raw_id,
-        ship_id=row.ship_id,
-        action_type_code=row.action_type_code,
-        result_code=row.result_code,
-        message=row.message,
         created_at=row.created_at,
     )
 
@@ -731,116 +681,3 @@ class ShipIdentityHistoryService:
         await self.db.commit()
         return _to_mmsi_history_response(row)
 
-
-class ShipImportService:
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-        self.batch_repo = ShipImportBatchRepository(db)
-        self.raw_repo = ShipImportRawRepository(db)
-        self.record_repo = ShipImportRecordRepository(db)
-        self.sequence_service = CodeSequenceService(db)
-
-    async def list_batches(
-        self,
-        keyword: str | None,
-        status_code: str | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[ShipImportBatchResponse]:
-        rows, total = await self.batch_repo.list_batches(keyword, status_code, page, page_size)
-        return PageResponse[ShipImportBatchResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_to_import_batch_response(item) for item in rows],
-        )
-
-    async def create_batch(self, payload) -> ShipImportBatchResponse:
-        data = payload.model_dump(exclude_none=True)
-        batch_no = (payload.batch_no or "").strip()
-        if not batch_no:
-            batch_no = await self.sequence_service.next_code("SHIP_IMPORT_BATCH_NO")
-        existed = await self.batch_repo.get_batch_by_no(batch_no)
-        if existed is not None:
-            raise ConflictError(f"batch_no already exists: {batch_no}")
-        data["batch_no"] = batch_no
-        row = await self.batch_repo.create_batch(data)
-        await self.db.commit()
-        return _to_import_batch_response(row)
-
-    async def get_batch_detail(self, batch_id: int) -> ShipImportBatchDetailResponse:
-        batch = await self.batch_repo.get_batch(batch_id)
-        if batch is None:
-            raise NotFoundError("ShipImportBatch", batch_id)
-        _, raw_total = await self.raw_repo.list_raw_records(batch_id, 1, 1)
-        _, record_total = await self.record_repo.list_import_records(batch_id, 1, 1)
-        return ShipImportBatchDetailResponse(
-            batch=_to_import_batch_response(batch),
-            raw_total=raw_total,
-            record_total=record_total,
-        )
-
-    async def list_raw_records(
-        self, batch_id: int, page: int, page_size: int
-    ) -> PageResponse[ShipImportRawResponse]:
-        batch = await self.batch_repo.get_batch(batch_id)
-        if batch is None:
-            raise NotFoundError("ShipImportBatch", batch_id)
-        rows, total = await self.raw_repo.list_raw_records(batch_id, page, page_size)
-        return PageResponse[ShipImportRawResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_to_import_raw_response(item) for item in rows],
-        )
-
-    async def list_import_records(
-        self, batch_id: int, page: int, page_size: int
-    ) -> PageResponse[ShipImportRecordResponse]:
-        batch = await self.batch_repo.get_batch(batch_id)
-        if batch is None:
-            raise NotFoundError("ShipImportBatch", batch_id)
-        rows, total = await self.record_repo.list_import_records(batch_id, page, page_size)
-        return PageResponse[ShipImportRecordResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_to_import_record_response(item) for item in rows],
-        )
-
-    async def create_raw_records(self, batch_id: int, items: list[dict]) -> list[ShipImportRawResponse]:
-        batch = await self.batch_repo.get_batch(batch_id)
-        if batch is None:
-            raise NotFoundError("ShipImportBatch", batch_id)
-        rows = await self.raw_repo.create_raw_records(batch_id, items)
-        await self.batch_repo.update_batch(
-            batch_id,
-            {
-                "total_count": (batch.total_count or 0) + len(rows),
-            },
-        )
-        await self.db.commit()
-        return [_to_import_raw_response(item) for item in rows]
-
-    async def create_import_record(self, payload) -> ShipImportRecordResponse:
-        batch = await self.batch_repo.get_batch(payload.batch_id)
-        if batch is None:
-            raise NotFoundError("ShipImportBatch", payload.batch_id)
-        row = await self.record_repo.create_import_record(payload.model_dump(exclude_none=True))
-        updates = {
-            "success_count": batch.success_count + (1 if row.result_code.upper() == "SUCCESS" else 0),
-            "failed_count": batch.failed_count + (1 if row.result_code.upper() != "SUCCESS" else 0),
-        }
-        await self.batch_repo.update_batch(payload.batch_id, updates)
-        await self.db.commit()
-        return _to_import_record_response(row)
-
-    async def update_import_record(self, record_id: int, payload) -> ShipImportRecordResponse:
-        updates = payload.model_dump(exclude_none=True)
-        if not updates:
-            raise ValidationError("no update fields provided")
-        row = await self.record_repo.update_import_record(record_id, updates)
-        if row is None:
-            raise NotFoundError("ShipImportRecord", record_id)
-        await self.db.commit()
-        return _to_import_record_response(row)

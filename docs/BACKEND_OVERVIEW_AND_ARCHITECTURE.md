@@ -1,175 +1,43 @@
-# BACKEND OVERVIEW AND ARCHITECTURE
+# Backend Overview And Architecture
 
-## 1. 项目定位
+## 定位
 
-`inland-shipping-platform` 后端为非 AI 正式业务基线，采用模块化单体结构。  
-当前仅保留正式业务域，不包含历史 AI/workflow/workspace/ship_analysis 链路。
+后端是内河航运数据分析平台的生产级本地基线。系统围绕真实业务对象建模，不再保留旧演示接口、旧统计表格接口或 E2E 命名主数据。
 
-## 2. 业务模块
+## 架构
 
-- `dictionary`：标准字典、字典项、编码序列查询与生成
-- `system`（含 `auth`）：登录认证、用户/角色/权限/菜单/配置/日志
-- `audit`：审核任务与审核记录
-- `address`：行政区划、业务区域、运输节点、约束点
-- `commodity`：货品分类、类型、标准货品及规则关系
-- `ship`：船舶主档、扩展信息、证书、导入批次
-- `freight`：正式货源主档、联系人、附件、标签
-- `route`：航线、方案、航段、点位与几何刷新；阶段 4B 已明确后续需从“手工维护航段/点位”重构为“路径节点串设计 + 自动生成航段 + geometry/约束结果展示”
-- `analysis`：统计结果查询与统计任务记录查询
+- `app/api/v1`: API router 聚合
+- `app/core`: 配置、数据库、异常、日志、安全
+- `app/integrations`: 地图、外部路径、通义千问、HTTP 客户端等集成边界
+- `app/models`: ORM 数据模型
+- `app/modules`: 各业务域的 router/service/repository/schema
+- `scripts`: seed、清理和验收脚本
+- `alembic`: 数据库迁移
 
-## 3. 目录结构
+## 业务域
 
-```text
-app/
-  api/v1/                  # API 聚合装配
-  core/                    # 配置、数据库、异常、日志、安全
-  integrations/            # amap / hifleet / es / http
-  models/                  # ORM 真值
-  modules/                 # 唯一正式业务实现层
-alembic/                   # 数据库迁移框架（单一初始迁移）
-scripts/                   # 正式 seed 初始化链
-scripts/seed_data/         # 正式初始化数据源
-docs/                      # 后端核心文档
-```
+- 基础数据：字典、行政区划、业务区域、运输节点、通航约束点、标准货品
+- 船舶管理：主档、尺度载重、AIS/MMSI、运营、主体联系人、证照、历史
+- 货源采集：正式货源、来源接入、通义千问解析任务、线索、候选、人工反馈
+- 航线规划：航线、运输方案、路线、路线节点、路线段、轨迹
+- 数据分析：指标定义、分桶、事实表、快照、任务、图表和地图接口
+- 审核治理：审核任务、对象快照、字段差异、审核记录
+- 系统管理：用户、角色、菜单、配置、日志
 
-## 4. 运行配置
+## 配置边界
 
-配置由 `app/core/config.py` 读取，环境变量模板见 `.env.example`。  
-核心配置分组：
+- 启动级配置来自环境变量和 `.env`。
+- `system_config` 仅保存运行期可维护配置和占位配置。
+- 敏感项如 `DASHSCOPE_API_KEY`、地图 key 通过接口脱敏展示，真实值优先从环境变量读取。
+- 前端地图配置通过 `/api/v1/system/frontend-map-config` 获取，不返回后端 WebService 密钥。
 
-- 基础：`APP_NAME`、`APP_VERSION`、`DEBUG`
-- 数据库：`DATABASE_URL`
-- 认证：`SECRET_KEY`、`ALGORITHM`、`ACCESS_TOKEN_EXPIRE_MINUTES`
-- 跨域：`ALLOWED_ORIGINS`
-- 外部集成：`ES_*`、`ES_R_*`、`ROUTE_AMAP_WEB_API_KEY`、`HIFLEET_*`
+## 初始化与验收
 
-`system` 模块提供 `RuntimeConfigService` 作为统一运行时读取入口，规则为：
-
-1. DB 优先：优先读取 `system_config` 中 `ACTIVE` 配置
-2. ENV/settings 回退：DB 无值或空值时回退 `settings`
-3. default 兜底：仍无值时使用调用方默认值
-
-说明：
-
-- 内部服务读取时可拿到敏感配置真实值（用于后续集成调用）。
-- API 响应层仍遵循敏感值隐藏规则，不泄露明文。
-- `RuntimeConfigService` 对敏感配置采用“双重识别”：`system_config.sensitive_flag` 元数据 + 后端内置敏感 key 集合。
-- 即使 DB 配置值为空并回退到 ENV，诊断接口仍会隐藏敏感值；隐藏只发生在 API 响应层，内部读取不受影响。
-- 当前阶段不包含连接测试执行与真实加密能力。
-
-`system` 模块新增 `ConfigTestService`，支持外部集成连接测试：
-
-- `AMAP`
-- `HIFLEET`（AMMS）
-- `ES_REALTIME`
-- `ES_HISTORY`
-
-测试结果直接写回 `system_config` 的 `last_test_status_code / last_test_message / last_tested_at`。当前阶段不新增测试日志表。
-
-外部集成配置 key 已统一收口在 `app/integrations/config_keys.py`，用于避免分散硬编码。
-
-阶段 2A 新增前端地图配置接口 `GET /api/v1/system/frontend-map-config`：
-
-- 地址/航线/分析等前端地图能力统一通过该接口获取浏览器地图加载配置。
-- 该接口仅返回 `AMAP_JS_API_KEY / AMAP_SECURITY_JS_CODE` 与默认中心点参数。
-- 不返回后端 `ROUTE_AMAP_WEB_API_KEY` 等 WebService 密钥。
-
-## 5. 启动与初始化
-
-本地最小流程：
+最终本地链路：
 
 1. `alembic upgrade head`
 2. `python -m scripts.seed_system_init`
-3. `uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
+3. `python -m scripts.verify_local_acceptance`
+4. `uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
 
-容器入口由 `docker/entrypoint.sh` 收口：
-
-1. 等待数据库连通（可配置重试）
-2. 执行迁移
-3. 执行正式 seed 链
-4. 启动 `uvicorn`
-
-## 5.1 请求追踪与错误诊断（阶段 4A）
-
-- 后端对每个请求透传或生成 `request_id`（`X-Request-ID`），并在响应头回写 `X-Request-ID`。
-- `AppException`、`RequestValidationError` 与未捕获异常响应均包含 `request_id` 字段，便于前后端联合排查。
-- 新增全局未捕获异常处理：
-  - 后端日志使用 `logger.exception(...)` 记录完整堆栈
-  - 日志包含 `request_id / method / path / client_ip`
-  - 对前端返回统一 `500000` 错误结构，不回传堆栈
-- `DEBUG=true` 时，500 响应 `data` 可包含 `exception_type / exception_message`，生产环境建议关闭 DEBUG。
-- 登录链路（`/auth/login -> /auth/me -> /auth/me/menus`）可通过同一个 `request_id` 在 Network 与后端日志中对齐定位。
-
-## 6. 外部依赖边界
-
-- AMap：航线几何刷新
-- HiFleet：水路路径能力（按开关启用）
-- Elasticsearch：统计查询与历史查询数据源
-
-1C-1 阶段已为 AMap / HiFleet / ES 客户端提供可选 `RuntimeConfigService` 注入能力：
-
-- 注入时：按 DB 优先、settings/.env 回退读取运行时配置。
-- 未注入时：保持原有 `settings` 读取路径，兼容现有调用点。
-
-外部依赖未配置不会改变后端正式业务模型语义，但会影响相关接口真实数据能力。
-
-## 7. 菜单与路由对齐约束
-
-- 菜单 seed 维护左侧导航和可见入口；隐藏详情页仍由前端静态路由维护。
-- `visible_flag=1` 且 `menu_type_code=MENU` 的 seed 菜单，需要在前端 `routes.ts` 中存在对应路由。
-- 目录分组使用 `menu_type_code=DIRECTORY`，用于导航层级归类，不强制绑定具体页面。
-- 详细规则见 `docs/MENU_ROUTE_SEED_ALIGNMENT.md`。
-
-## 8. 开发约束
-
-- 业务实现仅允许写入 `app/modules/*`
-- `app/api/v1` 仅做 router 聚合装配
-- 不恢复旧平铺 `services/repositories/schemas` 结构
-- 不恢复 AI/workflow/workspace/ship_analysis 历史域
-- 不在当前基线上新增与真值文档无关的业务表与业务模块
-
-## 9. 阶段 1 治理文档
-
-阶段 1 收口后，治理规则以以下文档为准：
-
-- `docs/STAGE_1_SYSTEM_GOVERNANCE_ACCEPTANCE.md`
-- `docs/ENV_RUNTIME_CONFIG_BOUNDARY.md`
-- `docs/MENU_ROUTE_SEED_ALIGNMENT.md`
-
-其中 `system` 模块承担配置中心、菜单管理、连接测试、运行时配置读取职责；`integrations` 通过可选注入 `RuntimeConfigService` 读取配置。
-
-## 10. 阶段 4B 航线产品化重构审计
-
-阶段 4B 完成航线模块产品化重构审计，结论为当前航线模块仍偏“数据库维护后台”，不适合作为最终路径方案设计工具。
-
-后续重构方向以 `docs/STAGE_4B_ROUTE_PRODUCTIZATION_AUDIT.md` 为准：
-
-- 航线仍表示商业起终区域对。
-- 路径方案应围绕路径节点串设计，而不是手工维护航段 ID/约束点 ID/排序。
-- 航段与航段点位应降级为生成结果或高级调试对象。
-- 通航约束点应作为独立基础数据管理，不应等同于运输作业节点。
-- 后续建议按 4C-4H 分阶段落地：通航约束点管理、RoutePlanNode、方案设计页、自动生成航段、geometry 状态、约束影响分析。
-
-## 11. 阶段 4C 通航约束点基础能力
-
-阶段 4C 新增 `NavigationConstraintProfile`，将通航约束点的空间基础信息与约束能力档案分层：
-
-- `NavigationConstraintPoint`：编码、名称、类型、行政区、经纬度、有效期、风险等级、状态。
-- `NavigationConstraintProfile`：吨位、吃水、水深、净空、船宽、船长、通行时间窗口、规则 JSON 和业务提示。
-
-该模块属于地址/基础数据能力，为后续 RoutePlanNode 和约束影响分析提供数据来源。本阶段不新增航线接口，不做路径规划，不做自动生成航段。
-
-## 12. 阶段 4D 路径节点串基础能力
-
-阶段 4D 新增 `ShippingRoutePlanNode`，作为路径方案设计的节点串底座：
-
-- 路径节点可引用区域锚点、运输节点、通航约束点或手工坐标点。
-- 后端提供 nodes 查询、整体替换、相邻节点航段 preview。
-- Preview 仅返回可生成航段的结构化说明，不创建真实航段，不生成 geometry。
-- 旧 `ShippingRoutePlanSegment / ShippingRoutePlanSegmentPoint` 接口继续保留，用于兼容现有地图展示与高级维护能力。
-
-该阶段是后续 4E 方案设计页和 4F 自动生成航段的前置基础。
-
-## Stage 4G 航线规划领域模型重构
-
-航线模块已从旧的 `RoutePlanNode / RoutePlanSegment / RoutePlanSegmentPoint` 主链路重构为 `Route -> Plan -> Line -> LineNode / LineSegment / LineTrack`。`Plan` 表达运输方案，`Line` 表达一条完整走法，地图预览读取已保存的 `LineTrack`。旧节点串和旧航段点位表已从 clean migration 中移除。
+`verify_local_acceptance` 会校验核心数据量、废弃表和废弃接口删除、菜单无旧入口、主业务数据无 `E2E_%` 编码。

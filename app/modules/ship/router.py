@@ -1,4 +1,4 @@
-"""ship 模块 router（含导入管理）。"""
+"""ship 模块 router。"""
 
 from __future__ import annotations
 
@@ -20,15 +20,6 @@ from app.modules.ship.schemas import (
     ShipContactResponse,
     ShipCreateRequest,
     ShipDetailResponse,
-    ShipImportBatchCreateRequest,
-    ShipImportBatchDetailResponse,
-    ShipImportBatchListQuery,
-    ShipImportBatchResponse,
-    ShipImportRawCreateRequest,
-    ShipImportRawListQuery,
-    ShipImportRawResponse,
-    ShipImportRecordListQuery,
-    ShipImportRecordResponse,
     ShipListQuery,
     ShipMmsiHistoryCreateRequest,
     ShipMmsiHistoryResponse,
@@ -48,7 +39,6 @@ from app.modules.ship.service import (
     ShipCertificateService,
     ShipContactService,
     ShipIdentityHistoryService,
-    ShipImportService,
     ShipOperationService,
     ShipOwnerService,
     ShipProfileService,
@@ -84,78 +74,6 @@ async def create_ship(
     _ = current_user
     service = ShipProfileService(db)
     return await service.create_ship(body)
-
-
-@router.get("/import/batches", response_model=PageResponse[ShipImportBatchResponse])
-async def list_import_batches(
-    query: ShipImportBatchListQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipImportService(db)
-    return await service.list_batches(query.keyword, query.status_code, query.page, query.page_size)
-
-
-@router.get("/import/batches/{batch_id}", response_model=ShipImportBatchDetailResponse)
-async def get_import_batch_detail(
-    batch_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipImportService(db)
-    return await service.get_batch_detail(batch_id)
-
-
-@router.post("/import/batches", response_model=ShipImportBatchResponse)
-async def create_import_batch(
-    body: ShipImportBatchCreateRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipImportService(db)
-    return await service.create_batch(body)
-
-
-@router.get("/import/batches/{batch_id}/raw-records", response_model=PageResponse[ShipImportRawResponse])
-async def list_import_raw_records(
-    batch_id: int,
-    query: ShipImportRawListQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipImportService(db)
-    return await service.list_raw_records(batch_id, query.page, query.page_size)
-
-
-@router.post("/import/batches/{batch_id}/raw-records", response_model=list[ShipImportRawResponse])
-async def create_import_raw_records(
-    batch_id: int,
-    body: ShipImportRawCreateRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipImportService(db)
-    return await service.create_raw_records(
-        batch_id=batch_id,
-        items=[item.model_dump(exclude_none=True) for item in body.items],
-    )
-
-
-@router.get("/import/batches/{batch_id}/records", response_model=PageResponse[ShipImportRecordResponse])
-async def list_import_records(
-    batch_id: int,
-    query: ShipImportRecordListQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShipImportService(db)
-    return await service.list_import_records(batch_id, query.page, query.page_size)
 
 
 @router.get("/statistics/overview", response_model=ShipStatisticsOverviewResponse)

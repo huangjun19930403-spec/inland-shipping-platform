@@ -53,29 +53,6 @@ class CommodityCategoryRepository:
         ).scalars().all()
         return list(items), total
 
-    async def get_category(self, category_id: int) -> CommodityCategory | None:
-        return await self.db.scalar(select(CommodityCategory).where(CommodityCategory.id == category_id))
-
-    async def get_category_by_code(self, code: str) -> CommodityCategory | None:
-        return await self.db.scalar(select(CommodityCategory).where(CommodityCategory.code == code))
-
-    async def create_category(self, data: dict[str, Any]) -> CommodityCategory:
-        entity = CommodityCategory(**data)
-        self.db.add(entity)
-        await self.db.flush()
-        await self.db.refresh(entity)
-        return entity
-
-    async def update_category(self, category_id: int, data: dict[str, Any]) -> CommodityCategory | None:
-        entity = await self.get_category(category_id)
-        if entity is None:
-            return None
-        for key, value in data.items():
-            setattr(entity, key, value)
-        await self.db.flush()
-        await self.db.refresh(entity)
-        return entity
-
 
 class CommodityTypeRepository:
     def __init__(self, db: AsyncSession) -> None:
@@ -111,29 +88,6 @@ class CommodityTypeRepository:
             )
         ).scalars().all()
         return list(items), total
-
-    async def get_type(self, type_id: int) -> CommodityType | None:
-        return await self.db.scalar(select(CommodityType).where(CommodityType.id == type_id))
-
-    async def get_type_by_code(self, code: str) -> CommodityType | None:
-        return await self.db.scalar(select(CommodityType).where(CommodityType.code == code))
-
-    async def create_type(self, data: dict[str, Any]) -> CommodityType:
-        entity = CommodityType(**data)
-        self.db.add(entity)
-        await self.db.flush()
-        await self.db.refresh(entity)
-        return entity
-
-    async def update_type(self, type_id: int, data: dict[str, Any]) -> CommodityType | None:
-        entity = await self.get_type(type_id)
-        if entity is None:
-            return None
-        for key, value in data.items():
-            setattr(entity, key, value)
-        await self.db.flush()
-        await self.db.refresh(entity)
-        return entity
 
 
 class CommodityStandardRepository:
@@ -389,4 +343,3 @@ class CommodityStandardRepository:
             CommodityHandlingModeRule.handling_mode_code,
             standard_id,
         )
-

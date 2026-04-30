@@ -1,4 +1,4 @@
-"""系统初始化脚本骨架（非 AI 版本）。"""
+"""系统初始化脚本。"""
 
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ from scripts.seed_freight_samples import seed_freight_samples
 from scripts.seed_analysis_samples import seed_analysis_samples
 from scripts.seed_audit_samples import seed_audit_samples
 from scripts.seed_navigation_constraints import seed_navigation_constraints
-from scripts.seed_route_map_e2e import seed_route_map_e2e
+from scripts.seed_route_samples import seed_route_samples
 from scripts.seed_ship_samples import seed_ship_samples
 from scripts.seed_system_base import seed_system_base
+from scripts.purge_legacy_e2e_data import purge_legacy_e2e_data
 
 
 async def seed_system_init() -> None:
@@ -26,13 +27,14 @@ async def seed_system_init() -> None:
     await seed_commodity_taxonomy()
     await seed_commodity_standards()
     await seed_foundation_samples()
+    await purge_legacy_e2e_data()
     await seed_ship_samples()
     await seed_freight_samples()
     await seed_analysis_samples()
     await seed_system_base()
     await seed_audit_samples()
     await seed_navigation_constraints()
-    await seed_route_map_e2e()
+    await seed_route_samples()
 
 
 if __name__ == "__main__":

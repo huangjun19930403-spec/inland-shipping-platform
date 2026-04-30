@@ -17,27 +17,6 @@ class PageResponse(BaseModel, Generic[T]):
     items: list[T]
 
 
-class CommodityCategoryListQuery(BaseModel):
-    keyword: str | None = None
-    status: int | None = Field(default=None, ge=0, le=1)
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=20, ge=1, le=500)
-
-
-class CommodityCategoryCreateRequest(BaseModel):
-    code: str | None = Field(default=None, max_length=32)
-    name: str = Field(min_length=1, max_length=128)
-    description: str | None = Field(default=None, max_length=512)
-    sort_order: int = 0
-
-
-class CommodityCategoryUpdateRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=128)
-    description: str | None = Field(default=None, max_length=512)
-    sort_order: int | None = None
-    audit_status: str | None = None
-
-
 class CommodityCategoryResponse(BaseModel):
     id: int
     code: str
@@ -47,30 +26,6 @@ class CommodityCategoryResponse(BaseModel):
     audit_status: str
     created_at: datetime
     updated_at: datetime
-
-
-class CommodityTypeListQuery(BaseModel):
-    category_id: int | None = None
-    keyword: str | None = None
-    status: int | None = Field(default=None, ge=0, le=1)
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=20, ge=1, le=500)
-
-
-class CommodityTypeCreateRequest(BaseModel):
-    category_id: int
-    code: str | None = Field(default=None, max_length=32)
-    name: str = Field(min_length=1, max_length=128)
-    description: str | None = Field(default=None, max_length=512)
-    sort_order: int = 0
-
-
-class CommodityTypeUpdateRequest(BaseModel):
-    category_id: int | None = None
-    name: str | None = Field(default=None, min_length=1, max_length=128)
-    description: str | None = Field(default=None, max_length=512)
-    sort_order: int | None = None
-    audit_status: str | None = None
 
 
 class CommodityTypeResponse(BaseModel):
@@ -83,6 +38,11 @@ class CommodityTypeResponse(BaseModel):
     audit_status: str
     created_at: datetime
     updated_at: datetime
+
+
+class CommodityMetadataResponse(BaseModel):
+    categories: list[CommodityCategoryResponse]
+    types: list[CommodityTypeResponse]
 
 
 class CommodityStandardListQuery(BaseModel):
