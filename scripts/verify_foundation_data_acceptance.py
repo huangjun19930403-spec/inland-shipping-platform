@@ -18,9 +18,10 @@ from app.models.address import AdminRegion, AdminRegionBoundary, NavigationConst
 from app.models.commodity import CommodityStandard
 from app.models.common import CodeSequence
 from app.models.dictionary import StdDict, StdDictItem
-from app.modules.address.schemas import TransportNodeCreateRequest
+from app.modules.address.schemas import AddressMapCandidate, TransportNodeCreateRequest
 from app.modules.address.service import AdminRegionService, AddressMapService, BusinessRegionService
 from app.modules.commodity.service import CommodityStandardService
+from app.modules.dictionary.service import CodeSequenceService
 from main import app
 
 
@@ -59,6 +60,15 @@ def _result(name: str, ok: bool, detail: str) -> CheckResult:
     return CheckResult(name=name, ok=ok, detail=detail)
 
 
+def _find_route(path: str, method: str) -> APIRoute | None:
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path == path and method.upper() in route.methods:
+            return route
+    return None
+
+
 def _is_renderable_geojson(value: object) -> bool:
     if not isinstance(value, dict):
         return False
@@ -76,6 +86,19 @@ def _is_renderable_geojson(value: object) -> bool:
             for feature in features
         )
     return False
+
+
+async def _duplicate_values(session, model, *columns) -> list[str]:
+    rows = (
+        await session.execute(
+            select(*columns, func.count())
+            .select_from(model)
+            .group_by(*columns)
+            .having(func.count() > 1)
+            .limit(10)
+        )
+    ).all()
+    return ["/".join(str(value) for value in row[:-1]) for row in rows]
 
 
 async def verify() -> list[CheckResult]:
@@ -102,6 +125,25 @@ async def verify() -> list[CheckResult]:
             "foundation routes require login",
             not unauthenticated,
             "none" if not unauthenticated else ", ".join(sorted(set(unauthenticated))),
+        )
+    )
+
+    code_sequence_write_routes = [
+        ("/api/v1/dictionary/code-sequences", "POST"),
+        ("/api/v1/dictionary/code-sequences/{business_code}", "PUT"),
+    ]
+    missing_or_open_routes = []
+    for path, method in code_sequence_write_routes:
+        route = _find_route(path, method)
+        if route is None:
+            missing_or_open_routes.append(f"{method} {path}:missing")
+        elif not _route_requires_auth(route):
+            missing_or_open_routes.append(f"{method} {path}:no-auth")
+    results.append(
+        _result(
+            "code sequence write routes exist and require login",
+            not missing_or_open_routes,
+            "ok" if not missing_or_open_routes else ", ".join(missing_or_open_routes),
         )
     )
 
@@ -135,6 +177,22 @@ async def verify() -> list[CheckResult]:
                     "NAV_CONSTRAINT_POINT_CODE",
                 },
                 ", ".join(sorted(sequence_codes)),
+            )
+        )
+
+        sequence_before = await session.scalar(
+            select(CodeSequence.current_value).where(CodeSequence.biz_code == "COMMODITY_STANDARD_CODE")
+        )
+        generated_code = await CodeSequenceService(session).next_code("COMMODITY_STANDARD_CODE")
+        await session.rollback()
+        sequence_after = await session.scalar(
+            select(CodeSequence.current_value).where(CodeSequence.biz_code == "COMMODITY_STANDARD_CODE")
+        )
+        results.append(
+            _result(
+                "code sequence can generate without acceptance pollution",
+                bool(generated_code) and sequence_before == sequence_after,
+                f"generated={generated_code}, before={sequence_before}, after={sequence_after}",
             )
         )
 
@@ -275,6 +333,31 @@ async def verify() -> list[CheckResult]:
             )
         )
 
+        candidate_fields = set(AddressMapCandidate.model_fields)
+        required_candidate_fields = {
+            "longitude",
+            "latitude",
+            "formatted_address",
+            "province_name",
+            "province_code",
+            "city_name",
+            "city_code",
+            "district_name",
+            "district_code",
+            "adcode",
+            "city_region_id",
+            "provider",
+            "confidence",
+            "level",
+        }
+        results.append(
+            _result(
+                "address map candidate exposes standard fields only",
+                candidate_fields == required_candidate_fields,
+                ", ".join(sorted(candidate_fields)),
+            )
+        )
+
         district_seed = await session.scalar(
             select(AdminRegion)
             .where(AdminRegion.level == 3, AdminRegion.status == 1, AdminRegion.city_code.is_not(None))
@@ -385,6 +468,34 @@ async def verify() -> list[CheckResult]:
                 f"{current.geometry_json.get('type') if current else '-'}"
             )
         results.append(_result("business region current boundary returns GeoJSON", business_boundary_ok, business_boundary_detail))
+
+        duplicate_checks = {
+            "code_sequence.biz_code": await _duplicate_values(session, CodeSequence, CodeSequence.biz_code),
+            "std_dict.dict_code": await _duplicate_values(session, StdDict, StdDict.dict_code),
+            "std_dict_item.dict_id/item_code": await _duplicate_values(
+                session,
+                StdDictItem,
+                StdDictItem.dict_id,
+                StdDictItem.item_code,
+            ),
+            "admin_region.code": await _duplicate_values(session, AdminRegion, AdminRegion.code),
+            "commodity_standard.code": await _duplicate_values(session, CommodityStandard, CommodityStandard.code),
+            "region.code": await _duplicate_values(session, Region, Region.code),
+            "transport_node.code": await _duplicate_values(session, TransportNode, TransportNode.code),
+            "navigation_constraint_point.code": await _duplicate_values(
+                session,
+                NavigationConstraintPoint,
+                NavigationConstraintPoint.code,
+            ),
+        }
+        duplicate_failures = {key: value for key, value in duplicate_checks.items() if value}
+        results.append(
+            _result(
+                "seed idempotency unique codes stay clean",
+                not duplicate_failures,
+                str(duplicate_failures or "none"),
+            )
+        )
 
     return results
 
