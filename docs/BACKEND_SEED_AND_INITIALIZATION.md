@@ -56,4 +56,4 @@ python -m scripts.verify_local_acceptance
 - 菜单不包含旧入口。
 - 主业务数据不包含 `E2E_%` 编码。
 
-`scripts.verify_foundation_data_acceptance` 是基础数据专项只读验收脚本，检查基础数据 router 登录约束、自动编码序列、单位和危险等级字典、标准货品单位 code、节点城市关系和基础样例数据。
+`scripts.verify_foundation_data_acceptance` 是基础数据专项只读验收脚本，检查基础数据 router 登录约束、自动编码序列、单位和危险等级字典、标准货品单位 code、标准货品结构化中文规则、节点城市关系和基础样例数据。

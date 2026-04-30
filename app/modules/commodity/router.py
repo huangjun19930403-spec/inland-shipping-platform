@@ -10,8 +10,9 @@ from app.core.security import get_current_user
 from app.modules.commodity.schemas import (
     CommodityAliasReplaceRequest,
     CommodityAttributeReplaceRequest,
+    CommodityDecisionRuleReplaceRequest,
+    CommodityDefaultRuleReplaceRequest,
     CommodityMetadataResponse,
-    CommodityRuleCodeReplaceRequest,
     CommodityStandardCreateRequest,
     CommodityStandardDetailResponse,
     CommodityStandardListQuery,
@@ -99,7 +100,7 @@ async def replace_attributes(
 @router.put("/standards/{standard_id}/packaging-forms")
 async def replace_packaging_forms(
     standard_id: int,
-    body: CommodityRuleCodeReplaceRequest,
+    body: CommodityDefaultRuleReplaceRequest,
     db: AsyncSession = Depends(get_db),
 ):
     service = CommodityStandardService(db)
@@ -110,7 +111,7 @@ async def replace_packaging_forms(
 @router.put("/standards/{standard_id}/transport-modes")
 async def replace_transport_modes(
     standard_id: int,
-    body: CommodityRuleCodeReplaceRequest,
+    body: CommodityDefaultRuleReplaceRequest,
     db: AsyncSession = Depends(get_db),
 ):
     service = CommodityStandardService(db)
@@ -121,7 +122,7 @@ async def replace_transport_modes(
 @router.put("/standards/{standard_id}/ship-type-rules")
 async def replace_ship_type_rules(
     standard_id: int,
-    body: CommodityRuleCodeReplaceRequest,
+    body: CommodityDecisionRuleReplaceRequest,
     db: AsyncSession = Depends(get_db),
 ):
     service = CommodityStandardService(db)
@@ -132,7 +133,7 @@ async def replace_ship_type_rules(
 @router.put("/standards/{standard_id}/node-type-rules")
 async def replace_node_type_rules(
     standard_id: int,
-    body: CommodityRuleCodeReplaceRequest,
+    body: CommodityDecisionRuleReplaceRequest,
     db: AsyncSession = Depends(get_db),
 ):
     service = CommodityStandardService(db)
@@ -143,7 +144,7 @@ async def replace_node_type_rules(
 @router.put("/standards/{standard_id}/handling-mode-rules")
 async def replace_handling_mode_rules(
     standard_id: int,
-    body: CommodityRuleCodeReplaceRequest,
+    body: CommodityDecisionRuleReplaceRequest,
     db: AsyncSession = Depends(get_db),
 ):
     service = CommodityStandardService(db)

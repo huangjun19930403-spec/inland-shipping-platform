@@ -93,8 +93,40 @@ class CommodityAttributeReplaceRequest(BaseModel):
     attributes: list[CommodityAttributeItem] = Field(default_factory=list)
 
 
-class CommodityRuleCodeReplaceRequest(BaseModel):
-    codes: list[str] = Field(default_factory=list)
+class CommodityAttributeResponse(CommodityAttributeItem):
+    attribute_value_type_name: str | None = None
+
+
+class CommodityDefaultRuleItem(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    is_default: bool = False
+
+
+class CommodityDefaultRuleReplaceRequest(BaseModel):
+    items: list[CommodityDefaultRuleItem] = Field(default_factory=list)
+
+
+class CommodityDecisionRuleItem(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    allow_flag: bool = True
+    rule_desc: str | None = Field(default=None, max_length=256)
+
+
+class CommodityDecisionRuleReplaceRequest(BaseModel):
+    items: list[CommodityDecisionRuleItem] = Field(default_factory=list)
+
+
+class CommodityDefaultRuleResponse(BaseModel):
+    code: str
+    name: str | None
+    is_default: bool
+
+
+class CommodityDecisionRuleResponse(BaseModel):
+    code: str
+    name: str | None
+    allow_flag: bool
+    rule_desc: str | None
 
 
 class CommodityStandardResponse(BaseModel):
@@ -119,9 +151,9 @@ class CommodityStandardResponse(BaseModel):
 class CommodityStandardDetailResponse(BaseModel):
     standard: CommodityStandardResponse
     aliases: list[str]
-    attributes: list[CommodityAttributeItem]
-    packaging_form_codes: list[str]
-    transport_mode_codes: list[str]
-    ship_type_codes: list[str]
-    node_type_codes: list[str]
-    handling_mode_codes: list[str]
+    attributes: list[CommodityAttributeResponse]
+    packaging_forms: list[CommodityDefaultRuleResponse]
+    transport_modes: list[CommodityDefaultRuleResponse]
+    ship_type_rules: list[CommodityDecisionRuleResponse]
+    node_type_rules: list[CommodityDecisionRuleResponse]
+    handling_mode_rules: list[CommodityDecisionRuleResponse]

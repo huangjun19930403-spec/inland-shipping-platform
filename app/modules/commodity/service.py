@@ -15,9 +15,10 @@ from app.modules.dictionary.labels import DictLabelMap, dict_label, load_dict_la
 from app.modules.commodity.schemas import (
     CommodityAliasReplaceRequest,
     CommodityAttributeReplaceRequest,
+    CommodityDecisionRuleReplaceRequest,
+    CommodityDefaultRuleReplaceRequest,
     CommodityMetadataResponse,
     CommodityCategoryResponse,
-    CommodityRuleCodeReplaceRequest,
     CommodityStandardCreateRequest,
     CommodityStandardDetailResponse,
     CommodityStandardResponse,
@@ -74,6 +75,42 @@ def _standard_response(row, labels: DictLabelMap | None = None) -> CommodityStan
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _normalize_default_rule_items(payload: CommodityDefaultRuleReplaceRequest) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen_codes: set[str] = set()
+    default_assigned = False
+    has_explicit_default = any(item.is_default for item in payload.items)
+    for index, item in enumerate(payload.items):
+        code = item.code.strip()
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        is_default = item.is_default and not default_assigned
+        if not has_explicit_default and index == 0:
+            is_default = True
+        default_assigned = default_assigned or is_default
+        items.append({"code": code, "is_default": is_default})
+    return items
+
+
+def _normalize_decision_rule_items(payload: CommodityDecisionRuleReplaceRequest) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen_codes: set[str] = set()
+    for item in payload.items:
+        code = item.code.strip()
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        items.append(
+            {
+                "code": code,
+                "allow_flag": item.allow_flag,
+                "rule_desc": item.rule_desc.strip() if item.rule_desc else None,
+            }
+        )
+    return items
 
 
 class CommodityMetadataService:
@@ -153,8 +190,23 @@ class CommodityStandardService:
         attributes = await self.repo.list_attributes(standard_id)
         labels = await load_dict_label_map(
             self.db,
-            ["COMMODITY_UNIT", "DANGEROUS_GOODS_LEVEL", "AUDIT_STATUS"],
+            [
+                "COMMODITY_UNIT",
+                "DANGEROUS_GOODS_LEVEL",
+                "AUDIT_STATUS",
+                "PACKAGING_FORM",
+                "TRANSPORT_MODE_ELEMENT",
+                "SHIP_TYPE",
+                "NODE_TYPE",
+                "HANDLING_MODE",
+                "VALUE_TYPE",
+            ],
         )
+        packaging_forms = await self.repo.list_packaging_forms(standard_id)
+        transport_modes = await self.repo.list_transport_modes(standard_id)
+        ship_type_rules = await self.repo.list_ship_type_rules(standard_id)
+        node_type_rules = await self.repo.list_node_type_rules(standard_id)
+        handling_mode_rules = await self.repo.list_handling_mode_rules(standard_id)
         return CommodityStandardDetailResponse(
             standard=_standard_response(item, labels),
             aliases=await self.repo.list_aliases(standard_id),
@@ -163,6 +215,9 @@ class CommodityStandardService:
                     "attribute_code": attr.attribute_code,
                     "attribute_name": attr.attribute_name,
                     "attribute_value_type_code": attr.attribute_value_type_code,
+                    "attribute_value_type_name": dict_label(
+                        labels, "VALUE_TYPE", attr.attribute_value_type_code
+                    ),
                     "attribute_unit": attr.attribute_unit,
                     "is_required": attr.is_required,
                     "default_value": attr.default_value,
@@ -171,11 +226,49 @@ class CommodityStandardService:
                 }
                 for attr in attributes
             ],
-            packaging_form_codes=await self.repo.list_packaging_form_codes(standard_id),
-            transport_mode_codes=await self.repo.list_transport_mode_codes(standard_id),
-            ship_type_codes=await self.repo.list_ship_type_codes(standard_id),
-            node_type_codes=await self.repo.list_node_type_codes(standard_id),
-            handling_mode_codes=await self.repo.list_handling_mode_codes(standard_id),
+            packaging_forms=[
+                {
+                    "code": row.packaging_form_code,
+                    "name": dict_label(labels, "PACKAGING_FORM", row.packaging_form_code),
+                    "is_default": row.is_default,
+                }
+                for row in packaging_forms
+            ],
+            transport_modes=[
+                {
+                    "code": row.transport_mode_element_code,
+                    "name": dict_label(labels, "TRANSPORT_MODE_ELEMENT", row.transport_mode_element_code),
+                    "is_default": row.is_default,
+                }
+                for row in transport_modes
+            ],
+            ship_type_rules=[
+                {
+                    "code": row.ship_type_code,
+                    "name": dict_label(labels, "SHIP_TYPE", row.ship_type_code),
+                    "allow_flag": row.allow_flag,
+                    "rule_desc": row.rule_desc,
+                }
+                for row in ship_type_rules
+            ],
+            node_type_rules=[
+                {
+                    "code": row.node_type_code,
+                    "name": dict_label(labels, "NODE_TYPE", row.node_type_code),
+                    "allow_flag": row.allow_flag,
+                    "rule_desc": row.rule_desc,
+                }
+                for row in node_type_rules
+            ],
+            handling_mode_rules=[
+                {
+                    "code": row.handling_mode_code,
+                    "name": dict_label(labels, "HANDLING_MODE", row.handling_mode_code),
+                    "allow_flag": row.allow_flag,
+                    "rule_desc": row.rule_desc,
+                }
+                for row in handling_mode_rules
+            ],
         )
 
     async def replace_aliases(self, standard_id: int, payload: CommodityAliasReplaceRequest) -> None:
@@ -193,32 +286,32 @@ class CommodityStandardService:
         )
         await self.db.commit()
 
-    async def replace_packaging_forms(self, standard_id: int, payload: CommodityRuleCodeReplaceRequest) -> None:
+    async def replace_packaging_forms(self, standard_id: int, payload: CommodityDefaultRuleReplaceRequest) -> None:
         if await self.repo.get_standard(standard_id) is None:
             raise NotFoundError("CommodityStandard", standard_id)
-        await self.repo.replace_packaging_forms(standard_id, payload.codes)
+        await self.repo.replace_packaging_forms(standard_id, _normalize_default_rule_items(payload))
         await self.db.commit()
 
-    async def replace_transport_modes(self, standard_id: int, payload: CommodityRuleCodeReplaceRequest) -> None:
+    async def replace_transport_modes(self, standard_id: int, payload: CommodityDefaultRuleReplaceRequest) -> None:
         if await self.repo.get_standard(standard_id) is None:
             raise NotFoundError("CommodityStandard", standard_id)
-        await self.repo.replace_transport_modes(standard_id, payload.codes)
+        await self.repo.replace_transport_modes(standard_id, _normalize_default_rule_items(payload))
         await self.db.commit()
 
-    async def replace_ship_type_rules(self, standard_id: int, payload: CommodityRuleCodeReplaceRequest) -> None:
+    async def replace_ship_type_rules(self, standard_id: int, payload: CommodityDecisionRuleReplaceRequest) -> None:
         if await self.repo.get_standard(standard_id) is None:
             raise NotFoundError("CommodityStandard", standard_id)
-        await self.repo.replace_ship_type_rules(standard_id, payload.codes)
+        await self.repo.replace_ship_type_rules(standard_id, _normalize_decision_rule_items(payload))
         await self.db.commit()
 
-    async def replace_node_type_rules(self, standard_id: int, payload: CommodityRuleCodeReplaceRequest) -> None:
+    async def replace_node_type_rules(self, standard_id: int, payload: CommodityDecisionRuleReplaceRequest) -> None:
         if await self.repo.get_standard(standard_id) is None:
             raise NotFoundError("CommodityStandard", standard_id)
-        await self.repo.replace_node_type_rules(standard_id, payload.codes)
+        await self.repo.replace_node_type_rules(standard_id, _normalize_decision_rule_items(payload))
         await self.db.commit()
 
-    async def replace_handling_mode_rules(self, standard_id: int, payload: CommodityRuleCodeReplaceRequest) -> None:
+    async def replace_handling_mode_rules(self, standard_id: int, payload: CommodityDecisionRuleReplaceRequest) -> None:
         if await self.repo.get_standard(standard_id) is None:
             raise NotFoundError("CommodityStandard", standard_id)
-        await self.repo.replace_handling_mode_rules(standard_id, payload.codes)
+        await self.repo.replace_handling_mode_rules(standard_id, _normalize_decision_rule_items(payload))
         await self.db.commit()

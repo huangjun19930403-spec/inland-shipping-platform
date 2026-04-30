@@ -199,86 +199,101 @@ class CommodityStandardRepository:
             )
         await self.db.flush()
 
-    async def replace_packaging_forms(self, standard_id: int, codes: list[str]) -> None:
+    async def replace_packaging_forms(self, standard_id: int, items: list[dict[str, Any]]) -> None:
         await self.db.execute(
             delete(CommodityPackagingForm).where(CommodityPackagingForm.commodity_standard_id == standard_id)
         )
         now = datetime.utcnow()
-        for idx, code in enumerate(codes):
+        for item in items:
+            code = str(item.get("code") or "").strip()
+            if not code:
+                continue
             self.db.add(
                 CommodityPackagingForm(
                     commodity_standard_id=standard_id,
                     packaging_form_code=code,
-                    is_default=idx == 0,
+                    is_default=bool(item.get("is_default", False)),
                     created_at=now,
                 )
             )
         await self.db.flush()
 
-    async def replace_transport_modes(self, standard_id: int, codes: list[str]) -> None:
+    async def replace_transport_modes(self, standard_id: int, items: list[dict[str, Any]]) -> None:
         await self.db.execute(
             delete(CommodityTransportMode).where(CommodityTransportMode.commodity_standard_id == standard_id)
         )
         now = datetime.utcnow()
-        for idx, code in enumerate(codes):
+        for item in items:
+            code = str(item.get("code") or "").strip()
+            if not code:
+                continue
             self.db.add(
                 CommodityTransportMode(
                     commodity_standard_id=standard_id,
                     transport_mode_element_code=code,
-                    is_default=idx == 0,
+                    is_default=bool(item.get("is_default", False)),
                     created_at=now,
                 )
             )
         await self.db.flush()
 
-    async def replace_ship_type_rules(self, standard_id: int, codes: list[str]) -> None:
+    async def replace_ship_type_rules(self, standard_id: int, items: list[dict[str, Any]]) -> None:
         await self.db.execute(
             delete(CommodityShipTypeRule).where(CommodityShipTypeRule.commodity_standard_id == standard_id)
         )
         now = datetime.utcnow()
-        for code in codes:
+        for item in items:
+            code = str(item.get("code") or "").strip()
+            if not code:
+                continue
             self.db.add(
                 CommodityShipTypeRule(
                     commodity_standard_id=standard_id,
                     ship_type_code=code,
-                    allow_flag=True,
-                    rule_desc=None,
+                    allow_flag=bool(item.get("allow_flag", True)),
+                    rule_desc=item.get("rule_desc"),
                     created_at=now,
                 )
             )
         await self.db.flush()
 
-    async def replace_node_type_rules(self, standard_id: int, codes: list[str]) -> None:
+    async def replace_node_type_rules(self, standard_id: int, items: list[dict[str, Any]]) -> None:
         await self.db.execute(
             delete(CommodityNodeTypeRule).where(CommodityNodeTypeRule.commodity_standard_id == standard_id)
         )
         now = datetime.utcnow()
-        for code in codes:
+        for item in items:
+            code = str(item.get("code") or "").strip()
+            if not code:
+                continue
             self.db.add(
                 CommodityNodeTypeRule(
                     commodity_standard_id=standard_id,
                     node_type_code=code,
-                    allow_flag=True,
-                    rule_desc=None,
+                    allow_flag=bool(item.get("allow_flag", True)),
+                    rule_desc=item.get("rule_desc"),
                     created_at=now,
                 )
             )
         await self.db.flush()
 
-    async def replace_handling_mode_rules(self, standard_id: int, codes: list[str]) -> None:
+    async def replace_handling_mode_rules(self, standard_id: int, items: list[dict[str, Any]]) -> None:
         await self.db.execute(
             delete(CommodityHandlingModeRule).where(
                 CommodityHandlingModeRule.commodity_standard_id == standard_id
             )
         )
         now = datetime.utcnow()
-        for code in codes:
+        for item in items:
+            code = str(item.get("code") or "").strip()
+            if not code:
+                continue
             self.db.add(
                 CommodityHandlingModeRule(
                     commodity_standard_id=standard_id,
                     handling_mode_code=code,
-                    allow_flag=True,
-                    rule_desc=None,
+                    allow_flag=bool(item.get("allow_flag", True)),
+                    rule_desc=item.get("rule_desc"),
                     created_at=now,
                 )
             )
@@ -305,41 +320,67 @@ class CommodityStandardRepository:
             .all()
         )
 
-    async def _list_codes(self, model, column, standard_id: int) -> list[str]:
-        rows = (await self.db.execute(select(column).where(model.commodity_standard_id == standard_id))).all()
-        return [row[0] for row in rows]
-
-    async def list_packaging_form_codes(self, standard_id: int) -> list[str]:
-        return await self._list_codes(
-            CommodityPackagingForm,
-            CommodityPackagingForm.packaging_form_code,
-            standard_id,
+    async def list_packaging_forms(self, standard_id: int) -> list[CommodityPackagingForm]:
+        return list(
+            (
+                await self.db.execute(
+                    select(CommodityPackagingForm)
+                    .where(CommodityPackagingForm.commodity_standard_id == standard_id)
+                    .order_by(CommodityPackagingForm.is_default.desc(), CommodityPackagingForm.id.asc())
+                )
+            )
+            .scalars()
+            .all()
         )
 
-    async def list_transport_mode_codes(self, standard_id: int) -> list[str]:
-        return await self._list_codes(
-            CommodityTransportMode,
-            CommodityTransportMode.transport_mode_element_code,
-            standard_id,
+    async def list_transport_modes(self, standard_id: int) -> list[CommodityTransportMode]:
+        return list(
+            (
+                await self.db.execute(
+                    select(CommodityTransportMode)
+                    .where(CommodityTransportMode.commodity_standard_id == standard_id)
+                    .order_by(CommodityTransportMode.is_default.desc(), CommodityTransportMode.id.asc())
+                )
+            )
+            .scalars()
+            .all()
         )
 
-    async def list_ship_type_codes(self, standard_id: int) -> list[str]:
-        return await self._list_codes(
-            CommodityShipTypeRule,
-            CommodityShipTypeRule.ship_type_code,
-            standard_id,
+    async def list_ship_type_rules(self, standard_id: int) -> list[CommodityShipTypeRule]:
+        return list(
+            (
+                await self.db.execute(
+                    select(CommodityShipTypeRule)
+                    .where(CommodityShipTypeRule.commodity_standard_id == standard_id)
+                    .order_by(CommodityShipTypeRule.allow_flag.desc(), CommodityShipTypeRule.id.asc())
+                )
+            )
+            .scalars()
+            .all()
         )
 
-    async def list_node_type_codes(self, standard_id: int) -> list[str]:
-        return await self._list_codes(
-            CommodityNodeTypeRule,
-            CommodityNodeTypeRule.node_type_code,
-            standard_id,
+    async def list_node_type_rules(self, standard_id: int) -> list[CommodityNodeTypeRule]:
+        return list(
+            (
+                await self.db.execute(
+                    select(CommodityNodeTypeRule)
+                    .where(CommodityNodeTypeRule.commodity_standard_id == standard_id)
+                    .order_by(CommodityNodeTypeRule.allow_flag.desc(), CommodityNodeTypeRule.id.asc())
+                )
+            )
+            .scalars()
+            .all()
         )
 
-    async def list_handling_mode_codes(self, standard_id: int) -> list[str]:
-        return await self._list_codes(
-            CommodityHandlingModeRule,
-            CommodityHandlingModeRule.handling_mode_code,
-            standard_id,
+    async def list_handling_mode_rules(self, standard_id: int) -> list[CommodityHandlingModeRule]:
+        return list(
+            (
+                await self.db.execute(
+                    select(CommodityHandlingModeRule)
+                    .where(CommodityHandlingModeRule.commodity_standard_id == standard_id)
+                    .order_by(CommodityHandlingModeRule.allow_flag.desc(), CommodityHandlingModeRule.id.asc())
+                )
+            )
+            .scalars()
+            .all()
         )

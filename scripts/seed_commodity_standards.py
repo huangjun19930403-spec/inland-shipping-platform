@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import delete, select
 
 from app.core.database import AsyncSessionLocal
-from app.models.commodity import CommodityAlias, CommodityStandard, CommodityType
+from app.models.commodity import (
+    CommodityAlias,
+    CommodityHandlingModeRule,
+    CommodityNodeTypeRule,
+    CommodityPackagingForm,
+    CommodityShipTypeRule,
+    CommodityStandard,
+    CommodityTransportMode,
+    CommodityType,
+)
 
 
 COMMODITY_STANDARD_FILE = (
@@ -36,6 +46,49 @@ def _unit_code(row: dict, fallback: str = "TON") -> str:
         "车": "TRUCK",
         "船次": "VOYAGE",
     }.get(raw, raw or fallback)
+
+
+def _default_rule_items(row: dict, key: str) -> list[dict]:
+    raw_items = row.get(key) or []
+    items: list[dict] = []
+    seen_codes: set[str] = set()
+    explicit_default = False
+    for index, raw in enumerate(raw_items):
+        if isinstance(raw, str):
+            code = raw.strip()
+            is_default = index == 0
+        else:
+            code = str(raw.get("code") or "").strip()
+            is_default = bool(raw.get("is_default", False))
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        if is_default:
+            explicit_default = True
+        items.append({"code": code, "is_default": is_default})
+    if items and not explicit_default:
+        items[0]["is_default"] = True
+    return items
+
+
+def _decision_rule_items(row: dict, key: str) -> list[dict]:
+    raw_items = row.get(key) or []
+    items: list[dict] = []
+    seen_codes: set[str] = set()
+    for raw in raw_items:
+        if isinstance(raw, str):
+            code = raw.strip()
+            allow_flag = True
+            rule_desc = None
+        else:
+            code = str(raw.get("code") or "").strip()
+            allow_flag = bool(raw.get("allow_flag", True))
+            rule_desc = raw.get("rule_desc")
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        items.append({"code": code, "allow_flag": allow_flag, "rule_desc": rule_desc})
+    return items
 
 
 async def seed_commodity_standards() -> None:
@@ -108,6 +161,81 @@ async def seed_commodity_standards() -> None:
                         alias_name=alias_name,
                         source_type_code="SYSTEM",
                         is_primary=index == 0,
+                    )
+                )
+
+            await session.execute(
+                delete(CommodityPackagingForm).where(
+                    CommodityPackagingForm.commodity_standard_id == entity.id
+                )
+            )
+            await session.execute(
+                delete(CommodityTransportMode).where(
+                    CommodityTransportMode.commodity_standard_id == entity.id
+                )
+            )
+            await session.execute(
+                delete(CommodityShipTypeRule).where(
+                    CommodityShipTypeRule.commodity_standard_id == entity.id
+                )
+            )
+            await session.execute(
+                delete(CommodityNodeTypeRule).where(
+                    CommodityNodeTypeRule.commodity_standard_id == entity.id
+                )
+            )
+            await session.execute(
+                delete(CommodityHandlingModeRule).where(
+                    CommodityHandlingModeRule.commodity_standard_id == entity.id
+                )
+            )
+            now = datetime.utcnow()
+            for item in _default_rule_items(row, "packaging_forms"):
+                session.add(
+                    CommodityPackagingForm(
+                        commodity_standard_id=entity.id,
+                        packaging_form_code=item["code"],
+                        is_default=item["is_default"],
+                        created_at=now,
+                    )
+                )
+            for item in _default_rule_items(row, "transport_modes"):
+                session.add(
+                    CommodityTransportMode(
+                        commodity_standard_id=entity.id,
+                        transport_mode_element_code=item["code"],
+                        is_default=item["is_default"],
+                        created_at=now,
+                    )
+                )
+            for item in _decision_rule_items(row, "ship_type_rules"):
+                session.add(
+                    CommodityShipTypeRule(
+                        commodity_standard_id=entity.id,
+                        ship_type_code=item["code"],
+                        allow_flag=item["allow_flag"],
+                        rule_desc=item["rule_desc"],
+                        created_at=now,
+                    )
+                )
+            for item in _decision_rule_items(row, "node_type_rules"):
+                session.add(
+                    CommodityNodeTypeRule(
+                        commodity_standard_id=entity.id,
+                        node_type_code=item["code"],
+                        allow_flag=item["allow_flag"],
+                        rule_desc=item["rule_desc"],
+                        created_at=now,
+                    )
+                )
+            for item in _decision_rule_items(row, "handling_mode_rules"):
+                session.add(
+                    CommodityHandlingModeRule(
+                        commodity_standard_id=entity.id,
+                        handling_mode_code=item["code"],
+                        allow_flag=item["allow_flag"],
+                        rule_desc=item["rule_desc"],
+                        created_at=now,
                     )
                 )
 

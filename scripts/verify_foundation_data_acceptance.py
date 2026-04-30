@@ -16,6 +16,7 @@ from app.models.address import AdminRegion, NavigationConstraintPoint, Region, T
 from app.models.commodity import CommodityStandard
 from app.models.common import CodeSequence
 from app.models.dictionary import StdDict, StdDictItem
+from app.modules.commodity.service import CommodityStandardService
 from main import app
 
 
@@ -142,6 +143,47 @@ async def verify() -> list[CheckResult]:
             )
         )
 
+        option_rows = (
+            await session.execute(
+                select(StdDict.dict_code, StdDictItem.item_code, StdDictItem.item_name)
+                .join(StdDictItem, StdDictItem.dict_id == StdDict.id)
+                .where(
+                    StdDict.dict_code.in_(
+                        [
+                            "PACKAGING_FORM",
+                            "TRANSPORT_MODE_ELEMENT",
+                            "SHIP_TYPE",
+                            "NODE_TYPE",
+                            "HANDLING_MODE",
+                            "VALUE_TYPE",
+                        ]
+                    ),
+                    StdDict.status == 1,
+                    StdDictItem.status == 1,
+                )
+            )
+        ).all()
+        option_names = {}
+        for dict_code, item_code, item_name in option_rows:
+            option_names.setdefault(dict_code, {})[item_code] = item_name
+        results.append(
+            _result(
+                "commodity rule and attribute dictionaries have Chinese labels",
+                all(
+                    option_names.get(dict_code, {}).get(item_code)
+                    for dict_code, item_code in [
+                        ("PACKAGING_FORM", "BULK"),
+                        ("TRANSPORT_MODE_ELEMENT", "WATER"),
+                        ("SHIP_TYPE", "BULK_CARRIER"),
+                        ("NODE_TYPE", "PORT"),
+                        ("HANDLING_MODE", "GRAB"),
+                        ("VALUE_TYPE", "STRING"),
+                    ]
+                ),
+                str({key: sorted(value)[:3] for key, value in option_names.items()}),
+            )
+        )
+
         bad_units = (
             await session.scalar(
                 select(func.count())
@@ -161,6 +203,34 @@ async def verify() -> list[CheckResult]:
                 "no standards" if sample_standard is None else f"{sample_standard.code}:{sample_standard.main_unit_code}",
             )
         )
+        seeded_standard = await session.scalar(
+            select(CommodityStandard).where(CommodityStandard.code == "STD_SAND_STONE_AGGREGATE")
+        )
+        detail_ok = True
+        detail_text = "no seeded standard"
+        if seeded_standard is not None:
+            detail = await CommodityStandardService(session).get_standard_detail(seeded_standard.id)
+            detail_ok = all(
+                [
+                    any(item.name for item in detail.packaging_forms),
+                    any(item.name for item in detail.transport_modes),
+                    any(item.name for item in detail.ship_type_rules),
+                    any(item.name for item in detail.node_type_rules),
+                    any(item.name for item in detail.handling_mode_rules),
+                    not any(
+                        attr.attribute_value_type_code and not attr.attribute_value_type_name
+                        for attr in detail.attributes
+                    ),
+                ]
+            )
+            detail_text = (
+                f"packaging={len(detail.packaging_forms)}, "
+                f"transport={len(detail.transport_modes)}, "
+                f"ship={len(detail.ship_type_rules)}, "
+                f"node={len(detail.node_type_rules)}, "
+                f"handling={len(detail.handling_mode_rules)}"
+            )
+        results.append(_result("commodity standard detail returns structured Chinese rules", detail_ok, detail_text))
 
         node = await session.scalar(select(TransportNode).limit(1))
         node_region_ok = True

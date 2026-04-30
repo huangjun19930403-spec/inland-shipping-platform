@@ -94,6 +94,16 @@ Base URL: `/api/v1`
 
 标准货品新增时由后端自动生成编码。创建接口只接收核心字段，主单位字段为 `main_unit_code`，响应补充 `main_unit_name`、`dangerous_grade_name` 和 `audit_status_name`。
 
+标准货品详情接口返回结构化规则明细，不再以 code 数组作为主契约：
+
+- `packaging_forms`: `{ code, name, is_default }`
+- `transport_modes`: `{ code, name, is_default }`
+- `ship_type_rules`: `{ code, name, allow_flag, rule_desc }`
+- `node_type_rules`: `{ code, name, allow_flag, rule_desc }`
+- `handling_mode_rules`: `{ code, name, allow_flag, rule_desc }`
+
+规则维护接口同步接收结构化 `items`。包装形式、运输方式使用 `{ code, is_default }`；船型、节点类型、作业方式使用 `{ code, allow_flag, rule_desc }`。
+
 ## Ship
 
 - `GET /ship`

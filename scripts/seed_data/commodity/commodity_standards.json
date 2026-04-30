@@ -6,7 +6,31 @@
     "short_name": "骨料",
     "main_unit_code": "TON",
     "is_active": true,
-    "aliases": ["石子", "石料", "机制砂", "河砂"]
+    "aliases": ["石子", "石料", "机制砂", "河砂"],
+    "density_range_desc": "按砂石品类和含水率维护密度/规格描述",
+    "dangerous_grade_code": "NON_DANGEROUS",
+    "packaging_forms": [
+      { "code": "BULK", "is_default": true },
+      { "code": "TON_BAG", "is_default": false }
+    ],
+    "transport_modes": [
+      { "code": "WATER", "is_default": true },
+      { "code": "ROAD", "is_default": false }
+    ],
+    "ship_type_rules": [
+      { "code": "BULK_CARRIER", "allow_flag": true, "rule_desc": "散货船优先" },
+      { "code": "SELF_UNLOADING_BULK", "allow_flag": true, "rule_desc": "具备自卸能力时可选" },
+      { "code": "CHEMICAL_TANKER", "allow_flag": false, "rule_desc": "液体化学品船不适配砂石骨料" }
+    ],
+    "node_type_rules": [
+      { "code": "PORT", "allow_flag": true, "rule_desc": "港口散货泊位可作业" },
+      { "code": "TERMINAL", "allow_flag": true, "rule_desc": "码头需具备散货装卸能力" }
+    ],
+    "handling_mode_rules": [
+      { "code": "GRAB", "allow_flag": true, "rule_desc": "抓斗装卸优先" },
+      { "code": "CONVEYOR", "allow_flag": true, "rule_desc": "皮带机适用于连续作业" },
+      { "code": "PIPELINE", "allow_flag": false, "rule_desc": "管输不适用于砂石骨料" }
+    ]
   },
   {
     "code": "STD_LIMESTONE",

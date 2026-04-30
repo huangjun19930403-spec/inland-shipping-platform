@@ -45,6 +45,8 @@
 
 `commodity_standard.main_unit_code` 使用 `COMMODITY_UNIT` 字典，不再保存自由文本主单位；危险等级使用 `DANGEROUS_GOODS_LEVEL` 字典，业务响应同时返回 code 和中文 name。
 
+标准货品详情使用 `commodity_packaging_form`、`commodity_transport_mode`、`commodity_ship_type_rule`、`commodity_node_type_rule`、`commodity_handling_mode_rule` 组合返回结构化明细。包装形式和运输方式保留 `is_default`，船型、节点类型和作业方式保留 `allow_flag` 与 `rule_desc`，由 service 补齐中文 label 后返回给前端。
+
 ### 船舶
 
 - `ship_profile`
