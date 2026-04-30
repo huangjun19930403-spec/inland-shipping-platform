@@ -32,6 +32,10 @@ class ShipProfile(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     home_port_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     home_port_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     owner_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    building_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    registry_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    business_region_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    operation_status_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     profile_status_code: Mapped[str] = mapped_column(String(64), nullable=False)
     source_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
 

@@ -43,6 +43,7 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "PACKAGING_FORM", "dict_name": "包装形式", "items": _items(("BULK", "散装"), ("TON_BAG", "吨袋"), ("BAGGED", "袋装"), ("BOXED", "箱装"), ("CONTAINER", "集装箱"), ("GENERAL_CARGO", "件杂货"))},
     {"dict_code": "HANDLING_MODE", "dict_name": "装卸方式", "items": _items(("GRAB", "抓斗"), ("PIPELINE", "管输"), ("CONVEYOR", "皮带机"), ("CRANE", "吊装"), ("MANUAL", "人工/叉车"), ("SELF_UNLOADING", "自卸"), ("OTHER", "其他"))},
     {"dict_code": "SHIP_TYPE", "dict_name": "船型", "items": _items(("BULK_CARRIER", "散货船"), ("SELF_UNLOADING_BULK", "自卸散货船"), ("GENERAL_CARGO_SHIP", "普通货船"), ("CONTAINER_SHIP", "集装箱船"), ("CHEMICAL_TANKER", "化学品船"), ("OIL_TANKER", "油船"), ("MULTIPURPOSE", "多用途船"), ("BARGE", "驳船"), ("TUG", "拖轮"))},
+    {"dict_code": "SHIP_OPERATION_STATUS", "dict_name": "船舶运营状态", "items": [_item("OPERATING", "运营中", color="success"), _item("IN_PORT", "在港待装", color="warning"), _item("MAINTENANCE", "检修中", color="info"), _item("SUSPENDED", "暂停运营", color="danger")]},
     {"dict_code": "NAVIGATION_POWER_TYPE", "dict_name": "动力类型", "items": _items(("SELF_PROPELLED", "自航"), ("NON_SELF_PROPELLED", "非自航"))},
     {"dict_code": "PARTY_RELATION_TYPE", "dict_name": "主体关系类型", "items": _items(("OWNER", "所有人"), ("OPERATOR", "经营人"), ("MANAGER", "管理人"), ("AGENT", "代理人"), ("CARRIER", "承运人"))},
     {"dict_code": "CONTACT_ROLE", "dict_name": "联系人角色", "items": _items(("CAPTAIN", "船长"), ("OWNER_CONTACT", "船东联系人"), ("DISPATCH_CONTACT", "调度联系人"), ("SETTLEMENT_CONTACT", "结算联系人"), ("EMERGENCY_CONTACT", "应急联系人"), ("FREIGHT_CONTACT", "货源联系人"))},

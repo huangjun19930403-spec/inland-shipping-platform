@@ -37,6 +37,10 @@ class ShipCreateRequest(BaseModel):
     home_port_code: str | None = Field(default=None, max_length=12)
     home_port_name: str | None = Field(default=None, max_length=128)
     owner_name: str | None = Field(default=None, max_length=128)
+    building_year: int | None = Field(default=None, ge=1900, le=2100)
+    registry_city_code: str | None = Field(default=None, max_length=12)
+    business_region_id: int | None = None
+    operation_status_code: str | None = Field(default="OPERATING", max_length=64)
     profile_status_code: str = Field(default="ACTIVE", min_length=1, max_length=64)
     source_type_code: str = Field(default="MANUAL", min_length=1, max_length=64)
 
@@ -50,6 +54,10 @@ class ShipUpdateRequest(BaseModel):
     home_port_code: str | None = Field(default=None, max_length=12)
     home_port_name: str | None = Field(default=None, max_length=128)
     owner_name: str | None = Field(default=None, max_length=128)
+    building_year: int | None = Field(default=None, ge=1900, le=2100)
+    registry_city_code: str | None = Field(default=None, max_length=12)
+    business_region_id: int | None = None
+    operation_status_code: str | None = Field(default=None, max_length=64)
     source_type_code: str | None = Field(default=None, min_length=1, max_length=64)
 
 
@@ -68,11 +76,45 @@ class ShipResponse(BaseModel):
     home_port_code: str | None
     home_port_name: str | None
     owner_name: str | None
+    building_year: int | None
+    registry_city_code: str | None
+    registry_city_name: str | None = None
+    business_region_id: int | None
+    business_region_name: str | None = None
+    operation_status_code: str | None
+    operation_status_name: str | None = None
     profile_status_code: str
+    profile_status_name: str | None = None
     source_type_code: str
+    source_type_name: str | None = None
     audit_status: str
+    audit_status_name: str | None = None
+    ship_type_name: str | None = None
+    navigation_power_type_name: str | None = None
+    deadweight_ton: Decimal | None = None
+    length_m: Decimal | None = None
+    width_m: Decimal | None = None
+    design_draft_m: Decimal | None = None
+    ship_age: int | None = None
+    size_text: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ShipDistributionBucketResponse(BaseModel):
+    code: str
+    name: str
+    count: int
+
+
+class ShipStatisticsOverviewResponse(BaseModel):
+    total_count: int
+    active_count: int
+    average_deadweight_ton: Decimal | None = None
+    ship_type_distribution: list[ShipDistributionBucketResponse]
+    age_distribution: list[ShipDistributionBucketResponse]
+    deadweight_distribution: list[ShipDistributionBucketResponse]
+    status_distribution: list[ShipDistributionBucketResponse]
 
 
 class ShipCapacityUpsertRequest(BaseModel):

@@ -39,6 +39,7 @@ from app.modules.ship.schemas import (
     ShipOwnerReplaceRequest,
     ShipOwnerResponse,
     ShipResponse,
+    ShipStatisticsOverviewResponse,
     ShipStatusChangeRequest,
     ShipUpdateRequest,
 )
@@ -155,6 +156,16 @@ async def list_import_records(
     _ = current_user
     service = ShipImportService(db)
     return await service.list_import_records(batch_id, query.page, query.page_size)
+
+
+@router.get("/statistics/overview", response_model=ShipStatisticsOverviewResponse)
+async def get_ship_statistics_overview(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShipProfileService(db)
+    return await service.get_statistics_overview()
 
 
 @router.get("/{ship_id}", response_model=ShipDetailResponse)

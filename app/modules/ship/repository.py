@@ -70,8 +70,8 @@ class ShipProfileRepository:
             stmt = stmt.where(ShipProfile.profile_status_code == status_code)
         if ship_type_code:
             stmt = stmt.where(ShipProfile.ship_type_code == ship_type_code)
-        # 当前 ShipProfile ORM 未落地 city_code 字段；参数保留用于后续演进。
-        _ = city_code
+        if city_code:
+            stmt = stmt.where(ShipProfile.registry_city_code == city_code)
 
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         items = (
@@ -80,6 +80,16 @@ class ShipProfileRepository:
             )
         ).scalars().all()
         return list(items), total
+
+    async def list_all_ships(self) -> list[ShipProfile]:
+        rows = (
+            await self.db.execute(
+                select(ShipProfile)
+                .where(ShipProfile.deleted_at.is_(None))
+                .order_by(ShipProfile.id.asc())
+            )
+        ).scalars().all()
+        return list(rows)
 
     async def create_ship(self, data: dict[str, Any]) -> ShipProfile:
         row = ShipProfile(**data)
@@ -134,6 +144,14 @@ class ShipCapacityRepository:
 
     async def get_capacity_by_ship_id(self, ship_id: int) -> ShipCapacity | None:
         return await self.db.scalar(select(ShipCapacity).where(ShipCapacity.ship_id == ship_id))
+
+    async def list_capacity_by_ship_ids(self, ship_ids: list[int]) -> dict[int, ShipCapacity]:
+        if not ship_ids:
+            return {}
+        rows = (
+            await self.db.execute(select(ShipCapacity).where(ShipCapacity.ship_id.in_(ship_ids)))
+        ).scalars().all()
+        return {row.ship_id: row for row in rows}
 
     async def upsert_capacity(self, ship_id: int, data: dict[str, Any]) -> ShipCapacity:
         row = await self.get_capacity_by_ship_id(ship_id)
