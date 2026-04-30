@@ -155,6 +155,37 @@ class RegionCityRelationResponse(BaseModel):
     sort_order: int
 
 
+class AddressMapGeocodeQuery(BaseModel):
+    keyword: str = Field(min_length=1, max_length=256)
+    city_code: str | None = Field(default=None, max_length=12)
+
+
+class AddressMapReverseGeocodeQuery(BaseModel):
+    longitude: Decimal = Field(ge=-180, le=180)
+    latitude: Decimal = Field(ge=-90, le=90)
+
+
+class AddressMapCandidate(BaseModel):
+    longitude: Decimal
+    latitude: Decimal
+    formatted_address: str | None
+    province_name: str | None
+    province_code: str | None
+    city_name: str | None
+    city_code: str | None
+    district_name: str | None
+    district_code: str | None
+    adcode: str | None
+    city_region_id: int | None
+    provider: str
+    confidence: float | None
+    level: str | None
+
+
+class AddressMapGeocodeResponse(BaseModel):
+    items: list[AddressMapCandidate]
+
+
 class TransportNodeListQuery(BaseModel):
     keyword: str | None = None
     city_code: str | None = None

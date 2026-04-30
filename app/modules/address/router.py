@@ -11,6 +11,10 @@ from app.modules.address.schemas import (
     AdminRegionBoundaryResponse,
     AdminRegionQuery,
     AdminRegionResponse,
+    AddressMapCandidate,
+    AddressMapGeocodeQuery,
+    AddressMapGeocodeResponse,
+    AddressMapReverseGeocodeQuery,
     BusinessRegionCreateRequest,
     BusinessRegionListQuery,
     BusinessRegionResponse,
@@ -39,12 +43,31 @@ from app.modules.address.schemas import (
 )
 from app.modules.address.service import (
     AdminRegionService,
+    AddressMapService,
     BusinessRegionService,
     NavigationConstraintPointService,
     TransportNodeService,
 )
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+
+@router.get("/map/geocode", response_model=AddressMapGeocodeResponse)
+async def geocode_address(
+    query: AddressMapGeocodeQuery = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AddressMapService(db)
+    return await service.geocode(query.keyword, query.city_code)
+
+
+@router.get("/map/reverse-geocode", response_model=AddressMapCandidate)
+async def reverse_geocode_address(
+    query: AddressMapReverseGeocodeQuery = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AddressMapService(db)
+    return await service.reverse_geocode(query.longitude, query.latitude)
 
 
 @router.get("/admin-regions", response_model=PageResponse[AdminRegionResponse])

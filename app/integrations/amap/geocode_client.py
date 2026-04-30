@@ -1,4 +1,4 @@
-"""高德逆地理编码集成客户端。"""
+"""高德地理编码集成客户端。"""
 from __future__ import annotations
 
 import asyncio
@@ -21,6 +21,23 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class GeocodeCandidate:
+    longitude: float
+    latitude: float
+    formatted_address: Optional[str]
+    province: Optional[str]
+    city: Optional[str]
+    district: Optional[str]
+    adcode: Optional[str]
+    level: Optional[str]
+    source: str
+    resolved_at: datetime
+    status: str
+    confidence: Optional[float] = None
+    raw_payload: Optional[dict] = None
+
+
+@dataclass
 class ReverseGeocodeResult:
     longitude: float
     latitude: float
@@ -32,11 +49,13 @@ class ReverseGeocodeResult:
     source: str
     resolved_at: datetime
     status: str
+    level: Optional[str] = None
+    confidence: Optional[float] = None
     raw_payload: Optional[dict] = None
 
 
 class AmapGeocodeClient:
-    """统一封装高德 WebService 逆地理编码。"""
+    """统一封装高德 WebService 地理编码。"""
 
     def __init__(
         self,
@@ -78,6 +97,114 @@ class AmapGeocodeClient:
         text = str(value).strip()
         return text or None
 
+    @staticmethod
+    def _extract_city(component: dict | None) -> Optional[str]:
+        if not component:
+            return None
+        city = component.get("city")
+        if isinstance(city, list):
+            city = city[0] if city else None
+        return AmapGeocodeClient._extract_text(city) or AmapGeocodeClient._extract_text(component.get("province"))
+
+    @staticmethod
+    def _parse_location(value: object) -> tuple[float, float] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            parts = value.split(",")
+            if len(parts) != 2:
+                return None
+            try:
+                return float(parts[0]), float(parts[1])
+            except ValueError:
+                return None
+        if isinstance(value, dict):
+            lng = value.get("lng")
+            lat = value.get("lat")
+            try:
+                return float(lng), float(lat)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    async def geocode(self, *, keyword: str, city_code: str | None = None) -> list[GeocodeCandidate]:
+        keyword_text = keyword.strip()
+        if not keyword_text:
+            raise ValidationError("请输入地址或节点名称")
+
+        key = await self._key()
+        if not key:
+            raise ValidationError("未配置高德 Web 服务 Key，无法进行地理编码")
+
+        url = "https://restapi.amap.com/v3/geocode/geo"
+        params = {
+            "key": key,
+            "address": keyword_text,
+            "output": "JSON",
+        }
+        if city_code:
+            params["city"] = city_code
+            params["citylimit"] = "false"
+
+        client = await self._client()
+        last_error: Exception | None = None
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = await client.get(url, params=params, timeout=self._timeout())
+                response.raise_for_status()
+                payload = response.json()
+                break
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = exc
+                if attempt >= self._max_retries:
+                    raise InternalError(f"高德地理编码请求失败: {exc}") from exc
+                await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
+        else:
+            raise InternalError(f"高德地理编码请求失败: {last_error}")
+
+        if str(payload.get("status")) != "1":
+            info = payload.get("info") or payload.get("infocode") or "unknown"
+            raise ValidationError(f"高德地理编码返回失败: {info}")
+
+        candidates: list[GeocodeCandidate] = []
+        for item in payload.get("geocodes") or []:
+            if not isinstance(item, dict):
+                continue
+            point = self._parse_location(item.get("location"))
+            if point is None:
+                continue
+            formatted_address = self._extract_text(item.get("formatted_address"))
+            province = self._extract_text(item.get("province"))
+            city = self._extract_city(item)
+            district = self._extract_text(item.get("district"))
+            if not formatted_address:
+                formatted_address = "".join(part for part in [province, city, district, self._extract_text(item.get("township"))] if part) or keyword_text
+            candidates.append(
+                GeocodeCandidate(
+                    longitude=point[0],
+                    latitude=point[1],
+                    formatted_address=formatted_address,
+                    province=province,
+                    city=city,
+                    district=district,
+                    adcode=self._extract_text(item.get("adcode")),
+                    level=self._extract_text(item.get("level")),
+                    source="AMAP_GEOCODE",
+                    resolved_at=datetime.utcnow(),
+                    status="SUCCESS",
+                    raw_payload=item,
+                )
+            )
+
+        logger.info(
+            "amap geocode completed keyword=%s city_code=%s candidates=%s",
+            keyword_text[:32],
+            city_code,
+            len(candidates),
+        )
+        return candidates
+
     async def reverse_geocode(self, *, longitude: float, latitude: float) -> ReverseGeocodeResult:
         key = await self._key()
         if not key:
@@ -112,9 +239,7 @@ class AmapGeocodeClient:
 
         regeo = payload.get("regeocode") or {}
         component = regeo.get("addressComponent") or {}
-        city = component.get("city")
-        if isinstance(city, list):
-            city = city[0] if city else None
+        city = self._extract_city(component)
         formatted_address = self._extract_text(regeo.get("formatted_address"))
         if not formatted_address:
             parts = [
@@ -130,11 +255,12 @@ class AmapGeocodeClient:
             latitude=latitude,
             formatted_address=formatted_address,
             province=self._extract_text(component.get("province")),
-            city=self._extract_text(city) or self._extract_text(component.get("province")),
+            city=city,
             district=self._extract_text(component.get("district")),
             adcode=self._extract_text(component.get("adcode")),
             source="AMAP_REVERSE_GEOCODE",
             resolved_at=datetime.utcnow(),
             status="SUCCESS",
+            level="逆地理编码",
             raw_payload=payload,
         )

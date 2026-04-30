@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 
 import sqlalchemy as sa
 from fastapi.routing import APIRoute
@@ -12,11 +13,13 @@ from sqlalchemy import func, select
 
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import get_current_user
+from app.integrations.amap import GeocodeCandidate
 from app.models.address import AdminRegion, AdminRegionBoundary, NavigationConstraintPoint, Region, RegionBoundaryVersion, TransportNode
 from app.models.commodity import CommodityStandard
 from app.models.common import CodeSequence
 from app.models.dictionary import StdDict, StdDictItem
-from app.modules.address.service import AdminRegionService, BusinessRegionService
+from app.modules.address.schemas import TransportNodeCreateRequest
+from app.modules.address.service import AdminRegionService, AddressMapService, BusinessRegionService
 from app.modules.commodity.service import CommodityStandardService
 from main import app
 
@@ -263,6 +266,52 @@ async def verify() -> list[CheckResult]:
             node_region_ok = city is not None and int(city.id) == int(node.city_region_id) and district_ok
             node_detail = f"{node.code}:{node.city_code}/{node.city_region_id}"
         results.append(_result("node admin labels and city relation resolvable", node_region_ok, node_detail))
+        city_region_field = TransportNodeCreateRequest.model_fields.get("city_region_id")
+        results.append(
+            _result(
+                "node create does not require frontend city_region_id",
+                bool(city_region_field and not city_region_field.is_required()),
+                f"required={city_region_field.is_required() if city_region_field else 'missing'}",
+            )
+        )
+
+        district_seed = await session.scalar(
+            select(AdminRegion)
+            .where(AdminRegion.level == 3, AdminRegion.status == 1, AdminRegion.city_code.is_not(None))
+            .order_by(AdminRegion.code.asc())
+            .limit(1)
+        )
+        map_shape_ok = True
+        map_shape_detail = "no district seed"
+        if district_seed is not None:
+            city_seed = await session.scalar(select(AdminRegion).where(AdminRegion.code == district_seed.city_code))
+            province_seed = await session.scalar(select(AdminRegion).where(AdminRegion.code == district_seed.province_code))
+            raw_candidate = GeocodeCandidate(
+                longitude=float(district_seed.longitude or 120.0),
+                latitude=float(district_seed.latitude or 30.0),
+                formatted_address=f"{province_seed.name if province_seed else ''}{city_seed.name if city_seed else ''}{district_seed.name}",
+                province=province_seed.name if province_seed else None,
+                city=city_seed.name if city_seed else None,
+                district=district_seed.name,
+                adcode=district_seed.code,
+                level="区县",
+                source="AMAP_GEOCODE",
+                resolved_at=datetime.utcnow(),
+                status="SUCCESS",
+            )
+            candidate = await AddressMapService(session)._to_candidate(raw_candidate)
+            map_shape_ok = bool(
+                candidate.provider == "AMAP"
+                and candidate.city_code == (city_seed.code if city_seed else None)
+                and candidate.city_region_id == (int(city_seed.id) if city_seed else None)
+                and candidate.district_code == district_seed.code
+                and candidate.formatted_address
+            )
+            map_shape_detail = (
+                f"{candidate.province_code}/{candidate.city_code}/{candidate.district_code}:"
+                f"{candidate.city_region_id}"
+            )
+        results.append(_result("address map candidate maps to admin regions", map_shape_ok, map_shape_detail))
 
         counts = {
             "regions": await session.scalar(select(func.count()).select_from(Region)),

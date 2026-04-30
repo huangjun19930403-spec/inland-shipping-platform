@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+from decimal import Decimal
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.integrations.amap import AmapGeocodeClient
 from app.models.address import AdminRegion
 from app.modules.address.repository import (
     AdminRegionRepository,
@@ -17,6 +21,8 @@ from app.modules.address.geometry import normalize_boundary_geometry, normalize_
 from app.modules.address.schemas import (
     AdminRegionBoundaryResponse,
     AdminRegionResponse,
+    AddressMapCandidate,
+    AddressMapGeocodeResponse,
     BusinessRegionCreateRequest,
     BusinessRegionResponse,
     BusinessRegionUpdateRequest,
@@ -49,6 +55,10 @@ from app.modules.dictionary.labels import (
     region_label,
     status_name,
 )
+from app.modules.system.runtime_config import RuntimeConfigService
+
+
+logger = logging.getLogger(__name__)
 
 
 def _to_admin_region_response(row) -> AdminRegionResponse:
@@ -360,6 +370,129 @@ class BusinessRegionService:
             )
             for row in rows
         ]
+
+
+class AddressMapService:
+    def __init__(self, db: AsyncSession, client: AmapGeocodeClient | None = None) -> None:
+        self.db = db
+        self.client = client or AmapGeocodeClient(runtime_config=RuntimeConfigService(db))
+
+    async def geocode(self, keyword: str, city_code: str | None = None) -> AddressMapGeocodeResponse:
+        try:
+            raw_items = await self.client.geocode(keyword=keyword, city_code=city_code)
+        except Exception:
+            logger.exception("address map geocode provider failed")
+            raise
+
+        items: list[AddressMapCandidate] = []
+        for raw in raw_items:
+            candidate = await self._to_candidate(raw)
+            if candidate.city_code and candidate.city_region_id:
+                items.append(candidate)
+            else:
+                logger.info(
+                    "skip geocode candidate without city match adcode=%s address=%s",
+                    candidate.adcode,
+                    candidate.formatted_address,
+                )
+
+        if not items:
+            raise ValidationError("未匹配到可用于节点回填的城市行政区划")
+        return AddressMapGeocodeResponse(items=items)
+
+    async def reverse_geocode(self, longitude: Decimal, latitude: Decimal) -> AddressMapCandidate:
+        try:
+            raw = await self.client.reverse_geocode(longitude=float(longitude), latitude=float(latitude))
+        except Exception:
+            logger.exception("address map reverse geocode provider failed")
+            raise
+
+        candidate = await self._to_candidate(raw)
+        if not candidate.city_code or not candidate.city_region_id:
+            raise ValidationError("逆地理编码结果未匹配到可用于节点回填的城市行政区划")
+        return candidate
+
+    async def _to_candidate(self, raw) -> AddressMapCandidate:
+        province, city, district = await self._resolve_region_context(
+            raw.adcode,
+            raw.province,
+            raw.city,
+            raw.district,
+        )
+        city_region_id = int(city.id) if city is not None else None
+        confidence = raw.confidence
+        if confidence is None:
+            confidence = 1.0 if city_region_id else 0.5
+        return AddressMapCandidate(
+            longitude=Decimal(str(raw.longitude)),
+            latitude=Decimal(str(raw.latitude)),
+            formatted_address=raw.formatted_address,
+            province_name=province.name if province is not None else raw.province,
+            province_code=province.code if province is not None else None,
+            city_name=city.name if city is not None else raw.city,
+            city_code=city.code if city is not None else None,
+            district_name=district.name if district is not None else raw.district,
+            district_code=district.code if district is not None else None,
+            adcode=raw.adcode,
+            city_region_id=city_region_id,
+            provider="AMAP",
+            confidence=confidence,
+            level=raw.level,
+        )
+
+    async def _resolve_region_context(
+        self,
+        adcode: str | None,
+        province_name: str | None,
+        city_name: str | None,
+        district_name: str | None,
+    ) -> tuple[AdminRegion | None, AdminRegion | None, AdminRegion | None]:
+        exact = await self._region_by_code(adcode)
+        if exact is not None:
+            if exact.level == 3:
+                city = await self._region_by_code(exact.city_code or exact.parent_code)
+                province = await self._region_by_code(exact.province_code or (city.province_code if city else None))
+                return province, city, exact
+            if exact.level == 2:
+                province = await self._region_by_code(exact.province_code or exact.parent_code)
+                return province, exact, None
+            if exact.level == 1:
+                return exact, None, None
+
+        province = await self._region_by_name(province_name, level=1)
+        city = await self._region_by_name(city_name, level=2, parent_code=province.code if province else None)
+        district = await self._region_by_name(district_name, level=3, parent_code=city.code if city else None)
+
+        if district is not None and city is None:
+            city = await self._region_by_code(district.city_code or district.parent_code)
+        if city is not None and province is None:
+            province = await self._region_by_code(city.province_code or city.parent_code)
+        return province, city, district
+
+    async def _region_by_code(self, code: str | None) -> AdminRegion | None:
+        if not code:
+            return None
+        return await self.db.scalar(
+            select(AdminRegion).where(AdminRegion.code == code, AdminRegion.status == 1)
+        )
+
+    async def _region_by_name(
+        self,
+        name: str | None,
+        *,
+        level: int,
+        parent_code: str | None = None,
+    ) -> AdminRegion | None:
+        if not name:
+            return None
+        stmt = select(AdminRegion).where(
+            AdminRegion.level == level,
+            AdminRegion.status == 1,
+            or_(AdminRegion.name == name, AdminRegion.short_name == name),
+        )
+        if parent_code:
+            stmt = stmt.where(AdminRegion.parent_code == parent_code)
+        return await self.db.scalar(stmt.order_by(AdminRegion.sort_order.asc(), AdminRegion.code.asc()).limit(1))
 
 
 class TransportNodeService:
