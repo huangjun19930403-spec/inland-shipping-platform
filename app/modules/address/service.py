@@ -27,6 +27,7 @@ from app.modules.address.schemas import (
     RegionBoundaryVersionCreateRequest,
     RegionBoundaryVersionResponse,
     RegionCityRelationResponse,
+    NodeAliasResponse,
     TransportNodeCreateRequest,
     TransportNodeDetailResponse,
     TransportNodeProfileResponse,
@@ -339,6 +340,16 @@ class TransportNodeService:
             node=_to_node_response(node),
             profile=profile_payload,
             aliases=[row.alias_name for row in aliases],
+            aliases_meta=[
+                NodeAliasResponse(
+                    id=row.id,
+                    alias_name=row.alias_name,
+                    alias_type_code=row.alias_type_code,
+                    source_type_code=row.source_type_code,
+                    is_primary=row.is_primary,
+                )
+                for row in aliases
+            ],
             business_category_codes=business_codes,
             packaging_form_codes=packaging_codes,
             handling_mode_codes=handling_codes,

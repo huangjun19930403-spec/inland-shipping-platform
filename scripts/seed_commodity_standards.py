@@ -76,6 +76,7 @@ async def seed_commodity_standards() -> None:
                 entity.is_active = bool(row.get("is_active", True))
                 entity.deleted_at = None
                 await session.flush()
+            entity.audit_status = "APPROVED"
 
             await session.execute(
                 delete(CommodityAlias).where(
@@ -83,10 +84,12 @@ async def seed_commodity_standards() -> None:
                 )
             )
             aliases = row.get("aliases") or []
-            for index, alias in enumerate(aliases):
-                alias_name = str(alias).strip()
-                if not alias_name:
-                    continue
+            deduped_aliases = []
+            for alias in [name, row.get("short_name"), *aliases]:
+                alias_name = str(alias or "").strip()
+                if alias_name and alias_name not in deduped_aliases:
+                    deduped_aliases.append(alias_name)
+            for index, alias_name in enumerate(deduped_aliases):
                 session.add(
                     CommodityAlias(
                         commodity_standard_id=entity.id,

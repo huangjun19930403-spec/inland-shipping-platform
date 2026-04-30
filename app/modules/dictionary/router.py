@@ -15,6 +15,7 @@ from app.modules.dictionary.schemas import (
     DictItemResponse,
     DictItemUpdateRequest,
     DictListQuery,
+    DictOptionsResponse,
     DictResponse,
     DictUpdateRequest,
     PageResponse,
@@ -40,6 +41,15 @@ async def get_dict_detail(
 ):
     service = DictionaryService(db)
     return await service.get_dict_detail(dict_code)
+
+
+@router.get("/options", response_model=list[DictOptionsResponse])
+async def get_dict_options(
+    dict_codes: list[str] = Query(default=[]),
+    db: AsyncSession = Depends(get_db),
+):
+    service = DictionaryService(db)
+    return await service.get_options(dict_codes)
 
 
 @router.post("/dicts", response_model=DictResponse)
@@ -140,4 +150,3 @@ async def get_code_sequence_detail(
 ):
     service = CodeSequenceService(db)
     return await service.get_sequence_detail(business_code)
-

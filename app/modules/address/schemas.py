@@ -231,10 +231,19 @@ class TransportNodeProfileResponse(BaseModel):
     updated_at: datetime
 
 
+class NodeAliasResponse(BaseModel):
+    id: int
+    alias_name: str
+    alias_type_code: str
+    source_type_code: str
+    is_primary: bool
+
+
 class TransportNodeDetailResponse(BaseModel):
     node: TransportNodeResponse
     profile: TransportNodeProfileResponse | None
     aliases: list[str]
+    aliases_meta: list[NodeAliasResponse] = Field(default_factory=list)
     business_category_codes: list[str]
     packaging_form_codes: list[str]
     handling_mode_codes: list[str]

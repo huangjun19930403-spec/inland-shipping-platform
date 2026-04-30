@@ -111,6 +111,24 @@ class DictItemResponse(BaseModel):
     updated_at: datetime
 
 
+class DictOptionItemResponse(BaseModel):
+    dict_code: str
+    item_code: str
+    item_name: str
+    item_name_en: str | None
+    item_value: str | None
+    color: str | None
+    description: str | None
+    is_default: bool
+    sort_order: int
+
+
+class DictOptionsResponse(BaseModel):
+    dict_code: str
+    dict_name: str
+    items: list[DictOptionItemResponse]
+
+
 class DictItemOrderRequest(BaseModel):
     ordered_ids: list[int] = Field(default_factory=list)
 

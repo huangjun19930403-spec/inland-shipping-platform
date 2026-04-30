@@ -11,56 +11,70 @@ from app.core.database import AsyncSessionLocal
 from app.models.dictionary import StdDict, StdDictItem
 
 
-def _items(*codes: str) -> list[dict[str, Any]]:
+def _item(
+    code: str,
+    name: str,
+    *,
+    name_en: str | None = None,
+    color: str | None = None,
+    description: str | None = None,
+    is_default: bool = False,
+) -> dict[str, Any]:
+    return {
+        "item_code": code,
+        "item_name": name,
+        "item_name_en": name_en or code,
+        "color": color,
+        "description": description,
+        "is_default": is_default,
+    }
+
+
+def _items(*pairs: tuple[str, str] | str) -> list[dict[str, Any]]:
     return [
-        {
-            "item_code": code,
-            "item_name": code,
-            "item_name_en": code,
-            "is_default": False,
-        }
-        for code in codes
+        _item(raw[0], raw[1]) if isinstance(raw, tuple) else _item(raw, raw)
+        for raw in pairs
     ]
 
 
 BUILTIN_DICTS: list[dict[str, Any]] = [
-    {"dict_code": "NODE_TYPE", "dict_name": "节点类型", "items": _items("PORT", "TERMINAL", "ANCHORAGE", "LOCK", "LOGISTICS_PARK", "RAIL_STATION", "HIGHWAY_PORT", "INTERMODAL_HUB", "OTHER")},
-    {"dict_code": "BUSINESS_CATEGORY", "dict_name": "业务类别", "items": _items("LOADING", "UNLOADING", "TRANSFER", "TRANSSHIPMENT", "STORAGE", "PASSAGE", "COMPREHENSIVE")},
-    {"dict_code": "PACKAGING_FORM", "dict_name": "包装形式", "items": _items("BULK", "TON_BAG", "BAGGED", "BOXED", "CONTAINER", "GENERAL_CARGO")},
-    {"dict_code": "HANDLING_MODE", "dict_name": "装卸方式", "items": _items("GRAB", "PIPELINE", "CONVEYOR", "CRANE", "MANUAL", "SELF_UNLOADING", "OTHER")},
-    {"dict_code": "SHIP_TYPE", "dict_name": "船型", "items": _items("BULK_CARRIER", "SELF_UNLOADING_BULK", "GENERAL_CARGO_SHIP", "CONTAINER_SHIP", "CHEMICAL_TANKER", "OIL_TANKER", "MULTIPURPOSE", "BARGE", "TUG")},
-    {"dict_code": "NAVIGATION_POWER_TYPE", "dict_name": "动力类型", "items": _items("SELF_PROPELLED", "NON_SELF_PROPELLED")},
-    {"dict_code": "PARTY_RELATION_TYPE", "dict_name": "主体关系类型", "items": _items("OWNER", "OPERATOR", "MANAGER", "AGENT", "CARRIER")},
-    {"dict_code": "CONTACT_ROLE", "dict_name": "联系人角色", "items": _items("CAPTAIN", "OWNER_CONTACT", "DISPATCH_CONTACT", "SETTLEMENT_CONTACT", "EMERGENCY_CONTACT", "FREIGHT_CONTACT")},
-    {"dict_code": "CERTIFICATE_TYPE", "dict_name": "证件类型", "items": _items("TRANSPORT_LICENSE", "OWNERSHIP_CERT", "INSPECTION_CERT", "SEAWORTHINESS_CERT", "AIS_CERT", "CREW_CERT", "OTHER")},
-    {"dict_code": "BOUNDARY_SOURCE_TYPE", "dict_name": "边界来源类型", "items": _items("OFFICIAL_GIS_SERVICE", "STANDARD_MAP_EXTRACTION", "PLATFORM_DEFINED", "THIRD_PARTY_AUTHORIZED")},
-    {"dict_code": "REGION_TYPE", "dict_name": "区域类型", "items": _items("SHIPPING_ANALYSIS_REGION", "OPERATION_REGION", "MARKET_REGION")},
-    {"dict_code": "REGION_RELATION_TYPE", "dict_name": "区域关系类型", "items": _items("INCLUDED", "PRIMARY", "ASSIST")},
-    {"dict_code": "TRANSPORT_MODE_ELEMENT", "dict_name": "运输方式要素", "items": _items("WATER", "ROAD", "RAIL", "MANUAL", "UNKNOWN")},
-    {"dict_code": "TRANSPORT_ORG_TYPE", "dict_name": "运输组织类型", "items": _items("SINGLE_MODE", "MULTIMODAL")},
-    {"dict_code": "MULTIMODAL_COMBINATION", "dict_name": "联运组合", "items": _items("WATER_ROAD", "WATER_RAIL", "ROAD_RAIL", "WATER_ROAD_RAIL")},
-    {"dict_code": "ROUTE_PLAN_TYPE", "dict_name": "运输方案类型", "items": _items("STANDARD", "SEASONAL", "EMERGENCY", "MANUAL")},
-    {"dict_code": "ROUTE_LINE_ROLE", "dict_name": "路线角色", "items": _items("MAIN", "ALTERNATE", "DETOUR", "EMERGENCY")},
-    {"dict_code": "ROUTE_LINE_NODE_TYPE", "dict_name": "路线节点类型", "items": _items("TRANSPORT_NODE", "CONSTRAINT_POINT", "MANUAL_POINT")},
-    {"dict_code": "ROUTE_LINE_TRACK_STATUS", "dict_name": "路线轨迹状态", "items": _items("NOT_GENERATED", "READY", "PARTIAL", "FAILED")},
-    {"dict_code": "ROUTE_GEOMETRY_SOURCE", "dict_name": "路线轨迹来源", "items": _items("AMAP", "HIFLEET", "MANUAL", "FALLBACK")},
-    {"dict_code": "NAVIGATION_CONSTRAINT_TYPE", "dict_name": "通航约束类型", "items": _items("LOCK", "BRIDGE", "SHALLOW", "RESTRICTED_AREA", "FORBIDDEN_AREA", "DRAFT_LIMIT", "WIDTH_LIMIT", "HEIGHT_LIMIT", "LOW_BRIDGE", "PASSAGE_RESTRICTION")},
-    {"dict_code": "SOURCE_TYPE", "dict_name": "来源类型", "items": _items("MANUAL", "IMPORT", "TMS", "WECHAT", "SYSTEM")},
-    {"dict_code": "SOURCE_CHANNEL", "dict_name": "来源渠道", "items": _items("MANUAL_FORM", "IMPORT_FILE", "TMS_API", "WECHAT_TEXT", "SYSTEM_SYNC")},
-    {"dict_code": "PROVIDER_CODE", "dict_name": "提供方编码", "items": _items("AMAP", "HIFLEET")},
-    {"dict_code": "FREIGHT_STATUS", "dict_name": "货源状态", "items": _items("DRAFT", "PUBLISHED", "MATCHING", "EXPIRED", "CLOSED")},
-    {"dict_code": "FREIGHT_TAG", "dict_name": "货源标签", "items": _items("URGENT", "HIGH_VALUE", "FIXED_ROUTE", "LONG_TERM")},
-    {"dict_code": "DATA_SCOPE_TYPE", "dict_name": "数据权限类型", "items": _items("ALL_DATA", "REGION_DATA", "CITY_DATA", "NODE_DATA", "SELF_DATA")},
-    {"dict_code": "USER_STATUS", "dict_name": "用户状态", "items": _items("ACTIVE", "DISABLED", "LOCKED")},
-    {"dict_code": "AUDIT_STATUS", "dict_name": "审核状态", "items": _items("PENDING", "APPROVED", "REJECTED")},
-    {"dict_code": "CERTIFICATE_STATUS", "dict_name": "证件状态", "items": _items("VALID", "EXPIRING", "EXPIRED", "INVALID")},
-    {"dict_code": "VERIFY_STATUS", "dict_name": "校验状态", "items": _items("UNVERIFIED", "VERIFIED", "FAILED")},
-    {"dict_code": "FILE_STORAGE_PROVIDER", "dict_name": "文件存储提供方", "items": _items("TENCENT_COS", "MINIO", "LOCAL")},
-    {"dict_code": "LOGIN_RESULT", "dict_name": "登录结果", "items": _items("SUCCESS", "FAILED", "LOGOUT")},
-    {"dict_code": "PROFILE_STATUS", "dict_name": "档案状态", "items": _items("ACTIVE", "INACTIVE", "ARCHIVED")},
-    {"dict_code": "STAT_JOB_STATUS", "dict_name": "统计任务状态", "items": _items("RUNNING", "SUCCESS", "FAILED")},
-    {"dict_code": "VALUE_TYPE", "dict_name": "值类型", "items": _items("STRING", "NUMBER", "BOOLEAN", "JSON", "DATE", "DATETIME")},
-    {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items("SYSTEM", "MAP", "FREIGHT", "SHIP", "ANALYSIS")},
+    {"dict_code": "NODE_TYPE", "dict_name": "节点类型", "items": _items(("PORT", "港口"), ("TERMINAL", "码头"), ("ANCHORAGE", "锚地"), ("LOCK", "船闸"), ("LOGISTICS_PARK", "物流园"), ("RAIL_STATION", "铁路货站"), ("HIGHWAY_PORT", "公路港"), ("INTERMODAL_HUB", "多式联运枢纽"), ("OTHER", "其他节点"))},
+    {"dict_code": "BUSINESS_CATEGORY", "dict_name": "业务类别", "items": _items(("LOADING", "装货"), ("UNLOADING", "卸货"), ("TRANSFER", "中转"), ("TRANSSHIPMENT", "换装"), ("STORAGE", "仓储"), ("PASSAGE", "通行"), ("COMPREHENSIVE", "综合服务"))},
+    {"dict_code": "PACKAGING_FORM", "dict_name": "包装形式", "items": _items(("BULK", "散装"), ("TON_BAG", "吨袋"), ("BAGGED", "袋装"), ("BOXED", "箱装"), ("CONTAINER", "集装箱"), ("GENERAL_CARGO", "件杂货"))},
+    {"dict_code": "HANDLING_MODE", "dict_name": "装卸方式", "items": _items(("GRAB", "抓斗"), ("PIPELINE", "管输"), ("CONVEYOR", "皮带机"), ("CRANE", "吊装"), ("MANUAL", "人工/叉车"), ("SELF_UNLOADING", "自卸"), ("OTHER", "其他"))},
+    {"dict_code": "SHIP_TYPE", "dict_name": "船型", "items": _items(("BULK_CARRIER", "散货船"), ("SELF_UNLOADING_BULK", "自卸散货船"), ("GENERAL_CARGO_SHIP", "普通货船"), ("CONTAINER_SHIP", "集装箱船"), ("CHEMICAL_TANKER", "化学品船"), ("OIL_TANKER", "油船"), ("MULTIPURPOSE", "多用途船"), ("BARGE", "驳船"), ("TUG", "拖轮"))},
+    {"dict_code": "NAVIGATION_POWER_TYPE", "dict_name": "动力类型", "items": _items(("SELF_PROPELLED", "自航"), ("NON_SELF_PROPELLED", "非自航"))},
+    {"dict_code": "PARTY_RELATION_TYPE", "dict_name": "主体关系类型", "items": _items(("OWNER", "所有人"), ("OPERATOR", "经营人"), ("MANAGER", "管理人"), ("AGENT", "代理人"), ("CARRIER", "承运人"))},
+    {"dict_code": "CONTACT_ROLE", "dict_name": "联系人角色", "items": _items(("CAPTAIN", "船长"), ("OWNER_CONTACT", "船东联系人"), ("DISPATCH_CONTACT", "调度联系人"), ("SETTLEMENT_CONTACT", "结算联系人"), ("EMERGENCY_CONTACT", "应急联系人"), ("FREIGHT_CONTACT", "货源联系人"))},
+    {"dict_code": "CERTIFICATE_TYPE", "dict_name": "证件类型", "items": _items(("TRANSPORT_LICENSE", "水路运输许可证"), ("OWNERSHIP_CERT", "船舶所有权证书"), ("INSPECTION_CERT", "检验证书"), ("SEAWORTHINESS_CERT", "适航证书"), ("AIS_CERT", "AIS 证书"), ("CREW_CERT", "船员证书"), ("OTHER", "其他证照"))},
+    {"dict_code": "BOUNDARY_SOURCE_TYPE", "dict_name": "边界来源类型", "items": _items(("OFFICIAL_GIS_SERVICE", "官方地理服务"), ("STANDARD_MAP_EXTRACTION", "标准地图提取"), ("PLATFORM_DEFINED", "平台定义"), ("THIRD_PARTY_AUTHORIZED", "授权三方数据"))},
+    {"dict_code": "REGION_TYPE", "dict_name": "区域类型", "items": _items(("SHIPPING_ANALYSIS_REGION", "航运分析区"), ("OPERATION_REGION", "运营管理区"), ("MARKET_REGION", "市场片区"))},
+    {"dict_code": "REGION_RELATION_TYPE", "dict_name": "区域关系类型", "items": _items(("INCLUDED", "包含"), ("PRIMARY", "主归属"), ("ASSIST", "辅助归属"))},
+    {"dict_code": "TRANSPORT_MODE_ELEMENT", "dict_name": "运输方式要素", "items": _items(("WATER", "水运"), ("ROAD", "公路"), ("RAIL", "铁路"), ("MANUAL", "人工维护"), ("UNKNOWN", "未知"))},
+    {"dict_code": "TRANSPORT_ORG_TYPE", "dict_name": "运输组织类型", "items": _items(("SINGLE_MODE", "单一运输"), ("MULTIMODAL", "多式联运"))},
+    {"dict_code": "MULTIMODAL_COMBINATION", "dict_name": "联运组合", "items": _items(("WATER_ROAD", "水公联运"), ("WATER_RAIL", "水铁联运"), ("ROAD_RAIL", "公铁联运"), ("WATER_ROAD_RAIL", "水公铁联运"))},
+    {"dict_code": "ROUTE_PLAN_TYPE", "dict_name": "运输方案类型", "items": _items(("STANDARD", "标准方案"), ("SEASONAL", "季节方案"), ("EMERGENCY", "应急方案"), ("MANUAL", "人工方案"))},
+    {"dict_code": "ROUTE_LINE_ROLE", "dict_name": "路线角色", "items": _items(("MAIN", "主线"), ("ALTERNATE", "备选"), ("DETOUR", "绕行"), ("EMERGENCY", "应急"))},
+    {"dict_code": "ROUTE_LINE_NODE_TYPE", "dict_name": "路线节点类型", "items": _items(("TRANSPORT_NODE", "运输节点"), ("CONSTRAINT_POINT", "通航约束点"), ("MANUAL_POINT", "手工点位"))},
+    {"dict_code": "ROUTE_LINE_TRACK_STATUS", "dict_name": "路线轨迹状态", "items": _items(("NOT_GENERATED", "未生成"), ("READY", "已就绪"), ("PARTIAL", "部分生成"), ("FAILED", "生成失败"))},
+    {"dict_code": "ROUTE_GEOMETRY_SOURCE", "dict_name": "路线轨迹来源", "items": _items(("AMAP", "高德"), ("HIFLEET", "HiFleet"), ("MANUAL", "人工"), ("FALLBACK", "兜底轨迹"))},
+    {"dict_code": "NAVIGATION_CONSTRAINT_TYPE", "dict_name": "通航约束类型", "items": _items(("LOCK", "船闸"), ("BRIDGE", "桥梁"), ("SHALLOW", "浅滩"), ("RESTRICTED_AREA", "限制区"), ("FORBIDDEN_AREA", "禁航区"), ("DRAFT_LIMIT", "吃水限制"), ("WIDTH_LIMIT", "船宽限制"), ("HEIGHT_LIMIT", "净空限制"), ("LOW_BRIDGE", "低桥"), ("PASSAGE_RESTRICTION", "通行限制"))},
+    {"dict_code": "SOURCE_TYPE", "dict_name": "来源类型", "items": _items(("MANUAL", "人工录入"), ("IMPORT", "文件导入"), ("TMS", "TMS 接入"), ("WECHAT", "微信采集"), ("SYSTEM", "系统生成"))},
+    {"dict_code": "SOURCE_CHANNEL", "dict_name": "来源渠道", "items": _items(("MANUAL_FORM", "手工表单"), ("IMPORT_FILE", "导入文件"), ("TMS_API", "TMS 接口"), ("WECHAT_TEXT", "微信文本"), ("SYSTEM_SYNC", "系统同步"))},
+    {"dict_code": "PROVIDER_CODE", "dict_name": "提供方编码", "items": _items(("AMAP", "高德地图"), ("HIFLEET", "HiFleet"))},
+    {"dict_code": "FREIGHT_STATUS", "dict_name": "货源状态", "items": [_item("DRAFT", "草稿", color="info"), _item("PUBLISHED", "已发布", color="success"), _item("MATCHING", "匹配中", color="warning"), _item("EXPIRED", "已过期", color="danger"), _item("CLOSED", "已关闭", color="info")]},
+    {"dict_code": "FREIGHT_TAG", "dict_name": "货源标签", "items": _items(("URGENT", "急货"), ("HIGH_VALUE", "高价值"), ("FIXED_ROUTE", "固定线路"), ("LONG_TERM", "长期货源"))},
+    {"dict_code": "DATA_SCOPE_TYPE", "dict_name": "数据权限类型", "items": _items(("ALL_DATA", "全部数据"), ("REGION_DATA", "区域数据"), ("CITY_DATA", "城市数据"), ("NODE_DATA", "节点数据"), ("SELF_DATA", "本人数据"))},
+    {"dict_code": "USER_STATUS", "dict_name": "用户状态", "items": [_item("ACTIVE", "启用", color="success"), _item("DISABLED", "停用", color="info"), _item("LOCKED", "锁定", color="danger")]},
+    {"dict_code": "AUDIT_STATUS", "dict_name": "审核状态", "items": [_item("PENDING", "待审核", color="warning"), _item("APPROVED", "已通过", color="success"), _item("REJECTED", "已驳回", color="danger")]},
+    {"dict_code": "CERTIFICATE_STATUS", "dict_name": "证件状态", "items": _items(("VALID", "有效"), ("EXPIRING", "即将到期"), ("EXPIRED", "已过期"), ("INVALID", "无效"))},
+    {"dict_code": "VERIFY_STATUS", "dict_name": "校验状态", "items": _items(("UNVERIFIED", "未校验"), ("VERIFIED", "已校验"), ("FAILED", "校验失败"))},
+    {"dict_code": "FILE_STORAGE_PROVIDER", "dict_name": "文件存储提供方", "items": _items(("TENCENT_COS", "腾讯云 COS"), ("MINIO", "MinIO"), ("LOCAL", "本地存储"))},
+    {"dict_code": "LOGIN_RESULT", "dict_name": "登录结果", "items": _items(("SUCCESS", "成功"), ("FAILED", "失败"), ("LOGOUT", "退出"))},
+    {"dict_code": "PROFILE_STATUS", "dict_name": "档案状态", "items": [_item("ACTIVE", "启用", color="success"), _item("INACTIVE", "停用", color="info"), _item("ARCHIVED", "归档", color="warning")]},
+    {"dict_code": "STAT_JOB_STATUS", "dict_name": "统计任务状态", "items": [_item("RUNNING", "运行中", color="warning"), _item("SUCCESS", "成功", color="success"), _item("FAILED", "失败", color="danger")]},
+    {"dict_code": "VALUE_TYPE", "dict_name": "值类型", "items": _items(("STRING", "字符串"), ("NUMBER", "数值"), ("BOOLEAN", "布尔值"), ("JSON", "JSON"), ("DATE", "日期"), ("DATETIME", "日期时间"))},
+    {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items(("SYSTEM", "系统"), ("MAP", "地图"), ("FREIGHT", "货源"), ("SHIP", "船舶"), ("ANALYSIS", "分析"))},
 ]
 
 
@@ -81,6 +95,13 @@ async def seed_builtin_dicts() -> None:
                 )
                 session.add(dictionary)
                 await session.flush()
+            else:
+                dictionary.dict_name = dict_payload["dict_name"]
+                dictionary.dict_name_en = dict_payload.get("dict_name_en")
+                dictionary.description = dict_payload.get("description")
+                dictionary.is_system = True
+                dictionary.status = 1
+                dictionary.sort_order = dict_payload.get("sort_order", 0)
 
             for item in dict_payload.get("items", []):
                 existed_item = await session.scalar(
@@ -90,6 +111,15 @@ async def seed_builtin_dicts() -> None:
                     )
                 )
                 if existed_item is not None:
+                    existed_item.item_name = item["item_name"]
+                    existed_item.item_name_en = item.get("item_name_en")
+                    existed_item.item_value = item.get("item_value")
+                    existed_item.color = item.get("color")
+                    existed_item.description = item.get("description")
+                    existed_item.is_default = bool(item.get("is_default", False))
+                    existed_item.is_system = True
+                    existed_item.status = 1
+                    existed_item.sort_order = item.get("sort_order", 0)
                     continue
                 session.add(
                     StdDictItem(
@@ -98,6 +128,7 @@ async def seed_builtin_dicts() -> None:
                         item_name=item["item_name"],
                         item_name_en=item.get("item_name_en"),
                         item_value=item.get("item_value"),
+                        color=item.get("color"),
                         description=item.get("description"),
                         is_default=bool(item.get("is_default", False)),
                         is_system=True,

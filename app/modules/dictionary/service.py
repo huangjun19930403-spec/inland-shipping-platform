@@ -16,6 +16,8 @@ from app.modules.dictionary.schemas import (
     DictItemCreateRequest,
     DictItemResponse,
     DictItemUpdateRequest,
+    DictOptionItemResponse,
+    DictOptionsResponse,
     DictResponse,
     DictUpdateRequest,
     PageResponse,
@@ -126,6 +128,45 @@ class DictionaryService:
             "items_total": total,
             "items": [_to_item_response(item) for item in items],
         }
+
+    async def get_options(self, dict_codes: list[str]) -> list[DictOptionsResponse]:
+        normalized_codes = []
+        seen_codes: set[str] = set()
+        for raw_code in dict_codes:
+            code = (raw_code or "").strip()
+            if not code or code in seen_codes:
+                continue
+            normalized_codes.append(code)
+            seen_codes.add(code)
+
+        results: list[DictOptionsResponse] = []
+        for code in normalized_codes:
+            entity = await self.repo.get_dict_by_code(code)
+            if entity is None or entity.status != 1:
+                results.append(DictOptionsResponse(dict_code=code, dict_name=code, items=[]))
+                continue
+            items, _ = await self.item_repo.list_items(code, None, True, 1, 1000)
+            results.append(
+                DictOptionsResponse(
+                    dict_code=entity.dict_code,
+                    dict_name=entity.dict_name,
+                    items=[
+                        DictOptionItemResponse(
+                            dict_code=entity.dict_code,
+                            item_code=item.item_code,
+                            item_name=item.item_name,
+                            item_name_en=item.item_name_en,
+                            item_value=item.item_value,
+                            color=item.color,
+                            description=item.description,
+                            is_default=item.is_default,
+                            sort_order=item.sort_order,
+                        )
+                        for item in items
+                    ],
+                )
+            )
+        return results
 
 
 class DictionaryItemService:
