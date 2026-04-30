@@ -51,7 +51,17 @@ from app.models.ship import (
     ShipImportRaw,
     ShipImportRecord,
 )
-from app.models.freight import Freight, FreightContact, FreightSourceAttachment, FreightTagRelation
+from app.models.freight import (
+    Freight,
+    FreightAiParseTask,
+    FreightCandidate,
+    FreightCandidateFeedback,
+    FreightClue,
+    FreightContact,
+    FreightSourceAttachment,
+    FreightSourceInbound,
+    FreightTagRelation,
+)
 from app.models.analysis import (
     StatCargoDaily,
     StatCargoCityDaily,
@@ -126,6 +136,11 @@ __all__ = [
     "ShipImportRaw",
     "ShipImportRecord",
     "Freight",
+    "FreightSourceInbound",
+    "FreightAiParseTask",
+    "FreightClue",
+    "FreightCandidate",
+    "FreightCandidateFeedback",
     "FreightContact",
     "FreightSourceAttachment",
     "FreightTagRelation",

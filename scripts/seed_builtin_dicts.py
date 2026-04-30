@@ -62,8 +62,13 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "NAVIGATION_CONSTRAINT_TYPE", "dict_name": "通航约束类型", "items": _items(("LOCK", "船闸"), ("BRIDGE", "桥梁"), ("SHALLOW", "浅滩"), ("RESTRICTED_AREA", "限制区"), ("FORBIDDEN_AREA", "禁航区"), ("DRAFT_LIMIT", "吃水限制"), ("WIDTH_LIMIT", "船宽限制"), ("HEIGHT_LIMIT", "净空限制"), ("LOW_BRIDGE", "低桥"), ("PASSAGE_RESTRICTION", "通行限制"))},
     {"dict_code": "SOURCE_TYPE", "dict_name": "来源类型", "items": _items(("MANUAL", "人工录入"), ("IMPORT", "文件导入"), ("TMS", "TMS 接入"), ("WECHAT", "微信采集"), ("SYSTEM", "系统生成"))},
     {"dict_code": "SOURCE_CHANNEL", "dict_name": "来源渠道", "items": _items(("MANUAL_FORM", "手工表单"), ("IMPORT_FILE", "导入文件"), ("TMS_API", "TMS 接口"), ("WECHAT_TEXT", "微信文本"), ("SYSTEM_SYNC", "系统同步"))},
-    {"dict_code": "PROVIDER_CODE", "dict_name": "提供方编码", "items": _items(("AMAP", "高德地图"), ("HIFLEET", "HiFleet"))},
+    {"dict_code": "PROVIDER_CODE", "dict_name": "提供方编码", "items": _items(("AMAP", "高德地图"), ("HIFLEET", "HiFleet"), ("DASHSCOPE_QWEN", "通义千问"))},
     {"dict_code": "FREIGHT_STATUS", "dict_name": "货源状态", "items": [_item("DRAFT", "草稿", color="info"), _item("PUBLISHED", "已发布", color="success"), _item("MATCHING", "匹配中", color="warning"), _item("EXPIRED", "已过期", color="danger"), _item("CLOSED", "已关闭", color="info")]},
+    {"dict_code": "FREIGHT_INBOUND_STATUS", "dict_name": "货源接入状态", "items": [_item("NEW", "待解析", color="info"), _item("PARSING", "解析中", color="warning"), _item("PARSED", "已解析", color="success"), _item("FAILED", "解析失败", color="danger"), _item("IGNORED", "已忽略", color="info")]},
+    {"dict_code": "AI_PARSE_STATUS", "dict_name": "AI 解析状态", "items": [_item("PENDING", "待运行", color="info"), _item("RUNNING", "运行中", color="warning"), _item("SUCCESS", "解析成功", color="success"), _item("PARTIAL_FAILED", "部分失败", color="warning"), _item("FAILED", "解析失败", color="danger")]},
+    {"dict_code": "FREIGHT_CLUE_STATUS", "dict_name": "货源线索状态", "items": [_item("NEW", "新线索", color="info"), _item("CANDIDATE_CREATED", "已生成候选", color="success"), _item("IGNORED", "已忽略", color="info"), _item("FAILED", "处理失败", color="danger")]},
+    {"dict_code": "FREIGHT_CANDIDATE_STATUS", "dict_name": "候选货源状态", "items": [_item("PENDING", "待确认", color="warning"), _item("CONFIRMED", "已确认", color="success"), _item("REJECTED", "已驳回", color="danger"), _item("MERGED", "已合并", color="info")]},
+    {"dict_code": "FREIGHT_CONFIRM_ACTION", "dict_name": "候选确认动作", "items": [_item("CONFIRM", "确认入库", color="success"), _item("EDIT_CONFIRM", "编辑后确认", color="success"), _item("REJECT", "驳回", color="danger"), _item("MERGE", "合并", color="info")]},
     {"dict_code": "FREIGHT_TAG", "dict_name": "货源标签", "items": _items(("URGENT", "急货"), ("HIGH_VALUE", "高价值"), ("FIXED_ROUTE", "固定线路"), ("LONG_TERM", "长期货源"))},
     {"dict_code": "DATA_SCOPE_TYPE", "dict_name": "数据权限类型", "items": _items(("ALL_DATA", "全部数据"), ("REGION_DATA", "区域数据"), ("CITY_DATA", "城市数据"), ("NODE_DATA", "节点数据"), ("SELF_DATA", "本人数据"))},
     {"dict_code": "USER_STATUS", "dict_name": "用户状态", "items": [_item("ACTIVE", "启用", color="success"), _item("DISABLED", "停用", color="info"), _item("LOCKED", "锁定", color="danger")]},
@@ -75,7 +80,7 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "PROFILE_STATUS", "dict_name": "档案状态", "items": [_item("ACTIVE", "启用", color="success"), _item("INACTIVE", "停用", color="info"), _item("ARCHIVED", "归档", color="warning")]},
     {"dict_code": "STAT_JOB_STATUS", "dict_name": "统计任务状态", "items": [_item("RUNNING", "运行中", color="warning"), _item("SUCCESS", "成功", color="success"), _item("FAILED", "失败", color="danger")]},
     {"dict_code": "VALUE_TYPE", "dict_name": "值类型", "items": _items(("STRING", "字符串"), ("NUMBER", "数值"), ("BOOLEAN", "布尔值"), ("JSON", "JSON"), ("DATE", "日期"), ("DATETIME", "日期时间"))},
-    {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items(("SYSTEM", "系统"), ("MAP", "地图"), ("FREIGHT", "货源"), ("SHIP", "船舶"), ("ANALYSIS", "分析"))},
+    {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items(("SYSTEM", "系统"), ("INTEGRATION", "外部集成"), ("AI", "AI 配置"), ("MAP", "地图"), ("FREIGHT", "货源"), ("SHIP", "船舶"), ("ANALYSIS", "分析"))},
 ]
 
 

@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     HIFLEET_TIMEOUT_SECONDS: float = 8.0
     HIFLEET_RELOGIN_CHECK_ENABLED: bool = True
 
+    # 通义千问 / 阿里云百炼 DashScope
+    AI_PROVIDER: str = "DASHSCOPE_QWEN"
+    DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    DASHSCOPE_MODEL: str = "qwen-plus"
+    DASHSCOPE_API_KEY: str = ""
+    DASHSCOPE_TIMEOUT_SECONDS: float = 60.0
+
 
 settings = Settings()
-

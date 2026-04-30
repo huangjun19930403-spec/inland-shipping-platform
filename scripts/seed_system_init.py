@@ -10,6 +10,7 @@ from scripts.seed_code_sequences import seed_code_sequences
 from scripts.seed_commodity_standards import seed_commodity_standards
 from scripts.seed_commodity_taxonomy import seed_commodity_taxonomy
 from scripts.seed_foundation_samples import seed_foundation_samples
+from scripts.seed_freight_samples import seed_freight_samples
 from scripts.seed_navigation_constraints import seed_navigation_constraints
 from scripts.seed_route_map_e2e import seed_route_map_e2e
 from scripts.seed_ship_samples import seed_ship_samples
@@ -24,6 +25,7 @@ async def seed_system_init() -> None:
     await seed_commodity_standards()
     await seed_foundation_samples()
     await seed_ship_samples()
+    await seed_freight_samples()
     await seed_system_base()
     await seed_navigation_constraints()
     await seed_route_map_e2e()
