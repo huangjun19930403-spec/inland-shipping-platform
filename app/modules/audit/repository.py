@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit import AuditRecord, AuditTask
+from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 
 
 class AuditTaskRepository:
@@ -21,11 +21,17 @@ class AuditTaskRepository:
     async def list_tasks(
         self,
         keyword: str | None,
+        queue_type: str | None,
         task_type: str | None,
         status_code: str | None,
         object_type: str | None,
+        object_type_code: str | None,
         object_id: int | None,
+        submitter_id: int | None,
         assignee_user_id: int | None,
+        current_handler_id: int | None,
+        submitted_from: datetime | None,
+        submitted_to: datetime | None,
         page: int,
         page_size: int,
     ) -> tuple[list[AuditTask], int]:
@@ -36,19 +42,40 @@ class AuditTaskRepository:
                 or_(
                     AuditTask.task_no.ilike(like_value),
                     AuditTask.biz_code.ilike(like_value),
+                    AuditTask.object_code.ilike(like_value),
+                    AuditTask.object_name.ilike(like_value),
                     AuditTask.audit_remark.ilike(like_value),
                 )
             )
+        if queue_type:
+            queue = queue_type.upper()
+            if queue == "PENDING":
+                stmt = stmt.where(AuditTask.audit_status == "PENDING")
+            elif queue == "DONE":
+                stmt = stmt.where(AuditTask.audit_status.in_(("APPROVED", "REJECTED", "CANCELED")))
         if task_type:
             stmt = stmt.where(AuditTask.biz_type_code == task_type)
         if status_code:
             stmt = stmt.where(AuditTask.audit_status == status_code)
-        if object_type:
-            stmt = stmt.where(AuditTask.biz_code == object_type)
+        object_type_value = object_type_code or object_type
+        if object_type_value:
+            stmt = stmt.where(
+                or_(
+                    AuditTask.object_type_code == object_type_value,
+                    AuditTask.biz_code == object_type_value,
+                )
+            )
         if object_id is not None:
             stmt = stmt.where(AuditTask.biz_id == object_id)
-        if assignee_user_id is not None:
-            stmt = stmt.where(AuditTask.current_handler_id == assignee_user_id)
+        if submitter_id is not None:
+            stmt = stmt.where(AuditTask.submitter_id == submitter_id)
+        handler_id = current_handler_id if current_handler_id is not None else assignee_user_id
+        if handler_id is not None:
+            stmt = stmt.where(AuditTask.current_handler_id == handler_id)
+        if submitted_from is not None:
+            stmt = stmt.where(AuditTask.submitted_at >= submitted_from)
+        if submitted_to is not None:
+            stmt = stmt.where(AuditTask.submitted_at <= submitted_to)
 
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (
@@ -96,6 +123,40 @@ class AuditTaskRepository:
         if assignee_user_id is not None:
             stmt = stmt.where(AuditTask.current_handler_id == assignee_user_id)
         return int((await self.db.execute(stmt)).scalar_one())
+
+
+class AuditTaskSnapshotRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get_snapshot_by_task_id(self, task_id: int) -> AuditTaskSnapshot | None:
+        return await self.db.scalar(
+            select(AuditTaskSnapshot).where(AuditTaskSnapshot.task_id == task_id)
+        )
+
+    async def upsert_snapshot(self, task_id: int, data: dict[str, Any]) -> AuditTaskSnapshot:
+        now = datetime.utcnow()
+        row = await self.get_snapshot_by_task_id(task_id)
+        payload = {
+            "before_snapshot_json": data.get("before_snapshot_json"),
+            "after_snapshot_json": data.get("after_snapshot_json"),
+            "diff_json": data.get("diff_json"),
+            "summary_json": data.get("summary_json"),
+            "updated_at": now,
+        }
+        if row is None:
+            row = AuditTaskSnapshot(
+                task_id=task_id,
+                created_at=now,
+                **payload,
+            )
+            self.db.add(row)
+        else:
+            for key, value in payload.items():
+                setattr(row, key, value)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
 
 
 class AuditRecordRepository:

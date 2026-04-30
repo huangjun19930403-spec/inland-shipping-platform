@@ -83,7 +83,7 @@ from app.models.analysis import (
     FactShipFlowDaily,
     StatJobRun,
 )
-from app.models.audit import AuditTask, AuditRecord
+from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.system import (
     SysUser,
     SysRole,
@@ -176,6 +176,7 @@ __all__ = [
     "StatJobRun",
     "AuditTask",
     "AuditRecord",
+    "AuditTaskSnapshot",
     "SysUser",
     "SysRole",
     "SysUserRole",

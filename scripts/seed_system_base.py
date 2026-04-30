@@ -69,6 +69,86 @@ ROLE_SUPER_ADMIN = {
     "sort_order": 1,
 }
 
+ADDITIONAL_ROLES = [
+    {
+        "role_code": "DATA_STEWARD",
+        "role_name": "数据治理员",
+        "description": "负责基础数据、船舶、货品和货源审核治理",
+        "status_code": "ACTIVE",
+        "sort_order": 2,
+    },
+    {
+        "role_code": "OPS_ANALYST",
+        "role_name": "运营分析员",
+        "description": "负责查看航线、货源和船舶分析结果",
+        "status_code": "ACTIVE",
+        "sort_order": 3,
+    },
+    {
+        "role_code": "BUSINESS_INPUTTER",
+        "role_name": "业务录入员",
+        "description": "负责货源录入、来源接入和候选确认",
+        "status_code": "ACTIVE",
+        "sort_order": 4,
+    },
+]
+
+ROLE_PERMISSION_CODES = {
+    "DATA_STEWARD": ["MASTER_DATA:ALL", "AUDIT:ALL", "FREIGHT:ALL"],
+    "OPS_ANALYST": ["ANALYSIS:READ", "MASTER_DATA:ALL"],
+    "BUSINESS_INPUTTER": ["FREIGHT:ALL", "MASTER_DATA:ALL"],
+}
+
+ROLE_MENU_CODES = {
+    "DATA_STEWARD": [
+        "DASHBOARD",
+        "DICTIONARY_ROOT",
+        "ADDRESS_ADMIN_REGIONS",
+        "ADDRESS_REGIONS",
+        "ADDRESS_NODES",
+        "COMMODITY_STANDARDS",
+        "SHIP_LIST",
+        "FREIGHT_ROOT",
+        "FREIGHT_LIST",
+        "FREIGHT_MANUAL_CREATE",
+        "FREIGHT_AI_PARSE_RECORDS",
+        "FREIGHT_CANDIDATES",
+        "FREIGHT_SOURCE_INBOUNDS",
+        "AUDIT_ROOT",
+        "AUDIT_PENDING",
+        "AUDIT_DONE",
+    ],
+    "OPS_ANALYST": [
+        "DASHBOARD",
+        "DICTIONARY_ROOT",
+        "ADDRESS_REGIONS",
+        "ADDRESS_NODES",
+        "SHIP_LIST",
+        "FREIGHT_LIST",
+        "ROUTE_ROOT",
+        "ROUTE_LIST",
+        "ANALYSIS_ROOT",
+        "ANALYSIS_SHIPS",
+        "ANALYSIS_FREIGHT",
+        "ANALYSIS_REGIONS",
+        "ANALYSIS_FLOWS",
+        "ANALYSIS_PRICES",
+        "ANALYSIS_JOBS",
+    ],
+    "BUSINESS_INPUTTER": [
+        "DASHBOARD",
+        "DICTIONARY_ROOT",
+        "ADDRESS_NODES",
+        "COMMODITY_STANDARDS",
+        "FREIGHT_ROOT",
+        "FREIGHT_LIST",
+        "FREIGHT_MANUAL_CREATE",
+        "FREIGHT_AI_PARSE_RECORDS",
+        "FREIGHT_CANDIDATES",
+        "FREIGHT_SOURCE_INBOUNDS",
+    ],
+}
+
 PERMISSIONS = [
     {
         "permission_code": "SYSTEM:ALL",
@@ -93,6 +173,30 @@ PERMISSIONS = [
         "resource_path": "/api/v1/address/*",
         "action_code": "ALL",
         "description": "地址/货品/船舶/航线/货源等主数据权限",
+    },
+    {
+        "permission_code": "AUDIT:ALL",
+        "permission_name": "审核中心全量权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/audit/*",
+        "action_code": "ALL",
+        "description": "审核队列、差异查看、通过、驳回和指派权限",
+    },
+    {
+        "permission_code": "ANALYSIS:READ",
+        "permission_name": "数据分析查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/analysis/*",
+        "action_code": "READ",
+        "description": "船舶、货源、区域、流向和运价分析查看权限",
+    },
+    {
+        "permission_code": "FREIGHT:ALL",
+        "permission_name": "货源采集全量权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/freight/*",
+        "action_code": "ALL",
+        "description": "正式货源、来源接入、AI 解析和候选确认权限",
     },
 ]
 
@@ -546,25 +650,49 @@ MENUS = [
     },
     {
         "menu_code": "AUDIT_ROOT",
-        "menu_name": "审核管理",
+        "menu_name": "审核中心",
         "menu_type_code": "DIRECTORY",
         "route_path": None,
         "component_path": None,
         "icon": "Select",
-        "sort_order": 85,
+        "sort_order": 80,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
+        "menu_code": "AUDIT_PENDING",
+        "menu_name": "待审核",
+        "menu_type_code": "MENU",
+        "parent_code": "AUDIT_ROOT",
+        "route_path": "/audit/pending",
+        "component_path": "modules/audit/pages/AuditTaskListPage",
+        "icon": "Clock",
+        "sort_order": 1,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
+        "menu_code": "AUDIT_DONE",
+        "menu_name": "已审核",
+        "menu_type_code": "MENU",
+        "parent_code": "AUDIT_ROOT",
+        "route_path": "/audit/done",
+        "component_path": "modules/audit/pages/AuditTaskListPage",
+        "icon": "Finished",
+        "sort_order": 2,
         "visible_flag": 1,
         "status_code": "ACTIVE",
     },
     {
         "menu_code": "AUDIT_TASKS",
-        "menu_name": "审核任务",
+        "menu_name": "审核任务兼容入口",
         "menu_type_code": "MENU",
         "parent_code": "AUDIT_ROOT",
         "route_path": "/audit/tasks",
         "component_path": "modules/audit/pages/AuditTaskListPage",
         "icon": "Select",
-        "sort_order": 1,
-        "visible_flag": 1,
+        "sort_order": 99,
+        "visible_flag": 0,
         "status_code": "ACTIVE",
     },
 ]
@@ -618,7 +746,7 @@ SYSTEM_CONFIGS = [
         "config_name": "高德 Web 服务 Key",
         "config_value": "",
         "value_type_code": "STRING",
-        "config_group_code": "INTEGRATION",
+        "config_group_code": "MAP",
         "config_profile_code": AMAP_CONFIG_PROFILE,
         "sensitive_flag": 1,
         "encrypted_flag": 0,
@@ -635,7 +763,7 @@ SYSTEM_CONFIGS = [
         "config_name": "路线几何请求超时时间",
         "config_value": "8",
         "value_type_code": "FLOAT",
-        "config_group_code": "INTEGRATION",
+        "config_group_code": "MAP",
         "config_profile_code": AMAP_CONFIG_PROFILE,
         "sensitive_flag": 0,
         "encrypted_flag": 0,
@@ -652,7 +780,7 @@ SYSTEM_CONFIGS = [
         "config_name": "路线几何模式",
         "config_value": "fallback",
         "value_type_code": "STRING",
-        "config_group_code": "INTEGRATION",
+        "config_group_code": "MAP",
         "config_profile_code": AMAP_CONFIG_PROFILE,
         "sensitive_flag": 0,
         "encrypted_flag": 0,
@@ -669,7 +797,7 @@ SYSTEM_CONFIGS = [
         "config_name": "高德 JS API Key",
         "config_value": "",
         "value_type_code": "STRING",
-        "config_group_code": "INTEGRATION",
+        "config_group_code": "MAP",
         "config_profile_code": AMAP_CONFIG_PROFILE,
         "sensitive_flag": 1,
         "encrypted_flag": 0,
@@ -686,7 +814,7 @@ SYSTEM_CONFIGS = [
         "config_name": "高德 JS 安全密钥",
         "config_value": "",
         "value_type_code": "STRING",
-        "config_group_code": "INTEGRATION",
+        "config_group_code": "MAP",
         "config_profile_code": AMAP_CONFIG_PROFILE,
         "sensitive_flag": 1,
         "encrypted_flag": 0,
@@ -1194,7 +1322,24 @@ async def seed_system_base() -> None:
             role.status_code = ROLE_SUPER_ADMIN["status_code"]
             role.sort_order = ROLE_SUPER_ADMIN["sort_order"]
 
+        extra_roles_by_code: dict[str, SysRole] = {}
+        for role_payload in ADDITIONAL_ROLES:
+            extra_role = await session.scalar(
+                select(SysRole).where(SysRole.role_code == role_payload["role_code"])
+            )
+            if extra_role is None:
+                extra_role = SysRole(**role_payload)
+                session.add(extra_role)
+                await session.flush()
+            else:
+                extra_role.role_name = role_payload["role_name"]
+                extra_role.description = role_payload["description"]
+                extra_role.status_code = role_payload["status_code"]
+                extra_role.sort_order = role_payload["sort_order"]
+            extra_roles_by_code[role_payload["role_code"]] = extra_role
+
         permission_ids: list[int] = []
+        permission_id_by_code: dict[str, int] = {}
         for item in PERMISSIONS:
             permission = await session.scalar(
                 select(SysPermission).where(
@@ -1212,6 +1357,7 @@ async def seed_system_base() -> None:
                 permission.action_code = item["action_code"]
                 permission.description = item["description"]
             permission_ids.append(int(permission.id))
+            permission_id_by_code[item["permission_code"]] = int(permission.id)
 
         menu_id_by_code: dict[str, int] = {}
         for item in MENUS:
@@ -1295,6 +1441,44 @@ async def seed_system_base() -> None:
                         created_at=now,
                     )
                 )
+
+        for role_code, extra_role in extra_roles_by_code.items():
+            for permission_code in ROLE_PERMISSION_CODES.get(role_code, []):
+                permission_id = permission_id_by_code.get(permission_code)
+                if permission_id is None:
+                    continue
+                existed = await session.scalar(
+                    select(SysRolePermission).where(
+                        SysRolePermission.role_id == extra_role.id,
+                        SysRolePermission.permission_id == permission_id,
+                    )
+                )
+                if existed is None:
+                    session.add(
+                        SysRolePermission(
+                            role_id=extra_role.id,
+                            permission_id=permission_id,
+                            created_at=now,
+                        )
+                    )
+            for menu_code in ROLE_MENU_CODES.get(role_code, []):
+                menu_id = menu_id_by_code.get(menu_code)
+                if menu_id is None:
+                    continue
+                existed = await session.scalar(
+                    select(SysRoleMenu).where(
+                        SysRoleMenu.role_id == extra_role.id,
+                        SysRoleMenu.menu_id == menu_id,
+                    )
+                )
+                if existed is None:
+                    session.add(
+                        SysRoleMenu(
+                            role_id=extra_role.id,
+                            menu_id=menu_id,
+                            created_at=now,
+                        )
+                    )
 
         user_role = await session.scalar(
             select(SysUserRole).where(

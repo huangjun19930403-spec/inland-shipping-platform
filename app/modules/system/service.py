@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,9 +135,10 @@ def _mask_config_value(value: str | None) -> str:
 
 def _to_system_config_response(row) -> SystemConfigResponse:
     sensitive = int(row.sensitive_flag or 0) == 1
+    effective_value = os.getenv(row.config_key) or row.config_value
     if sensitive:
         config_value = ""
-        config_value_masked = _mask_config_value(row.config_value)
+        config_value_masked = _mask_config_value(effective_value)
     else:
         config_value = row.config_value
         config_value_masked = None
@@ -147,6 +149,7 @@ def _to_system_config_response(row) -> SystemConfigResponse:
         config_name=row.config_name,
         config_value=config_value,
         config_value_masked=config_value_masked,
+        configured=bool(str(effective_value or "").strip()),
         value_type_code=row.value_type_code,
         config_group_code=row.config_group_code,
         config_profile_code=row.config_profile_code,

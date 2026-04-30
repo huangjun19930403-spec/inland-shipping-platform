@@ -322,6 +322,7 @@ class SystemConfigResponse(BaseModel):
     config_name: str
     config_value: str
     config_value_masked: str | None
+    configured: bool
     value_type_code: str
     config_group_code: str
     config_profile_code: str

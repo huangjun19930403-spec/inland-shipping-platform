@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.modules.audit.schemas import (
+    AuditMetadataResponse,
     AuditPendingCountResponse,
     AuditRecordListQuery,
     AuditRecordResponse,
@@ -24,6 +25,16 @@ from app.modules.audit.service import AuditRecordService, AuditTaskService
 router = APIRouter()
 
 
+@router.get("/metadata", response_model=AuditMetadataResponse)
+async def get_audit_metadata(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AuditTaskService(db)
+    return await service.get_metadata()
+
+
 @router.get("/tasks", response_model=PageResponse[AuditTaskResponse])
 async def list_tasks(
     query: AuditTaskListQuery = Depends(),
@@ -34,11 +45,17 @@ async def list_tasks(
     service = AuditTaskService(db)
     return await service.list_tasks(
         keyword=query.keyword,
+        queue_type=query.queue_type,
         task_type=query.task_type,
         status_code=query.status_code,
         object_type=query.object_type,
+        object_type_code=query.object_type_code,
         object_id=query.object_id,
+        submitter_id=query.submitter_id,
         assignee_user_id=query.assignee_user_id,
+        current_handler_id=query.current_handler_id,
+        submitted_from=query.submitted_from,
+        submitted_to=query.submitted_to,
         page=query.page,
         page_size=query.page_size,
     )
@@ -90,7 +107,12 @@ async def approve_task(
     db: AsyncSession = Depends(get_db),
 ):
     service = AuditTaskService(db)
-    await service.approve_task(task_id, body.comment, current_user.id)
+    await service.approve_task(
+        task_id,
+        body.comment,
+        current_user.id,
+        getattr(current_user, "real_name", None),
+    )
     return {"ok": True}
 
 
@@ -102,7 +124,12 @@ async def reject_task(
     db: AsyncSession = Depends(get_db),
 ):
     service = AuditTaskService(db)
-    await service.reject_task(task_id, body.comment, current_user.id)
+    await service.reject_task(
+        task_id,
+        body.comment,
+        current_user.id,
+        getattr(current_user, "real_name", None),
+    )
     return {"ok": True}
 
 
@@ -114,7 +141,12 @@ async def cancel_task(
     db: AsyncSession = Depends(get_db),
 ):
     service = AuditTaskService(db)
-    await service.cancel_task(task_id, body.comment, current_user.id)
+    await service.cancel_task(
+        task_id,
+        body.comment,
+        current_user.id,
+        getattr(current_user, "real_name", None),
+    )
     return {"ok": True}
 
 
