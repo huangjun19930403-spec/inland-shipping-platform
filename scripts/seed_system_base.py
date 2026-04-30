@@ -261,7 +261,7 @@ MENUS = [
     },
     {
         "menu_code": "SYSTEM_CONFIG",
-        "menu_name": "系统配置",
+        "menu_name": "参数配置",
         "menu_type_code": "MENU",
         "parent_code": "SYSTEM_ROOT",
         "route_path": "/system/configs",
@@ -460,7 +460,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_LIST",
-        "menu_name": "货源列表",
+        "menu_name": "正式货源",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/list",
