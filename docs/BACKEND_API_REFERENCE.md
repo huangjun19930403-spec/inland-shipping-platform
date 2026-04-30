@@ -402,3 +402,16 @@
 - `PUT /audit/tasks/{task_id}/cancel`
 - `GET /audit/pending-count`
 - `GET /audit/tasks/{task_id}/records`
+
+## Stage 4G 航线规划 API
+
+航线规划 API 当前主链路为航线、运输方案、路线、路线结构和路线轨迹：
+
+- `GET /api/v1/route` 返回航线列表，并聚合 `plan_count / line_count / main_line_name / track_status`。
+- `GET /api/v1/route/{route_id}` 返回航线详情、方案列表和路线列表。
+- `GET /api/v1/route/{route_id}/plans`、`POST /api/v1/route/{route_id}/plans` 管理运输方案。
+- `GET /api/v1/route/plans/{plan_id}/lines`、`POST /api/v1/route/plans/{plan_id}/lines` 管理方案下路线。
+- `GET /api/v1/route/lines/{line_id}/structure` 读取路线、路线节点、路线段和轨迹。
+- `PUT /api/v1/route/lines/{line_id}/structure` 整体保存路线结构，不调用 provider。
+- `GET /api/v1/route/lines/{line_id}/track` 读取已保存路线轨迹。
+- `POST /api/v1/route/lines/{line_id}/track/generate` 当前返回 provider 未配置状态，不执行真实路径规划。

@@ -252,3 +252,9 @@
 - `shipping_route_plan_node` 是方案设计输入。
 - `shipping_route_plan_segment` 与 `shipping_route_plan_segment_point` 仍保留为结果/高级维护对象。
 - 阶段 4D 只做节点串与 preview，不生成真实航段。
+
+## Stage 4G 航线规划数据模型
+
+航线规划主模型已调整为：`shipping_route`、`shipping_route_plan`、`shipping_route_line`、`shipping_route_line_node`、`shipping_route_line_segment`、`shipping_route_line_track`。
+
+`shipping_route_plan_node`、`shipping_route_plan_segment`、`shipping_route_plan_segment_point` 已从 clean migration 中移除。新增编码序列 `ROUTE_LINE_CODE` 用于路线编码。

@@ -11,39 +11,23 @@ from app.modules.route.schemas import (
     PageResponse,
     RouteCreateRequest,
     RouteDetailResponse,
-    RouteGeometryRefreshRequest,
-    RouteGeometryRefreshResponse,
+    RouteLineCreateRequest,
+    RouteLineResponse,
+    RouteLineStructureReplaceRequest,
+    RouteLineStructureResponse,
+    RouteLineTrackGenerateRequest,
+    RouteLineTrackGenerateResponse,
+    RouteLineTrackResponse,
+    RouteLineUpdateRequest,
     RouteListQuery,
-    RoutePlanActivateRequest,
     RoutePlanCreateRequest,
-    RoutePlanDetailResponse,
     RoutePlanListQuery,
-    RoutePlanNodeReplaceRequest,
-    RoutePlanNodeResponse,
-    RoutePlanPreviewSegmentResponse,
     RoutePlanResponse,
-    RoutePlanStatusChangeRequest,
     RoutePlanUpdateRequest,
     RouteResponse,
-    RouteSegmentCreateRequest,
-    RouteSegmentOrderRequest,
-    RouteSegmentPointCreateRequest,
-    RouteSegmentPointOrderRequest,
-    RouteSegmentPointResponse,
-    RouteSegmentPointUpdateRequest,
-    RouteSegmentResponse,
-    RouteSegmentUpdateRequest,
-    RouteStatusChangeRequest,
     RouteUpdateRequest,
 )
-from app.modules.route.service import (
-    RouteGeometryService,
-    ShippingRoutePlanNodeService,
-    ShippingRoutePlanService,
-    ShippingRoutePointService,
-    ShippingRouteSegmentService,
-    ShippingRouteService,
-)
+from app.modules.route.service import ShippingRouteLineService, ShippingRoutePlanService, ShippingRouteService
 
 router = APIRouter()
 
@@ -56,25 +40,7 @@ async def list_routes(
 ):
     _ = current_user
     service = ShippingRouteService(db)
-    return await service.list_routes(
-        keyword=query.keyword,
-        status_code=query.status_code,
-        origin_region_id=query.origin_region_id,
-        destination_region_id=query.destination_region_id,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.get("/{route_id}", response_model=RouteDetailResponse)
-async def get_route_detail(
-    route_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRouteService(db)
-    return await service.get_route_detail(route_id)
+    return await service.list_routes(query)
 
 
 @router.post("", response_model=RouteResponse)
@@ -86,6 +52,17 @@ async def create_route(
     _ = current_user
     service = ShippingRouteService(db)
     return await service.create_route(body)
+
+
+@router.get("/{route_id}", response_model=RouteDetailResponse)
+async def get_route_detail(
+    route_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRouteService(db)
+    return await service.get_route_detail(route_id)
 
 
 @router.put("/{route_id}", response_model=RouteResponse)
@@ -100,16 +77,15 @@ async def update_route(
     return await service.update_route(route_id, body)
 
 
-@router.put("/{route_id}/status")
-async def change_route_status(
+@router.delete("/{route_id}")
+async def delete_route(
     route_id: int,
-    body: RouteStatusChangeRequest,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
     service = ShippingRouteService(db)
-    await service.change_route_status(route_id, body.status_code)
+    await service.delete_route(route_id)
     return {"ok": True}
 
 
@@ -122,12 +98,7 @@ async def list_route_plans(
 ):
     _ = current_user
     service = ShippingRoutePlanService(db)
-    return await service.list_plans(
-        route_id=route_id,
-        status_code=query.status_code,
-        page=query.page,
-        page_size=query.page_size,
-    )
+    return await service.list_plans(route_id, query)
 
 
 @router.post("/{route_id}/plans", response_model=RoutePlanResponse)
@@ -142,19 +113,8 @@ async def create_route_plan(
     return await service.create_plan(route_id, body)
 
 
-@router.get("/plans/{plan_id}", response_model=RoutePlanDetailResponse)
-async def get_plan_detail(
-    plan_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRoutePlanService(db)
-    return await service.get_plan_detail(plan_id)
-
-
 @router.put("/plans/{plan_id}", response_model=RoutePlanResponse)
-async def update_plan(
+async def update_route_plan(
     plan_id: int,
     body: RoutePlanUpdateRequest,
     current_user=Depends(get_current_user),
@@ -165,214 +125,118 @@ async def update_plan(
     return await service.update_plan(plan_id, body)
 
 
-@router.put("/plans/{plan_id}/status")
-async def change_plan_status(
+@router.delete("/plans/{plan_id}")
+async def delete_route_plan(
     plan_id: int,
-    body: RoutePlanStatusChangeRequest,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
     service = ShippingRoutePlanService(db)
-    await service.change_plan_status(plan_id, body.status_code)
+    await service.delete_plan(plan_id)
     return {"ok": True}
 
 
-@router.put("/{route_id}/plans/{plan_id}/activate")
-async def activate_plan(
-    route_id: int,
+@router.get("/plans/{plan_id}/lines", response_model=list[RouteLineResponse])
+async def list_route_lines(
     plan_id: int,
-    body: RoutePlanActivateRequest,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    _ = (current_user, body)
-    service = ShippingRoutePlanService(db)
-    await service.activate_plan(route_id, plan_id)
+    _ = current_user
+    service = ShippingRouteLineService(db)
+    return await service.list_lines(plan_id)
+
+
+@router.post("/plans/{plan_id}/lines", response_model=RouteLineResponse)
+async def create_route_line(
+    plan_id: int,
+    body: RouteLineCreateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRouteLineService(db)
+    return await service.create_line(plan_id, body)
+
+
+@router.get("/lines/{line_id}", response_model=RouteLineResponse)
+async def get_route_line(
+    line_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRouteLineService(db)
+    structure = await service.get_structure(line_id)
+    return structure.line
+
+
+@router.put("/lines/{line_id}", response_model=RouteLineResponse)
+async def update_route_line(
+    line_id: int,
+    body: RouteLineUpdateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRouteLineService(db)
+    return await service.update_line(line_id, body)
+
+
+@router.delete("/lines/{line_id}")
+async def delete_route_line(
+    line_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingRouteLineService(db)
+    await service.delete_line(line_id)
     return {"ok": True}
 
 
-@router.get("/plans/{plan_id}/nodes", response_model=list[RoutePlanNodeResponse])
-async def list_plan_nodes(
-    plan_id: int,
+@router.get("/lines/{line_id}/structure", response_model=RouteLineStructureResponse)
+async def get_route_line_structure(
+    line_id: int,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    service = ShippingRoutePlanNodeService(db)
-    return await service.list_plan_nodes(plan_id)
+    service = ShippingRouteLineService(db)
+    return await service.get_structure(line_id)
 
 
-@router.put("/plans/{plan_id}/nodes", response_model=list[RoutePlanNodeResponse])
-async def replace_plan_nodes(
-    plan_id: int,
-    body: RoutePlanNodeReplaceRequest,
+@router.put("/lines/{line_id}/structure", response_model=RouteLineStructureResponse)
+async def replace_route_line_structure(
+    line_id: int,
+    body: RouteLineStructureReplaceRequest,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    service = ShippingRoutePlanNodeService(db)
-    return await service.replace_plan_nodes(plan_id, body)
+    service = ShippingRouteLineService(db)
+    return await service.replace_structure(line_id, body)
 
 
-@router.post("/plans/{plan_id}/nodes/preview-segments", response_model=list[RoutePlanPreviewSegmentResponse])
-async def preview_segments_from_plan_nodes(
-    plan_id: int,
+@router.get("/lines/{line_id}/track", response_model=RouteLineTrackResponse | None)
+async def get_route_line_track(
+    line_id: int,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    service = ShippingRoutePlanNodeService(db)
-    return await service.preview_segments_from_nodes(plan_id)
+    service = ShippingRouteLineService(db)
+    return await service.get_track(line_id)
 
 
-@router.get("/plans/{plan_id}/segments", response_model=list[RouteSegmentResponse])
-async def list_segments(
-    plan_id: int,
+@router.post("/lines/{line_id}/track/generate", response_model=RouteLineTrackGenerateResponse)
+async def generate_route_line_track(
+    line_id: int,
+    body: RouteLineTrackGenerateRequest | None = None,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    service = ShippingRouteSegmentService(db)
-    return await service.list_segments(plan_id)
-
-
-@router.post("/plans/{plan_id}/segments", response_model=RouteSegmentResponse)
-async def create_segment(
-    plan_id: int,
-    body: RouteSegmentCreateRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRouteSegmentService(db)
-    return await service.create_segment(plan_id, body)
-
-
-@router.put("/segments/{segment_id}", response_model=RouteSegmentResponse)
-async def update_segment(
-    segment_id: int,
-    body: RouteSegmentUpdateRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRouteSegmentService(db)
-    return await service.update_segment(segment_id, body)
-
-
-@router.delete("/segments/{segment_id}")
-async def delete_segment(
-    segment_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRouteSegmentService(db)
-    await service.delete_segment(segment_id)
-    return {"ok": True}
-
-
-@router.put("/plans/{plan_id}/segments/order")
-async def reorder_segments(
-    plan_id: int,
-    body: RouteSegmentOrderRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRouteSegmentService(db)
-    count = await service.reorder_segments(plan_id, body.ordered_ids)
-    return {"ok": True, "sorted_count": count}
-
-
-@router.get("/segments/{segment_id}/points", response_model=list[RouteSegmentPointResponse])
-async def list_points(
-    segment_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRoutePointService(db)
-    return await service.list_points(segment_id)
-
-
-@router.post("/segments/{segment_id}/points", response_model=RouteSegmentPointResponse)
-async def create_point(
-    segment_id: int,
-    body: RouteSegmentPointCreateRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRoutePointService(db)
-    return await service.create_point(segment_id, body)
-
-
-@router.put("/points/{point_id}", response_model=RouteSegmentPointResponse)
-async def update_point(
-    point_id: int,
-    body: RouteSegmentPointUpdateRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRoutePointService(db)
-    return await service.update_point(point_id, body)
-
-
-@router.delete("/points/{point_id}")
-async def delete_point(
-    point_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRoutePointService(db)
-    await service.delete_point(point_id)
-    return {"ok": True}
-
-
-@router.put("/segments/{segment_id}/points/order")
-async def reorder_points(
-    segment_id: int,
-    body: RouteSegmentPointOrderRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = ShippingRoutePointService(db)
-    count = await service.reorder_points(segment_id, body.ordered_ids)
-    return {"ok": True, "sorted_count": count}
-
-
-@router.post("/plans/{plan_id}/geometry/refresh", response_model=RouteGeometryRefreshResponse)
-async def refresh_plan_geometry(
-    plan_id: int,
-    body: RouteGeometryRefreshRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = RouteGeometryService(db)
-    return await service.refresh_plan_geometry(
-        plan_id=plan_id,
-        provider_code=body.provider_code,
-        force_refresh=body.force_refresh,
-    )
-
-
-@router.post("/segments/{segment_id}/geometry/refresh", response_model=RouteGeometryRefreshResponse)
-async def refresh_segment_geometry(
-    segment_id: int,
-    body: RouteGeometryRefreshRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = RouteGeometryService(db)
-    return await service.refresh_segment_geometry(
-        segment_id=segment_id,
-        provider_code=body.provider_code,
-        force_refresh=body.force_refresh,
-    )
+    service = ShippingRouteLineService(db)
+    return await service.generate_track(line_id, body or RouteLineTrackGenerateRequest())

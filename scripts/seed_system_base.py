@@ -374,7 +374,7 @@ MENUS = [
     },
     {
         "menu_code": "ROUTE_ROOT",
-        "menu_name": "航线管理",
+        "menu_name": "航线规划",
         "menu_type_code": "DIRECTORY",
         "route_path": None,
         "component_path": None,
@@ -385,7 +385,7 @@ MENUS = [
     },
     {
         "menu_code": "ROUTE_LIST",
-        "menu_name": "航线",
+        "menu_name": "航线规划",
         "menu_type_code": "MENU",
         "parent_code": "ROUTE_ROOT",
         "route_path": "/route/list",
@@ -397,7 +397,7 @@ MENUS = [
     },
     {
         "menu_code": "ROUTE_PLANS",
-        "menu_name": "方案（已合并至航线工作台）",
+        "menu_name": "方案（已合并至航线规划）",
         "menu_type_code": "MENU",
         "parent_code": "ROUTE_ROOT",
         "route_path": "/route/plans",

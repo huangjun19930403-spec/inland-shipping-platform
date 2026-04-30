@@ -186,3 +186,7 @@ PYTHONPATH=. python -m scripts.seed_system_init
 - `menu_type_code=DIRECTORY` 的节点可不设置 `route_path/component_path`。
 - 详情页、编辑页等 `hidden route` 不进入 seed，由前端 `routes.ts` 维护并通过 `activeMenu` 归属。
 - 菜单与路由对齐规则见 `docs/MENU_ROUTE_SEED_ALIGNMENT.md`。
+
+## Stage 4G 航线规划 Seed
+
+`seed_route_map_e2e.py` 现在写入新航线规划模型数据：E2E 航线、两个运输方案、两条路线、路线节点、路线段、路线轨迹，以及两个 E2E 运输节点。`seed_system_init.py` 执行后即可运行航线规划 E2E。

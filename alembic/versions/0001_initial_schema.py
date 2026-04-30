@@ -44,8 +44,8 @@ def upgrade() -> None:
     sa.Column('longitude', sa.Numeric(precision=11, scale=8), nullable=True),
     sa.Column('latitude', sa.Numeric(precision=10, scale=8), nullable=True),
     sa.Column('center_address', sa.String(length=256), nullable=True),
-    sa.Column('status', sa.SmallInteger(), nullable=False),
-    sa.Column('sort_order', sa.Integer(), nullable=False),
+    sa.Column('status', sa.SmallInteger(), nullable=False, server_default='1'),
+    sa.Column('sort_order', sa.Integer(), nullable=False, server_default='0'),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
@@ -685,8 +685,6 @@ def upgrade() -> None:
     sa.Column('origin_region_id', sa.BigInteger(), nullable=False),
     sa.Column('destination_region_id', sa.BigInteger(), nullable=False),
     sa.Column('description', sa.String(length=512), nullable=True),
-    sa.Column('status', sa.SmallInteger(), nullable=False),
-    sa.Column('sort_order', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
@@ -927,14 +925,8 @@ def upgrade() -> None:
     sa.Column('route_id', sa.BigInteger(), nullable=False),
     sa.Column('plan_code', sa.String(length=32), nullable=False),
     sa.Column('plan_name', sa.String(length=128), nullable=False),
-    sa.Column('version_no', sa.Integer(), nullable=False),
     sa.Column('plan_type_code', sa.String(length=64), nullable=False),
-    sa.Column('total_distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('effective_from', sa.DateTime(), nullable=True),
-    sa.Column('effective_to', sa.DateTime(), nullable=True),
-    sa.Column('status', sa.SmallInteger(), nullable=False),
-    sa.Column('is_default', sa.Boolean(), nullable=False),
+    sa.Column('description', sa.String(length=512), nullable=True),
     sa.Column('remark', sa.String(length=512), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
@@ -945,34 +937,95 @@ def upgrade() -> None:
     with op.batch_alter_table('shipping_route_plan', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_shipping_route_plan_route_id'), ['route_id'], unique=False)
 
-    op.create_table('shipping_route_plan_node',
+    op.create_table('shipping_route_line',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('plan_id', sa.BigInteger(), nullable=False),
+    sa.Column('line_code', sa.String(length=32), nullable=False),
+    sa.Column('line_name', sa.String(length=128), nullable=False),
+    sa.Column('line_role_code', sa.String(length=64), nullable=False),
+    sa.Column('priority', sa.Integer(), nullable=False),
+    sa.Column('trigger_condition', sa.String(length=256), nullable=True),
+    sa.Column('description', sa.String(length=512), nullable=True),
+    sa.Column('track_status', sa.String(length=64), nullable=False),
+    sa.Column('track_generated_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('plan_id', 'line_code', name='uk_route_line_code')
+    )
+    with op.batch_alter_table('shipping_route_line', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_plan_id'), ['plan_id'], unique=False)
+
+    op.create_table('shipping_route_line_node',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('line_id', sa.BigInteger(), nullable=False),
     sa.Column('node_order', sa.Integer(), nullable=False),
-    sa.Column('node_kind_code', sa.String(length=64), nullable=False),
+    sa.Column('node_type_code', sa.String(length=64), nullable=False),
     sa.Column('transport_node_id', sa.BigInteger(), nullable=True),
     sa.Column('constraint_point_id', sa.BigInteger(), nullable=True),
-    sa.Column('region_id', sa.BigInteger(), nullable=True),
+    sa.Column('manual_name', sa.String(length=128), nullable=True),
     sa.Column('longitude', sa.Numeric(precision=11, scale=8), nullable=True),
     sa.Column('latitude', sa.Numeric(precision=10, scale=8), nullable=True),
     sa.Column('display_name', sa.String(length=128), nullable=False),
-    sa.Column('role_code', sa.String(length=64), nullable=True),
-    sa.Column('next_transport_mode_code', sa.String(length=64), nullable=True),
     sa.Column('remark', sa.String(length=512), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['constraint_point_id'], ['navigation_constraint_point.id'], ),
-    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
-    sa.ForeignKeyConstraint(['region_id'], ['region.id'], ),
+    sa.ForeignKeyConstraint(['line_id'], ['shipping_route_line.id'], ),
     sa.ForeignKeyConstraint(['transport_node_id'], ['transport_node.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plan_id', 'node_order', name='uk_route_plan_node_order')
+    sa.UniqueConstraint('line_id', 'node_order', name='uk_route_line_node_order')
     )
-    with op.batch_alter_table('shipping_route_plan_node', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_constraint_point_id'), ['constraint_point_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_plan_id'), ['plan_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_region_id'), ['region_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_node_transport_node_id'), ['transport_node_id'], unique=False)
+    with op.batch_alter_table('shipping_route_line_node', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_node_constraint_point_id'), ['constraint_point_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_node_line_id'), ['line_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_node_transport_node_id'), ['transport_node_id'], unique=False)
+
+    op.create_table('shipping_route_line_segment',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('line_id', sa.BigInteger(), nullable=False),
+    sa.Column('segment_no', sa.Integer(), nullable=False),
+    sa.Column('start_line_node_id', sa.BigInteger(), nullable=False),
+    sa.Column('end_line_node_id', sa.BigInteger(), nullable=False),
+    sa.Column('transport_mode_code', sa.String(length=64), nullable=False),
+    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('segment_track_status', sa.String(length=64), nullable=False),
+    sa.Column('geometry_source', sa.String(length=64), nullable=True),
+    sa.Column('geometry_json', sa.JSON(), nullable=True),
+    sa.Column('remark', sa.String(length=512), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['end_line_node_id'], ['shipping_route_line_node.id'], ),
+    sa.ForeignKeyConstraint(['line_id'], ['shipping_route_line.id'], ),
+    sa.ForeignKeyConstraint(['start_line_node_id'], ['shipping_route_line_node.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('line_id', 'segment_no', name='uk_route_line_segment_no')
+    )
+    with op.batch_alter_table('shipping_route_line_segment', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_segment_end_line_node_id'), ['end_line_node_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_segment_line_id'), ['line_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_segment_start_line_node_id'), ['start_line_node_id'], unique=False)
+
+    op.create_table('shipping_route_line_track',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('line_id', sa.BigInteger(), nullable=False),
+    sa.Column('track_status', sa.String(length=64), nullable=False),
+    sa.Column('geometry_json', sa.JSON(), nullable=True),
+    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('provider_summary_json', sa.JSON(), nullable=True),
+    sa.Column('error_message', sa.String(length=512), nullable=True),
+    sa.Column('generated_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['line_id'], ['shipping_route_line.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('line_id')
+    )
+    with op.batch_alter_table('shipping_route_line_track', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_line_track_line_id'), ['line_id'], unique=False)
 
     op.create_table('sys_role_data_scope',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -1199,33 +1252,6 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_freight_origin_node_id'), ['origin_node_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_freight_origin_region_id_cache'), ['origin_region_id_cache'], unique=False)
 
-    op.create_table('shipping_route_plan_segment',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('plan_id', sa.BigInteger(), nullable=False),
-    sa.Column('segment_no', sa.Integer(), nullable=False),
-    sa.Column('segment_type_code', sa.String(length=64), nullable=False),
-    sa.Column('start_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('end_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('start_constraint_point_id', sa.BigInteger(), nullable=True),
-    sa.Column('end_constraint_point_id', sa.BigInteger(), nullable=True),
-    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('geometry_json', sa.JSON(), nullable=True),
-    sa.Column('sort_order', sa.Integer(), nullable=False),
-    sa.Column('remark', sa.String(length=512), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['end_constraint_point_id'], ['navigation_constraint_point.id'], ),
-    sa.ForeignKeyConstraint(['end_node_id'], ['transport_node.id'], ),
-    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
-    sa.ForeignKeyConstraint(['start_constraint_point_id'], ['navigation_constraint_point.id'], ),
-    sa.ForeignKeyConstraint(['start_node_id'], ['transport_node.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plan_id', 'segment_no', name='uk_route_plan_segment_no')
-    )
-    with op.batch_alter_table('shipping_route_plan_segment', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_plan_id'), ['plan_id'], unique=False)
-
     op.create_table('stat_cargo_commodity_daily',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('stat_date', sa.Date(), nullable=False),
@@ -1288,37 +1314,32 @@ def upgrade() -> None:
     with op.batch_alter_table('freight_tag_relation', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_freight_tag_relation_freight_id'), ['freight_id'], unique=False)
 
-    op.create_table('shipping_route_plan_segment_point',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('segment_id', sa.BigInteger(), nullable=False),
-    sa.Column('point_no', sa.Integer(), nullable=False),
-    sa.Column('point_type_code', sa.String(length=64), nullable=False),
-    sa.Column('related_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('related_constraint_point_id', sa.BigInteger(), nullable=True),
-    sa.Column('longitude', sa.Numeric(precision=11, scale=8), nullable=True),
-    sa.Column('latitude', sa.Numeric(precision=10, scale=8), nullable=True),
-    sa.Column('stay_minutes', sa.Integer(), nullable=True),
-    sa.Column('remark', sa.String(length=512), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['related_constraint_point_id'], ['navigation_constraint_point.id'], ),
-    sa.ForeignKeyConstraint(['related_node_id'], ['transport_node.id'], ),
-    sa.ForeignKeyConstraint(['segment_id'], ['shipping_route_plan_segment.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('segment_id', 'point_no', name='uk_route_segment_point_no')
-    )
-    with op.batch_alter_table('shipping_route_plan_segment_point', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_point_segment_id'), ['segment_id'], unique=False)
 
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
-    with op.batch_alter_table('shipping_route_plan_segment_point', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_point_segment_id'))
+    with op.batch_alter_table('shipping_route_line_track', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_track_line_id'))
 
-    op.drop_table('shipping_route_plan_segment_point')
+    op.drop_table('shipping_route_line_track')
+    with op.batch_alter_table('shipping_route_line_segment', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_segment_start_line_node_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_segment_line_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_segment_end_line_node_id'))
+
+    op.drop_table('shipping_route_line_segment')
+    with op.batch_alter_table('shipping_route_line_node', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_node_transport_node_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_node_line_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_node_constraint_point_id'))
+
+    op.drop_table('shipping_route_line_node')
+    with op.batch_alter_table('shipping_route_line', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_line_plan_id'))
+
+    op.drop_table('shipping_route_line')
     with op.batch_alter_table('freight_tag_relation', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_tag_relation_freight_id'))
 
@@ -1336,17 +1357,6 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_stat_cargo_commodity_daily_commodity_standard_id'))
 
     op.drop_table('stat_cargo_commodity_daily')
-    with op.batch_alter_table('shipping_route_plan_segment', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_plan_id'))
-
-    op.drop_table('shipping_route_plan_segment')
-    with op.batch_alter_table('shipping_route_plan_node', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_transport_node_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_region_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_plan_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_node_constraint_point_id'))
-
-    op.drop_table('shipping_route_plan_node')
     with op.batch_alter_table('freight', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_origin_region_id_cache'))
         batch_op.drop_index(batch_op.f('ix_freight_origin_node_id'))

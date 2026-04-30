@@ -68,3 +68,7 @@
 
 - `/route/plans` 不再作为可见菜单入口，方案设计必须从具体航线工作台进入。
 - `ROUTE_PLANS` seed 记录保留历史兼容，但 `visible_flag=0`，前端静态路由也会 redirect 到 `/route/list`。
+
+## Stage 4G 菜单对齐
+
+航线模块菜单已统一为“航线规划”。`ROUTE_LIST` 指向 `/route/list`；旧的 `/route/plans` 伪方案列表入口保留为不可见/兼容项，不再作为菜单入口。

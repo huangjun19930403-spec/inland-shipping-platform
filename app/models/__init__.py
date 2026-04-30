@@ -19,9 +19,10 @@ from app.models.address import (
 from app.models.route import (
     ShippingRoute,
     ShippingRoutePlan,
-    ShippingRoutePlanNode,
-    ShippingRoutePlanSegment,
-    ShippingRoutePlanSegmentPoint,
+    ShippingRouteLine,
+    ShippingRouteLineNode,
+    ShippingRouteLineSegment,
+    ShippingRouteLineTrack,
 )
 from app.models.commodity import (
     CommodityCategory,
@@ -97,9 +98,10 @@ __all__ = [
     "NavigationConstraintProfile",
     "ShippingRoute",
     "ShippingRoutePlan",
-    "ShippingRoutePlanNode",
-    "ShippingRoutePlanSegment",
-    "ShippingRoutePlanSegmentPoint",
+    "ShippingRouteLine",
+    "ShippingRouteLineNode",
+    "ShippingRouteLineSegment",
+    "ShippingRouteLineTrack",
     "CommodityCategory",
     "CommodityType",
     "CommodityStandard",

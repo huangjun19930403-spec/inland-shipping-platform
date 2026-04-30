@@ -169,3 +169,7 @@ docs/                      # 后端核心文档
 - 旧 `ShippingRoutePlanSegment / ShippingRoutePlanSegmentPoint` 接口继续保留，用于兼容现有地图展示与高级维护能力。
 
 该阶段是后续 4E 方案设计页和 4F 自动生成航段的前置基础。
+
+## Stage 4G 航线规划领域模型重构
+
+航线模块已从旧的 `RoutePlanNode / RoutePlanSegment / RoutePlanSegmentPoint` 主链路重构为 `Route -> Plan -> Line -> LineNode / LineSegment / LineTrack`。`Plan` 表达运输方案，`Line` 表达一条完整走法，地图预览读取已保存的 `LineTrack`。旧节点串和旧航段点位表已从 clean migration 中移除。
