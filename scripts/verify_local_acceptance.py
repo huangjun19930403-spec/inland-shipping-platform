@@ -10,6 +10,15 @@ import sqlalchemy as sa
 from sqlalchemy import func, select
 
 from app.core.database import AsyncSessionLocal, engine
+from app.integrations.config_keys import (
+    AMAP_JS_API_KEY,
+    AMAP_ROUTE_WEB_API_KEY,
+    AMAP_SECURITY_JS_CODE,
+    DASHSCOPE_API_KEY,
+    HIFLEET_ENABLED,
+    HIFLEET_PASSWORD,
+    HIFLEET_USERNAME,
+)
 from app.models.address import NavigationConstraintPoint, NodeAlias, Region, TransportNode
 from app.models.analysis import (
     AnalysisJobRun,
@@ -20,9 +29,15 @@ from app.models.analysis import (
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.freight import Freight, FreightAiParseTask, FreightCandidate, FreightSourceInbound
-from app.models.route import ShippingRoute
+from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
 from app.models.ship import ShipProfile
-from app.models.system import SysMenu
+from app.models.system import SysMenu, SystemConfig
+from scripts.seed_local_private_config import (
+    CONFIG_METADATA_BY_KEY,
+    LOCAL_PRIVATE_CONFIG_KEYS,
+    _merged_local_values,
+    _normalize_config_value,
+)
 from main import app
 
 
@@ -82,6 +97,20 @@ LEGACY_MENU_PATHS = {
     "/analysis/cargo",
 }
 
+REQUIRED_INTEGRATION_CONFIG_KEYS = {
+    AMAP_ROUTE_WEB_API_KEY,
+    AMAP_JS_API_KEY,
+    AMAP_SECURITY_JS_CODE,
+    DASHSCOPE_API_KEY,
+    HIFLEET_ENABLED,
+    HIFLEET_USERNAME,
+    HIFLEET_PASSWORD,
+}
+
+ROUTE_TRACK_STATUSES = {"NOT_GENERATED", "READY", "PARTIAL", "FAILED"}
+ROUTE_TRANSPORT_MODES = {"WATER", "ROAD", "RAIL"}
+ROUTE_GEOMETRY_SOURCES = {"AMAP", "HIFLEET", "MANUAL", "FALLBACK"}
+
 
 async def _table_names() -> set[str]:
     async with engine.begin() as conn:
@@ -97,6 +126,24 @@ async def _count(session, model, *conditions) -> int:
 
 def _result(name: str, ok: bool, detail: str) -> CheckResult:
     return CheckResult(name=name, ok=ok, detail=detail)
+
+
+def _config_value_is_valid(value: str, value_type_code: str) -> bool:
+    if value_type_code == "BOOLEAN":
+        return str(value).strip().lower() in {"true", "false", ""}
+    if value_type_code == "INTEGER":
+        try:
+            int(str(value).strip())
+        except ValueError:
+            return False
+        return True
+    if value_type_code == "FLOAT":
+        try:
+            float(str(value).strip())
+        except ValueError:
+            return False
+        return True
+    return value_type_code == "STRING"
 
 
 async def verify() -> list[CheckResult]:
@@ -172,6 +219,128 @@ async def verify() -> list[CheckResult]:
             .all()
         )
         results.append(_result("legacy menu entries removed", not menu_left, str(menu_left or "none")))
+
+        configs = (
+            (
+                await session.execute(
+                    select(
+                        SystemConfig.config_key,
+                        SystemConfig.config_value,
+                        SystemConfig.value_type_code,
+                    )
+                )
+            )
+            .all()
+        )
+        config_by_key = {key: (value, value_type) for key, value, value_type in configs}
+        missing_configs = sorted(REQUIRED_INTEGRATION_CONFIG_KEYS - set(config_by_key))
+        results.append(
+            _result(
+                "integration configs present",
+                not missing_configs,
+                "none" if not missing_configs else ", ".join(missing_configs),
+            )
+        )
+
+        invalid_configs = sorted(
+            key
+            for key, value, value_type in configs
+            if not _config_value_is_valid(value, value_type)
+        )
+        results.append(
+            _result(
+                "system config typed values valid",
+                not invalid_configs,
+                "none" if not invalid_configs else ", ".join(invalid_configs),
+            )
+        )
+
+        local_values = {
+            key: value
+            for key, value in _merged_local_values().items()
+            if key in LOCAL_PRIVATE_CONFIG_KEYS and str(value).strip()
+        }
+        local_mismatches = []
+        for key, raw_value in local_values.items():
+            metadata = CONFIG_METADATA_BY_KEY.get(key)
+            db_config = config_by_key.get(key)
+            if metadata is None or db_config is None:
+                local_mismatches.append(key)
+                continue
+            expected = _normalize_config_value(key, raw_value, metadata["value_type_code"])
+            if db_config[0] != expected:
+                local_mismatches.append(key)
+        results.append(
+            _result(
+                "local private seed applied",
+                not local_mismatches,
+                f"{len(local_values)} local values checked" if not local_mismatches else ", ".join(sorted(local_mismatches)),
+            )
+        )
+
+        invalid_line_statuses = (
+            (
+                await session.execute(
+                    select(ShippingRouteLine.line_code, ShippingRouteLine.track_status).where(
+                        ~ShippingRouteLine.track_status.in_(ROUTE_TRACK_STATUSES)
+                    )
+                )
+            )
+            .all()
+        )
+        results.append(
+            _result(
+                "route line track statuses valid",
+                not invalid_line_statuses,
+                str(invalid_line_statuses or "none"),
+            )
+        )
+
+        invalid_segment_values = (
+            (
+                await session.execute(
+                    select(
+                        ShippingRouteLineSegment.segment_no,
+                        ShippingRouteLineSegment.transport_mode_code,
+                        ShippingRouteLineSegment.segment_track_status,
+                        ShippingRouteLineSegment.geometry_source,
+                    ).where(
+                        (~ShippingRouteLineSegment.transport_mode_code.in_(ROUTE_TRANSPORT_MODES))
+                        | (~ShippingRouteLineSegment.segment_track_status.in_(ROUTE_TRACK_STATUSES))
+                        | (
+                            ShippingRouteLineSegment.geometry_source.is_not(None)
+                            & (~ShippingRouteLineSegment.geometry_source.in_(ROUTE_GEOMETRY_SOURCES))
+                        )
+                    )
+                )
+            )
+            .all()
+        )
+        results.append(
+            _result(
+                "route segment enums valid",
+                not invalid_segment_values,
+                str(invalid_segment_values or "none"),
+            )
+        )
+
+        invalid_track_statuses = (
+            (
+                await session.execute(
+                    select(ShippingRouteLineTrack.line_id, ShippingRouteLineTrack.track_status).where(
+                        ~ShippingRouteLineTrack.track_status.in_(ROUTE_TRACK_STATUSES)
+                    )
+                )
+            )
+            .all()
+        )
+        results.append(
+            _result(
+                "stored route track statuses valid",
+                not invalid_track_statuses,
+                str(invalid_track_statuses or "none"),
+            )
+        )
 
     return results
 

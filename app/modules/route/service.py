@@ -9,7 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.models.address import NavigationConstraintPoint, Region, TransportNode
+from app.integrations.amap.route_client import AmapRouteClient
+from app.integrations.hifleet.client import HifleetRouteClient
+from app.integrations.http.route_geometry_types import RouteGeometryQuery, RouteGeometryResult
+from app.models.address import NavigationConstraintPoint, TransportNode
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.route.repository import ShippingRouteLineRepository, ShippingRoutePlanRepository, ShippingRouteRepository
 from app.modules.route.schemas import (
@@ -24,6 +27,7 @@ from app.modules.route.schemas import (
     RoutePlanResponse,
     RouteResponse,
 )
+from app.modules.system.runtime_config import RuntimeConfigService
 
 PLAN_TYPES = {"STANDARD", "SEASONAL", "EMERGENCY", "MANUAL"}
 LINE_ROLES = {"MAIN", "ALTERNATE", "DETOUR", "EMERGENCY"}
@@ -31,6 +35,56 @@ NODE_TYPES = {"TRANSPORT_NODE", "CONSTRAINT_POINT", "MANUAL_POINT"}
 TRANSPORT_MODES = {"WATER", "ROAD", "RAIL"}
 TRACK_STATUSES = {"NOT_GENERATED", "READY", "PARTIAL", "FAILED"}
 GEOMETRY_SOURCES = {"AMAP", "HIFLEET", "MANUAL", "FALLBACK"}
+
+
+def _status_from_provider_status(value: str | None) -> str:
+    return "READY" if str(value or "").lower() == "ready" else "FAILED"
+
+
+def _geometry_source_from_provider(value: str | None) -> str | None:
+    source = str(value or "").strip().upper()
+    return source if source in GEOMETRY_SOURCES else None
+
+
+def _line_string_points(geometry: dict | None) -> list[list[float]]:
+    if not isinstance(geometry, dict):
+        return []
+    if geometry.get("type") != "LineString":
+        return []
+    points: list[list[float]] = []
+    for item in geometry.get("coordinates") or []:
+        if not isinstance(item, list | tuple) or len(item) < 2:
+            continue
+        try:
+            lon = float(item[0])
+            lat = float(item[1])
+        except (TypeError, ValueError):
+            continue
+        if -180 <= lon <= 180 and -90 <= lat <= 90:
+            if not points or points[-1] != [lon, lat]:
+                points.append([lon, lat])
+    return points
+
+
+def _combine_line_strings(geometries: list[dict]) -> dict | None:
+    combined: list[list[float]] = []
+    for geometry in geometries:
+        for point in _line_string_points(geometry):
+            if not combined or combined[-1] != point:
+                combined.append(point)
+    if len(combined) < 2:
+        return None
+    return {"type": "LineString", "coordinates": combined}
+
+
+def _track_status_from_success_count(success_count: int, total_count: int) -> str:
+    if total_count <= 0:
+        return "FAILED"
+    if success_count == total_count:
+        return "READY"
+    if success_count > 0:
+        return "PARTIAL"
+    return "FAILED"
 
 
 def _to_decimal(value) -> Decimal | None:
@@ -316,6 +370,7 @@ class ShippingRouteLineService:
         self.plan_repo = ShippingRoutePlanRepository(db)
         self.line_repo = ShippingRouteLineRepository(db)
         self.sequence_service = CodeSequenceService(db)
+        self.runtime_config = RuntimeConfigService(db)
 
     async def _line_response(self, line) -> RouteLineResponse:
         segments = await self.line_repo.list_segments(line.id)
@@ -463,12 +518,217 @@ class ShippingRouteLineService:
         track = await self.line_repo.get_track(line_id)
         return _to_track_response(track) if track else None
 
+    async def _resolve_node_point(self, node) -> tuple[float, float]:
+        longitude = node.longitude
+        latitude = node.latitude
+
+        if node.node_type_code == "TRANSPORT_NODE":
+            transport_node = await self.db.scalar(
+                select(TransportNode).where(
+                    TransportNode.id == node.transport_node_id,
+                    TransportNode.deleted_at.is_(None),
+                )
+            )
+            if transport_node is None:
+                raise NotFoundError("TransportNode", node.transport_node_id)
+            longitude = transport_node.longitude
+            latitude = transport_node.latitude
+        elif node.node_type_code == "CONSTRAINT_POINT":
+            constraint_point = await self.db.scalar(
+                select(NavigationConstraintPoint).where(
+                    NavigationConstraintPoint.id == node.constraint_point_id
+                )
+            )
+            if constraint_point is None:
+                raise NotFoundError("NavigationConstraintPoint", node.constraint_point_id)
+            longitude = constraint_point.longitude
+            latitude = constraint_point.latitude
+
+        if longitude is None or latitude is None:
+            raise ValidationError(f"路线节点缺少经纬度: {node.display_name}")
+
+        lon = float(longitude)
+        lat = float(latitude)
+        if lon < -180 or lon > 180 or lat < -90 or lat > 90:
+            raise ValidationError(f"路线节点经纬度非法: {node.display_name}")
+        return lon, lat
+
+    def _geometry_client_for_segment(self, transport_mode_code: str, provider_code: str | None):
+        provider_override = str(provider_code or "").strip().upper()
+        if provider_override in {"AMAP", "HIFLEET"}:
+            provider = provider_override
+        elif provider_override and provider_override != "AUTO":
+            raise ValidationError(f"不支持的轨迹 provider_code: {provider_override}")
+        elif transport_mode_code == "WATER":
+            provider = "HIFLEET"
+        elif transport_mode_code == "ROAD":
+            provider = "AMAP"
+        elif transport_mode_code == "RAIL":
+            raise ValidationError("铁路段暂不支持真实轨迹生成")
+        else:
+            raise ValidationError(f"不支持的运输方式: {transport_mode_code}")
+
+        if provider == "HIFLEET":
+            return HifleetRouteClient(runtime_config=self.runtime_config)
+        return AmapRouteClient(runtime_config=self.runtime_config)
+
+    async def _generate_segment_geometry(
+        self,
+        *,
+        segment,
+        start_node,
+        end_node,
+        provider_code: str | None,
+    ) -> RouteGeometryResult:
+        origin_lon, origin_lat = await self._resolve_node_point(start_node)
+        dest_lon, dest_lat = await self._resolve_node_point(end_node)
+        client = self._geometry_client_for_segment(segment.transport_mode_code, provider_code)
+        return await client.generate(
+            RouteGeometryQuery(
+                origin_lon=origin_lon,
+                origin_lat=origin_lat,
+                dest_lon=dest_lon,
+                dest_lat=dest_lat,
+                transport_mode=segment.transport_mode_code,
+                segment_type="ROUTE_LINE_SEGMENT",
+            )
+        )
+
+    @staticmethod
+    def _safe_error_message(exc: Exception) -> str:
+        text = str(exc or "").replace("\r", " ").replace("\n", " ").strip()
+        return (text or "未知错误")[:180]
+
     async def generate_track(self, line_id: int, payload) -> RouteLineTrackGenerateResponse:
-        if await self.line_repo.get_line_by_id(line_id) is None:
+        line = await self.line_repo.get_line_by_id(line_id)
+        if line is None:
             raise NotFoundError("ShippingRouteLine", line_id)
+        nodes = await self.line_repo.list_nodes(line_id)
+        segments = await self.line_repo.list_segments(line_id)
+        if not segments:
+            raise ValidationError("请先保存至少一个路线段，再生成轨迹")
+
+        now = datetime.utcnow()
+        node_by_id = {node.id: node for node in nodes}
+        successful_geometries: list[dict] = []
+        segment_summaries: list[dict] = []
+        error_messages: list[str] = []
+        total_distance = Decimal("0")
+        total_duration = Decimal("0")
+        has_distance = False
+        has_duration = False
+
+        for segment in segments:
+            start_node = node_by_id.get(segment.start_line_node_id)
+            end_node = node_by_id.get(segment.end_line_node_id)
+            if start_node is None or end_node is None:
+                error_text = "路线段引用的起终点不存在"
+                segment.segment_track_status = "FAILED"
+                segment.geometry_source = None
+                segment.geometry_json = None
+                segment.distance_km = None
+                segment.estimated_duration_hour = None
+                error_messages.append(f"#{segment.segment_no} {error_text}")
+                segment_summaries.append(
+                    {
+                        "segment_no": segment.segment_no,
+                        "transport_mode_code": segment.transport_mode_code,
+                        "status": "FAILED",
+                        "error": error_text,
+                    }
+                )
+                continue
+
+            try:
+                result = await self._generate_segment_geometry(
+                    segment=segment,
+                    start_node=start_node,
+                    end_node=end_node,
+                    provider_code=payload.provider_code,
+                )
+                status = _status_from_provider_status(result.status)
+                source = _geometry_source_from_provider(result.source)
+                if status != "READY" or not source:
+                    raise ValidationError(f"provider 返回状态无效: {result.status}")
+
+                segment.segment_track_status = "READY"
+                segment.geometry_source = source
+                segment.geometry_json = result.geometry
+                segment.distance_km = _to_decimal(result.distance_km)
+                segment.estimated_duration_hour = _to_decimal(result.estimated_duration_hour)
+                successful_geometries.append(result.geometry)
+                if result.distance_km is not None:
+                    total_distance += Decimal(str(result.distance_km))
+                    has_distance = True
+                if result.estimated_duration_hour is not None:
+                    total_duration += Decimal(str(result.estimated_duration_hour))
+                    has_duration = True
+                segment_summaries.append(
+                    {
+                        "segment_no": segment.segment_no,
+                        "transport_mode_code": segment.transport_mode_code,
+                        "status": "READY",
+                        "provider": result.provider,
+                        "geometry_source": source,
+                        "provider_trace_id": result.provider_trace_id,
+                        "point_count": len(_line_string_points(result.geometry)),
+                        "distance_km": result.distance_km,
+                        "estimated_duration_hour": result.estimated_duration_hour,
+                        "raw_summary": result.raw_summary,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                error_text = self._safe_error_message(exc)
+                segment.segment_track_status = "FAILED"
+                segment.geometry_source = None
+                segment.geometry_json = None
+                segment.distance_km = None
+                segment.estimated_duration_hour = None
+                error_messages.append(f"#{segment.segment_no} {error_text}")
+                segment_summaries.append(
+                    {
+                        "segment_no": segment.segment_no,
+                        "transport_mode_code": segment.transport_mode_code,
+                        "status": "FAILED",
+                        "error": error_text,
+                    }
+                )
+
+        success_count = len(successful_geometries)
+        status = _track_status_from_success_count(success_count, len(segments))
+        if status == "READY":
+            message = "轨迹生成完成"
+        elif status == "PARTIAL":
+            message = f"轨迹部分生成：成功 {success_count}/{len(segments)} 段"
+        else:
+            message = "轨迹生成失败，未写入回退直线"
+
+        line_geometry = _combine_line_strings(successful_geometries)
+        line.track_status = status
+        line.track_generated_at = now
+        track = await self.line_repo.upsert_track(
+            line_id,
+            {
+                "track_status": status,
+                "geometry_json": line_geometry,
+                "distance_km": total_distance if has_distance else None,
+                "estimated_duration_hour": total_duration if has_duration else None,
+                "provider_summary_json": {
+                    "generated_by": "route_line_track_generate",
+                    "success_count": success_count,
+                    "failed_count": len(segments) - success_count,
+                    "segments": segment_summaries,
+                },
+                "error_message": "; ".join(error_messages)[:512] if error_messages else None,
+                "generated_at": now,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        await self.db.commit()
         return RouteLineTrackGenerateResponse(
             line_id=line_id,
-            status="FAILED",
-            message="provider not configured in Stage 4G; no track was generated",
-            track=None,
+            status=status,
+            message=message,
+            track=_to_track_response(track),
         )

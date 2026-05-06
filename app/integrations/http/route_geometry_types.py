@@ -23,3 +23,6 @@ class RouteGeometryResult:
     provider: str
     provider_trace_id: str | None
     status: str
+    distance_km: float | None = None
+    estimated_duration_hour: float | None = None
+    raw_summary: dict[str, Any] | None = None

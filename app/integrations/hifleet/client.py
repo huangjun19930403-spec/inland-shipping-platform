@@ -168,6 +168,50 @@ class HifleetRouteClient:
                     return str(value).strip()
         return None
 
+    @classmethod
+    def _find_numeric(cls, payload: Any, keys: set[str]) -> float | None:
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                if key in keys:
+                    parsed = cls._to_float(value)
+                    if parsed is not None:
+                        return parsed
+                nested = cls._find_numeric(value, keys)
+                if nested is not None:
+                    return nested
+        elif isinstance(payload, list):
+            for item in payload:
+                nested = cls._find_numeric(item, keys)
+                if nested is not None:
+                    return nested
+        return None
+
+    @classmethod
+    def _extract_distance_km(cls, payload: dict[str, Any]) -> float | None:
+        distance_nm = cls._find_numeric(payload, {"distanceNm", "distance_nm", "nm", "nmi"})
+        if distance_nm is not None:
+            return round(distance_nm * 1.852, 3)
+        distance_km = cls._find_numeric(payload, {"distanceKm", "distance_km", "kilometers", "km"})
+        if distance_km is not None:
+            return round(distance_km, 3)
+        distance_m = cls._find_numeric(payload, {"distanceM", "distance_m", "meters", "distance"})
+        if distance_m is not None:
+            return round(distance_m / 1000, 3)
+        return None
+
+    @classmethod
+    def _extract_duration_hour(cls, payload: dict[str, Any]) -> float | None:
+        duration_hour = cls._find_numeric(payload, {"durationHour", "duration_hour", "hours", "hour"})
+        if duration_hour is not None:
+            return round(duration_hour, 3)
+        duration_seconds = cls._find_numeric(payload, {"durationSeconds", "duration_seconds", "seconds"})
+        if duration_seconds is not None:
+            return round(duration_seconds / 3600, 3)
+        duration_minutes = cls._find_numeric(payload, {"durationMinutes", "duration_minutes", "minutes", "duration"})
+        if duration_minutes is not None:
+            return round(duration_minutes / 60, 3)
+        return None
+
     async def _call_route_api(self, query: RouteGeometryQuery) -> dict[str, Any]:
         client = await self._session._client()
         route_url = await self._route_url()
@@ -212,6 +256,13 @@ class HifleetRouteClient:
                         provider=self.provider_name,
                         provider_trace_id=self._extract_trace_id(payload),
                         status=RouteGeometryStatus.READY.value,
+                        distance_km=self._extract_distance_km(payload),
+                        estimated_duration_hour=self._extract_duration_hour(payload),
+                        raw_summary={
+                            "status": payload.get("status"),
+                            "message": payload.get("msg") or payload.get("message"),
+                            "point_count": len(points),
+                        },
                     )
                 except ValidationError as exc:
                     message = str(exc)

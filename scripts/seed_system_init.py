@@ -12,6 +12,7 @@ from scripts.seed_commodity_taxonomy import seed_commodity_taxonomy
 from scripts.seed_foundation_samples import seed_foundation_samples
 from scripts.seed_freight_samples import seed_freight_samples
 from scripts.seed_analysis_samples import seed_analysis_samples
+from scripts.seed_local_private_config import seed_local_private_config
 from scripts.seed_audit_samples import seed_audit_samples
 from scripts.seed_navigation_constraints import seed_navigation_constraints
 from scripts.seed_route_samples import seed_route_samples
@@ -32,6 +33,7 @@ async def seed_system_init() -> None:
     await seed_freight_samples()
     await seed_analysis_samples()
     await seed_system_base()
+    await seed_local_private_config()
     await seed_audit_samples()
     await seed_navigation_constraints()
     await seed_route_samples()

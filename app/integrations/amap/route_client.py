@@ -78,6 +78,31 @@ class AmapRouteClient:
                     points.append([lon, lat])
         return points
 
+    @staticmethod
+    def _to_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _extract_distance_km(cls, raw_path: dict[str, Any]) -> float | None:
+        distance_m = cls._to_float(raw_path.get("distance"))
+        if distance_m is None:
+            return None
+        return round(distance_m / 1000, 3)
+
+    @classmethod
+    def _extract_duration_hour(cls, raw_path: dict[str, Any]) -> float | None:
+        duration_seconds = cls._to_float(raw_path.get("duration"))
+        if duration_seconds is None:
+            cost = raw_path.get("cost")
+            if isinstance(cost, dict):
+                duration_seconds = cls._to_float(cost.get("duration"))
+        if duration_seconds is None:
+            return None
+        return round(duration_seconds / 3600, 3)
+
     async def generate(self, query: RouteGeometryQuery) -> RouteGeometryResult:
         key = await self._key()
         timeout = await self._timeout()
@@ -116,9 +141,15 @@ class AmapRouteClient:
         if not route:
             raise ValidationError("高德轨迹返回为空")
 
-        points = self._parse_polyline(route[0])
+        raw_path = route[0]
+        points = self._parse_polyline(raw_path)
         if len(points) < 2:
             raise ValidationError("高德轨迹点不足，无法生成有效线路")
+
+        cost = raw_path.get("cost")
+        duration_seconds = raw_path.get("duration")
+        if duration_seconds is None and isinstance(cost, dict):
+            duration_seconds = cost.get("duration")
 
         return RouteGeometryResult(
             geometry={"type": "LineString", "coordinates": points},
@@ -126,4 +157,11 @@ class AmapRouteClient:
             provider=self.provider_name,
             provider_trace_id=None,
             status=RouteGeometryStatus.READY.value,
+            distance_km=self._extract_distance_km(raw_path),
+            estimated_duration_hour=self._extract_duration_hour(raw_path),
+            raw_summary={
+                "path_count": len(route),
+                "distance_m": raw_path.get("distance"),
+                "duration_seconds": duration_seconds,
+            },
         )

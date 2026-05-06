@@ -277,6 +277,8 @@ class ShippingRouteLineRepository:
             self.db.add(row)
         else:
             for key, value in data.items():
+                if key == "created_at":
+                    continue
                 setattr(row, key, value)
         await self.db.flush()
         await self.db.refresh(row)

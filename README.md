@@ -26,13 +26,21 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 - OpenAPI: `http://127.0.0.1:8000/docs`
 - Health: `http://127.0.0.1:8000/health`
 
-通义千问配置通过环境变量读取，seed 不写入真实密钥：
+本地私有集成配置可写入 `.env.local` 或运行时环境变量。`.env.local` 已被 Git 忽略，
+`python -m scripts.seed_system_init` 会在基础 seed 后把这些值覆盖写入本地 `system_config`；
+基础 seed 重复执行时不会清空已有敏感配置。
 
 ```bash
+ROUTE_AMAP_WEB_API_KEY=
+AMAP_JS_API_KEY=
+AMAP_SECURITY_JS_CODE=
 AI_PROVIDER=DASHSCOPE_QWEN
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 DASHSCOPE_MODEL=qwen-plus
-DASHSCOPE_API_KEY=...
+DASHSCOPE_API_KEY=
+HIFLEET_ENABLED=true
+HIFLEET_USERNAME=
+HIFLEET_PASSWORD=
 ```
 
 ## Final Docs

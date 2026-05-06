@@ -1461,6 +1461,11 @@ async def seed_system_base() -> None:
                     SystemConfig.config_key == config_item["config_key"]
                 )
             )
+            should_preserve_value = (
+                config is not None
+                and int(config_item["sensitive_flag"] or 0) == 1
+                and not str(config_item["config_value"] or "").strip()
+            )
             if config is None:
                 config = SystemConfig(
                     config_key=config_item["config_key"],
@@ -1485,7 +1490,8 @@ async def seed_system_base() -> None:
                 session.add(config)
             else:
                 config.config_name = config_item["config_name"]
-                config.config_value = config_item["config_value"]
+                if not should_preserve_value:
+                    config.config_value = config_item["config_value"]
                 config.value_type_code = config_item["value_type_code"]
                 config.config_group_code = config_item["config_group_code"]
                 config.config_profile_code = config_item["config_profile_code"]

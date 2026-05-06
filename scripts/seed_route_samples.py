@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -19,10 +18,6 @@ from app.models.route import (
     ShippingRouteLineTrack,
     ShippingRoutePlan,
 )
-
-
-def _decimal(value: str | float) -> Decimal:
-    return Decimal(str(value))
 
 
 async def _region(session, code: str) -> Region:
@@ -95,7 +90,6 @@ async def _replace_line_structure(
     *,
     line: ShippingRouteLine,
     nodes_payload: list[dict[str, Any]],
-    tracks: list[list[float]],
 ) -> None:
     await session.execute(delete(ShippingRouteLineTrack).where(ShippingRouteLineTrack.line_id == line.id))
     await session.execute(delete(ShippingRouteLineSegment).where(ShippingRouteLineSegment.line_id == line.id))
@@ -118,34 +112,20 @@ async def _replace_line_structure(
                 segment_no=idx + 1,
                 start_line_node_id=start.id,
                 end_line_node_id=end.id,
-                transport_mode_code="WATERWAY",
-                distance_km=Decimal("78.00") + Decimal(idx * 32),
-                estimated_duration_hour=Decimal("7.50") + Decimal(idx * 2),
-                segment_track_status="GENERATED",
-                geometry_source="LOCAL_SAMPLE",
-                geometry_json={"type": "LineString", "coordinates": [tracks[idx], tracks[idx + 1]]},
-                remark="本地验证预制航段",
+                transport_mode_code="WATER",
+                distance_km=None,
+                estimated_duration_hour=None,
+                segment_track_status="NOT_GENERATED",
+                geometry_source=None,
+                geometry_json=None,
+                remark="本地验证预制航段；轨迹需通过真实 provider 生成",
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
         )
 
-    session.add(
-        ShippingRouteLineTrack(
-            line_id=line.id,
-            track_status="GENERATED",
-            geometry_json={"type": "LineString", "coordinates": tracks},
-            distance_km=Decimal("315.00"),
-            estimated_duration_hour=Decimal("31.00"),
-            provider_summary_json={"seed": "LOCAL_ROUTE_SAMPLE", "source": "FOUNDATION_DATA"},
-            error_message=None,
-            generated_at=datetime.utcnow(),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-    )
-    line.track_status = "GENERATED"
-    line.track_generated_at = datetime.utcnow()
+    line.track_status = "NOT_GENERATED"
+    line.track_generated_at = None
     await session.flush()
 
 
@@ -197,7 +177,7 @@ async def seed_route_samples() -> None:
                 "priority": 1,
                 "trigger_condition": "常水位和常规船型默认使用",
                 "description": "本地验证预制主路线。",
-                "track_status": "GENERATED",
+                "track_status": "NOT_GENERATED",
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
             },
@@ -234,14 +214,7 @@ async def seed_route_samples() -> None:
                 "remark": "卸货港",
             },
         ]
-        tracks = [
-            [float(taicang.longitude), float(taicang.latitude)],
-            [float(bridge.longitude), float(bridge.latitude)],
-            [float(jiangyin.longitude), float(jiangyin.latitude)],
-            [float(longtan.longitude), float(longtan.latitude)],
-            [float(wuhu.longitude), float(wuhu.latitude)],
-        ]
-        await _replace_line_structure(session, line=line, nodes_payload=nodes_payload, tracks=tracks)
+        await _replace_line_structure(session, line=line, nodes_payload=nodes_payload)
         await session.commit()
 
     print("seed_route_samples completed: route_code=ROUTE_TAICANG_WUHU")
