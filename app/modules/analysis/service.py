@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -10,15 +10,18 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.models.address import AdminRegion, Region, TransportNode
 from app.models.analysis import (
+    AnalysisJobDefinition,
     AnalysisJobRun,
+    FactFreightCityDaily,
     FactFreightCommodityDaily,
     FactFreightDaily,
     FactFreightFlowDaily,
     FactFreightPriceDaily,
     FactRegionDaily,
+    FactShipCityDaily,
     FactShipDaily,
     FactShipFlowDaily,
 )
@@ -28,6 +31,9 @@ from app.modules.analysis.schemas import (
     AnalysisJobRunDetailResponse,
     AnalysisJobRunResponse,
     AnalysisOverviewResponse,
+    AnalysisTaskDetailResponse,
+    AnalysisTaskResponse,
+    AnalysisTaskTriggerRequest,
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowMapItem,
@@ -75,13 +81,52 @@ def _job_to_response(entity: AnalysisJobRun) -> AnalysisJobRunResponse:
         stat_date_to=entity.stat_date_to,
         status_code=entity.status_code,
         status_name=entity.status_name,
+        celery_task_id=entity.celery_task_id,
+        queued_at=entity.queued_at,
         started_at=entity.started_at,
         finished_at=entity.finished_at,
+        duration_ms=entity.duration_ms,
+        input_rows=entity.input_rows,
+        output_rows=entity.output_rows,
         affected_rows=entity.affected_rows,
         error_message=entity.error_message,
         triggered_by=entity.triggered_by,
         created_at=entity.created_at,
     )
+
+
+def _task_to_response(entity: AnalysisJobDefinition) -> AnalysisTaskResponse:
+    return AnalysisTaskResponse(
+        id=entity.id,
+        job_code=entity.job_code,
+        job_name=entity.job_name,
+        module_code=entity.module_code,
+        module_name=entity.module_name,
+        description=entity.description,
+        source_tables_json=entity.source_tables_json,
+        target_tables_json=entity.target_tables_json,
+        default_parameters_json=entity.default_parameters_json,
+        schedule_cron=entity.schedule_cron,
+        schedule_enabled=entity.schedule_enabled,
+        enabled=entity.enabled,
+        last_run_id=entity.last_run_id,
+        last_status_code=entity.last_status_code,
+        last_finished_at=entity.last_finished_at,
+        last_result_summary_json=entity.last_result_summary_json,
+        sort_order=entity.sort_order,
+        created_at=entity.created_at,
+        updated_at=entity.updated_at,
+    )
+
+
+def _status_name(status_code: str) -> str:
+    return {
+        "QUEUED": "排队中",
+        "RUNNING": "运行中",
+        "SUCCESS": "成功",
+        "PARTIAL_SUCCESS": "部分成功",
+        "FAILED": "失败",
+    }.get(status_code, status_code)
 
 
 class AnalysisDashboardService:
@@ -474,21 +519,22 @@ class AnalysisDashboardService:
         rows = (
             await self.db.execute(
                 select(
-                    TransportNode.id,
-                    TransportNode.name,
-                    TransportNode.longitude,
-                    TransportNode.latitude,
-                    FactRegionDaily.region_id,
-                    func.sum(FactRegionDaily.heat_value),
-                    func.sum(FactRegionDaily.freight_count),
-                    func.sum(FactRegionDaily.total_tonnage),
-                    func.sum(FactRegionDaily.ship_count),
+                    AdminRegion.id,
+                    AdminRegion.name,
+                    AdminRegion.longitude,
+                    AdminRegion.latitude,
+                    FactFreightCityDaily.primary_region_id,
+                    func.sum(FactFreightCityDaily.heat_value),
+                    func.sum(FactFreightCityDaily.freight_count),
+                    func.sum(FactFreightCityDaily.inbound_count),
+                    func.sum(FactFreightCityDaily.outbound_count),
+                    func.sum(FactFreightCityDaily.total_tonnage),
                 )
-                .join(TransportNode, TransportNode.id == FactRegionDaily.node_id)
-                .where(FactRegionDaily.stat_date >= start, FactRegionDaily.stat_date <= end, FactRegionDaily.node_id.is_not(None))
-                .group_by(TransportNode.id, TransportNode.name, TransportNode.longitude, TransportNode.latitude, FactRegionDaily.region_id)
-                .order_by(func.sum(FactRegionDaily.heat_value).desc())
-                .limit(40)
+                .join(AdminRegion, AdminRegion.code == FactFreightCityDaily.city_code)
+                .where(FactFreightCityDaily.stat_date >= start, FactFreightCityDaily.stat_date <= end)
+                .group_by(AdminRegion.id, AdminRegion.name, AdminRegion.longitude, AdminRegion.latitude, FactFreightCityDaily.primary_region_id)
+                .order_by(func.sum(FactFreightCityDaily.heat_value).desc())
+                .limit(80)
             )
         ).all()
         values = [_num(row[5]) for row in rows]
@@ -496,7 +542,6 @@ class AnalysisDashboardService:
         return [
             HeatMapItem(
                 id=row[0],
-                node_id=row[0],
                 region_id=row[4],
                 name=row[1],
                 longitude=_num(row[2]) if row[2] is not None else None,
@@ -504,8 +549,9 @@ class AnalysisDashboardService:
                 value=round(_num(row[5]), 2),
                 level="HIGH" if high and _num(row[5]) >= high * 0.66 else "MEDIUM" if high and _num(row[5]) >= high * 0.33 else "LOW",
                 freight_count=int(_num(row[6])),
-                tonnage=round(_num(row[7]), 2),
-                ship_count=int(_num(row[8])),
+                inbound_count=int(_num(row[7])),
+                outbound_count=int(_num(row[8])),
+                tonnage=round(_num(row[9]), 2),
             )
             for row in rows
         ]
@@ -613,3 +659,127 @@ class AnalysisDashboardService:
             parameters_json=row.parameters_json,
             result_summary_json=row.result_summary_json,
         )
+
+    async def list_tasks(
+        self,
+        module_code: str | None,
+        enabled: bool | None,
+        page: int,
+        page_size: int,
+    ) -> PageResponse[AnalysisTaskResponse]:
+        stmt = select(AnalysisJobDefinition)
+        if module_code:
+            stmt = stmt.where(AnalysisJobDefinition.module_code == module_code)
+        if enabled is not None:
+            stmt = stmt.where(AnalysisJobDefinition.enabled == enabled)
+        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
+        rows = (
+            await self.db.execute(
+                stmt.order_by(AnalysisJobDefinition.sort_order.asc(), AnalysisJobDefinition.id.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+        return PageResponse[AnalysisTaskResponse](
+            total=total,
+            page=page,
+            page_size=page_size,
+            items=[_task_to_response(row) for row in rows],
+        )
+
+    async def get_task_detail(self, job_code: str) -> AnalysisTaskDetailResponse:
+        row = await self.db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == job_code))
+        if row is None:
+            raise NotFoundError("AnalysisJobDefinition", job_code)
+        runs = (
+            await self.db.execute(
+                select(AnalysisJobRun)
+                .where(AnalysisJobRun.job_code == job_code)
+                .order_by(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+        base = _task_to_response(row).model_dump()
+        return AnalysisTaskDetailResponse(**base, recent_runs=[_job_to_response(item) for item in runs])
+
+    async def list_task_runs(
+        self,
+        job_code: str,
+        status_code: str | None,
+        date_from: date | None,
+        date_to: date | None,
+        page: int,
+        page_size: int,
+    ) -> PageResponse[AnalysisJobRunResponse]:
+        stmt = select(AnalysisJobRun).where(AnalysisJobRun.job_code == job_code)
+        if status_code:
+            stmt = stmt.where(AnalysisJobRun.status_code == status_code)
+        if date_from:
+            stmt = stmt.where(AnalysisJobRun.stat_date_to >= date_from)
+        if date_to:
+            stmt = stmt.where(AnalysisJobRun.stat_date_from <= date_to)
+        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
+        rows = (
+            await self.db.execute(
+                stmt.order_by(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+        return PageResponse[AnalysisJobRunResponse](total=total, page=page, page_size=page_size, items=[_job_to_response(row) for row in rows])
+
+    async def trigger_task(self, job_code: str, payload: AnalysisTaskTriggerRequest, triggered_by: str | None) -> AnalysisJobRunResponse:
+        definition = await self.db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == job_code))
+        if definition is None:
+            raise NotFoundError("AnalysisJobDefinition", job_code)
+        if not definition.enabled:
+            raise ValidationError("分析任务已停用，不能手动触发", {"job_code": job_code})
+        now = datetime.utcnow()
+        parameters = {
+            **(definition.default_parameters_json or {}),
+            **(payload.parameters_json or {}),
+            "force_rebuild": payload.force_rebuild,
+        }
+        run = AnalysisJobRun(
+            job_code=definition.job_code,
+            job_name=definition.job_name,
+            module_code=definition.module_code,
+            module_name=definition.module_name,
+            stat_date_from=payload.date_from,
+            stat_date_to=payload.date_to,
+            status_code="QUEUED",
+            status_name=_status_name("QUEUED"),
+            queued_at=now,
+            parameters_json=parameters,
+            triggered_by=triggered_by,
+            created_at=now,
+        )
+        self.db.add(run)
+        await self.db.flush()
+        await self.db.commit()
+        await self.db.refresh(run)
+
+        try:
+            from app.tasks.analysis_tasks import run_analysis_job
+
+            async_result = run_analysis_job.apply_async(
+                args=[
+                    definition.job_code,
+                    payload.date_from.isoformat(),
+                    payload.date_to.isoformat(),
+                    payload.force_rebuild,
+                    {"job_run_id": run.id, "triggered_by": triggered_by, **(payload.parameters_json or {})},
+                ],
+                queue="analysis",
+            )
+            run.celery_task_id = async_result.id
+        except Exception as exc:
+            run.status_code = "FAILED"
+            run.status_name = _status_name("FAILED")
+            run.finished_at = datetime.utcnow()
+            run.error_message = f"Celery 任务投递失败：{exc}"
+            await self.db.commit()
+            raise ValidationError("Celery 任务投递失败，请确认 Redis 和 analysis-worker 已启动", {"error": str(exc)}) from exc
+        await self.db.commit()
+        await self.db.refresh(run)
+        return _job_to_response(run)

@@ -70,6 +70,9 @@ class HeatMapItem(BaseModel):
     freight_count: int | None = None
     tonnage: float | None = None
     ship_count: int | None = None
+    active_ship_count: int | None = None
+    inbound_count: int | None = None
+    outbound_count: int | None = None
 
 
 class AnalysisOverviewResponse(BaseModel):
@@ -134,6 +137,46 @@ class AnalysisJobRunQuery(BaseModel):
     page_size: int = Field(default=20, ge=1, le=200)
 
 
+class AnalysisTaskQuery(BaseModel):
+    module_code: str | None = None
+    enabled: bool | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=200)
+
+
+class AnalysisTaskTriggerRequest(BaseModel):
+    date_from: date
+    date_to: date
+    force_rebuild: bool = True
+    parameters_json: dict | None = None
+
+
+class AnalysisTaskResponse(BaseModel):
+    id: int
+    job_code: str
+    job_name: str
+    module_code: str
+    module_name: str
+    description: str | None
+    source_tables_json: list | None
+    target_tables_json: list | None
+    default_parameters_json: dict | None
+    schedule_cron: str | None
+    schedule_enabled: bool
+    enabled: bool
+    last_run_id: int | None
+    last_status_code: str | None
+    last_finished_at: datetime | None
+    last_result_summary_json: dict | None
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AnalysisTaskDetailResponse(AnalysisTaskResponse):
+    recent_runs: list["AnalysisJobRunResponse"] = Field(default_factory=list)
+
+
 class AnalysisJobRunResponse(BaseModel):
     id: int
     job_code: str
@@ -144,8 +187,13 @@ class AnalysisJobRunResponse(BaseModel):
     stat_date_to: date | None
     status_code: str
     status_name: str
+    celery_task_id: str | None = None
+    queued_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
+    duration_ms: int | None = None
+    input_rows: int | None = None
+    output_rows: int | None = None
     affected_rows: int | None
     error_message: str | None
     triggered_by: str | None

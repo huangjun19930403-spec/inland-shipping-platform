@@ -192,6 +192,10 @@ Base URL: `/api/v1`
 - `GET /analysis/flows/overview`
 - `GET /analysis/flows/map`
 - `GET /analysis/prices/overview`
+- `GET /analysis/tasks`
+- `GET /analysis/tasks/{job_code}`
+- `POST /analysis/tasks/{job_code}/trigger`
+- `GET /analysis/tasks/{job_code}/runs`
 - `GET /analysis/jobs`
 - `GET /analysis/jobs/{job_run_id}`
 

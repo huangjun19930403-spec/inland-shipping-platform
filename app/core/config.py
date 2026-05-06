@@ -15,6 +15,10 @@ class Settings(BaseSettings):
 
     # 数据库
     DATABASE_URL: str = "sqlite+aiosqlite:///./inland_shipping.db"
+    CELERY_BROKER_URL: str = "redis://127.0.0.1:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://127.0.0.1:6379/1"
+    ANALYSIS_CELERY_EAGER: bool = False
+    ANALYSIS_DEFAULT_DAILY_CRON: str = "20 2 * * *"
 
     # 认证
     SECRET_KEY: str = "inland-shipping-platform-secret-key"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -40,6 +40,30 @@ class AnalysisBucketDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class AnalysisJobDefinition(Base):
+    __tablename__ = "analysis_job_definition"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    job_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    job_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    module_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    module_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_tables_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    target_tables_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    default_parameters_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    schedule_cron: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    schedule_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    last_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    last_status_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_result_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class AnalysisJobRun(Base):
     __tablename__ = "analysis_job_run"
 
@@ -52,8 +76,13 @@ class AnalysisJobRun(Base):
     stat_date_to: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     status_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    celery_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
     affected_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
     parameters_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     result_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -130,6 +159,24 @@ class FactFreightCommodityDaily(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class FactFreightCityDaily(Base):
+    __tablename__ = "fact_freight_city_daily"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    stat_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    city_code: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    city_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    primary_region_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("region.id"), nullable=True, index=True)
+    freight_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inbound_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    outbound_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tonnage: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    avg_unit_price: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    heat_value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    data_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class FactFreightPriceDaily(Base):
     __tablename__ = "fact_freight_price_daily"
 
@@ -162,6 +209,22 @@ class FactShipDaily(Base):
     ship_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     active_ship_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_deadweight_ton: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    data_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class FactShipCityDaily(Base):
+    __tablename__ = "fact_ship_city_daily"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    stat_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    city_code: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    city_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    primary_region_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("region.id"), nullable=True, index=True)
+    ship_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    active_ship_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_deadweight_ton: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    heat_value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     data_version: Mapped[str] = mapped_column(String(64), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 

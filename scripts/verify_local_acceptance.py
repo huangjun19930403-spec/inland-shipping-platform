@@ -21,9 +21,12 @@ from app.integrations.config_keys import (
 )
 from app.models.address import NavigationConstraintPoint, NodeAlias, Region, TransportNode
 from app.models.analysis import (
+    AnalysisJobDefinition,
     AnalysisJobRun,
+    FactFreightCityDaily,
     FactFreightDaily,
     FactFreightFlowDaily,
+    FactShipCityDaily,
     FactShipFlowDaily,
 )
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
@@ -182,8 +185,11 @@ async def verify() -> list[CheckResult]:
             ("ai parse tasks", await _count(session, FreightAiParseTask), 20),
             ("freight candidates", await _count(session, FreightCandidate), 40),
             ("freight daily facts", await _count(session, FactFreightDaily), 90),
-            ("freight flow facts", await _count(session, FactFreightFlowDaily), 600),
+            ("freight city facts", await _count(session, FactFreightCityDaily), 60),
+            ("freight flow facts", await _count(session, FactFreightFlowDaily), 180),
+            ("ship city facts", await _count(session, FactShipCityDaily), 90),
             ("ship flow facts", await _count(session, FactShipFlowDaily), 300),
+            ("analysis task definitions", await _count(session, AnalysisJobDefinition), 10),
             ("analysis jobs", await _count(session, AnalysisJobRun), 15),
             ("audit tasks", await _count(session, AuditTask), 30),
             ("audit snapshots", await _count(session, AuditTaskSnapshot), 30),
@@ -193,6 +199,49 @@ async def verify() -> list[CheckResult]:
         ]
         for name, actual, expected in count_checks:
             results.append(_result(name, actual >= expected, f"{actual} >= {expected}"))
+
+        task_codes = (await session.execute(select(AnalysisJobDefinition.job_code))).scalars().all()
+        results.append(
+            _result(
+                "analysis task codes unique",
+                len(task_codes) == len(set(task_codes)),
+                f"{len(set(task_codes))}/{len(task_codes)} unique",
+            )
+        )
+        freight_city_keys = (
+            await session.execute(
+                select(
+                    FactFreightCityDaily.stat_date,
+                    FactFreightCityDaily.city_code,
+                    FactFreightCityDaily.data_version,
+                )
+            )
+        ).all()
+        results.append(
+            _result(
+                "freight city facts idempotent",
+                len(freight_city_keys) == len(set(freight_city_keys)),
+                f"{len(set(freight_city_keys))}/{len(freight_city_keys)} unique",
+            )
+        )
+        freight_flow_keys = (
+            await session.execute(
+                select(
+                    FactFreightFlowDaily.stat_date,
+                    FactFreightFlowDaily.origin_node_id,
+                    FactFreightFlowDaily.destination_node_id,
+                    FactFreightFlowDaily.commodity_standard_id,
+                    FactFreightFlowDaily.data_version,
+                )
+            )
+        ).all()
+        results.append(
+            _result(
+                "freight flow facts idempotent",
+                len(freight_flow_keys) == len(set(freight_flow_keys)),
+                f"{len(set(freight_flow_keys))}/{len(freight_flow_keys)} unique",
+            )
+        )
 
         e2e_counts = {
             "regions": await _count(session, Region, Region.code.like("E2E%") | Region.name.like("%E2E%")),

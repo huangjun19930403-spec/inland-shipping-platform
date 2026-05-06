@@ -28,4 +28,8 @@ if [ "${RUN_SEED_ON_START:-true}" = "true" ]; then
   PYTHONPATH=. python -m scripts.seed_system_init
 fi
 
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+
 exec uvicorn main:app --host 0.0.0.0 --port "${UVICORN_PORT:-8000}" --log-level "${UVICORN_LOG_LEVEL:-info}"

@@ -13,6 +13,10 @@ from app.modules.analysis.schemas import (
     AnalysisJobRunQuery,
     AnalysisJobRunResponse,
     AnalysisOverviewResponse,
+    AnalysisTaskDetailResponse,
+    AnalysisTaskQuery,
+    AnalysisTaskResponse,
+    AnalysisTaskTriggerRequest,
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowMapItem,
@@ -259,6 +263,63 @@ async def list_job_runs(
     service = AnalysisDashboardService(db)
     return await service.list_jobs(
         module_code=query.module_code,
+        status_code=query.status_code,
+        date_from=query.date_from,
+        date_to=query.date_to,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
+@router.get("/tasks", response_model=PageResponse[AnalysisTaskResponse])
+async def list_analysis_tasks(
+    query: AnalysisTaskQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.list_tasks(
+        module_code=query.module_code,
+        enabled=query.enabled,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
+@router.get("/tasks/{job_code}", response_model=AnalysisTaskDetailResponse)
+async def get_analysis_task_detail(
+    job_code: str,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.get_task_detail(job_code)
+
+
+@router.post("/tasks/{job_code}/trigger", response_model=AnalysisJobRunResponse)
+async def trigger_analysis_task(
+    job_code: str,
+    body: AnalysisTaskTriggerRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AnalysisDashboardService(db)
+    return await service.trigger_task(job_code, body, triggered_by=str(getattr(current_user, "id", "manual")))
+
+
+@router.get("/tasks/{job_code}/runs", response_model=PageResponse[AnalysisJobRunResponse])
+async def list_analysis_task_runs(
+    job_code: str,
+    query: AnalysisJobRunQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.list_task_runs(
+        job_code=job_code,
         status_code=query.status_code,
         date_from=query.date_from,
         date_to=query.date_to,

@@ -134,7 +134,8 @@ ROLE_MENU_CODES = {
         "ANALYSIS_FLOWS",
         "ANALYSIS_PRICES",
         "ANALYSIS_QUOTE_SIMULATOR",
-        "ANALYSIS_JOBS",
+        "ANALYSIS_TASK_ROOT",
+        "ANALYSIS_TASK_LIST",
     ],
     "BUSINESS_INPUTTER": [
         "DASHBOARD",
@@ -157,6 +158,7 @@ LEGACY_MENU_CODES = {
     "SHIP_IMPORT_BATCHES",
     "ROUTE_PLANS",
     "ANALYSIS_CARGO",
+    "ANALYSIS_JOBS",
 }
 
 PERMISSIONS = [
@@ -588,14 +590,25 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "ANALYSIS_JOBS",
+        "menu_code": "ANALYSIS_TASK_ROOT",
         "menu_name": "分析任务",
+        "menu_type_code": "DIRECTORY",
+        "route_path": None,
+        "component_path": None,
+        "icon": "List",
+        "sort_order": 85,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
+        "menu_code": "ANALYSIS_TASK_LIST",
+        "menu_name": "任务列表",
         "menu_type_code": "MENU",
-        "parent_code": "ANALYSIS_ROOT",
+        "parent_code": "ANALYSIS_TASK_ROOT",
         "route_path": "/analysis/jobs",
         "component_path": "modules/analysis/pages/AnalysisJobPage",
         "icon": "List",
-        "sort_order": 7,
+        "sort_order": 1,
         "visible_flag": 1,
         "status_code": "ACTIVE",
     },

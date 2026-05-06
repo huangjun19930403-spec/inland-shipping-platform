@@ -83,7 +83,7 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "FILE_STORAGE_PROVIDER", "dict_name": "文件存储提供方", "items": _items(("TENCENT_COS", "腾讯云 COS"), ("MINIO", "MinIO"), ("LOCAL", "本地存储"))},
     {"dict_code": "LOGIN_RESULT", "dict_name": "登录结果", "items": _items(("SUCCESS", "成功"), ("FAILED", "失败"), ("LOGOUT", "退出"))},
     {"dict_code": "PROFILE_STATUS", "dict_name": "档案状态", "items": [_item("ACTIVE", "启用", color="success"), _item("INACTIVE", "停用", color="info"), _item("ARCHIVED", "归档", color="warning")]},
-    {"dict_code": "STAT_JOB_STATUS", "dict_name": "统计任务状态", "items": [_item("RUNNING", "运行中", color="warning"), _item("SUCCESS", "成功", color="success"), _item("FAILED", "失败", color="danger")]},
+    {"dict_code": "STAT_JOB_STATUS", "dict_name": "统计任务状态", "items": [_item("QUEUED", "排队中", color="info"), _item("RUNNING", "运行中", color="warning"), _item("SUCCESS", "成功", color="success"), _item("PARTIAL_SUCCESS", "部分成功", color="warning"), _item("FAILED", "失败", color="danger")]},
     {"dict_code": "VALUE_TYPE", "dict_name": "值类型", "items": _items(("STRING", "字符串"), ("NUMBER", "数值"), ("BOOLEAN", "布尔值"), ("JSON", "JSON"), ("DATE", "日期"), ("DATETIME", "日期时间"))},
     {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items(("SYSTEM", "系统"), ("INTEGRATION", "外部集成"), ("AI", "AI 配置"), ("MAP", "地图"), ("FREIGHT", "货源"), ("SHIP", "船舶"), ("ANALYSIS", "分析"))},
 ]

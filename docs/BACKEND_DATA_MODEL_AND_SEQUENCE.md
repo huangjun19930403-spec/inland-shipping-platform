@@ -90,14 +90,19 @@
 - `analysis_indicator_definition`
 - `analysis_bucket_definition`
 - `analysis_snapshot`
+- `analysis_job_definition`
 - `analysis_job_run`
 - `fact_freight_daily`
 - `fact_freight_flow_daily`
 - `fact_freight_commodity_daily`
 - `fact_freight_price_daily`
+- `fact_freight_city_daily`
 - `fact_ship_daily`
+- `fact_ship_city_daily`
 - `fact_ship_flow_daily`
 - `fact_region_daily`
+
+`analysis_job_definition` 保存任务编码、模块、源表、目标表、默认参数、调度配置和最近运行摘要。`analysis_job_run` 记录 Celery 队列任务、运行状态、耗时、输入输出行数、参数和结果摘要。统计任务由 Celery + Redis 承载，具体口径见 `docs/ANALYSIS_STATISTICS_TASKS.md`。
 
 旧 `stat_*`、`cargo_channel_daily`、`stat_job_run` 表已删除。
 
