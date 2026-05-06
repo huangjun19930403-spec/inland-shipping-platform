@@ -150,7 +150,37 @@ def _to_line_response(entity, *, segment_count: int = 0) -> RouteLineResponse:
     )
 
 
-def _to_node_response(entity) -> RouteLineNodeResponse:
+def _to_node_response(
+    entity,
+    *,
+    transport_node: TransportNode | None = None,
+    constraint_point: NavigationConstraintPoint | None = None,
+) -> RouteLineNodeResponse:
+    longitude = entity.longitude
+    latitude = entity.latitude
+    resolved_name = entity.display_name
+    resolved_code = None
+    resolved_node_type_code = entity.node_type_code
+    resolved_address = entity.remark
+
+    if transport_node is not None:
+        longitude = transport_node.longitude
+        latitude = transport_node.latitude
+        resolved_name = transport_node.name
+        resolved_code = transport_node.code
+        resolved_node_type_code = transport_node.node_type_code
+        resolved_address = transport_node.address
+    elif constraint_point is not None:
+        longitude = constraint_point.longitude
+        latitude = constraint_point.latitude
+        resolved_name = constraint_point.name
+        resolved_code = constraint_point.code
+        resolved_node_type_code = constraint_point.constraint_type_code
+        resolved_address = constraint_point.description or entity.remark
+    elif entity.node_type_code == "MANUAL_POINT":
+        resolved_name = entity.manual_name or entity.display_name
+        resolved_node_type_code = "MANUAL_POINT"
+
     return RouteLineNodeResponse(
         id=entity.id,
         line_id=entity.line_id,
@@ -159,9 +189,13 @@ def _to_node_response(entity) -> RouteLineNodeResponse:
         transport_node_id=entity.transport_node_id,
         constraint_point_id=entity.constraint_point_id,
         manual_name=entity.manual_name,
-        longitude=entity.longitude,
-        latitude=entity.latitude,
+        longitude=longitude,
+        latitude=latitude,
         display_name=entity.display_name,
+        resolved_name=resolved_name,
+        resolved_code=resolved_code,
+        resolved_node_type_code=resolved_node_type_code,
+        resolved_address=resolved_address,
         remark=entity.remark,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
@@ -376,6 +410,50 @@ class ShippingRouteLineService:
         segments = await self.line_repo.list_segments(line.id)
         return _to_line_response(line, segment_count=len(segments))
 
+    async def _node_responses(self, nodes) -> list[RouteLineNodeResponse]:
+        transport_ids = {
+            node.transport_node_id
+            for node in nodes
+            if node.node_type_code == "TRANSPORT_NODE" and node.transport_node_id is not None
+        }
+        constraint_ids = {
+            node.constraint_point_id
+            for node in nodes
+            if node.node_type_code == "CONSTRAINT_POINT" and node.constraint_point_id is not None
+        }
+        transport_by_id: dict[int, TransportNode] = {}
+        constraint_by_id: dict[int, NavigationConstraintPoint] = {}
+
+        if transport_ids:
+            rows = (
+                await self.db.execute(
+                    select(TransportNode).where(
+                        TransportNode.id.in_(transport_ids),
+                        TransportNode.deleted_at.is_(None),
+                    )
+                )
+            ).scalars()
+            transport_by_id = {row.id: row for row in rows}
+
+        if constraint_ids:
+            rows = (
+                await self.db.execute(
+                    select(NavigationConstraintPoint).where(
+                        NavigationConstraintPoint.id.in_(constraint_ids)
+                    )
+                )
+            ).scalars()
+            constraint_by_id = {row.id: row for row in rows}
+
+        return [
+            _to_node_response(
+                node,
+                transport_node=transport_by_id.get(node.transport_node_id),
+                constraint_point=constraint_by_id.get(node.constraint_point_id),
+            )
+            for node in nodes
+        ]
+
     async def list_lines(self, plan_id: int) -> list[RouteLineResponse]:
         if await self.plan_repo.get_plan_by_id(plan_id) is None:
             raise NotFoundError("ShippingRoutePlan", plan_id)
@@ -429,7 +507,7 @@ class ShippingRouteLineService:
         track = await self.line_repo.get_track(line_id)
         return RouteLineStructureResponse(
             line=await self._line_response(line),
-            nodes=[_to_node_response(item) for item in nodes],
+            nodes=await self._node_responses(nodes),
             segments=[_to_segment_response(item) for item in segments],
             track=_to_track_response(track) if track else None,
         )
@@ -447,7 +525,7 @@ class ShippingRouteLineService:
         await self.db.commit()
         return RouteLineStructureResponse(
             line=await self._line_response(line),
-            nodes=[_to_node_response(item) for item in node_rows],
+            nodes=await self._node_responses(node_rows),
             segments=[_to_segment_response(item) for item in segment_rows],
             track=None,
         )

@@ -155,6 +155,10 @@ class RouteLineNodeResponse(BaseModel):
     longitude: Decimal | None
     latitude: Decimal | None
     display_name: str
+    resolved_name: str | None = None
+    resolved_code: str | None = None
+    resolved_node_type_code: str | None = None
+    resolved_address: str | None = None
     remark: str | None
     created_at: datetime
     updated_at: datetime

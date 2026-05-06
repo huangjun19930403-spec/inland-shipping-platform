@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 import httpx
@@ -16,7 +18,12 @@ from app.integrations.config_keys import (
 )
 from app.integrations.hifleet.client import HifleetRouteClient
 from app.integrations.http.route_geometry_types import RouteGeometryQuery, RouteGeometryResult
-from app.modules.route.service import ShippingRouteLineService, _combine_line_strings, _track_status_from_success_count
+from app.modules.route.service import (
+    ShippingRouteLineService,
+    _combine_line_strings,
+    _to_node_response,
+    _track_status_from_success_count,
+)
 
 
 class FakeRuntimeConfig:
@@ -168,6 +175,98 @@ def test_combine_line_strings_deduplicates_segment_boundaries() -> None:
         "type": "LineString",
         "coordinates": [[120.0, 31.0], [120.5, 31.5], [121.0, 32.0]],
     }
+
+
+def _route_node(**overrides):
+    now = datetime.utcnow()
+    values = {
+        "id": 1,
+        "line_id": 10,
+        "node_order": 1,
+        "node_type_code": "MANUAL_POINT",
+        "transport_node_id": None,
+        "constraint_point_id": None,
+        "manual_name": "手工点",
+        "longitude": Decimal("120.10000000"),
+        "latitude": Decimal("31.10000000"),
+        "display_name": "手工点",
+        "remark": "手工备注",
+        "created_at": now,
+        "updated_at": now,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_node_response_resolves_transport_node_coordinate_and_info() -> None:
+    response = _to_node_response(
+        _route_node(
+            node_type_code="TRANSPORT_NODE",
+            transport_node_id=88,
+            manual_name=None,
+            longitude=None,
+            latitude=None,
+            display_name="运输节点占位",
+            remark=None,
+        ),
+        transport_node=SimpleNamespace(
+            id=88,
+            code="NODE_TEST",
+            name="测试港口",
+            node_type_code="PORT",
+            address="测试地址",
+            longitude=Decimal("121.20000000"),
+            latitude=Decimal("32.20000000"),
+        ),
+    )
+
+    assert response.longitude == Decimal("121.20000000")
+    assert response.latitude == Decimal("32.20000000")
+    assert response.resolved_name == "测试港口"
+    assert response.resolved_code == "NODE_TEST"
+    assert response.resolved_node_type_code == "PORT"
+    assert response.resolved_address == "测试地址"
+
+
+def test_node_response_resolves_constraint_point_coordinate_and_info() -> None:
+    response = _to_node_response(
+        _route_node(
+            node_type_code="CONSTRAINT_POINT",
+            constraint_point_id=66,
+            manual_name=None,
+            longitude=None,
+            latitude=None,
+            display_name="约束点占位",
+            remark="节点备注",
+        ),
+        constraint_point=SimpleNamespace(
+            id=66,
+            code="LIMIT_TEST",
+            name="测试桥区",
+            constraint_type_code="BRIDGE",
+            description="桥区限高",
+            longitude=Decimal("122.30000000"),
+            latitude=Decimal("33.30000000"),
+        ),
+    )
+
+    assert response.longitude == Decimal("122.30000000")
+    assert response.latitude == Decimal("33.30000000")
+    assert response.resolved_name == "测试桥区"
+    assert response.resolved_code == "LIMIT_TEST"
+    assert response.resolved_node_type_code == "BRIDGE"
+    assert response.resolved_address == "桥区限高"
+
+
+def test_node_response_keeps_manual_point_coordinate_and_info() -> None:
+    response = _to_node_response(_route_node())
+
+    assert response.longitude == Decimal("120.10000000")
+    assert response.latitude == Decimal("31.10000000")
+    assert response.resolved_name == "手工点"
+    assert response.resolved_code is None
+    assert response.resolved_node_type_code == "MANUAL_POINT"
+    assert response.resolved_address == "手工备注"
 
 
 class FakeRouteLineRepository:
