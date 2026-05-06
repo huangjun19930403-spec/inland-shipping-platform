@@ -368,6 +368,13 @@ class AnalysisDashboardService:
     async def ship_overview(self, date_from: date | None, date_to: date | None) -> ShipAnalysisOverviewResponse:
         start, end = await self._date_range(date_from, date_to)
         totals = await self._ship_totals(start, end)
+        active_city_count = await self.db.scalar(
+            select(func.count(func.distinct(FactShipCityDaily.city_code))).where(
+                FactShipCityDaily.stat_date >= start,
+                FactShipCityDaily.stat_date <= end,
+                FactShipCityDaily.active_ship_count > 0,
+            )
+        )
         return ShipAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
@@ -375,6 +382,7 @@ class AnalysisDashboardService:
                 _metric("ship_count", "船舶总量", totals["ship_count"], "艘"),
                 _metric("active_ship_count", "活跃船舶", totals["active_ship_count"], "艘"),
                 _metric("deadweight", "总载重吨", totals["total_deadweight_ton"], "吨"),
+                _metric("active_city_count", "活跃城市", active_city_count or 0, "个"),
             ],
             type_distribution=await self.ship_type_distribution(start, end),
             age_distribution=await self.ship_age_distribution(start, end),

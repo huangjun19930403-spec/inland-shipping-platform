@@ -35,6 +35,7 @@ from app.models.freight import Freight, FreightAiParseTask, FreightCandidate, Fr
 from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
 from app.models.ship import ShipProfile
 from app.models.system import SysMenu, SystemConfig
+from app.modules.analysis.service import AnalysisDashboardService
 from scripts.seed_local_private_config import (
     CONFIG_METADATA_BY_KEY,
     LOCAL_PRIVATE_CONFIG_KEYS,
@@ -206,6 +207,26 @@ async def verify() -> list[CheckResult]:
                 "analysis task codes unique",
                 len(task_codes) == len(set(task_codes)),
                 f"{len(set(task_codes))}/{len(task_codes)} unique",
+            )
+        )
+        active_ship_city_count = await session.scalar(
+            select(func.count(func.distinct(FactShipCityDaily.city_code))).where(FactShipCityDaily.active_ship_count > 0)
+        )
+        results.append(
+            _result(
+                "ship active city facts usable",
+                int(active_ship_city_count or 0) > 0,
+                f"{int(active_ship_city_count or 0)} active cities",
+            )
+        )
+        ship_overview = await AnalysisDashboardService(session).ship_overview(None, None)
+        ship_metrics = {item.code: item for item in ship_overview.metrics}
+        active_city_metric = ship_metrics.get("active_city_count")
+        results.append(
+            _result(
+                "ship overview active city metric",
+                active_city_metric is not None and active_city_metric.value > 0,
+                f"{active_city_metric.value if active_city_metric else 0} active cities",
             )
         )
         freight_city_keys = (
