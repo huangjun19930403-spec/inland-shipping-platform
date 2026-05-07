@@ -2,17 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (
-    BigInteger,
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Integer,
-    JSON,
-    Numeric,
-    String,
-    Text,
-)
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import AuditFlowMixin, Base, SoftDeleteMixin, TimestampMixin
@@ -26,6 +16,9 @@ class Freight(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     source_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
     source_channel_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     source_ref_no: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    source_batch_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    source_tms_inbound_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    source_clue_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     source_candidate_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     cargo_title: Mapped[str] = mapped_column(String(256), nullable=False)
     cargo_description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
@@ -68,45 +61,52 @@ class Freight(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     expired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     confirmed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    hall_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="NOT_LISTED")
+    hall_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    hall_unpublished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    hall_visible_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class FreightSourceInbound(Base, TimestampMixin):
-    __tablename__ = "freight_source_inbound"
+class FreightBatchTask(Base, TimestampMixin):
+    __tablename__ = "freight_batch_task"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_no: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="WECHAT")
+    source_channel_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="WECHAT_TEXT")
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    clue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    raw_response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class FreightTmsInbound(Base, TimestampMixin):
+    __tablename__ = "freight_tms_inbound"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     inbound_no: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
-    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_channel_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="TMS")
+    source_channel_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="TMS_API")
+    source_trace_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
     external_ref_no: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    sender_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    sender_contact: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    raw_title: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    raw_content: Mapped[str] = mapped_column(Text, nullable=False)
-    received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    parse_task_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
-    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
-
-
-class FreightAiParseTask(Base, TimestampMixin):
-    __tablename__ = "freight_ai_parse_task"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    task_no: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
-    source_inbound_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("freight_source_inbound.id"), nullable=True, index=True
-    )
-    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_channel_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     raw_content: Mapped[str] = mapped_column(Text, nullable=False)
     status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    ai_provider_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    ai_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    requested_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    clue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     raw_response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
@@ -115,16 +115,20 @@ class FreightClue(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     clue_no: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
-    parse_task_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("freight_ai_parse_task.id"), nullable=False, index=True
+    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_channel_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("freight_batch_task.id"), nullable=True, index=True
     )
-    source_inbound_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("freight_source_inbound.id"), nullable=True, index=True
+    source_tms_inbound_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("freight_tms_inbound.id"), nullable=True, index=True
     )
     segment_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    context_summary: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    extracted_fields_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    quality_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    parse_result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class FreightCandidate(Base, TimestampMixin):
@@ -132,15 +136,20 @@ class FreightCandidate(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidate_no: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
-    parse_task_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("freight_ai_parse_task.id"), nullable=False, index=True
+    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_channel_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("freight_batch_task.id"), nullable=True, index=True
     )
-    clue_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("freight_clue.id"), nullable=True, index=True
+    source_tms_inbound_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("freight_tms_inbound.id"), nullable=True, index=True
     )
-    source_inbound_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("freight_source_inbound.id"), nullable=True, index=True
-    )
+    clue_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("freight_clue.id"), nullable=True, index=True)
+    source_ref_no: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_commodity_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    raw_origin_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    raw_destination_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
     cargo_title: Mapped[str] = mapped_column(String(256), nullable=False)
     cargo_description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     commodity_standard_id: Mapped[int | None] = mapped_column(
@@ -148,6 +157,8 @@ class FreightCandidate(Base, TimestampMixin):
     )
     commodity_match_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     commodity_match_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    commodity_match_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    commodity_options_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     packaging_form_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     estimated_tonnage: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     min_tonnage: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
@@ -156,14 +167,18 @@ class FreightCandidate(Base, TimestampMixin):
     total_price: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     price_unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     settlement_method_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    origin_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    destination_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
     origin_node_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True
     )
     destination_node_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True
     )
+    origin_node_match_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    destination_node_match_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    origin_match_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    destination_match_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    origin_options_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    destination_options_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     origin_province_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     origin_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     origin_district_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
@@ -185,7 +200,10 @@ class FreightCandidate(Base, TimestampMixin):
     contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     contact_wechat: Mapped[str | None] = mapped_column(String(64), nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    completeness_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     match_basis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_suggestion_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    manual_overrides_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     confirmed_freight_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("freight.id"), nullable=True, index=True
@@ -193,8 +211,8 @@ class FreightCandidate(Base, TimestampMixin):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class FreightCandidateFeedback(Base):
-    __tablename__ = "freight_candidate_feedback"
+class FreightCandidateManualFeedback(Base):
+    __tablename__ = "freight_candidate_manual_feedback"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     candidate_id: Mapped[int] = mapped_column(
@@ -213,9 +231,7 @@ class FreightContact(Base, TimestampMixin):
     __tablename__ = "freight_contact"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    freight_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("freight.id"), nullable=False, index=True
-    )
+    freight_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("freight.id"), nullable=False, index=True)
     contact_name: Mapped[str] = mapped_column(String(64), nullable=False)
     contact_role_code: Mapped[str] = mapped_column(String(64), nullable=False)
     mobile_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -228,9 +244,7 @@ class FreightSourceAttachment(Base):
     __tablename__ = "freight_source_attachment"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    freight_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("freight.id"), nullable=False, index=True
-    )
+    freight_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("freight.id"), nullable=False, index=True)
     storage_provider_code: Mapped[str] = mapped_column(String(64), nullable=False)
     file_url: Mapped[str] = mapped_column(String(512), nullable=False)
     file_name: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -246,8 +260,6 @@ class FreightTagRelation(Base):
     __tablename__ = "freight_tag_relation"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    freight_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("freight.id"), nullable=False, index=True
-    )
+    freight_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("freight.id"), nullable=False, index=True)
     tag_code: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

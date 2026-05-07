@@ -19,6 +19,7 @@ from app.models.analysis import (
     FactFreightCommodityDaily,
     FactFreightDaily,
     FactFreightFlowDaily,
+    FactFreightNodeDaily,
     FactFreightPriceDaily,
     FactRegionDaily,
     FactShipCityDaily,
@@ -231,6 +232,7 @@ class AnalysisDashboardService:
                 _metric("avg_unit_price", "平均运价", totals["avg_unit_price"], "元/吨"),
             ],
             trend=await self.freight_trend(start, end),
+            node_ranking=await self.freight_node_ranking(start, end, 12),
             commodity_structure=await self.freight_commodity_structure(start, end),
             price_distribution=await self.freight_price_distribution(start, end),
             hot_routes=await self.freight_hot_routes(start, end, 8),
@@ -272,6 +274,56 @@ class AnalysisDashboardService:
         total = sum(_num(row[1]) for row in rows)
         return [
             ChartPoint(name=row[0], value=int(_num(row[1])), ratio=_ratio(_num(row[1]), total), extra={"tonnage": _num(row[2])})
+            for row in rows
+        ]
+
+    async def freight_node_ranking(self, start: date, end: date, limit: int = 12) -> list[HeatMapItem]:
+        rows = (
+            await self.db.execute(
+                select(
+                    FactFreightNodeDaily.node_id,
+                    FactFreightNodeDaily.node_name,
+                    TransportNode.longitude,
+                    TransportNode.latitude,
+                    FactFreightNodeDaily.city_code,
+                    FactFreightNodeDaily.primary_region_id,
+                    func.sum(FactFreightNodeDaily.heat_value),
+                    func.sum(FactFreightNodeDaily.freight_count),
+                    func.sum(FactFreightNodeDaily.inbound_count),
+                    func.sum(FactFreightNodeDaily.outbound_count),
+                    func.sum(FactFreightNodeDaily.total_tonnage),
+                )
+                .join(TransportNode, TransportNode.id == FactFreightNodeDaily.node_id)
+                .where(FactFreightNodeDaily.stat_date >= start, FactFreightNodeDaily.stat_date <= end)
+                .group_by(
+                    FactFreightNodeDaily.node_id,
+                    FactFreightNodeDaily.node_name,
+                    TransportNode.longitude,
+                    TransportNode.latitude,
+                    FactFreightNodeDaily.city_code,
+                    FactFreightNodeDaily.primary_region_id,
+                )
+                .order_by(func.sum(FactFreightNodeDaily.heat_value).desc())
+                .limit(limit)
+            )
+        ).all()
+        values = [_num(row[6]) for row in rows]
+        high = max(values) if values else 0
+        return [
+            HeatMapItem(
+                id=row[0],
+                node_id=row[0],
+                region_id=row[5],
+                name=row[1] or str(row[0]),
+                longitude=_num(row[2]) if row[2] is not None else None,
+                latitude=_num(row[3]) if row[3] is not None else None,
+                value=round(_num(row[6]), 2),
+                level="HIGH" if high and _num(row[6]) >= high * 0.66 else "MEDIUM" if high and _num(row[6]) >= high * 0.33 else "LOW",
+                freight_count=int(_num(row[7])),
+                inbound_count=int(_num(row[8])),
+                outbound_count=int(_num(row[9])),
+                tonnage=round(_num(row[10]), 2),
+            )
             for row in rows
         ]
 
@@ -321,6 +373,8 @@ class AnalysisDashboardService:
     async def freight_hot_routes(self, start: date, end: date, limit: int = 10) -> list[FlowMapItem]:
         origin = aliased(TransportNode)
         destination = aliased(TransportNode)
+        origin_city = aliased(AdminRegion)
+        destination_city = aliased(AdminRegion)
         rows = (
             await self.db.execute(
                 select(
@@ -332,16 +386,36 @@ class AnalysisDashboardService:
                     destination.name,
                     destination.longitude,
                     destination.latitude,
+                    origin_city.name,
+                    destination_city.name,
+                    FactFreightFlowDaily.origin_city_code,
+                    FactFreightFlowDaily.destination_city_code,
                     CommodityStandard.name,
                     func.sum(FactFreightFlowDaily.freight_count),
                     func.sum(FactFreightFlowDaily.total_tonnage),
                     func.avg(FactFreightFlowDaily.avg_unit_price),
                 )
-                .join(origin, origin.id == FactFreightFlowDaily.origin_node_id)
-                .join(destination, destination.id == FactFreightFlowDaily.destination_node_id)
+                .outerjoin(origin, origin.id == FactFreightFlowDaily.origin_node_id)
+                .outerjoin(destination, destination.id == FactFreightFlowDaily.destination_node_id)
+                .outerjoin(origin_city, origin_city.code == FactFreightFlowDaily.origin_city_code)
+                .outerjoin(destination_city, destination_city.code == FactFreightFlowDaily.destination_city_code)
                 .outerjoin(CommodityStandard, CommodityStandard.id == FactFreightFlowDaily.commodity_standard_id)
                 .where(FactFreightFlowDaily.stat_date >= start, FactFreightFlowDaily.stat_date <= end)
-                .group_by(origin.id, origin.name, origin.longitude, origin.latitude, destination.id, destination.name, destination.longitude, destination.latitude, CommodityStandard.name)
+                .group_by(
+                    origin.id,
+                    origin.name,
+                    origin.longitude,
+                    origin.latitude,
+                    destination.id,
+                    destination.name,
+                    destination.longitude,
+                    destination.latitude,
+                    origin_city.name,
+                    destination_city.name,
+                    FactFreightFlowDaily.origin_city_code,
+                    FactFreightFlowDaily.destination_city_code,
+                    CommodityStandard.name,
+                )
                 .order_by(func.sum(FactFreightFlowDaily.freight_count).desc())
                 .limit(limit)
             )
@@ -349,18 +423,18 @@ class AnalysisDashboardService:
         return [
             FlowMapItem(
                 origin_id=row[0],
-                origin_name=row[1],
+                origin_name=row[1] or row[8] or row[10] or "未知起点",
                 origin_longitude=_num(row[2]) if row[2] is not None else None,
                 origin_latitude=_num(row[3]) if row[3] is not None else None,
                 destination_id=row[4],
-                destination_name=row[5],
+                destination_name=row[5] or row[9] or row[11] or "未知终点",
                 destination_longitude=_num(row[6]) if row[6] is not None else None,
                 destination_latitude=_num(row[7]) if row[7] is not None else None,
-                commodity_name=row[8],
-                value=int(_num(row[9])),
-                freight_count=int(_num(row[9])),
-                tonnage=round(_num(row[10]), 2),
-                avg_unit_price=round(_num(row[11]), 2),
+                commodity_name=row[12],
+                value=int(_num(row[13])),
+                freight_count=int(_num(row[13])),
+                tonnage=round(_num(row[14]), 2),
+                avg_unit_price=round(_num(row[15]), 2),
             )
             for row in rows
         ]

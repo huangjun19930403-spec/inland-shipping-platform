@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 class QwenFreightParseResult:
     provider: str
     model: str
+    prompt_version: str
     raw_response: dict[str, Any]
     parsed_payload: dict[str, Any]
     segments: list[dict[str, Any]]
@@ -37,7 +38,9 @@ class QwenFreightParseResult:
 class DashScopeQwenFreightParserClient:
     """OpenAI-compatible DashScope Chat Completions wrapper."""
 
-    prompt_version = "freight_parse_v1"
+    wechat_prompt_version = "freight_wechat_clue_split_v2"
+    tms_prompt_version = "freight_tms_waybill_split_v2"
+    prompt_version = wechat_prompt_version
 
     def __init__(
         self,
@@ -95,11 +98,12 @@ class DashScopeQwenFreightParserClient:
         return segments
 
     @staticmethod
-    def _messages(raw_content: str) -> list[dict[str, str]]:
+    def _messages(raw_content: str, *, source_type_code: str) -> list[dict[str, str]]:
         schema_hint = {
             "segments": [
                 {
                     "raw_text": "原文片段",
+                    "context_summary": "线索上下文摘要",
                     "cargo_title": "货源标题",
                     "cargo_description": "补充描述",
                     "commodity_name": "货品名称",
@@ -123,19 +127,28 @@ class DashScopeQwenFreightParserClient:
                 }
             ]
         }
+        if source_type_code == "TMS":
+            system_hint = (
+                "你是内河航运 TMS 运单转货源助手。只输出 JSON，不要输出 Markdown。"
+                "输入可能是一条消息中包含多条标准化运单、数组或嵌套字段。"
+                "请把每条可发布为货源的运单切分为一个 segments 元素，保留运单号、装卸地、货品、吨位、价格等字段。"
+                "未知字段使用 null，数字字段只输出数字。"
+            )
+            user_hint = "请按以下 JSON 结构把 TMS 运单消息转成待确认货源候选："
+        else:
+            system_hint = (
+                "你是内河航运微信群货源线索切分助手。只输出 JSON，不要输出 Markdown。"
+                "微信群文本可能包含多段话、多条货源、上下文省略、联系人复用、前后句关联和无效聊天内容。"
+                "请先按业务语义切分货源线索，再抽取每条线索中的装货地、卸货地、货品、吨位、价格和联系方式。"
+                "不要把闲聊、无效回复或重复转发当作货源；未知字段使用 null，数字字段只输出数字。"
+            )
+            user_hint = "请按以下 JSON 结构切分并抽取微信群货源候选："
         return [
-            {
-                "role": "system",
-                "content": (
-                    "你是内河航运货源解析助手。只输出 JSON，不要输出 Markdown。"
-                    "从微信、TMS 或人工批量文本中切分并抽取货源候选。"
-                    "未知字段使用 null，数字字段只输出数字。"
-                ),
-            },
+            {"role": "system", "content": system_hint},
             {
                 "role": "user",
                 "content": (
-                    "请按以下 JSON 结构抽取货源候选：\n"
+                    f"{user_hint}\n"
                     f"{json.dumps(schema_hint, ensure_ascii=False)}\n\n"
                     "待解析原文：\n"
                     f"{raw_content}"
@@ -143,10 +156,12 @@ class DashScopeQwenFreightParserClient:
             },
         ]
 
-    async def parse(self, raw_content: str) -> QwenFreightParseResult:
+    async def parse(self, raw_content: str, *, source_type_code: str = "WECHAT") -> QwenFreightParseResult:
         content = (raw_content or "").strip()
         if not content:
             raise ValidationError("AI 解析原文不能为空")
+        normalized_source = (source_type_code or "WECHAT").strip().upper()
+        prompt_version = self.tms_prompt_version if normalized_source == "TMS" else self.wechat_prompt_version
 
         provider = await self._config_value(AI_PROVIDER, settings.AI_PROVIDER)
         base_url = (await self._config_value(DASHSCOPE_BASE_URL, settings.DASHSCOPE_BASE_URL)).rstrip("/")
@@ -166,7 +181,7 @@ class DashScopeQwenFreightParserClient:
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
                     "model": model,
-                    "messages": self._messages(content),
+                    "messages": self._messages(content, source_type_code=normalized_source),
                     "temperature": 0.1,
                     "response_format": {"type": "json_object"},
                 },
@@ -191,6 +206,7 @@ class DashScopeQwenFreightParserClient:
         return QwenFreightParseResult(
             provider=provider or "DASHSCOPE_QWEN",
             model=model,
+            prompt_version=prompt_version,
             raw_response=raw_response,
             parsed_payload=parsed_payload,
             segments=segments,

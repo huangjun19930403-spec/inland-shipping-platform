@@ -8,136 +8,136 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.modules.freight.schemas import (
-    FreightAiParseTaskCreateRequest,
-    FreightAiParseTaskDetailResponse,
-    FreightAiParseTaskListQuery,
-    FreightAiParseTaskResponse,
     FreightAttachmentCreateRequest,
     FreightAttachmentResponse,
     FreightAttachmentUpdateRequest,
+    FreightBatchCreateRequest,
+    FreightBatchDetailResponse,
+    FreightBatchListQuery,
+    FreightBatchResponse,
     FreightCandidateConfirmRequest,
     FreightCandidateRejectRequest,
     FreightCandidateResponse,
     FreightCandidateUpdateRequest,
     FreightContactReplaceRequest,
     FreightContactResponse,
-    FreightCreateRequest,
     FreightDetailResponse,
     FreightListQuery,
+    FreightManualCreateRequest,
     FreightResponse,
-    FreightSourceInboundCreateRequest,
-    FreightSourceInboundListQuery,
-    FreightSourceInboundResponse,
     FreightStatusChangeRequest,
     FreightTagRelationResponse,
     FreightTagReplaceRequest,
+    FreightTmsInboundCreateRequest,
+    FreightTmsInboundDetailResponse,
+    FreightTmsInboundListQuery,
+    FreightTmsInboundResponse,
     FreightUpdateRequest,
     PageResponse,
 )
 from app.modules.freight.service import (
-    FreightAiParseTaskService,
     FreightAttachmentService,
+    FreightBatchTaskService,
     FreightCandidateService,
     FreightContactService,
     FreightService,
-    FreightSourceInboundService,
     FreightTagService,
+    FreightTmsInboundService,
 )
 
 router = APIRouter()
 
 
-@router.get("/source-inbounds", response_model=PageResponse[FreightSourceInboundResponse])
-async def list_source_inbounds(
-    query: FreightSourceInboundListQuery = Depends(),
+@router.get("/batches", response_model=PageResponse[FreightBatchResponse])
+async def list_freight_batches(
+    query: FreightBatchListQuery = Depends(),
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    service = FreightSourceInboundService(db)
-    return await service.list_items(
-        keyword=query.keyword,
-        status_code=query.status_code,
-        source_channel_code=query.source_channel_code,
-        page=query.page,
-        page_size=query.page_size,
-    )
+    service = FreightBatchTaskService(db)
+    return await service.list_items(keyword=query.keyword, status_code=query.status_code, page=query.page, page_size=query.page_size)
 
 
-@router.post("/source-inbounds", response_model=FreightSourceInboundResponse)
-async def create_source_inbound(
-    body: FreightSourceInboundCreateRequest,
+@router.post("/batches/wechat", response_model=FreightBatchResponse)
+async def create_wechat_batch(
+    body: FreightBatchCreateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightBatchTaskService(db)
+    return await service.create_wechat_batch(body, creator_id=getattr(current_user, "id", None))
+
+
+@router.get("/batches/{batch_id}", response_model=FreightBatchDetailResponse)
+async def get_freight_batch_detail(
+    batch_id: int,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    service = FreightSourceInboundService(db)
+    service = FreightBatchTaskService(db)
+    return await service.get_detail(batch_id)
+
+
+@router.post("/batches/{batch_id}/parse", response_model=FreightBatchDetailResponse)
+async def parse_freight_batch(
+    batch_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightBatchTaskService(db)
+    return await service.parse(batch_id, requested_by=getattr(current_user, "id", None))
+
+
+@router.get("/tms-inbounds", response_model=PageResponse[FreightTmsInboundResponse])
+async def list_tms_inbounds(
+    query: FreightTmsInboundListQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = FreightTmsInboundService(db)
+    return await service.list_items(keyword=query.keyword, status_code=query.status_code, page=query.page, page_size=query.page_size)
+
+
+@router.post("/tms-inbounds", response_model=FreightTmsInboundResponse)
+async def create_tms_inbound(
+    body: FreightTmsInboundCreateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = FreightTmsInboundService(db)
     return await service.create(body)
 
 
-@router.get("/source-inbounds/{inbound_id}", response_model=FreightSourceInboundResponse)
-async def get_source_inbound(
+@router.get("/tms-inbounds/{inbound_id}", response_model=FreightTmsInboundDetailResponse)
+async def get_tms_inbound_detail(
     inbound_id: int,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    service = FreightSourceInboundService(db)
-    return await service.get(inbound_id)
+    service = FreightTmsInboundService(db)
+    return await service.get_detail(inbound_id)
 
 
-@router.get("/ai/parse-tasks", response_model=PageResponse[FreightAiParseTaskResponse])
-async def list_ai_parse_tasks(
-    query: FreightAiParseTaskListQuery = Depends(),
+@router.post("/tms-inbounds/{inbound_id}/parse", response_model=FreightTmsInboundDetailResponse)
+async def parse_tms_inbound(
+    inbound_id: int,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    _ = current_user
-    service = FreightAiParseTaskService(db)
-    return await service.list_items(
-        keyword=query.keyword,
-        status_code=query.status_code,
-        source_channel_code=query.source_channel_code,
-        page=query.page,
-        page_size=query.page_size,
-    )
-
-
-@router.post("/ai/parse-tasks", response_model=FreightAiParseTaskResponse)
-async def create_ai_parse_task(
-    body: FreightAiParseTaskCreateRequest,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    service = FreightAiParseTaskService(db)
-    return await service.create(body, requested_by=getattr(current_user, "id", None))
-
-
-@router.get("/ai/parse-tasks/{task_id}", response_model=FreightAiParseTaskDetailResponse)
-async def get_ai_parse_task_detail(
-    task_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = FreightAiParseTaskService(db)
-    return await service.get_detail(task_id)
-
-
-@router.post("/ai/parse-tasks/{task_id}/run", response_model=FreightAiParseTaskDetailResponse)
-async def run_ai_parse_task(
-    task_id: int,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    service = FreightAiParseTaskService(db)
-    return await service.run(task_id, requested_by=getattr(current_user, "id", None))
+    service = FreightTmsInboundService(db)
+    return await service.parse(inbound_id, requested_by=getattr(current_user, "id", None))
 
 
 @router.get("/candidates", response_model=PageResponse[FreightCandidateResponse])
 async def list_candidates(
     keyword: str | None = None,
     status_code: str | None = None,
+    source_type_code: str | None = None,
     page: int = 1,
     page_size: int = 20,
     current_user=Depends(get_current_user),
@@ -145,7 +145,13 @@ async def list_candidates(
 ):
     _ = current_user
     service = FreightCandidateService(db)
-    return await service.list_items(keyword=keyword, status_code=status_code, page=page, page_size=page_size)
+    return await service.list_items(
+        keyword=keyword,
+        status_code=status_code,
+        source_type_code=source_type_code,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/candidates/{candidate_id}", response_model=FreightCandidateResponse)
@@ -214,15 +220,15 @@ async def list_freights(
     )
 
 
-@router.post("", response_model=FreightResponse)
-async def create_freight(
-    body: FreightCreateRequest,
+@router.post("/manual", response_model=FreightResponse)
+async def create_manual_freight(
+    body: FreightManualCreateRequest,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
     service = FreightService(db)
-    return await service.create_freight(body)
+    return await service.create_manual_freight(body)
 
 
 @router.put("/attachments/{attachment_id}", response_model=FreightAttachmentResponse)
@@ -294,10 +300,7 @@ async def replace_freight_contacts(
 ):
     _ = current_user
     service = FreightContactService(db)
-    return await service.replace_contacts(
-        freight_id,
-        [item.model_dump(exclude_none=True) for item in body.contacts],
-    )
+    return await service.replace_contacts(freight_id, [item.model_dump(exclude_none=True) for item in body.contacts])
 
 
 @router.get("/{freight_id}/attachments", response_model=list[FreightAttachmentResponse])

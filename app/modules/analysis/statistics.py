@@ -18,6 +18,7 @@ from app.models.analysis import (
     FactFreightCommodityDaily,
     FactFreightDaily,
     FactFreightFlowDaily,
+    FactFreightNodeDaily,
     FactFreightPriceDaily,
     FactRegionDaily,
     FactShipCityDaily,
@@ -25,7 +26,7 @@ from app.models.analysis import (
     FactShipFlowDaily,
 )
 from app.models.commodity import CommodityStandard, CommodityType
-from app.models.freight import Freight, FreightCandidate, FreightSourceInbound
+from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightTmsInbound
 from app.models.ship import ShipCapacity, ShipOperation, ShipProfile
 from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
 
@@ -121,6 +122,7 @@ class AnalysisStatisticsService:
             "ANALYSIS_FREIGHT_COMMODITY_DAILY": self.run_freight_commodity_daily,
             "ANALYSIS_FREIGHT_PRICE_DAILY": self.run_freight_price_daily,
             "ANALYSIS_FREIGHT_CITY_DAILY": self.run_freight_city_daily,
+            "ANALYSIS_FREIGHT_NODE_DAILY": self.run_freight_node_daily,
             "ANALYSIS_SHIP_DAILY": self.run_ship_daily,
             "ANALYSIS_SHIP_CITY_DAILY": self.run_ship_city_daily,
             "ANALYSIS_SHIP_FLOW_DAILY": self.run_ship_flow_daily,
@@ -138,6 +140,7 @@ class AnalysisStatisticsService:
             "ANALYSIS_FREIGHT_COMMODITY_DAILY",
             "ANALYSIS_FREIGHT_PRICE_DAILY",
             "ANALYSIS_FREIGHT_CITY_DAILY",
+            "ANALYSIS_FREIGHT_NODE_DAILY",
             "ANALYSIS_SHIP_DAILY",
             "ANALYSIS_SHIP_CITY_DAILY",
             "ANALYSIS_SHIP_FLOW_DAILY",
@@ -199,14 +202,18 @@ class AnalysisStatisticsService:
             await self._clear(FactFreightDaily, start, end)
         freights = await self._freights(start, end)
         candidates = (await self.db.execute(select(FreightCandidate))).scalars().all()
-        inbounds = (await self.db.execute(select(FreightSourceInbound))).scalars().all()
+        batches = (await self.db.execute(select(FreightBatchTask))).scalars().all()
+        tms_inbounds = (await self.db.execute(select(FreightTmsInbound))).scalars().all()
         candidate_counts: dict[date, int] = defaultdict(int)
         inbound_counts: dict[date, int] = defaultdict(int)
         for row in candidates:
             if (dt := _date_of(row.confirmed_at, row.created_at)) and start <= dt <= end:
                 candidate_counts[dt] += 1
-        for row in inbounds:
-            if (dt := _date_of(row.received_at, row.created_at)) and start <= dt <= end:
+        for row in batches:
+            if (dt := _date_of(row.created_at)) and start <= dt <= end:
+                inbound_counts[dt] += 1
+        for row in tms_inbounds:
+            if (dt := _date_of(row.processed_at, row.created_at)) and start <= dt <= end:
                 inbound_counts[dt] += 1
 
         acc: dict[date, dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "confirmed": 0, "tonnage": Decimal("0"), "amount": Decimal("0")})
@@ -253,7 +260,7 @@ class AnalysisStatisticsService:
         acc: dict[tuple, dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "tonnage": Decimal("0"), "amount": Decimal("0"), "min": None, "max": None})
         for row in freights:
             stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
-            if stat_date is None or not row.origin_node_id or not row.destination_node_id:
+            if stat_date is None or not row.origin_city_code or not row.destination_city_code:
                 continue
             key = (
                 stat_date,
@@ -443,6 +450,54 @@ class AnalysisStatisticsService:
             )
         await self.db.flush()
         return AggregationResult("ANALYSIS_FREIGHT_CITY_DAILY", len(freights), len(acc), len(acc), ["fact_freight_city_daily"])
+
+    async def run_freight_node_daily(self, start: date, end: date, *, force_rebuild: bool = True) -> AggregationResult:
+        if force_rebuild:
+            await self._clear(FactFreightNodeDaily, start, end)
+        freights = await self._freights(start, end)
+        nodes = await self._node_map()
+        _, primary_region = await self._city_context()
+        acc: dict[tuple[date, int], dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "in": 0, "out": 0, "tonnage": Decimal("0"), "amount": Decimal("0")})
+        for row in freights:
+            stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
+            if stat_date is None:
+                continue
+            tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
+            price = _money(row.unit_price)
+            for node_id, inbound, outbound in ((row.origin_node_id, 0, 1), (row.destination_node_id, 1, 0)):
+                if node_id is None:
+                    continue
+                item = acc[(stat_date, int(node_id))]
+                item["count"] = int(item["count"]) + 1
+                item["in"] = int(item["in"]) + inbound
+                item["out"] = int(item["out"]) + outbound
+                item["tonnage"] = item["tonnage"] + tonnage
+                item["amount"] = item["amount"] + (tonnage * price)
+        now = datetime.utcnow()
+        for (stat_date, node_id), item in acc.items():
+            node = nodes.get(node_id)
+            tonnage = item["tonnage"]
+            amount = item["amount"]
+            city_code = node.city_code if node is not None else None
+            self.db.add(
+                FactFreightNodeDaily(
+                    stat_date=stat_date,
+                    node_id=node_id,
+                    node_name=node.name if node is not None else None,
+                    city_code=city_code,
+                    primary_region_id=primary_region.get(city_code) if city_code else None,
+                    freight_count=int(item["count"]),
+                    inbound_count=int(item["in"]),
+                    outbound_count=int(item["out"]),
+                    total_tonnage=tonnage,
+                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
+                    heat_value=Decimal(int(item["count"])) * Decimal("1.5") + (tonnage / Decimal("1000") if tonnage else Decimal("0")),
+                    data_version=DATA_VERSION,
+                    generated_at=now,
+                )
+            )
+        await self.db.flush()
+        return AggregationResult("ANALYSIS_FREIGHT_NODE_DAILY", len(freights), len(acc), len(acc), ["fact_freight_node_daily"])
 
     async def _ship_context(self) -> tuple[list[ShipProfile], dict[int, ShipCapacity], dict[int, ShipOperation], dict[str, AdminRegion], dict[str, int | None]]:
         ships = (

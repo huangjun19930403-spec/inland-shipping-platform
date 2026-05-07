@@ -2,7 +2,7 @@
 
 ## 数据模型真值
 
-以 `app/models/*` 和 Alembic head 为准。最终迁移链保留历史迁移文件，`0006_final_legacy_cleanup` 删除废弃表，`0007_foundation_dictionary_codes` 将标准货品主单位收敛为字典编码。
+以 `app/models/*` 和 Alembic head 为准。最终迁移链保留历史迁移文件，`0006_final_legacy_cleanup` 删除废弃表，`0007_foundation_dictionary_codes` 将标准货品主单位收敛为字典编码，`0009_freight_collection_production_rework` 重建货源采集链路。
 
 ## 核心表分组
 
@@ -68,13 +68,13 @@
 - `freight_contact`
 - `freight_source_attachment`
 - `freight_tag_relation`
-- `freight_source_inbound`
-- `freight_ai_parse_task`
+- `freight_batch_task`
+- `freight_tms_inbound`
 - `freight_clue`
 - `freight_candidate`
-- `freight_candidate_feedback`
+- `freight_candidate_manual_feedback`
 
-手工录入直达正式货源；微信/TMS/批量原文进入来源接入，经通义千问解析后进入候选池，由人工确认生成正式货源。
+`freight` 是货源分析事实对象，只保存已确认正式货源，并保留采集来源追溯字段和货源大厅预留字段。手工录入直达正式货源；微信文本进入 `freight_batch_task`，TMS 消息进入 `freight_tms_inbound`，二者经 AI 线索切分和标准化匹配后生成 `freight_clue`、`freight_candidate`，由人工确认生成正式货源。
 
 ### 航线规划
 
@@ -97,6 +97,7 @@
 - `fact_freight_commodity_daily`
 - `fact_freight_price_daily`
 - `fact_freight_city_daily`
+- `fact_freight_node_daily`
 - `fact_ship_daily`
 - `fact_ship_city_daily`
 - `fact_ship_flow_daily`
@@ -136,6 +137,8 @@
 - `ROUTE_LINE_CODE`
 - `COMMODITY_STANDARD_CODE`
 - `FREIGHT_NO`
+- `FREIGHT_BATCH_NO`
+- `FREIGHT_TMS_INBOUND_NO`
 - `AUDIT_TASK_NO`
 
 不再提供货品分类、货品类型、船舶导入批次的业务创建编号。
@@ -155,3 +158,6 @@
 - `stat_ship_city_daily`
 - `stat_ship_flow_daily`
 - `stat_job_run`
+- `freight_source_inbound`
+- `freight_ai_parse_task`
+- `freight_candidate_feedback`

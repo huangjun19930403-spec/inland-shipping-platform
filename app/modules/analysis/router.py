@@ -90,6 +90,18 @@ async def get_freight_tonnage_distribution(
     return await service.freight_tonnage_distribution(start, end)
 
 
+@router.get("/freight/node-ranking", response_model=list[HeatMapItem])
+async def get_freight_node_ranking(
+    query: AnalysisDateRangeQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    start, end = await service._date_range(query.date_from, query.date_to)
+    return await service.freight_node_ranking(start, end, 20)
+
+
 @router.get("/freight/price-distribution", response_model=list[ChartPoint])
 async def get_freight_price_distribution(
     query: AnalysisDateRangeQuery = Depends(),

@@ -30,11 +30,7 @@ class FreightListQuery(BaseModel):
     page_size: int = Field(default=20, ge=1, le=200)
 
 
-class FreightCreateRequest(BaseModel):
-    freight_no: str | None = Field(default=None, max_length=32)
-    source_type_code: str = Field(default="MANUAL", min_length=1, max_length=64)
-    source_channel_code: str | None = Field(default="MANUAL_FORM", max_length=64)
-    source_ref_no: str | None = Field(default=None, max_length=128)
+class FreightBasePayload(BaseModel):
     cargo_title: str = Field(min_length=1, max_length=256)
     cargo_description: str | None = Field(default=None, max_length=1024)
     commodity_standard_id: int
@@ -61,13 +57,19 @@ class FreightCreateRequest(BaseModel):
     unloading_time_from: datetime | None = None
     unloading_time_to: datetime | None = None
     publisher_org_name: str | None = Field(default=None, max_length=128)
-    status_code: str = Field(default="PUBLISHED", min_length=1, max_length=64)
     published_at: datetime | None = None
     expired_at: datetime | None = None
 
 
+class FreightManualCreateRequest(FreightBasePayload):
+    freight_no: str | None = Field(default=None, max_length=32)
+    source_ref_no: str | None = Field(default=None, max_length=128)
+    status_code: str = Field(default="PUBLISHED", min_length=1, max_length=64)
+    hall_status_code: str = Field(default="NOT_LISTED", min_length=1, max_length=64)
+    hall_visible_until: datetime | None = None
+
+
 class FreightUpdateRequest(BaseModel):
-    source_channel_code: str | None = Field(default=None, max_length=64)
     source_ref_no: str | None = Field(default=None, max_length=128)
     cargo_title: str | None = Field(default=None, min_length=1, max_length=256)
     cargo_description: str | None = Field(default=None, max_length=1024)
@@ -97,6 +99,8 @@ class FreightUpdateRequest(BaseModel):
     publisher_org_name: str | None = Field(default=None, max_length=128)
     published_at: datetime | None = None
     expired_at: datetime | None = None
+    hall_status_code: str | None = Field(default=None, max_length=64)
+    hall_visible_until: datetime | None = None
 
 
 class FreightStatusChangeRequest(BaseModel):
@@ -111,6 +115,9 @@ class FreightResponse(BaseModel):
     source_channel_code: str | None = None
     source_channel_name: str | None = None
     source_ref_no: str | None = None
+    source_batch_id: int | None = None
+    source_tms_inbound_id: int | None = None
+    source_clue_id: int | None = None
     source_candidate_id: int | None = None
     cargo_title: str
     cargo_description: str | None
@@ -154,6 +161,11 @@ class FreightResponse(BaseModel):
     expired_at: datetime | None
     confirmed_at: datetime | None = None
     confirmed_by: int | None = None
+    hall_status_code: str
+    hall_status_name: str | None = None
+    hall_published_at: datetime | None = None
+    hall_unpublished_at: datetime | None = None
+    hall_visible_until: datetime | None = None
     audit_status: str
     audit_status_name: str | None = None
     submitter_id: int | None
@@ -236,109 +248,111 @@ class FreightTagRelationResponse(BaseModel):
     created_at: datetime
 
 
-class FreightAiTraceResponse(BaseModel):
-    parse_task_id: int | None = None
-    task_no: str | None = None
-    status_code: str | None = None
+class FreightClueResponse(BaseModel):
+    id: int
+    clue_no: str
+    source_type_code: str
+    source_channel_code: str
+    source_batch_id: int | None
+    source_tms_inbound_id: int | None
+    segment_index: int
+    raw_text: str
+    context_summary: str | None
+    extracted_fields_json: dict[str, Any] | None
+    quality_score: Decimal | None
+    status_code: str
     status_name: str | None = None
-    raw_content: str | None = None
-    source_inbound_id: int | None = None
-    candidate_id: int | None = None
-    candidate_no: str | None = None
-    confidence_score: Decimal | None = None
-    match_basis_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
-class FreightConfirmationResponse(BaseModel):
-    candidate_id: int
-    candidate_no: str
-    action_code: str
-    action_name: str | None = None
-    operator_id: int | None
-    operated_at: datetime
-    feedback_remark: str | None
-    before_json: dict[str, Any] | None
-    after_json: dict[str, Any] | None
+class FreightBatchCreateRequest(BaseModel):
+    batch_no: str | None = Field(default=None, max_length=32)
+    raw_text: str = Field(min_length=1)
+    remark: str | None = Field(default=None, max_length=512)
 
 
-class FreightDetailResponse(BaseModel):
-    profile: FreightResponse
-    contacts: list[FreightContactResponse]
-    attachments: list[FreightAttachmentResponse]
-    tags: list[FreightTagRelationResponse]
-    ai_parse_records: list[FreightAiTraceResponse] = Field(default_factory=list)
-    confirmation_records: list[FreightConfirmationResponse] = Field(default_factory=list)
-
-
-class FreightSourceInboundListQuery(BaseModel):
+class FreightBatchListQuery(BaseModel):
     keyword: str | None = None
     status_code: str | None = None
-    source_channel_code: str | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=200)
 
 
-class FreightSourceInboundCreateRequest(BaseModel):
+class FreightBatchResponse(BaseModel):
+    id: int
+    batch_no: str
+    source_type_code: str
+    source_type_name: str | None = None
+    source_channel_code: str
+    source_channel_name: str | None = None
+    raw_text: str
+    status_code: str
+    status_name: str | None = None
+    clue_count: int
+    candidate_count: int
+    success_count: int
+    failed_count: int
+    creator_id: int | None
+    remark: str | None
+    error_message: str | None
+    prompt_version: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FreightBatchDetailResponse(BaseModel):
+    batch: FreightBatchResponse
+    clues: list[FreightClueResponse] = Field(default_factory=list)
+    candidates: list["FreightCandidateResponse"] = Field(default_factory=list)
+
+
+class FreightTmsInboundCreateRequest(BaseModel):
     inbound_no: str | None = Field(default=None, max_length=32)
-    source_type_code: str = Field(default="WECHAT", max_length=64)
-    source_channel_code: str = Field(default="WECHAT_TEXT", max_length=64)
+    source_channel_code: str = Field(default="TMS_API", max_length=64)
+    source_trace_id: str | None = Field(default=None, max_length=128)
+    idempotency_key: str = Field(min_length=1, max_length=256)
     external_ref_no: str | None = Field(default=None, max_length=128)
-    sender_name: str | None = Field(default=None, max_length=128)
-    sender_contact: str | None = Field(default=None, max_length=64)
-    raw_title: str | None = Field(default=None, max_length=256)
-    raw_content: str = Field(min_length=1)
-    received_at: datetime | None = None
+    payload_json: dict[str, Any]
+    raw_content: str | None = None
 
 
-class FreightSourceInboundResponse(BaseModel):
+class FreightTmsInboundListQuery(BaseModel):
+    keyword: str | None = None
+    status_code: str | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=200)
+
+
+class FreightTmsInboundResponse(BaseModel):
     id: int
     inbound_no: str
     source_type_code: str
     source_type_name: str | None = None
     source_channel_code: str
     source_channel_name: str | None = None
+    source_trace_id: str | None
+    idempotency_key: str
     external_ref_no: str | None
-    sender_name: str | None
-    sender_contact: str | None
-    raw_title: str | None
+    payload_json: dict[str, Any]
     raw_content: str
-    received_at: datetime | None
     status_code: str
     status_name: str | None = None
-    parse_task_id: int | None
+    clue_count: int
+    candidate_count: int
+    processed_at: datetime | None
     error_message: str | None
+    prompt_version: str | None
     created_at: datetime
     updated_at: datetime
 
 
-class FreightAiParseTaskListQuery(BaseModel):
-    keyword: str | None = None
-    status_code: str | None = None
-    source_channel_code: str | None = None
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=20, ge=1, le=200)
-
-
-class FreightAiParseTaskCreateRequest(BaseModel):
-    task_no: str | None = Field(default=None, max_length=32)
-    source_inbound_id: int | None = None
-    source_type_code: str = Field(default="WECHAT", max_length=64)
-    source_channel_code: str = Field(default="WECHAT_TEXT", max_length=64)
-    raw_content: str | None = None
-
-
-class FreightClueResponse(BaseModel):
-    id: int
-    clue_no: str
-    parse_task_id: int
-    source_inbound_id: int | None
-    segment_index: int
-    raw_text: str
-    status_code: str
-    status_name: str | None = None
-    parse_result_json: dict[str, Any] | None
-    created_at: datetime
-    updated_at: datetime
+class FreightTmsInboundDetailResponse(BaseModel):
+    inbound: FreightTmsInboundResponse
+    clues: list[FreightClueResponse] = Field(default_factory=list)
+    candidates: list["FreightCandidateResponse"] = Field(default_factory=list)
 
 
 class FreightCandidateUpdateRequest(BaseModel):
@@ -363,6 +377,8 @@ class FreightCandidateUpdateRequest(BaseModel):
     destination_district_code: str | None = Field(default=None, max_length=12)
     origin_region_id_cache: int | None = None
     destination_region_id_cache: int | None = None
+    origin_match_level_code: str | None = Field(default=None, max_length=64)
+    destination_match_level_code: str | None = Field(default=None, max_length=64)
     publisher_org_name: str | None = Field(default=None, max_length=128)
     contact_name: str | None = Field(default=None, max_length=64)
     contact_phone: str | None = Field(default=None, max_length=32)
@@ -381,15 +397,26 @@ class FreightCandidateRejectRequest(BaseModel):
 class FreightCandidateResponse(BaseModel):
     id: int
     candidate_no: str
-    parse_task_id: int
+    source_type_code: str
+    source_type_name: str | None = None
+    source_channel_code: str
+    source_channel_name: str | None = None
+    source_batch_id: int | None
+    source_tms_inbound_id: int | None
     clue_id: int | None
-    source_inbound_id: int | None
+    source_ref_no: str | None
+    raw_text: str | None
+    raw_commodity_name: str | None
+    raw_origin_text: str | None
+    raw_destination_text: str | None
     cargo_title: str
     cargo_description: str | None
     commodity_standard_id: int | None
     commodity_standard_name: str | None = None
     commodity_match_name: str | None
     commodity_match_score: Decimal | None
+    commodity_match_level_code: str | None
+    commodity_options_json: list[dict[str, Any]] | None = None
     packaging_form_code: str | None
     estimated_tonnage: Decimal | None
     min_tonnage: Decimal | None
@@ -398,12 +425,16 @@ class FreightCandidateResponse(BaseModel):
     total_price: Decimal | None
     price_unit: str | None
     settlement_method_code: str | None
-    origin_text: str | None
-    destination_text: str | None
     origin_node_id: int | None
     origin_node_name: str | None = None
     destination_node_id: int | None
     destination_node_name: str | None = None
+    origin_node_match_score: Decimal | None
+    destination_node_match_score: Decimal | None
+    origin_match_level_code: str | None
+    destination_match_level_code: str | None
+    origin_options_json: list[dict[str, Any]] | None = None
+    destination_options_json: list[dict[str, Any]] | None = None
     origin_province_code: str | None
     origin_city_code: str | None
     origin_city_name: str | None = None
@@ -413,13 +444,17 @@ class FreightCandidateResponse(BaseModel):
     destination_city_name: str | None = None
     destination_district_code: str | None
     origin_region_id_cache: int | None
+    origin_region_name: str | None = None
     destination_region_id_cache: int | None
+    destination_region_name: str | None = None
     publisher_org_name: str | None
     contact_name: str | None
     contact_phone: str | None
     contact_wechat: str | None
     confidence_score: Decimal | None
+    completeness_score: Decimal | None
     match_basis_json: dict[str, Any] | None
+    ai_suggestion_json: dict[str, Any] | None
     status_code: str
     status_name: str | None = None
     confirmed_freight_id: int | None
@@ -428,32 +463,25 @@ class FreightCandidateResponse(BaseModel):
     updated_at: datetime
 
 
-class FreightAiParseTaskResponse(BaseModel):
-    id: int
-    task_no: str
-    source_inbound_id: int | None
-    source_type_code: str
-    source_type_name: str | None = None
-    source_channel_code: str
-    source_channel_name: str | None = None
-    raw_content: str
-    status_code: str
-    status_name: str | None = None
-    ai_provider_code: str | None
-    ai_model: str | None
-    prompt_version: str | None
-    requested_by: int | None
-    started_at: datetime | None
-    finished_at: datetime | None
-    error_message: str | None
-    raw_response_json: dict[str, Any] | None
-    created_at: datetime
-    updated_at: datetime
+class FreightConfirmationResponse(BaseModel):
+    candidate_id: int
+    candidate_no: str
+    action_code: str
+    action_name: str | None = None
+    operator_id: int | None
+    operated_at: datetime
+    feedback_remark: str | None
+    before_json: dict[str, Any] | None
+    after_json: dict[str, Any] | None
 
 
-class FreightAiParseTaskDetailResponse(BaseModel):
-    task: FreightAiParseTaskResponse
-    source_inbound: FreightSourceInboundResponse | None = None
-    clues: list[FreightClueResponse] = Field(default_factory=list)
-    candidates: list[FreightCandidateResponse] = Field(default_factory=list)
-    feedback: list[FreightConfirmationResponse] = Field(default_factory=list)
+class FreightDetailResponse(BaseModel):
+    profile: FreightResponse
+    contacts: list[FreightContactResponse]
+    attachments: list[FreightAttachmentResponse]
+    tags: list[FreightTagRelationResponse]
+    source_batch: FreightBatchResponse | None = None
+    source_tms_inbound: FreightTmsInboundResponse | None = None
+    source_clue: FreightClueResponse | None = None
+    source_candidate: FreightCandidateResponse | None = None
+    confirmation_records: list[FreightConfirmationResponse] = Field(default_factory=list)

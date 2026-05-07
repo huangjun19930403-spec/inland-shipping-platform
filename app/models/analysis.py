@@ -177,6 +177,25 @@ class FactFreightCityDaily(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class FactFreightNodeDaily(Base):
+    __tablename__ = "fact_freight_node_daily"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    stat_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    node_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("transport_node.id"), nullable=False, index=True)
+    node_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    city_code: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    primary_region_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("region.id"), nullable=True, index=True)
+    freight_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inbound_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    outbound_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tonnage: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    avg_unit_price: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    heat_value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    data_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class FactFreightPriceDaily(Base):
     __tablename__ = "fact_freight_price_daily"
 

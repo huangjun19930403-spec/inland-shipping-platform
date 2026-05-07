@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -17,29 +18,29 @@ from app.models.dictionary import StdDict, StdDictItem
 from app.models.freight import FreightCandidate
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.freight.repository import (
-    FreightAiParseTaskRepository,
     FreightAttachmentRepository,
-    FreightCandidateFeedbackRepository,
+    FreightBatchTaskRepository,
+    FreightCandidateManualFeedbackRepository,
     FreightCandidateRepository,
     FreightClueRepository,
     FreightContactRepository,
     FreightRepository,
-    FreightSourceInboundRepository,
     FreightTagRelationRepository,
+    FreightTmsInboundRepository,
 )
 from app.modules.freight.schemas import (
-    FreightAiParseTaskDetailResponse,
-    FreightAiParseTaskResponse,
-    FreightAiTraceResponse,
     FreightAttachmentResponse,
+    FreightBatchDetailResponse,
+    FreightBatchResponse,
     FreightCandidateResponse,
     FreightClueResponse,
     FreightConfirmationResponse,
     FreightContactResponse,
     FreightDetailResponse,
     FreightResponse,
-    FreightSourceInboundResponse,
     FreightTagRelationResponse,
+    FreightTmsInboundDetailResponse,
+    FreightTmsInboundResponse,
     PageResponse,
 )
 from app.modules.system.runtime_config import RuntimeConfigService
@@ -51,11 +52,13 @@ DISPLAY_DICT_CODES = [
     "FREIGHT_STATUS",
     "AUDIT_STATUS",
     "PACKAGING_FORM",
-    "FREIGHT_INBOUND_STATUS",
-    "AI_PARSE_STATUS",
+    "FREIGHT_BATCH_STATUS",
+    "FREIGHT_TMS_INBOUND_STATUS",
     "FREIGHT_CLUE_STATUS",
     "FREIGHT_CANDIDATE_STATUS",
     "FREIGHT_CONFIRM_ACTION",
+    "FREIGHT_MATCH_LEVEL",
+    "FREIGHT_HALL_STATUS",
 ]
 
 
@@ -84,20 +87,28 @@ def _entity_snapshot(entity: Any, fields: list[str]) -> dict[str, Any]:
     return {field: _compact_json_value(getattr(entity, field, None)) for field in fields}
 
 
+def _first(segment: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = segment.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 async def _load_display_context(
     db: AsyncSession,
     *,
     freights: list[Any] | None = None,
     candidates: list[Any] | None = None,
-    inbounds: list[Any] | None = None,
-    tasks: list[Any] | None = None,
+    batches: list[Any] | None = None,
+    tms_inbounds: list[Any] | None = None,
     clues: list[Any] | None = None,
     feedback: list[Any] | None = None,
 ) -> dict[str, Any]:
     freights = freights or []
     candidates = candidates or []
-    inbounds = inbounds or []
-    tasks = tasks or []
+    batches = batches or []
+    tms_inbounds = tms_inbounds or []
     clues = clues or []
     feedback = feedback or []
 
@@ -147,10 +158,7 @@ async def _load_display_context(
     region_ids = {
         region_id
         for item in [*freights, *candidates]
-        for region_id in (
-            getattr(item, "origin_region_id_cache", None),
-            getattr(item, "destination_region_id_cache", None),
-        )
+        for region_id in (getattr(item, "origin_region_id_cache", None), getattr(item, "destination_region_id_cache", None))
         if region_id is not None
     }
     regions: dict[int, Region] = {}
@@ -164,6 +172,10 @@ async def _load_display_context(
         "nodes": nodes,
         "cities": cities,
         "regions": regions,
+        "batches": batches,
+        "tms_inbounds": tms_inbounds,
+        "clues": clues,
+        "feedback": feedback,
     }
 
 
@@ -211,6 +223,9 @@ def _to_freight_response(entity, ctx: dict[str, Any] | None = None) -> FreightRe
         source_channel_code=entity.source_channel_code,
         source_channel_name=_label(ctx, "SOURCE_CHANNEL", entity.source_channel_code),
         source_ref_no=entity.source_ref_no,
+        source_batch_id=entity.source_batch_id,
+        source_tms_inbound_id=entity.source_tms_inbound_id,
+        source_clue_id=entity.source_clue_id,
         source_candidate_id=entity.source_candidate_id,
         cargo_title=entity.cargo_title,
         cargo_description=entity.cargo_description,
@@ -254,6 +269,11 @@ def _to_freight_response(entity, ctx: dict[str, Any] | None = None) -> FreightRe
         expired_at=entity.expired_at,
         confirmed_at=entity.confirmed_at,
         confirmed_by=entity.confirmed_by,
+        hall_status_code=entity.hall_status_code,
+        hall_status_name=_label(ctx, "FREIGHT_HALL_STATUS", entity.hall_status_code),
+        hall_published_at=entity.hall_published_at,
+        hall_unpublished_at=entity.hall_unpublished_at,
+        hall_visible_until=entity.hall_visible_until,
         audit_status=entity.audit_status,
         audit_status_name=_label(ctx, "AUDIT_STATUS", entity.audit_status),
         submitter_id=entity.submitter_id,
@@ -296,59 +316,57 @@ def _to_attachment_response(entity) -> FreightAttachmentResponse:
 
 
 def _to_tag_response(entity) -> FreightTagRelationResponse:
-    return FreightTagRelationResponse(
+    return FreightTagRelationResponse(id=entity.id, freight_id=entity.freight_id, tag_code=entity.tag_code, created_at=entity.created_at)
+
+
+def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatchResponse:
+    ctx = ctx or {}
+    return FreightBatchResponse(
         id=entity.id,
-        freight_id=entity.freight_id,
-        tag_code=entity.tag_code,
+        batch_no=entity.batch_no,
+        source_type_code=entity.source_type_code,
+        source_type_name=_label(ctx, "SOURCE_TYPE", entity.source_type_code),
+        source_channel_code=entity.source_channel_code,
+        source_channel_name=_label(ctx, "SOURCE_CHANNEL", entity.source_channel_code),
+        raw_text=entity.raw_text,
+        status_code=entity.status_code,
+        status_name=_label(ctx, "FREIGHT_BATCH_STATUS", entity.status_code),
+        clue_count=entity.clue_count,
+        candidate_count=entity.candidate_count,
+        success_count=entity.success_count,
+        failed_count=entity.failed_count,
+        creator_id=entity.creator_id,
+        remark=entity.remark,
+        error_message=entity.error_message,
+        prompt_version=entity.prompt_version,
+        started_at=entity.started_at,
+        finished_at=entity.finished_at,
         created_at=entity.created_at,
+        updated_at=entity.updated_at,
     )
 
 
-def _to_inbound_response(entity, ctx: dict[str, Any] | None = None) -> FreightSourceInboundResponse:
+def _to_tms_response(entity, ctx: dict[str, Any] | None = None) -> FreightTmsInboundResponse:
     ctx = ctx or {}
-    return FreightSourceInboundResponse(
+    return FreightTmsInboundResponse(
         id=entity.id,
         inbound_no=entity.inbound_no,
         source_type_code=entity.source_type_code,
         source_type_name=_label(ctx, "SOURCE_TYPE", entity.source_type_code),
         source_channel_code=entity.source_channel_code,
         source_channel_name=_label(ctx, "SOURCE_CHANNEL", entity.source_channel_code),
+        source_trace_id=entity.source_trace_id,
+        idempotency_key=entity.idempotency_key,
         external_ref_no=entity.external_ref_no,
-        sender_name=entity.sender_name,
-        sender_contact=entity.sender_contact,
-        raw_title=entity.raw_title,
+        payload_json=entity.payload_json,
         raw_content=entity.raw_content,
-        received_at=entity.received_at,
         status_code=entity.status_code,
-        status_name=_label(ctx, "FREIGHT_INBOUND_STATUS", entity.status_code),
-        parse_task_id=entity.parse_task_id,
+        status_name=_label(ctx, "FREIGHT_TMS_INBOUND_STATUS", entity.status_code),
+        clue_count=entity.clue_count,
+        candidate_count=entity.candidate_count,
+        processed_at=entity.processed_at,
         error_message=entity.error_message,
-        created_at=entity.created_at,
-        updated_at=entity.updated_at,
-    )
-
-
-def _to_task_response(entity, ctx: dict[str, Any] | None = None) -> FreightAiParseTaskResponse:
-    ctx = ctx or {}
-    return FreightAiParseTaskResponse(
-        id=entity.id,
-        task_no=entity.task_no,
-        source_inbound_id=entity.source_inbound_id,
-        source_type_code=entity.source_type_code,
-        source_type_name=_label(ctx, "SOURCE_TYPE", entity.source_type_code),
-        source_channel_code=entity.source_channel_code,
-        source_channel_name=_label(ctx, "SOURCE_CHANNEL", entity.source_channel_code),
-        raw_content=entity.raw_content,
-        status_code=entity.status_code,
-        status_name=_label(ctx, "AI_PARSE_STATUS", entity.status_code),
-        ai_provider_code=entity.ai_provider_code,
-        ai_model=entity.ai_model,
         prompt_version=entity.prompt_version,
-        requested_by=entity.requested_by,
-        started_at=entity.started_at,
-        finished_at=entity.finished_at,
-        error_message=entity.error_message,
-        raw_response_json=entity.raw_response_json,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
     )
@@ -359,13 +377,17 @@ def _to_clue_response(entity, ctx: dict[str, Any] | None = None) -> FreightClueR
     return FreightClueResponse(
         id=entity.id,
         clue_no=entity.clue_no,
-        parse_task_id=entity.parse_task_id,
-        source_inbound_id=entity.source_inbound_id,
+        source_type_code=entity.source_type_code,
+        source_channel_code=entity.source_channel_code,
+        source_batch_id=entity.source_batch_id,
+        source_tms_inbound_id=entity.source_tms_inbound_id,
         segment_index=entity.segment_index,
         raw_text=entity.raw_text,
+        context_summary=entity.context_summary,
+        extracted_fields_json=entity.extracted_fields_json,
+        quality_score=entity.quality_score,
         status_code=entity.status_code,
         status_name=_label(ctx, "FREIGHT_CLUE_STATUS", entity.status_code),
-        parse_result_json=entity.parse_result_json,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
     )
@@ -377,15 +399,26 @@ def _to_candidate_response(entity, ctx: dict[str, Any] | None = None) -> Freight
     return FreightCandidateResponse(
         id=entity.id,
         candidate_no=entity.candidate_no,
-        parse_task_id=entity.parse_task_id,
+        source_type_code=entity.source_type_code,
+        source_type_name=_label(ctx, "SOURCE_TYPE", entity.source_type_code),
+        source_channel_code=entity.source_channel_code,
+        source_channel_name=_label(ctx, "SOURCE_CHANNEL", entity.source_channel_code),
+        source_batch_id=entity.source_batch_id,
+        source_tms_inbound_id=entity.source_tms_inbound_id,
         clue_id=entity.clue_id,
-        source_inbound_id=entity.source_inbound_id,
+        source_ref_no=entity.source_ref_no,
+        raw_text=entity.raw_text,
+        raw_commodity_name=entity.raw_commodity_name,
+        raw_origin_text=entity.raw_origin_text,
+        raw_destination_text=entity.raw_destination_text,
         cargo_title=entity.cargo_title,
         cargo_description=entity.cargo_description,
         commodity_standard_id=entity.commodity_standard_id,
         commodity_standard_name=commodity.name if commodity is not None else None,
         commodity_match_name=entity.commodity_match_name,
         commodity_match_score=entity.commodity_match_score,
+        commodity_match_level_code=entity.commodity_match_level_code,
+        commodity_options_json=entity.commodity_options_json,
         packaging_form_code=entity.packaging_form_code,
         estimated_tonnage=entity.estimated_tonnage,
         min_tonnage=entity.min_tonnage,
@@ -394,12 +427,16 @@ def _to_candidate_response(entity, ctx: dict[str, Any] | None = None) -> Freight
         total_price=entity.total_price,
         price_unit=entity.price_unit,
         settlement_method_code=entity.settlement_method_code,
-        origin_text=entity.origin_text,
-        destination_text=entity.destination_text,
         origin_node_id=entity.origin_node_id,
         origin_node_name=_node_name(ctx, entity.origin_node_id),
         destination_node_id=entity.destination_node_id,
         destination_node_name=_node_name(ctx, entity.destination_node_id),
+        origin_node_match_score=entity.origin_node_match_score,
+        destination_node_match_score=entity.destination_node_match_score,
+        origin_match_level_code=entity.origin_match_level_code,
+        destination_match_level_code=entity.destination_match_level_code,
+        origin_options_json=entity.origin_options_json,
+        destination_options_json=entity.destination_options_json,
         origin_province_code=entity.origin_province_code,
         origin_city_code=entity.origin_city_code,
         origin_city_name=_city_name(ctx, entity.origin_city_code),
@@ -409,13 +446,17 @@ def _to_candidate_response(entity, ctx: dict[str, Any] | None = None) -> Freight
         destination_city_name=_city_name(ctx, entity.destination_city_code),
         destination_district_code=entity.destination_district_code,
         origin_region_id_cache=entity.origin_region_id_cache,
+        origin_region_name=_region_name(ctx, entity.origin_region_id_cache),
         destination_region_id_cache=entity.destination_region_id_cache,
+        destination_region_name=_region_name(ctx, entity.destination_region_id_cache),
         publisher_org_name=entity.publisher_org_name,
         contact_name=entity.contact_name,
         contact_phone=entity.contact_phone,
         contact_wechat=entity.contact_wechat,
         confidence_score=entity.confidence_score,
+        completeness_score=entity.completeness_score,
         match_basis_json=entity.match_basis_json,
+        ai_suggestion_json=entity.ai_suggestion_json,
         status_code=entity.status_code,
         status_name=_label(ctx, "FREIGHT_CANDIDATE_STATUS", entity.status_code),
         confirmed_freight_id=entity.confirmed_freight_id,
@@ -440,16 +481,299 @@ def _to_feedback_response(entity, candidate: FreightCandidate | None, ctx: dict[
     )
 
 
-class FreightService:
+class FreightNormalizationMixin:
+    db: AsyncSession
+    sequence_service: CodeSequenceService
+
+    async def _business_region_id(self, city_region_id: int | None) -> int | None:
+        if city_region_id is None:
+            return None
+        relation = await self.db.scalar(
+            select(RegionCityRelation)
+            .where(RegionCityRelation.city_region_id == city_region_id)
+            .order_by(RegionCityRelation.is_primary.desc(), RegionCityRelation.sort_order.asc())
+        )
+        return int(relation.region_id) if relation is not None else None
+
+    async def _city_by_code(self, city_code: str | None) -> AdminRegion | None:
+        if not city_code:
+            return None
+        return await self.db.scalar(select(AdminRegion).where(AdminRegion.code == city_code))
+
+    async def _node_by_id(self, node_id: int | None) -> TransportNode | None:
+        if node_id is None:
+            return None
+        return await self.db.scalar(select(TransportNode).where(TransportNode.id == node_id, TransportNode.deleted_at.is_(None)))
+
+    async def _enrich_location_updates(self, updates: dict[str, Any], prefix: str) -> None:
+        node_key = f"{prefix}_node_id"
+        city_key = f"{prefix}_city_code"
+        province_key = f"{prefix}_province_code"
+        district_key = f"{prefix}_district_code"
+        region_key = f"{prefix}_region_id_cache"
+        if node_key in updates and updates.get(node_key):
+            node = await self._node_by_id(updates[node_key])
+            if node is not None:
+                updates[province_key] = node.province_code
+                updates[city_key] = node.city_code
+                updates[district_key] = node.district_code
+                updates[region_key] = await self._business_region_id(node.city_region_id)
+                updates[f"{prefix}_match_level_code"] = "NODE"
+            return
+        if city_key in updates and updates.get(city_key):
+            city = await self._city_by_code(updates[city_key])
+            if city is not None:
+                updates[province_key] = city.province_code or city.code[:2].ljust(6, "0")
+                updates[region_key] = await self._business_region_id(city.id)
+                updates[f"{prefix}_match_level_code"] = updates.get(f"{prefix}_match_level_code") or "CITY"
+
+    async def _match_commodity(self, raw_name: str) -> tuple[int | None, Decimal | None, str | None, list[dict[str, Any]], dict[str, Any]]:
+        text = raw_name.strip()
+        if not text:
+            return None, None, None, [], {"status": "NO_TEXT"}
+        standards = (await self.db.execute(select(CommodityStandard).where(CommodityStandard.deleted_at.is_(None)))).scalars().all()
+        aliases = (await self.db.execute(select(CommodityAlias))).scalars().all()
+        options: list[dict[str, Any]] = []
+        for standard in standards:
+            score = None
+            level = None
+            if text == standard.name or text == (standard.short_name or ""):
+                score, level = Decimal("1.0"), "STANDARD"
+            elif text in standard.name or standard.name in text:
+                score, level = Decimal("0.82"), "STANDARD"
+            if score is not None:
+                options.append({"id": int(standard.id), "name": standard.name, "score": str(score), "match_level_code": level, "basis": "standard"})
+        for alias in aliases:
+            score = None
+            if text == alias.alias_name:
+                score = Decimal("1.0")
+            elif text in alias.alias_name or alias.alias_name in text:
+                score = Decimal("0.80")
+            if score is not None:
+                standard = next((item for item in standards if item.id == alias.commodity_standard_id), None)
+                options.append(
+                    {
+                        "id": int(alias.commodity_standard_id),
+                        "name": standard.name if standard is not None else alias.alias_name,
+                        "score": str(score),
+                        "match_level_code": "ALIAS",
+                        "basis": alias.alias_name,
+                    }
+                )
+        dedup: dict[int, dict[str, Any]] = {}
+        for option in sorted(options, key=lambda item: Decimal(str(item["score"])), reverse=True):
+            dedup.setdefault(int(option["id"]), option)
+        ordered = list(dedup.values())[:5]
+        if not ordered:
+            return None, Decimal("0.0"), "UNMATCHED", [], {"status": "UNMATCHED", "text": text}
+        first = ordered[0]
+        return int(first["id"]), Decimal(str(first["score"])), str(first["match_level_code"]), ordered, {"status": "MATCHED", "text": text, "top": first}
+
+    async def _match_location(self, raw_text: str) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+        text = raw_text.strip()
+        if not text:
+            return {}, [], {"status": "NO_TEXT"}
+        nodes = (await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None)))).scalars().all()
+        aliases = (await self.db.execute(select(NodeAlias))).scalars().all()
+        cities = (await self.db.execute(select(AdminRegion).where(AdminRegion.level == 2, AdminRegion.status == 1))).scalars().all()
+        options: list[dict[str, Any]] = []
+        for node in nodes:
+            names = [node.name, node.short_name or ""]
+            score = None
+            if any(text == name for name in names if name):
+                score = Decimal("1.0")
+            elif any(name and (name in text or text in name) for name in names):
+                score = Decimal("0.86")
+            if score is not None:
+                options.append(
+                    {
+                        "level": "NODE",
+                        "node_id": int(node.id),
+                        "node_name": node.name,
+                        "city_code": node.city_code,
+                        "province_code": node.province_code,
+                        "district_code": node.district_code,
+                        "region_id": await self._business_region_id(node.city_region_id),
+                        "score": str(score),
+                        "basis": node.name,
+                    }
+                )
+        for alias in aliases:
+            score = None
+            if text == alias.alias_name:
+                score = Decimal("1.0")
+            elif alias.alias_name in text or text in alias.alias_name:
+                score = Decimal("0.82")
+            if score is not None:
+                node = next((item for item in nodes if item.id == alias.node_id), None)
+                if node is not None:
+                    options.append(
+                        {
+                            "level": "NODE",
+                            "node_id": int(node.id),
+                            "node_name": node.name,
+                            "city_code": node.city_code,
+                            "province_code": node.province_code,
+                            "district_code": node.district_code,
+                            "region_id": await self._business_region_id(node.city_region_id),
+                            "score": str(score),
+                            "basis": alias.alias_name,
+                        }
+                    )
+        for city in cities:
+            score = None
+            if text == city.name:
+                score = Decimal("0.90")
+            elif city.name in text or text in city.name:
+                score = Decimal("0.76")
+            if score is not None:
+                options.append(
+                    {
+                        "level": "CITY",
+                        "node_id": None,
+                        "node_name": None,
+                        "city_code": city.code,
+                        "city_name": city.name,
+                        "province_code": city.province_code or city.code[:2].ljust(6, "0"),
+                        "district_code": None,
+                        "region_id": await self._business_region_id(city.id),
+                        "score": str(score),
+                        "basis": city.name,
+                    }
+                )
+        ordered = sorted(options, key=lambda item: Decimal(str(item["score"])), reverse=True)[:6]
+        if not ordered:
+            return {}, [], {"status": "UNMATCHED", "text": text}
+        first = ordered[0]
+        normalized = {
+            "node_id": first.get("node_id"),
+            "province_code": first.get("province_code"),
+            "city_code": first.get("city_code"),
+            "district_code": first.get("district_code"),
+            "region_id": first.get("region_id"),
+            "match_score": Decimal(str(first["score"])),
+            "match_level_code": first["level"],
+        }
+        return normalized, ordered, {"status": "MATCHED", "text": text, "top": first}
+
+    async def _candidate_from_segment(
+        self,
+        *,
+        source_type_code: str,
+        source_channel_code: str,
+        source_batch_id: int | None,
+        source_tms_inbound_id: int | None,
+        clue_id: int,
+        segment: dict[str, Any],
+    ) -> dict[str, Any]:
+        commodity_name = str(_first(segment, "commodity_name", "cargo_name", "goods_name", "cargo") or "").strip()
+        commodity_id, commodity_score, commodity_level, commodity_options, commodity_basis = await self._match_commodity(commodity_name)
+        origin_text = str(_first(segment, "origin_text", "loading_place", "origin", "from") or "").strip()
+        destination_text = str(_first(segment, "destination_text", "unloading_place", "destination", "to") or "").strip()
+        origin, origin_options, origin_basis = await self._match_location(origin_text)
+        destination, destination_options, destination_basis = await self._match_location(destination_text)
+        confidence = _to_decimal_or_none(_first(segment, "confidence_score", "confidence")) or Decimal("0.50")
+        completeness_score = self._completeness_score(
+            commodity_id=commodity_id,
+            origin_city_code=origin.get("city_code"),
+            destination_city_code=destination.get("city_code"),
+            tonnage=_to_decimal_or_none(_first(segment, "estimated_tonnage", "quantity_ton", "tonnage")),
+            unit_price=_to_decimal_or_none(_first(segment, "unit_price", "price")),
+        )
+        title = str(_first(segment, "cargo_title", "title") or "").strip()
+        if not title:
+            pieces = [origin_text, destination_text, commodity_name or "货源"]
+            title = " - ".join([item for item in pieces if item])[:256] or "待确认货源"
+        raw_text = str(_first(segment, "raw_text", "source_text") or "").strip()
+        return {
+            "candidate_no": await self.sequence_service.next_code("FREIGHT_CANDIDATE_NO"),
+            "source_type_code": source_type_code,
+            "source_channel_code": source_channel_code,
+            "source_batch_id": source_batch_id,
+            "source_tms_inbound_id": source_tms_inbound_id,
+            "clue_id": clue_id,
+            "source_ref_no": _first(segment, "source_ref_no", "waybill_no", "order_no"),
+            "raw_text": raw_text or None,
+            "raw_commodity_name": commodity_name or None,
+            "raw_origin_text": origin_text or None,
+            "raw_destination_text": destination_text or None,
+            "cargo_title": title,
+            "cargo_description": _first(segment, "cargo_description", "description"),
+            "commodity_standard_id": commodity_id,
+            "commodity_match_name": commodity_name or None,
+            "commodity_match_score": commodity_score,
+            "commodity_match_level_code": commodity_level,
+            "commodity_options_json": commodity_options,
+            "packaging_form_code": _first(segment, "packaging_form_code", "packaging_form"),
+            "estimated_tonnage": _to_decimal_or_none(_first(segment, "estimated_tonnage", "quantity_ton", "tonnage")),
+            "min_tonnage": _to_decimal_or_none(segment.get("min_tonnage")),
+            "max_tonnage": _to_decimal_or_none(segment.get("max_tonnage")),
+            "unit_price": _to_decimal_or_none(_first(segment, "unit_price", "price")),
+            "total_price": _to_decimal_or_none(segment.get("total_price")),
+            "price_unit": _first(segment, "price_unit") or "元/吨",
+            "settlement_method_code": segment.get("settlement_method_code"),
+            "origin_node_id": origin.get("node_id"),
+            "destination_node_id": destination.get("node_id"),
+            "origin_node_match_score": origin.get("match_score"),
+            "destination_node_match_score": destination.get("match_score"),
+            "origin_match_level_code": origin.get("match_level_code"),
+            "destination_match_level_code": destination.get("match_level_code"),
+            "origin_options_json": origin_options,
+            "destination_options_json": destination_options,
+            "origin_province_code": origin.get("province_code"),
+            "origin_city_code": origin.get("city_code"),
+            "origin_district_code": origin.get("district_code"),
+            "destination_province_code": destination.get("province_code"),
+            "destination_city_code": destination.get("city_code"),
+            "destination_district_code": destination.get("district_code"),
+            "origin_region_id_cache": origin.get("region_id"),
+            "destination_region_id_cache": destination.get("region_id"),
+            "publisher_org_name": _first(segment, "publisher_org_name", "shipper", "company"),
+            "contact_name": _first(segment, "contact_name", "contact"),
+            "contact_phone": _first(segment, "contact_phone", "phone", "mobile"),
+            "contact_wechat": segment.get("contact_wechat"),
+            "confidence_score": confidence,
+            "completeness_score": completeness_score,
+            "match_basis_json": {
+                "commodity": commodity_basis,
+                "origin": origin_basis,
+                "destination": destination_basis,
+                "evidence": segment.get("evidence") or [],
+            },
+            "ai_suggestion_json": segment,
+            "status_code": "PENDING",
+        }
+
+    @staticmethod
+    def _completeness_score(
+        *,
+        commodity_id: int | None,
+        origin_city_code: str | None,
+        destination_city_code: str | None,
+        tonnage: Decimal | None,
+        unit_price: Decimal | None,
+    ) -> Decimal:
+        score = Decimal("0.20")
+        score += Decimal("0.20") if commodity_id else Decimal("0")
+        score += Decimal("0.20") if origin_city_code else Decimal("0")
+        score += Decimal("0.20") if destination_city_code else Decimal("0")
+        score += Decimal("0.10") if tonnage else Decimal("0")
+        score += Decimal("0.10") if unit_price else Decimal("0")
+        return score.quantize(Decimal("0.0001"))
+
+
+class FreightService(FreightNormalizationMixin):
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = FreightRepository(db)
         self.contact_repo = FreightContactRepository(db)
         self.attachment_repo = FreightAttachmentRepository(db)
         self.tag_repo = FreightTagRelationRepository(db)
+        self.batch_repo = FreightBatchTaskRepository(db)
+        self.tms_repo = FreightTmsInboundRepository(db)
+        self.clue_repo = FreightClueRepository(db)
         self.candidate_repo = FreightCandidateRepository(db)
-        self.feedback_repo = FreightCandidateFeedbackRepository(db)
-        self.task_repo = FreightAiParseTaskRepository(db)
+        self.feedback_repo = FreightCandidateManualFeedbackRepository(db)
         self.sequence_service = CodeSequenceService(db)
 
     async def list_freights(
@@ -476,24 +800,27 @@ class FreightService:
             page_size=page_size,
         )
         ctx = await _load_display_context(self.db, freights=rows)
-        return PageResponse[FreightResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_to_freight_response(item, ctx) for item in rows],
-        )
+        return PageResponse[FreightResponse](total=total, page=page, page_size=page_size, items=[_to_freight_response(item, ctx) for item in rows])
 
-    async def create_freight(self, payload) -> FreightResponse:
+    async def create_manual_freight(self, payload) -> FreightResponse:
         data = payload.model_dump(exclude_none=True)
-        freight_no = (payload.freight_no or "").strip()
-        if not freight_no:
-            freight_no = await self.sequence_service.next_code("FREIGHT_NO")
-        data["freight_no"] = freight_no
+        freight_no = (payload.freight_no or "").strip() or await self.sequence_service.next_code("FREIGHT_NO")
         if await self.repo.exists_freight_no(freight_no):
             raise ConflictError(f"freight_no already exists: {freight_no}")
-        data["cargo_title"] = payload.cargo_title.strip()
+        data.update(
+            {
+                "freight_no": freight_no,
+                "source_type_code": "MANUAL",
+                "source_channel_code": "MANUAL_FORM",
+                "cargo_title": payload.cargo_title.strip(),
+                "audit_status": "APPROVED",
+                "confirmed_at": datetime.utcnow(),
+            }
+        )
         if data.get("status_code") == "PUBLISHED" and data.get("published_at") is None:
             data["published_at"] = datetime.utcnow()
+        if data.get("hall_status_code") == "PUBLISHED" and data.get("hall_published_at") is None:
+            data["hall_published_at"] = datetime.utcnow()
         row = await self.repo.create_freight(data)
         await self.db.commit()
         ctx = await _load_display_context(self.db, freights=[row])
@@ -503,6 +830,11 @@ class FreightService:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             raise ValidationError("no update fields provided")
+        if updates.get("hall_status_code") == "PUBLISHED" and updates.get("hall_published_at") is None:
+            updates["hall_published_at"] = datetime.utcnow()
+            updates["hall_unpublished_at"] = None
+        if updates.get("hall_status_code") == "UNPUBLISHED" and updates.get("hall_unpublished_at") is None:
+            updates["hall_unpublished_at"] = datetime.utcnow()
         row = await self.repo.update_freight(freight_id, updates)
         if row is None:
             raise NotFoundError("Freight", freight_id)
@@ -517,50 +849,30 @@ class FreightService:
         contacts = await self.contact_repo.list_contacts(freight_id)
         attachments = await self.attachment_repo.list_attachments(freight_id)
         tags = await self.tag_repo.list_tag_relations(freight_id)
-
-        candidates: list[FreightCandidate] = []
-        task = None
-        if freight.source_candidate_id:
-            candidate = await self.candidate_repo.get_by_id(freight.source_candidate_id)
-            if candidate is not None:
-                candidates.append(candidate)
-                task = await self.task_repo.get_by_id(candidate.parse_task_id)
-        feedback_rows = await self.feedback_repo.list_by_candidate_ids([item.id for item in candidates])
+        source_batch = await self.batch_repo.get_by_id(freight.source_batch_id) if freight.source_batch_id else None
+        source_tms = await self.tms_repo.get_by_id(freight.source_tms_inbound_id) if freight.source_tms_inbound_id else None
+        source_clue = await self.clue_repo.get_by_id(freight.source_clue_id) if freight.source_clue_id else None
+        source_candidate = await self.candidate_repo.get_by_id(freight.source_candidate_id) if freight.source_candidate_id else None
+        feedback_rows = await self.feedback_repo.list_by_candidate_ids([source_candidate.id] if source_candidate else [])
         ctx = await _load_display_context(
             self.db,
             freights=[freight],
-            candidates=candidates,
-            tasks=[task] if task is not None else [],
+            candidates=[source_candidate] if source_candidate is not None else [],
+            batches=[source_batch] if source_batch is not None else [],
+            tms_inbounds=[source_tms] if source_tms is not None else [],
+            clues=[source_clue] if source_clue is not None else [],
             feedback=feedback_rows,
         )
-        candidate_by_id = {item.id: item for item in candidates}
-        ai_records = []
-        if task is not None:
-            candidate = candidates[0] if candidates else None
-            ai_records.append(
-                FreightAiTraceResponse(
-                    parse_task_id=task.id,
-                    task_no=task.task_no,
-                    status_code=task.status_code,
-                    status_name=_label(ctx, "AI_PARSE_STATUS", task.status_code),
-                    raw_content=task.raw_content,
-                    source_inbound_id=task.source_inbound_id,
-                    candidate_id=candidate.id if candidate is not None else None,
-                    candidate_no=candidate.candidate_no if candidate is not None else None,
-                    confidence_score=candidate.confidence_score if candidate is not None else None,
-                    match_basis_json=candidate.match_basis_json if candidate is not None else None,
-                )
-            )
         return FreightDetailResponse(
             profile=_to_freight_response(freight, ctx),
             contacts=[_to_contact_response(item) for item in contacts],
             attachments=[_to_attachment_response(item) for item in attachments],
             tags=[_to_tag_response(item) for item in tags],
-            ai_parse_records=ai_records,
-            confirmation_records=[
-                _to_feedback_response(item, candidate_by_id.get(item.candidate_id), ctx)
-                for item in feedback_rows
-            ],
+            source_batch=_to_batch_response(source_batch, ctx) if source_batch is not None else None,
+            source_tms_inbound=_to_tms_response(source_tms, ctx) if source_tms is not None else None,
+            source_clue=_to_clue_response(source_clue, ctx) if source_clue is not None else None,
+            source_candidate=_to_candidate_response(source_candidate, ctx) if source_candidate is not None else None,
+            confirmation_records=[_to_feedback_response(item, source_candidate, ctx) for item in feedback_rows],
         )
 
     async def change_freight_status(self, freight_id: int, status_code: str) -> None:
@@ -570,67 +882,12 @@ class FreightService:
         await self.db.commit()
 
 
-class FreightSourceInboundService:
+class FreightBatchTaskService(FreightNormalizationMixin):
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self.repo = FreightSourceInboundRepository(db)
-        self.sequence_service = CodeSequenceService(db)
-
-    async def list_items(
-        self,
-        *,
-        keyword: str | None,
-        status_code: str | None,
-        source_channel_code: str | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[FreightSourceInboundResponse]:
-        rows, total = await self.repo.list_items(
-            keyword=keyword,
-            status_code=status_code,
-            source_channel_code=source_channel_code,
-            page=page,
-            page_size=page_size,
-        )
-        ctx = await _load_display_context(self.db, inbounds=rows)
-        return PageResponse[FreightSourceInboundResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_to_inbound_response(item, ctx) for item in rows],
-        )
-
-    async def create(self, payload) -> FreightSourceInboundResponse:
-        inbound_no = (payload.inbound_no or "").strip() or await self.sequence_service.next_code("FREIGHT_INBOUND_NO")
-        row = await self.repo.create(
-            {
-                **payload.model_dump(exclude_none=True, exclude={"inbound_no"}),
-                "inbound_no": inbound_no,
-                "raw_content": payload.raw_content.strip(),
-                "received_at": payload.received_at or datetime.utcnow(),
-                "status_code": "NEW",
-            }
-        )
-        await self.db.commit()
-        ctx = await _load_display_context(self.db, inbounds=[row])
-        return _to_inbound_response(row, ctx)
-
-    async def get(self, inbound_id: int) -> FreightSourceInboundResponse:
-        row = await self.repo.get_by_id(inbound_id)
-        if row is None:
-            raise NotFoundError("FreightSourceInbound", inbound_id)
-        ctx = await _load_display_context(self.db, inbounds=[row])
-        return _to_inbound_response(row, ctx)
-
-
-class FreightAiParseTaskService:
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-        self.repo = FreightAiParseTaskRepository(db)
-        self.inbound_repo = FreightSourceInboundRepository(db)
+        self.repo = FreightBatchTaskRepository(db)
         self.clue_repo = FreightClueRepository(db)
         self.candidate_repo = FreightCandidateRepository(db)
-        self.feedback_repo = FreightCandidateFeedbackRepository(db)
         self.sequence_service = CodeSequenceService(db)
 
     async def list_items(
@@ -638,281 +895,237 @@ class FreightAiParseTaskService:
         *,
         keyword: str | None,
         status_code: str | None,
-        source_channel_code: str | None,
         page: int,
         page_size: int,
-    ) -> PageResponse[FreightAiParseTaskResponse]:
-        rows, total = await self.repo.list_items(
-            keyword=keyword,
-            status_code=status_code,
-            source_channel_code=source_channel_code,
-            page=page,
-            page_size=page_size,
-        )
-        ctx = await _load_display_context(self.db, tasks=rows)
-        return PageResponse[FreightAiParseTaskResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_to_task_response(item, ctx) for item in rows],
-        )
+    ) -> PageResponse[FreightBatchResponse]:
+        rows, total = await self.repo.list_items(keyword=keyword, status_code=status_code, page=page, page_size=page_size)
+        ctx = await _load_display_context(self.db, batches=rows)
+        return PageResponse[FreightBatchResponse](total=total, page=page, page_size=page_size, items=[_to_batch_response(item, ctx) for item in rows])
 
-    async def create(self, payload, requested_by: int | None = None) -> FreightAiParseTaskResponse:
-        inbound = None
-        raw_content = (payload.raw_content or "").strip()
-        source_type_code = payload.source_type_code
-        source_channel_code = payload.source_channel_code
-        if payload.source_inbound_id is not None:
-            inbound = await self.inbound_repo.get_by_id(payload.source_inbound_id)
-            if inbound is None:
-                raise NotFoundError("FreightSourceInbound", payload.source_inbound_id)
-            raw_content = inbound.raw_content
-            source_type_code = inbound.source_type_code
-            source_channel_code = inbound.source_channel_code
-        if not raw_content:
-            raise ValidationError("raw_content is required when source_inbound_id is not provided")
-        task_no = (payload.task_no or "").strip() or await self.sequence_service.next_code("FREIGHT_PARSE_TASK_NO")
+    async def create_wechat_batch(self, payload, creator_id: int | None) -> FreightBatchResponse:
+        batch_no = (payload.batch_no or "").strip() or await self.sequence_service.next_code("FREIGHT_BATCH_NO")
         row = await self.repo.create(
             {
-                "task_no": task_no,
-                "source_inbound_id": payload.source_inbound_id,
-                "source_type_code": source_type_code,
-                "source_channel_code": source_channel_code,
-                "raw_content": raw_content,
-                "status_code": "PENDING",
-                "ai_provider_code": "DASHSCOPE_QWEN",
-                "ai_model": "qwen-plus",
-                "prompt_version": DashScopeQwenFreightParserClient.prompt_version,
-                "requested_by": requested_by,
+                "batch_no": batch_no,
+                "source_type_code": "WECHAT",
+                "source_channel_code": "WECHAT_TEXT",
+                "raw_text": payload.raw_text.strip(),
+                "status_code": "NEW",
+                "creator_id": creator_id,
+                "remark": payload.remark,
             }
         )
-        if inbound is not None:
-            await self.inbound_repo.update(inbound.id, {"parse_task_id": row.id, "status_code": "PARSING"})
         await self.db.commit()
-        ctx = await _load_display_context(self.db, tasks=[row])
-        return _to_task_response(row, ctx)
+        ctx = await _load_display_context(self.db, batches=[row])
+        return _to_batch_response(row, ctx)
 
-    async def get_detail(self, task_id: int) -> FreightAiParseTaskDetailResponse:
-        task = await self.repo.get_by_id(task_id)
-        if task is None:
-            raise NotFoundError("FreightAiParseTask", task_id)
-        inbound = await self.inbound_repo.get_by_id(task.source_inbound_id) if task.source_inbound_id else None
-        clues = await self.clue_repo.list_by_task(task_id)
-        candidates = await self.candidate_repo.list_by_task(task_id)
-        feedback = await self.feedback_repo.list_by_candidate_ids([item.id for item in candidates])
-        ctx = await _load_display_context(
-            self.db,
-            tasks=[task],
-            inbounds=[inbound] if inbound is not None else [],
-            clues=clues,
-            candidates=candidates,
-            feedback=feedback,
-        )
-        candidate_by_id = {item.id: item for item in candidates}
-        return FreightAiParseTaskDetailResponse(
-            task=_to_task_response(task, ctx),
-            source_inbound=_to_inbound_response(inbound, ctx) if inbound is not None else None,
+    async def get_detail(self, batch_id: int) -> FreightBatchDetailResponse:
+        batch = await self.repo.get_by_id(batch_id)
+        if batch is None:
+            raise NotFoundError("FreightBatchTask", batch_id)
+        clues = await self.clue_repo.list_by_batch(batch_id)
+        candidates = await self.candidate_repo.list_by_batch(batch_id)
+        ctx = await _load_display_context(self.db, batches=[batch], clues=clues, candidates=candidates)
+        return FreightBatchDetailResponse(
+            batch=_to_batch_response(batch, ctx),
             clues=[_to_clue_response(item, ctx) for item in clues],
             candidates=[_to_candidate_response(item, ctx) for item in candidates],
-            feedback=[
-                _to_feedback_response(item, candidate_by_id.get(item.candidate_id), ctx)
-                for item in feedback
-            ],
         )
 
-    async def run(self, task_id: int, requested_by: int | None = None) -> FreightAiParseTaskDetailResponse:
-        task = await self.repo.get_by_id(task_id)
-        if task is None:
-            raise NotFoundError("FreightAiParseTask", task_id)
-        existing_candidates = await self.candidate_repo.list_by_task(task_id)
-        if task.status_code == "SUCCESS" and existing_candidates:
-            return await self.get_detail(task_id)
-
-        started_at = datetime.utcnow()
-        await self.repo.update(
-            task_id,
-            {
-                "status_code": "RUNNING",
-                "started_at": started_at,
-                "finished_at": None,
-                "error_message": None,
-                "requested_by": requested_by or task.requested_by,
-            },
-        )
-        if task.source_inbound_id:
-            await self.inbound_repo.update(task.source_inbound_id, {"status_code": "PARSING", "error_message": None})
+    async def parse(self, batch_id: int, requested_by: int | None = None) -> FreightBatchDetailResponse:
+        batch = await self.repo.get_by_id(batch_id)
+        if batch is None:
+            raise NotFoundError("FreightBatchTask", batch_id)
+        existing = await self.candidate_repo.list_by_batch(batch_id)
+        if batch.status_code == "PARSED" and existing:
+            return await self.get_detail(batch_id)
+        started = datetime.utcnow()
+        await self.repo.update(batch_id, {"status_code": "PARSING", "started_at": started, "finished_at": None, "error_message": None})
         await self.db.commit()
-
-        runtime_config = RuntimeConfigService(self.db)
-        client = DashScopeQwenFreightParserClient(runtime_config=runtime_config)
+        client = DashScopeQwenFreightParserClient(runtime_config=RuntimeConfigService(self.db))
         try:
-            parsed = await client.parse(task.raw_content)
+            parsed = await client.parse(batch.raw_text, source_type_code="WECHAT")
             clue_count = 0
+            candidate_count = 0
             for index, segment in enumerate(parsed.segments, start=1):
                 clue = await self.clue_repo.create(
                     {
                         "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
-                        "parse_task_id": task_id,
-                        "source_inbound_id": task.source_inbound_id,
+                        "source_type_code": "WECHAT",
+                        "source_channel_code": "WECHAT_TEXT",
+                        "source_batch_id": batch_id,
+                        "source_tms_inbound_id": None,
                         "segment_index": index,
-                        "raw_text": str(segment.get("raw_text") or task.raw_content),
+                        "raw_text": str(segment.get("raw_text") or batch.raw_text),
+                        "context_summary": segment.get("context_summary"),
+                        "extracted_fields_json": segment,
+                        "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
                         "status_code": "CANDIDATE_CREATED",
-                        "parse_result_json": segment,
                     }
                 )
-                candidate_data = await self._candidate_from_segment(task, clue.id, segment)
-                await self.candidate_repo.create(candidate_data)
+                await self.candidate_repo.create(
+                    await self._candidate_from_segment(
+                        source_type_code="WECHAT",
+                        source_channel_code="WECHAT_TEXT",
+                        source_batch_id=batch_id,
+                        source_tms_inbound_id=None,
+                        clue_id=clue.id,
+                        segment=segment,
+                    )
+                )
                 clue_count += 1
-            status_code = "SUCCESS" if clue_count else "FAILED"
+                candidate_count += 1
+            status = "PARSED" if candidate_count else "FAILED"
             await self.repo.update(
-                task_id,
+                batch_id,
                 {
-                    "status_code": status_code,
-                    "ai_provider_code": parsed.provider,
-                    "ai_model": parsed.model,
-                    "prompt_version": DashScopeQwenFreightParserClient.prompt_version,
+                    "status_code": status,
+                    "clue_count": clue_count,
+                    "candidate_count": candidate_count,
+                    "success_count": candidate_count,
+                    "failed_count": 0 if candidate_count else 1,
+                    "prompt_version": parsed.prompt_version,
                     "finished_at": datetime.utcnow(),
-                    "raw_response_json": {
-                        "parsed_payload": parsed.parsed_payload,
-                        "raw_response": parsed.raw_response,
-                    },
+                    "raw_response_json": {"parsed_payload": parsed.parsed_payload, "raw_response": parsed.raw_response},
                 },
             )
-            if task.source_inbound_id:
-                await self.inbound_repo.update(task.source_inbound_id, {"status_code": "PARSED", "error_message": None})
             await self.db.commit()
         except Exception as exc:
             message = str(exc)
-            await self.repo.update(
-                task_id,
-                {
-                    "status_code": "FAILED",
-                    "finished_at": datetime.utcnow(),
-                    "error_message": message,
-                },
-            )
-            if task.source_inbound_id:
-                await self.inbound_repo.update(task.source_inbound_id, {"status_code": "FAILED", "error_message": message[:512]})
+            await self.db.rollback()
+            await self.repo.update(batch_id, {"status_code": "FAILED", "finished_at": datetime.utcnow(), "error_message": message})
             await self.db.commit()
             raise
-        return await self.get_detail(task_id)
+        return await self.get_detail(batch_id)
 
-    async def _candidate_from_segment(self, task, clue_id: int, segment: dict[str, Any]) -> dict[str, Any]:
-        commodity_name = str(segment.get("commodity_name") or "").strip()
-        commodity_id, commodity_score, commodity_basis = await self._match_commodity(commodity_name)
-        origin_text = str(segment.get("origin_text") or "").strip()
-        destination_text = str(segment.get("destination_text") or "").strip()
-        origin_node, origin_basis = await self._match_node(origin_text)
-        destination_node, destination_basis = await self._match_node(destination_text)
-        confidence = _to_decimal_or_none(segment.get("confidence_score")) or Decimal("0.50")
-        basis = {
-            "commodity": commodity_basis,
-            "origin": origin_basis,
-            "destination": destination_basis,
-            "evidence": segment.get("evidence") or [],
-        }
-        title = str(segment.get("cargo_title") or "").strip()
-        if not title:
-            pieces = [commodity_name or "货源", origin_text, destination_text]
-            title = " - ".join([item for item in pieces if item])[:256] or "待确认货源"
-        return {
-            "candidate_no": await self.sequence_service.next_code("FREIGHT_CANDIDATE_NO"),
-            "parse_task_id": task.id,
-            "clue_id": clue_id,
-            "source_inbound_id": task.source_inbound_id,
-            "cargo_title": title,
-            "cargo_description": segment.get("cargo_description"),
-            "commodity_standard_id": commodity_id,
-            "commodity_match_name": commodity_name or None,
-            "commodity_match_score": commodity_score,
-            "packaging_form_code": segment.get("packaging_form_code"),
-            "estimated_tonnage": _to_decimal_or_none(segment.get("estimated_tonnage")),
-            "min_tonnage": _to_decimal_or_none(segment.get("min_tonnage")),
-            "max_tonnage": _to_decimal_or_none(segment.get("max_tonnage")),
-            "unit_price": _to_decimal_or_none(segment.get("unit_price")),
-            "total_price": _to_decimal_or_none(segment.get("total_price")),
-            "price_unit": segment.get("price_unit") or "元/吨",
-            "settlement_method_code": segment.get("settlement_method_code"),
-            "origin_text": origin_text or None,
-            "destination_text": destination_text or None,
-            "origin_node_id": origin_node.id if origin_node is not None else None,
-            "destination_node_id": destination_node.id if destination_node is not None else None,
-            "origin_province_code": origin_node.province_code if origin_node is not None else None,
-            "origin_city_code": origin_node.city_code if origin_node is not None else None,
-            "origin_district_code": origin_node.district_code if origin_node is not None else None,
-            "destination_province_code": destination_node.province_code if destination_node is not None else None,
-            "destination_city_code": destination_node.city_code if destination_node is not None else None,
-            "destination_district_code": destination_node.district_code if destination_node is not None else None,
-            "origin_region_id_cache": await self._business_region_id(origin_node.city_region_id) if origin_node is not None else None,
-            "destination_region_id_cache": await self._business_region_id(destination_node.city_region_id) if destination_node is not None else None,
-            "publisher_org_name": segment.get("publisher_org_name"),
-            "contact_name": segment.get("contact_name"),
-            "contact_phone": segment.get("contact_phone"),
-            "contact_wechat": segment.get("contact_wechat"),
-            "confidence_score": confidence,
-            "match_basis_json": basis,
-            "status_code": "PENDING",
-        }
 
-    async def _business_region_id(self, city_region_id: int | None) -> int | None:
-        if city_region_id is None:
-            return None
-        relation = await self.db.scalar(
-            select(RegionCityRelation)
-            .where(RegionCityRelation.city_region_id == city_region_id)
-            .order_by(RegionCityRelation.is_primary.desc(), RegionCityRelation.sort_order.asc())
+class FreightTmsInboundService(FreightNormalizationMixin):
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+        self.repo = FreightTmsInboundRepository(db)
+        self.clue_repo = FreightClueRepository(db)
+        self.candidate_repo = FreightCandidateRepository(db)
+        self.sequence_service = CodeSequenceService(db)
+
+    async def list_items(
+        self,
+        *,
+        keyword: str | None,
+        status_code: str | None,
+        page: int,
+        page_size: int,
+    ) -> PageResponse[FreightTmsInboundResponse]:
+        rows, total = await self.repo.list_items(keyword=keyword, status_code=status_code, page=page, page_size=page_size)
+        ctx = await _load_display_context(self.db, tms_inbounds=rows)
+        return PageResponse[FreightTmsInboundResponse](total=total, page=page, page_size=page_size, items=[_to_tms_response(item, ctx) for item in rows])
+
+    async def create(self, payload) -> FreightTmsInboundResponse:
+        existing = await self.repo.get_by_idempotency_key(payload.idempotency_key.strip())
+        if existing is not None:
+            ctx = await _load_display_context(self.db, tms_inbounds=[existing])
+            return _to_tms_response(existing, ctx)
+        inbound_no = (payload.inbound_no or "").strip() or await self.sequence_service.next_code("FREIGHT_TMS_INBOUND_NO")
+        raw_content = (payload.raw_content or "").strip() or json.dumps(payload.payload_json, ensure_ascii=False)
+        row = await self.repo.create(
+            {
+                "inbound_no": inbound_no,
+                "source_type_code": "TMS",
+                "source_channel_code": payload.source_channel_code,
+                "source_trace_id": payload.source_trace_id,
+                "idempotency_key": payload.idempotency_key.strip(),
+                "external_ref_no": payload.external_ref_no,
+                "payload_json": payload.payload_json,
+                "raw_content": raw_content,
+                "status_code": "NEW",
+            }
         )
-        return int(relation.region_id) if relation is not None else None
+        await self.db.commit()
+        ctx = await _load_display_context(self.db, tms_inbounds=[row])
+        return _to_tms_response(row, ctx)
 
-    async def _match_commodity(self, raw_name: str) -> tuple[int | None, Decimal | None, dict[str, Any]]:
-        text = raw_name.strip()
-        if not text:
-            return None, None, {"status": "NO_TEXT"}
-        standards = (await self.db.execute(select(CommodityStandard))).scalars().all()
-        aliases = (await self.db.execute(select(CommodityAlias))).scalars().all()
-        for standard in standards:
-            if text == standard.name or text == (standard.short_name or ""):
-                return int(standard.id), Decimal("1.0"), {"status": "STANDARD_EXACT", "name": standard.name}
-        for alias in aliases:
-            if text == alias.alias_name:
-                return int(alias.commodity_standard_id), Decimal("1.0"), {"status": "ALIAS_EXACT", "alias": alias.alias_name}
-        for standard in standards:
-            if text in standard.name or standard.name in text:
-                return int(standard.id), Decimal("0.82"), {"status": "STANDARD_CONTAINS", "name": standard.name}
-        for alias in aliases:
-            if text in alias.alias_name or alias.alias_name in text:
-                return int(alias.commodity_standard_id), Decimal("0.80"), {"status": "ALIAS_CONTAINS", "alias": alias.alias_name}
-        return None, Decimal("0.0"), {"status": "UNMATCHED", "text": text}
+    async def get_detail(self, inbound_id: int) -> FreightTmsInboundDetailResponse:
+        inbound = await self.repo.get_by_id(inbound_id)
+        if inbound is None:
+            raise NotFoundError("FreightTmsInbound", inbound_id)
+        clues = await self.clue_repo.list_by_tms_inbound(inbound_id)
+        candidates = await self.candidate_repo.list_by_tms_inbound(inbound_id)
+        ctx = await _load_display_context(self.db, tms_inbounds=[inbound], clues=clues, candidates=candidates)
+        return FreightTmsInboundDetailResponse(
+            inbound=_to_tms_response(inbound, ctx),
+            clues=[_to_clue_response(item, ctx) for item in clues],
+            candidates=[_to_candidate_response(item, ctx) for item in candidates],
+        )
 
-    async def _match_node(self, raw_text: str) -> tuple[TransportNode | None, dict[str, Any]]:
-        text = raw_text.strip()
-        if not text:
-            return None, {"status": "NO_TEXT"}
-        nodes = (await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None)))).scalars().all()
-        aliases = (await self.db.execute(select(NodeAlias))).scalars().all()
-        for node in nodes:
-            if text == node.name or text == (node.short_name or ""):
-                return node, {"status": "NODE_EXACT", "name": node.name}
-        for alias in aliases:
-            if text == alias.alias_name:
-                node = next((item for item in nodes if item.id == alias.node_id), None)
-                return node, {"status": "ALIAS_EXACT", "alias": alias.alias_name}
-        for node in nodes:
-            names = [node.name, node.short_name or ""]
-            if any(name and (name in text or text in name) for name in names):
-                return node, {"status": "NODE_CONTAINS", "name": node.name}
-        for alias in aliases:
-            if alias.alias_name in text or text in alias.alias_name:
-                node = next((item for item in nodes if item.id == alias.node_id), None)
-                return node, {"status": "ALIAS_CONTAINS", "alias": alias.alias_name}
-        return None, {"status": "UNMATCHED", "text": text}
+    async def parse(self, inbound_id: int, requested_by: int | None = None) -> FreightTmsInboundDetailResponse:
+        _ = requested_by
+        inbound = await self.repo.get_by_id(inbound_id)
+        if inbound is None:
+            raise NotFoundError("FreightTmsInbound", inbound_id)
+        existing = await self.candidate_repo.list_by_tms_inbound(inbound_id)
+        if inbound.status_code == "PARSED" and existing:
+            return await self.get_detail(inbound_id)
+        await self.repo.update(inbound_id, {"status_code": "PARSING", "error_message": None})
+        await self.db.commit()
+        client = DashScopeQwenFreightParserClient(runtime_config=RuntimeConfigService(self.db))
+        try:
+            parsed = await client.parse(inbound.raw_content, source_type_code="TMS")
+            clue_count = 0
+            candidate_count = 0
+            for index, segment in enumerate(parsed.segments, start=1):
+                clue = await self.clue_repo.create(
+                    {
+                        "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
+                        "source_type_code": "TMS",
+                        "source_channel_code": inbound.source_channel_code,
+                        "source_batch_id": None,
+                        "source_tms_inbound_id": inbound_id,
+                        "segment_index": index,
+                        "raw_text": str(segment.get("raw_text") or inbound.raw_content),
+                        "context_summary": segment.get("context_summary"),
+                        "extracted_fields_json": segment,
+                        "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
+                        "status_code": "CANDIDATE_CREATED",
+                    }
+                )
+                await self.candidate_repo.create(
+                    await self._candidate_from_segment(
+                        source_type_code="TMS",
+                        source_channel_code=inbound.source_channel_code,
+                        source_batch_id=None,
+                        source_tms_inbound_id=inbound_id,
+                        clue_id=clue.id,
+                        segment=segment,
+                    )
+                )
+                clue_count += 1
+                candidate_count += 1
+            status = "PARSED" if candidate_count else "FAILED"
+            await self.repo.update(
+                inbound_id,
+                {
+                    "status_code": status,
+                    "clue_count": clue_count,
+                    "candidate_count": candidate_count,
+                    "processed_at": datetime.utcnow(),
+                    "prompt_version": parsed.prompt_version,
+                    "raw_response_json": {"parsed_payload": parsed.parsed_payload, "raw_response": parsed.raw_response},
+                },
+            )
+            await self.db.commit()
+        except Exception as exc:
+            message = str(exc)
+            await self.db.rollback()
+            await self.repo.update(inbound_id, {"status_code": "FAILED", "processed_at": datetime.utcnow(), "error_message": message})
+            await self.db.commit()
+            raise
+        return await self.get_detail(inbound_id)
 
 
-class FreightCandidateService:
+class FreightCandidateService(FreightNormalizationMixin):
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = FreightCandidateRepository(db)
-        self.feedback_repo = FreightCandidateFeedbackRepository(db)
+        self.feedback_repo = FreightCandidateManualFeedbackRepository(db)
         self.freight_repo = FreightRepository(db)
         self.contact_repo = FreightContactRepository(db)
         self.sequence_service = CodeSequenceService(db)
@@ -922,22 +1135,19 @@ class FreightCandidateService:
         *,
         keyword: str | None,
         status_code: str | None,
+        source_type_code: str | None,
         page: int,
         page_size: int,
     ) -> PageResponse[FreightCandidateResponse]:
         rows, total = await self.repo.list_items(
             keyword=keyword,
             status_code=status_code,
+            source_type_code=source_type_code,
             page=page,
             page_size=page_size,
         )
         ctx = await _load_display_context(self.db, candidates=rows)
-        return PageResponse[FreightCandidateResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_to_candidate_response(item, ctx) for item in rows],
-        )
+        return PageResponse[FreightCandidateResponse](total=total, page=page, page_size=page_size, items=[_to_candidate_response(item, ctx) for item in rows])
 
     async def get(self, candidate_id: int) -> FreightCandidateResponse:
         row = await self.repo.get_by_id(candidate_id)
@@ -950,9 +1160,15 @@ class FreightCandidateService:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             raise ValidationError("no update fields provided")
-        row = await self.repo.update(candidate_id, updates)
+        await self._enrich_location_updates(updates, "origin")
+        await self._enrich_location_updates(updates, "destination")
+        row = await self.repo.get_by_id(candidate_id)
         if row is None:
             raise NotFoundError("FreightCandidate", candidate_id)
+        manual = dict(row.manual_overrides_json or {})
+        manual.update(_compact_json_value(updates))
+        updates["manual_overrides_json"] = manual
+        row = await self.repo.update(candidate_id, updates)
         await self.db.commit()
         ctx = await _load_display_context(self.db, candidates=[row])
         return _to_candidate_response(row, ctx)
@@ -968,17 +1184,24 @@ class FreightCandidateService:
         if payload.overrides is not None:
             updates = payload.overrides.model_dump(exclude_none=True)
             if updates:
+                await self._enrich_location_updates(updates, "origin")
+                await self._enrich_location_updates(updates, "destination")
+                manual = dict(candidate.manual_overrides_json or {})
+                manual.update(_compact_json_value(updates))
+                updates["manual_overrides_json"] = manual
                 candidate = await self.repo.update(candidate_id, updates) or candidate
                 action_code = "EDIT_CONFIRM"
         self._validate_candidate_ready(candidate)
-        freight_no = await self.sequence_service.next_code("FREIGHT_NO")
         now = datetime.utcnow()
         freight = await self.freight_repo.create_freight(
             {
-                "freight_no": freight_no,
-                "source_type_code": "WECHAT" if candidate.source_inbound_id else "SYSTEM",
-                "source_channel_code": "WECHAT_TEXT" if candidate.source_inbound_id else "SYSTEM_SYNC",
-                "source_ref_no": candidate.candidate_no,
+                "freight_no": await self.sequence_service.next_code("FREIGHT_NO"),
+                "source_type_code": candidate.source_type_code,
+                "source_channel_code": candidate.source_channel_code,
+                "source_ref_no": candidate.source_ref_no or candidate.candidate_no,
+                "source_batch_id": candidate.source_batch_id,
+                "source_tms_inbound_id": candidate.source_tms_inbound_id,
+                "source_clue_id": candidate.clue_id,
                 "source_candidate_id": candidate.id,
                 "cargo_title": candidate.cargo_title,
                 "cargo_description": candidate.cargo_description,
@@ -1011,10 +1234,14 @@ class FreightCandidateService:
                 "expired_at": candidate.loading_time_to,
                 "confirmed_at": now,
                 "confirmed_by": operator_id,
+                "hall_status_code": "NOT_LISTED",
                 "audit_status": "APPROVED",
             }
         )
-        await self.repo.update(candidate.id, {"status_code": "CONFIRMED", "confirmed_freight_id": freight.id, "confirmed_at": now})
+        candidate = await self.repo.update(
+            candidate.id,
+            {"status_code": "CONFIRMED", "confirmed_freight_id": freight.id, "confirmed_at": now},
+        ) or candidate
         if candidate.contact_name or candidate.contact_phone or candidate.contact_wechat:
             await self.contact_repo.create_contact(
                 freight.id,
@@ -1075,7 +1302,9 @@ class FreightCandidateService:
             "cargo_title",
             "commodity_standard_id",
             "origin_node_id",
+            "origin_city_code",
             "destination_node_id",
+            "destination_city_code",
             "estimated_tonnage",
             "unit_price",
             "status_code",
@@ -1087,9 +1316,9 @@ class FreightCandidateService:
         if candidate.commodity_standard_id is None:
             missing.append("标准货品")
         if not candidate.origin_province_code or not candidate.origin_city_code:
-            missing.append("起运省市")
+            missing.append("装货城市")
         if not candidate.destination_province_code or not candidate.destination_city_code:
-            missing.append("目的省市")
+            missing.append("卸货城市")
         if missing:
             raise ValidationError(f"候选货源缺少确认入库字段：{', '.join(missing)}")
 

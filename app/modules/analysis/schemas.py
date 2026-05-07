@@ -87,6 +87,7 @@ class FreightAnalysisOverviewResponse(BaseModel):
     date_to: date
     metrics: list[MetricCard]
     trend: list[ChartPoint]
+    node_ranking: list[HeatMapItem] = Field(default_factory=list)
     commodity_structure: list[ChartPoint]
     price_distribution: list[ChartPoint]
     hot_routes: list[FlowMapItem]

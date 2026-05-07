@@ -14,13 +14,13 @@ from app.models.address import RegionCityRelation, TransportNode
 from app.models.commodity import CommodityStandard
 from app.models.freight import (
     Freight,
-    FreightAiParseTask,
+    FreightBatchTask,
     FreightCandidate,
-    FreightCandidateFeedback,
+    FreightCandidateManualFeedback,
     FreightClue,
     FreightContact,
-    FreightSourceInbound,
     FreightTagRelation,
+    FreightTmsInbound,
 )
 
 
@@ -88,24 +88,33 @@ async def _clear_sample_data(session) -> None:
     sample_candidates = (
         await session.execute(select(FreightCandidate.id).where(FreightCandidate.candidate_no.like("FCA-LOCAL-%")))
     ).scalars().all()
-    sample_task_ids = (
-        await session.execute(select(FreightAiParseTask.id).where(FreightAiParseTask.task_no.like("FPT-LOCAL-%")))
+    sample_clue_ids = (
+        await session.execute(select(FreightClue.id).where(FreightClue.clue_no.like("FCU-LOCAL-%")))
+    ).scalars().all()
+    sample_batch_ids = (
+        await session.execute(select(FreightBatchTask.id).where(FreightBatchTask.batch_no.like("FBT-LOCAL-%")))
+    ).scalars().all()
+    sample_tms_ids = (
+        await session.execute(select(FreightTmsInbound.id).where(FreightTmsInbound.inbound_no.like("FTI-LOCAL-%")))
     ).scalars().all()
     sample_freight_ids = (
         await session.execute(select(Freight.id).where(Freight.freight_no.like("FR-LOCAL-%")))
     ).scalars().all()
     if sample_candidates:
-        await session.execute(delete(FreightCandidateFeedback).where(FreightCandidateFeedback.candidate_id.in_(sample_candidates)))
+        await session.execute(
+            delete(FreightCandidateManualFeedback).where(FreightCandidateManualFeedback.candidate_id.in_(sample_candidates))
+        )
+        await session.execute(delete(FreightCandidate).where(FreightCandidate.id.in_(sample_candidates)))
     if sample_freight_ids:
         await session.execute(delete(FreightContact).where(FreightContact.freight_id.in_(sample_freight_ids)))
         await session.execute(delete(FreightTagRelation).where(FreightTagRelation.freight_id.in_(sample_freight_ids)))
         await session.execute(delete(Freight).where(Freight.id.in_(sample_freight_ids)))
-    if sample_candidates:
-        await session.execute(delete(FreightCandidate).where(FreightCandidate.id.in_(sample_candidates)))
-    if sample_task_ids:
-        await session.execute(delete(FreightClue).where(FreightClue.parse_task_id.in_(sample_task_ids)))
-        await session.execute(delete(FreightAiParseTask).where(FreightAiParseTask.id.in_(sample_task_ids)))
-    await session.execute(delete(FreightSourceInbound).where(FreightSourceInbound.inbound_no.like("FSI-LOCAL-%")))
+    if sample_clue_ids:
+        await session.execute(delete(FreightClue).where(FreightClue.id.in_(sample_clue_ids)))
+    if sample_batch_ids:
+        await session.execute(delete(FreightBatchTask).where(FreightBatchTask.id.in_(sample_batch_ids)))
+    if sample_tms_ids:
+        await session.execute(delete(FreightTmsInbound).where(FreightTmsInbound.id.in_(sample_tms_ids)))
 
 
 async def seed_freight_samples() -> None:
@@ -171,6 +180,9 @@ async def seed_freight_samples() -> None:
                 status_code=status,
                 published_at=published_at if status != "DRAFT" else None,
                 expired_at=expired_at,
+                hall_status_code="PUBLISHED" if status in {"PUBLISHED", "MATCHING"} else "NOT_LISTED",
+                hall_published_at=published_at if status in {"PUBLISHED", "MATCHING"} else None,
+                hall_visible_until=expired_at if status in {"PUBLISHED", "MATCHING"} else None,
                 audit_status="APPROVED",
                 audited_at=published_at,
             )
@@ -203,72 +215,97 @@ async def seed_freight_samples() -> None:
             tonnage = _tonnage(idx + 300)
             price = _money(20 + ((idx * 13) % 48))
             received_at = now - timedelta(hours=idx * 3)
+            is_tms = idx % 3 == 0
+            source_type = "TMS" if is_tms else "WECHAT"
+            source_channel = "TMS_API" if is_tms else "WECHAT_TEXT"
+            source_ref_no = f"TMS-IN-{idx:04d}" if is_tms else f"WX-GROUP-{idx:04d}"
             raw_text = (
                 f"{origin.name}装{commodity.name}{int(tonnage)}吨，到{destination.name}，"
                 f"运价{price}元/吨，三天内装，联系李经理13{idx % 10}{(idx * 4567) % 100000000:08d}"
             )
-            inbound = FreightSourceInbound(
-                inbound_no=f"FSI-LOCAL-{idx:04d}",
-                source_type_code="WECHAT" if idx % 3 else "TMS",
-                source_channel_code="WECHAT_TEXT" if idx % 3 else "TMS_API",
-                external_ref_no=f"WX-GROUP-{idx:04d}" if idx % 3 else f"TMS-IN-{idx:04d}",
-                sender_name="长江货源群" if idx % 3 else "区域 TMS",
-                sender_contact=f"wechat-group-{idx:03d}" if idx % 3 else "tms-api",
-                raw_title=f"{origin.short_name or origin.name}至{destination.short_name or destination.name}货源",
-                raw_content=raw_text,
-                received_at=received_at,
-                status_code="PARSED",
-            )
-            session.add(inbound)
+            segment_payload = {
+                "raw_text": raw_text,
+                "cargo_title": f"{origin.short_name or origin.name}至{destination.short_name or destination.name}{commodity.name}",
+                "commodity_name": commodity.name,
+                "origin_text": origin.name,
+                "destination_text": destination.name,
+                "estimated_tonnage": int(tonnage),
+                "unit_price": str(price),
+                "price_unit": "元/吨",
+                "contact_name": "李经理",
+                "confidence_score": 0.86,
+                "context_summary": "本地样例：单条货源线索，装卸地、货品、吨位、运价和联系人完整。",
+            }
+            batch = None
+            tms_inbound = None
+            if is_tms:
+                tms_inbound = FreightTmsInbound(
+                    inbound_no=f"FTI-LOCAL-{idx:04d}",
+                    source_type_code=source_type,
+                    source_channel_code=source_channel,
+                    source_trace_id=f"trace-local-{idx:04d}",
+                    idempotency_key=f"seed:tms:{source_ref_no}",
+                    external_ref_no=source_ref_no,
+                    payload_json={
+                        "waybillNo": source_ref_no,
+                        "originName": origin.name,
+                        "destinationName": destination.name,
+                        "cargoName": commodity.name,
+                        "weightTon": str(tonnage),
+                        "freightRate": str(price),
+                    },
+                    raw_content=raw_text,
+                    status_code="PARSED",
+                    clue_count=1,
+                    candidate_count=1,
+                    processed_at=received_at + timedelta(minutes=2),
+                    prompt_version="freight_tms_waybill_split_v2",
+                    raw_response_json={"segments": [segment_payload]},
+                    created_at=received_at,
+                    updated_at=received_at + timedelta(minutes=2),
+                )
+                session.add(tms_inbound)
+            else:
+                batch = FreightBatchTask(
+                    batch_no=f"FBT-LOCAL-{idx:04d}",
+                    source_type_code=source_type,
+                    source_channel_code=source_channel,
+                    raw_text=raw_text,
+                    status_code="PARSED",
+                    clue_count=1,
+                    candidate_count=1,
+                    success_count=1,
+                    failed_count=0,
+                    creator_id=1,
+                    remark="本地样例：微信群粘贴采集",
+                    prompt_version="freight_wechat_clue_split_v2",
+                    started_at=received_at + timedelta(minutes=1),
+                    finished_at=received_at + timedelta(minutes=2),
+                    raw_response_json={"segments": [segment_payload]},
+                    created_at=received_at,
+                    updated_at=received_at + timedelta(minutes=2),
+                )
+                session.add(batch)
             await session.flush()
-
-            task = FreightAiParseTask(
-                task_no=f"FPT-LOCAL-{idx:04d}",
-                source_inbound_id=inbound.id,
-                source_type_code=inbound.source_type_code,
-                source_channel_code=inbound.source_channel_code,
-                raw_content=raw_text,
-                status_code="SUCCESS",
-                ai_provider_code="DASHSCOPE_QWEN",
-                ai_model="qwen-plus",
-                prompt_version="freight_parse_v1",
-                requested_by=1,
-                started_at=received_at + timedelta(minutes=1),
-                finished_at=received_at + timedelta(minutes=2),
-                raw_response_json={
-                    "parsed_payload": {
-                        "segments": [
-                            {
-                                "raw_text": raw_text,
-                                "cargo_title": f"{origin.short_name or origin.name}至{destination.short_name or destination.name}{commodity.name}",
-                                "commodity_name": commodity.name,
-                                "origin_text": origin.name,
-                                "destination_text": destination.name,
-                                "estimated_tonnage": int(tonnage),
-                                "unit_price": str(price),
-                                "price_unit": "元/吨",
-                                "contact_name": "李经理",
-                                "confidence_score": 0.86,
-                            }
-                        ]
-                    }
-                },
-            )
-            session.add(task)
-            await session.flush()
-            inbound.parse_task_id = task.id
 
             clue = FreightClue(
                 clue_no=f"FCU-LOCAL-{idx:04d}",
-                parse_task_id=task.id,
-                source_inbound_id=inbound.id,
+                source_type_code=source_type,
+                source_channel_code=source_channel,
+                source_batch_id=batch.id if batch is not None else None,
+                source_tms_inbound_id=tms_inbound.id if tms_inbound is not None else None,
                 segment_index=1,
                 raw_text=raw_text,
+                context_summary=segment_payload["context_summary"],
+                extracted_fields_json=segment_payload,
+                quality_score=Decimal("0.8600"),
                 status_code="CANDIDATE_CREATED",
-                parse_result_json={"commodity_name": commodity.name, "origin_text": origin.name, "destination_text": destination.name},
+                created_at=received_at + timedelta(minutes=2),
+                updated_at=received_at + timedelta(minutes=2),
             )
             session.add(clue)
             await session.flush()
+
             status = "PENDING"
             confirmed_freight_id = None
             confirmed_at = None
@@ -276,7 +313,9 @@ async def seed_freight_samples() -> None:
                 status = "CONFIRMED"
                 confirmed_freight_id = freight_rows[idx - 1].id
                 confirmed_at = received_at + timedelta(minutes=30)
-                freight_rows[idx - 1].source_candidate_id = None
+                freight_rows[idx - 1].source_batch_id = batch.id if batch is not None else None
+                freight_rows[idx - 1].source_tms_inbound_id = tms_inbound.id if tms_inbound is not None else None
+                freight_rows[idx - 1].source_clue_id = clue.id
                 freight_rows[idx - 1].confirmed_at = confirmed_at
                 freight_rows[idx - 1].confirmed_by = 1
             elif idx % 7 == 0:
@@ -284,23 +323,57 @@ async def seed_freight_samples() -> None:
 
             candidate = FreightCandidate(
                 candidate_no=f"FCA-LOCAL-{idx:04d}",
-                parse_task_id=task.id,
+                source_type_code=source_type,
+                source_channel_code=source_channel,
+                source_batch_id=batch.id if batch is not None else None,
+                source_tms_inbound_id=tms_inbound.id if tms_inbound is not None else None,
                 clue_id=clue.id,
-                source_inbound_id=inbound.id,
+                source_ref_no=source_ref_no,
+                raw_text=raw_text,
+                raw_commodity_name=commodity.name,
+                raw_origin_text=origin.name,
+                raw_destination_text=destination.name,
                 cargo_title=f"{origin.short_name or origin.name}至{destination.short_name or destination.name}{commodity.name}",
                 cargo_description=f"AI 样例候选：{raw_text}",
                 commodity_standard_id=commodity.id,
                 commodity_match_name=commodity.name,
                 commodity_match_score=Decimal("1.0000"),
+                commodity_match_level_code="STANDARD",
+                commodity_options_json=[
+                    {"level": "STANDARD", "id": commodity.id, "name": commodity.name, "score": 1.0},
+                    {"level": "RAW", "name": commodity.name, "score": 0.75},
+                ],
                 packaging_form_code="CONTAINER" if "箱" in commodity.name else "BULK",
                 estimated_tonnage=tonnage,
                 unit_price=price,
                 total_price=(tonnage * price).quantize(Decimal("0.01")),
                 price_unit="元/吨",
-                origin_text=origin.name,
-                destination_text=destination.name,
                 origin_node_id=origin.id,
                 destination_node_id=destination.id,
+                origin_node_match_score=Decimal("1.0000"),
+                destination_node_match_score=Decimal("1.0000"),
+                origin_match_level_code="NODE",
+                destination_match_level_code="NODE",
+                origin_options_json=[
+                    {
+                        "level": "NODE",
+                        "node_id": origin.id,
+                        "node_name": origin.name,
+                        "city_code": origin.city_code,
+                        "score": 1.0,
+                    },
+                    {"level": "RAW", "name": origin.name, "score": 0.7},
+                ],
+                destination_options_json=[
+                    {
+                        "level": "NODE",
+                        "node_id": destination.id,
+                        "node_name": destination.name,
+                        "city_code": destination.city_code,
+                        "score": 1.0,
+                    },
+                    {"level": "RAW", "name": destination.name, "score": 0.7},
+                ],
                 origin_province_code=origin.province_code,
                 origin_city_code=origin.city_code,
                 origin_district_code=origin.district_code,
@@ -313,22 +386,30 @@ async def seed_freight_samples() -> None:
                 contact_name="李经理",
                 contact_phone=f"13{idx % 10}{(idx * 4567) % 100000000:08d}"[:11],
                 confidence_score=Decimal("0.8600"),
+                completeness_score=Decimal("0.9200"),
                 match_basis_json={
-                    "commodity": {"status": "STANDARD_EXACT", "name": commodity.name},
-                    "origin": {"status": "NODE_EXACT", "name": origin.name},
-                    "destination": {"status": "NODE_EXACT", "name": destination.name},
+                    "commodity": {"level": "STANDARD", "name": commodity.name},
+                    "origin": {"level": "NODE", "name": origin.name},
+                    "destination": {"level": "NODE", "name": destination.name},
                     "evidence": [raw_text],
+                },
+                ai_suggestion_json={
+                    "summary": "建议按节点级装卸地和标准货品入库。",
+                    "risk_flags": [],
+                    "source_kind": "TMS 标准运单" if is_tms else "微信群文本",
                 },
                 status_code=status,
                 confirmed_freight_id=confirmed_freight_id,
                 confirmed_at=confirmed_at,
+                created_at=received_at + timedelta(minutes=2),
+                updated_at=received_at + timedelta(minutes=30) if confirmed_at else received_at + timedelta(minutes=2),
             )
             session.add(candidate)
             await session.flush()
             if idx <= 12:
                 freight_rows[idx - 1].source_candidate_id = candidate.id
                 session.add(
-                    FreightCandidateFeedback(
+                    FreightCandidateManualFeedback(
                         candidate_id=candidate.id,
                         action_code="CONFIRM",
                         before_json={"status_code": "PENDING"},
@@ -340,16 +421,17 @@ async def seed_freight_samples() -> None:
                     )
                 )
             elif status == "REJECTED":
+                rejected_at = received_at + timedelta(minutes=35)
                 session.add(
-                    FreightCandidateFeedback(
+                    FreightCandidateManualFeedback(
                         candidate_id=candidate.id,
                         action_code="REJECT",
                         before_json={"status_code": "PENDING"},
                         after_json={"status_code": "REJECTED"},
                         feedback_remark="本地样例：起终点描述不完整，业务驳回",
                         operator_id=1,
-                        operated_at=received_at + timedelta(minutes=35),
-                        created_at=received_at + timedelta(minutes=35),
+                        operated_at=rejected_at,
+                        created_at=rejected_at,
                     )
                 )
 

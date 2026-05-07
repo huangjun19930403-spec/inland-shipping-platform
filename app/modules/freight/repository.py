@@ -10,14 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.freight import (
     Freight,
-    FreightAiParseTask,
+    FreightBatchTask,
     FreightCandidate,
-    FreightCandidateFeedback,
+    FreightCandidateManualFeedback,
     FreightClue,
     FreightContact,
     FreightSourceAttachment,
-    FreightSourceInbound,
     FreightTagRelation,
+    FreightTmsInbound,
 )
 
 
@@ -26,9 +26,7 @@ class FreightRepository:
         self.db = db
 
     async def get_freight_by_id(self, freight_id: int) -> Freight | None:
-        return await self.db.scalar(
-            select(Freight).where(Freight.id == freight_id, Freight.deleted_at.is_(None))
-        )
+        return await self.db.scalar(select(Freight).where(Freight.id == freight_id, Freight.deleted_at.is_(None)))
 
     async def list_freights(
         self,
@@ -66,12 +64,9 @@ class FreightRepository:
             stmt = stmt.where(Freight.destination_city_code == destination_city_code)
         if commodity_id is not None:
             stmt = stmt.where(Freight.commodity_standard_id == commodity_id)
-
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (
-            await self.db.execute(
-                stmt.order_by(Freight.id.desc()).offset((page - 1) * page_size).limit(page_size)
-            )
+            await self.db.execute(stmt.order_by(Freight.id.desc()).offset((page - 1) * page_size).limit(page_size))
         ).scalars().all()
         return list(rows), total
 
@@ -100,82 +95,57 @@ class FreightRepository:
         await self.db.flush()
         return True
 
-    async def exists_freight_reference(
-        self,
-        source_type: str | None = None,
-        source_ref_no: str | None = None,
-        exclude_freight_id: int | None = None,
-    ) -> bool:
-        stmt = select(Freight).where(Freight.deleted_at.is_(None))
-        if source_type:
-            stmt = stmt.where(Freight.source_type_code == source_type)
-        if source_ref_no:
-            stmt = stmt.where(Freight.source_ref_no == source_ref_no)
-        if exclude_freight_id is not None:
-            stmt = stmt.where(Freight.id != exclude_freight_id)
-        if source_type is None and source_ref_no is None:
-            return False
-        return await self.db.scalar(stmt) is not None
-
     async def exists_freight_no(self, freight_no: str, exclude_freight_id: int | None = None) -> bool:
-        stmt = select(Freight).where(
-            Freight.freight_no == freight_no,
-            Freight.deleted_at.is_(None),
-        )
+        stmt = select(Freight).where(Freight.freight_no == freight_no, Freight.deleted_at.is_(None))
         if exclude_freight_id is not None:
             stmt = stmt.where(Freight.id != exclude_freight_id)
         return await self.db.scalar(stmt) is not None
 
 
-class FreightSourceInboundRepository:
+class FreightBatchTaskRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def get_by_id(self, inbound_id: int) -> FreightSourceInbound | None:
-        return await self.db.scalar(select(FreightSourceInbound).where(FreightSourceInbound.id == inbound_id))
+    async def get_by_id(self, batch_id: int) -> FreightBatchTask | None:
+        return await self.db.scalar(select(FreightBatchTask).where(FreightBatchTask.id == batch_id))
 
     async def list_items(
         self,
         *,
         keyword: str | None,
         status_code: str | None,
-        source_channel_code: str | None,
         page: int,
         page_size: int,
-    ) -> tuple[list[FreightSourceInbound], int]:
-        stmt = select(FreightSourceInbound)
+    ) -> tuple[list[FreightBatchTask], int]:
+        stmt = select(FreightBatchTask)
         if keyword:
             like_value = f"%{keyword.strip()}%"
             stmt = stmt.where(
                 or_(
-                    FreightSourceInbound.inbound_no.ilike(like_value),
-                    FreightSourceInbound.external_ref_no.ilike(like_value),
-                    FreightSourceInbound.sender_name.ilike(like_value),
-                    FreightSourceInbound.raw_title.ilike(like_value),
-                    FreightSourceInbound.raw_content.ilike(like_value),
+                    FreightBatchTask.batch_no.ilike(like_value),
+                    FreightBatchTask.raw_text.ilike(like_value),
+                    FreightBatchTask.remark.ilike(like_value),
                 )
             )
         if status_code:
-            stmt = stmt.where(FreightSourceInbound.status_code == status_code)
-        if source_channel_code:
-            stmt = stmt.where(FreightSourceInbound.source_channel_code == source_channel_code)
+            stmt = stmt.where(FreightBatchTask.status_code == status_code)
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (
             await self.db.execute(
-                stmt.order_by(FreightSourceInbound.id.desc()).offset((page - 1) * page_size).limit(page_size)
+                stmt.order_by(FreightBatchTask.id.desc()).offset((page - 1) * page_size).limit(page_size)
             )
         ).scalars().all()
         return list(rows), total
 
-    async def create(self, data: dict[str, Any]) -> FreightSourceInbound:
-        row = FreightSourceInbound(**data)
+    async def create(self, data: dict[str, Any]) -> FreightBatchTask:
+        row = FreightBatchTask(**data)
         self.db.add(row)
         await self.db.flush()
         await self.db.refresh(row)
         return row
 
-    async def update(self, inbound_id: int, data: dict[str, Any]) -> FreightSourceInbound | None:
-        row = await self.get_by_id(inbound_id)
+    async def update(self, batch_id: int, data: dict[str, Any]) -> FreightBatchTask | None:
+        row = await self.get_by_id(batch_id)
         if row is None:
             return None
         for key, value in data.items():
@@ -185,53 +155,55 @@ class FreightSourceInboundRepository:
         return row
 
 
-class FreightAiParseTaskRepository:
+class FreightTmsInboundRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def get_by_id(self, task_id: int) -> FreightAiParseTask | None:
-        return await self.db.scalar(select(FreightAiParseTask).where(FreightAiParseTask.id == task_id))
+    async def get_by_id(self, inbound_id: int) -> FreightTmsInbound | None:
+        return await self.db.scalar(select(FreightTmsInbound).where(FreightTmsInbound.id == inbound_id))
+
+    async def get_by_idempotency_key(self, key: str) -> FreightTmsInbound | None:
+        return await self.db.scalar(select(FreightTmsInbound).where(FreightTmsInbound.idempotency_key == key))
 
     async def list_items(
         self,
         *,
         keyword: str | None,
         status_code: str | None,
-        source_channel_code: str | None,
         page: int,
         page_size: int,
-    ) -> tuple[list[FreightAiParseTask], int]:
-        stmt = select(FreightAiParseTask)
+    ) -> tuple[list[FreightTmsInbound], int]:
+        stmt = select(FreightTmsInbound)
         if keyword:
             like_value = f"%{keyword.strip()}%"
             stmt = stmt.where(
                 or_(
-                    FreightAiParseTask.task_no.ilike(like_value),
-                    FreightAiParseTask.raw_content.ilike(like_value),
-                    FreightAiParseTask.error_message.ilike(like_value),
+                    FreightTmsInbound.inbound_no.ilike(like_value),
+                    FreightTmsInbound.idempotency_key.ilike(like_value),
+                    FreightTmsInbound.external_ref_no.ilike(like_value),
+                    FreightTmsInbound.source_trace_id.ilike(like_value),
+                    FreightTmsInbound.raw_content.ilike(like_value),
                 )
             )
         if status_code:
-            stmt = stmt.where(FreightAiParseTask.status_code == status_code)
-        if source_channel_code:
-            stmt = stmt.where(FreightAiParseTask.source_channel_code == source_channel_code)
+            stmt = stmt.where(FreightTmsInbound.status_code == status_code)
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (
             await self.db.execute(
-                stmt.order_by(FreightAiParseTask.id.desc()).offset((page - 1) * page_size).limit(page_size)
+                stmt.order_by(FreightTmsInbound.id.desc()).offset((page - 1) * page_size).limit(page_size)
             )
         ).scalars().all()
         return list(rows), total
 
-    async def create(self, data: dict[str, Any]) -> FreightAiParseTask:
-        row = FreightAiParseTask(**data)
+    async def create(self, data: dict[str, Any]) -> FreightTmsInbound:
+        row = FreightTmsInbound(**data)
         self.db.add(row)
         await self.db.flush()
         await self.db.refresh(row)
         return row
 
-    async def update(self, task_id: int, data: dict[str, Any]) -> FreightAiParseTask | None:
-        row = await self.get_by_id(task_id)
+    async def update(self, inbound_id: int, data: dict[str, Any]) -> FreightTmsInbound | None:
+        row = await self.get_by_id(inbound_id)
         if row is None:
             return None
         for key, value in data.items():
@@ -245,11 +217,24 @@ class FreightClueRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def list_by_task(self, task_id: int) -> list[FreightClue]:
+    async def get_by_id(self, clue_id: int) -> FreightClue | None:
+        return await self.db.scalar(select(FreightClue).where(FreightClue.id == clue_id))
+
+    async def list_by_batch(self, batch_id: int) -> list[FreightClue]:
         rows = (
             await self.db.execute(
                 select(FreightClue)
-                .where(FreightClue.parse_task_id == task_id)
+                .where(FreightClue.source_batch_id == batch_id)
+                .order_by(FreightClue.segment_index.asc(), FreightClue.id.asc())
+            )
+        ).scalars().all()
+        return list(rows)
+
+    async def list_by_tms_inbound(self, inbound_id: int) -> list[FreightClue]:
+        rows = (
+            await self.db.execute(
+                select(FreightClue)
+                .where(FreightClue.source_tms_inbound_id == inbound_id)
                 .order_by(FreightClue.segment_index.asc(), FreightClue.id.asc())
             )
         ).scalars().all()
@@ -270,11 +255,19 @@ class FreightCandidateRepository:
     async def get_by_id(self, candidate_id: int) -> FreightCandidate | None:
         return await self.db.scalar(select(FreightCandidate).where(FreightCandidate.id == candidate_id))
 
-    async def list_by_task(self, task_id: int) -> list[FreightCandidate]:
+    async def list_by_batch(self, batch_id: int) -> list[FreightCandidate]:
+        rows = (
+            await self.db.execute(
+                select(FreightCandidate).where(FreightCandidate.source_batch_id == batch_id).order_by(FreightCandidate.id.asc())
+            )
+        ).scalars().all()
+        return list(rows)
+
+    async def list_by_tms_inbound(self, inbound_id: int) -> list[FreightCandidate]:
         rows = (
             await self.db.execute(
                 select(FreightCandidate)
-                .where(FreightCandidate.parse_task_id == task_id)
+                .where(FreightCandidate.source_tms_inbound_id == inbound_id)
                 .order_by(FreightCandidate.id.asc())
             )
         ).scalars().all()
@@ -285,6 +278,7 @@ class FreightCandidateRepository:
         *,
         keyword: str | None,
         status_code: str | None,
+        source_type_code: str | None,
         page: int,
         page_size: int,
     ) -> tuple[list[FreightCandidate], int]:
@@ -295,14 +289,17 @@ class FreightCandidateRepository:
                 or_(
                     FreightCandidate.candidate_no.ilike(like_value),
                     FreightCandidate.cargo_title.ilike(like_value),
-                    FreightCandidate.origin_text.ilike(like_value),
-                    FreightCandidate.destination_text.ilike(like_value),
+                    FreightCandidate.raw_text.ilike(like_value),
+                    FreightCandidate.raw_origin_text.ilike(like_value),
+                    FreightCandidate.raw_destination_text.ilike(like_value),
                     FreightCandidate.commodity_match_name.ilike(like_value),
                     FreightCandidate.contact_phone.ilike(like_value),
                 )
             )
         if status_code:
             stmt = stmt.where(FreightCandidate.status_code == status_code)
+        if source_type_code:
+            stmt = stmt.where(FreightCandidate.source_type_code == source_type_code)
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (
             await self.db.execute(
@@ -329,25 +326,25 @@ class FreightCandidateRepository:
         return row
 
 
-class FreightCandidateFeedbackRepository:
+class FreightCandidateManualFeedbackRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def create(self, data: dict[str, Any]) -> FreightCandidateFeedback:
-        row = FreightCandidateFeedback(**data)
+    async def create(self, data: dict[str, Any]) -> FreightCandidateManualFeedback:
+        row = FreightCandidateManualFeedback(**data)
         self.db.add(row)
         await self.db.flush()
         await self.db.refresh(row)
         return row
 
-    async def list_by_candidate_ids(self, candidate_ids: list[int]) -> list[FreightCandidateFeedback]:
+    async def list_by_candidate_ids(self, candidate_ids: list[int]) -> list[FreightCandidateManualFeedback]:
         if not candidate_ids:
             return []
         rows = (
             await self.db.execute(
-                select(FreightCandidateFeedback)
-                .where(FreightCandidateFeedback.candidate_id.in_(candidate_ids))
-                .order_by(FreightCandidateFeedback.operated_at.desc(), FreightCandidateFeedback.id.desc())
+                select(FreightCandidateManualFeedback)
+                .where(FreightCandidateManualFeedback.candidate_id.in_(candidate_ids))
+                .order_by(FreightCandidateManualFeedback.operated_at.desc(), FreightCandidateManualFeedback.id.desc())
             )
         ).scalars().all()
         return list(rows)
@@ -367,11 +364,7 @@ class FreightContactRepository:
         ).scalars().all()
         return list(rows)
 
-    async def replace_contacts(
-        self,
-        freight_id: int,
-        contacts: list[dict[str, Any]],
-    ) -> list[FreightContact]:
+    async def replace_contacts(self, freight_id: int, contacts: list[dict[str, Any]]) -> list[FreightContact]:
         await self.db.execute(delete(FreightContact).where(FreightContact.freight_id == freight_id))
         rows: list[FreightContact] = []
         for item in contacts:
@@ -404,26 +397,16 @@ class FreightAttachmentRepository:
         return list(rows)
 
     async def get_attachment(self, attachment_id: int) -> FreightSourceAttachment | None:
-        return await self.db.scalar(
-            select(FreightSourceAttachment).where(FreightSourceAttachment.id == attachment_id)
-        )
+        return await self.db.scalar(select(FreightSourceAttachment).where(FreightSourceAttachment.id == attachment_id))
 
-    async def create_attachment(
-        self,
-        freight_id: int,
-        data: dict[str, Any],
-    ) -> FreightSourceAttachment:
+    async def create_attachment(self, freight_id: int, data: dict[str, Any]) -> FreightSourceAttachment:
         row = FreightSourceAttachment(freight_id=freight_id, created_at=datetime.utcnow(), **data)
         self.db.add(row)
         await self.db.flush()
         await self.db.refresh(row)
         return row
 
-    async def update_attachment(
-        self,
-        attachment_id: int,
-        data: dict[str, Any],
-    ) -> FreightSourceAttachment | None:
+    async def update_attachment(self, attachment_id: int, data: dict[str, Any]) -> FreightSourceAttachment | None:
         row = await self.get_attachment(attachment_id)
         if row is None:
             return None
@@ -449,18 +432,12 @@ class FreightTagRelationRepository:
     async def list_tag_relations(self, freight_id: int) -> list[FreightTagRelation]:
         rows = (
             await self.db.execute(
-                select(FreightTagRelation)
-                .where(FreightTagRelation.freight_id == freight_id)
-                .order_by(FreightTagRelation.id.asc())
+                select(FreightTagRelation).where(FreightTagRelation.freight_id == freight_id).order_by(FreightTagRelation.id.asc())
             )
         ).scalars().all()
         return list(rows)
 
-    async def replace_tag_relations(
-        self,
-        freight_id: int,
-        tags: list[str],
-    ) -> list[FreightTagRelation]:
+    async def replace_tag_relations(self, freight_id: int, tags: list[str]) -> list[FreightTagRelation]:
         await self.db.execute(delete(FreightTagRelation).where(FreightTagRelation.freight_id == freight_id))
         rows: list[FreightTagRelation] = []
         now = datetime.utcnow()

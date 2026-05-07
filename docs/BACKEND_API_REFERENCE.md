@@ -132,21 +132,31 @@ Base URL: `/api/v1`
 
 - `GET /freight`
 - `GET /freight/{freight_id}`
-- `POST /freight`
+- `POST /freight/manual`
 - `PUT /freight/{freight_id}`
 - `PUT /freight/{freight_id}/status`
-- `GET /freight/source-inbounds`
-- `POST /freight/source-inbounds`
-- `GET /freight/source-inbounds/{id}`
-- `GET /freight/ai/parse-tasks`
-- `POST /freight/ai/parse-tasks`
-- `GET /freight/ai/parse-tasks/{id}`
-- `POST /freight/ai/parse-tasks/{id}/run`
+- `PUT /freight/{freight_id}/contacts`
+- `GET /freight/{freight_id}/attachments`
+- `POST /freight/{freight_id}/attachments`
+- `PUT /freight/attachments/{attachment_id}`
+- `DELETE /freight/attachments/{attachment_id}`
+- `GET /freight/{freight_id}/tags`
+- `PUT /freight/{freight_id}/tags`
+- `GET /freight/batches`
+- `POST /freight/batches/wechat`
+- `GET /freight/batches/{batch_id}`
+- `POST /freight/batches/{batch_id}/parse`
+- `GET /freight/tms-inbounds`
+- `POST /freight/tms-inbounds`
+- `GET /freight/tms-inbounds/{inbound_id}`
+- `POST /freight/tms-inbounds/{inbound_id}/parse`
 - `GET /freight/candidates`
 - `GET /freight/candidates/{id}`
 - `PUT /freight/candidates/{id}`
 - `POST /freight/candidates/{id}/confirm`
 - `POST /freight/candidates/{id}/reject`
+
+手工录入直接生成正式货源。微信批次和 TMS 入站先执行 AI 线索切分，再通过节点、城市、区域和标准货品匹配生成候选货源，人工确认后写入 `freight`。旧 `/freight/source-inbounds*` 和 `/freight/ai/parse-tasks*` 已移除。
 
 ## Route
 
@@ -178,6 +188,7 @@ Base URL: `/api/v1`
 - `GET /analysis/freight/trend`
 - `GET /analysis/freight/commodity-structure`
 - `GET /analysis/freight/tonnage-distribution`
+- `GET /analysis/freight/node-ranking`
 - `GET /analysis/freight/price-distribution`
 - `GET /analysis/freight/hot-routes`
 - `GET /analysis/freight/flow-map`

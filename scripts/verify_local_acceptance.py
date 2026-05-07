@@ -26,12 +26,13 @@ from app.models.analysis import (
     FactFreightCityDaily,
     FactFreightDaily,
     FactFreightFlowDaily,
+    FactFreightNodeDaily,
     FactShipCityDaily,
     FactShipFlowDaily,
 )
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
-from app.models.freight import Freight, FreightAiParseTask, FreightCandidate, FreightSourceInbound
+from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightTmsInbound
 from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
 from app.models.ship import ShipProfile
 from app.models.system import SysMenu, SystemConfig
@@ -64,6 +65,9 @@ LEGACY_TABLES = {
     "stat_ship_city_daily",
     "stat_ship_flow_daily",
     "stat_job_run",
+    "freight_source_inbound",
+    "freight_ai_parse_task",
+    "freight_candidate_feedback",
 }
 
 LEGACY_ROUTE_PATHS = {
@@ -82,6 +86,22 @@ LEGACY_ROUTE_PATHS = {
     "/api/v1/commodity/categories/{category_id}",
     "/api/v1/commodity/types",
     "/api/v1/commodity/types/{type_id}",
+    "/api/v1/freight/source-inbounds",
+    "/api/v1/freight/source-inbounds/{id}",
+    "/api/v1/freight/ai/parse-tasks",
+    "/api/v1/freight/ai/parse-tasks/{id}",
+    "/api/v1/freight/ai/parse-tasks/{id}/run",
+}
+
+REQUIRED_ROUTE_PATHS = {
+    "/api/v1/freight/manual",
+    "/api/v1/freight/batches/wechat",
+    "/api/v1/freight/batches/{batch_id}/parse",
+    "/api/v1/freight/tms-inbounds",
+    "/api/v1/freight/tms-inbounds/{inbound_id}/parse",
+    "/api/v1/freight/candidates/{candidate_id}/confirm",
+    "/api/v1/freight/candidates/{candidate_id}/reject",
+    "/api/v1/analysis/freight/node-ranking",
 }
 
 LEGACY_MENU_CODES = {
@@ -91,6 +111,8 @@ LEGACY_MENU_CODES = {
     "SHIP_IMPORT_BATCHES",
     "ROUTE_PLANS",
     "ANALYSIS_CARGO",
+    "FREIGHT_AI_PARSE_RECORDS",
+    "FREIGHT_SOURCE_INBOUNDS",
 }
 
 LEGACY_MENU_PATHS = {
@@ -172,6 +194,14 @@ async def verify() -> list[CheckResult]:
             "none" if not legacy_routes_left else ", ".join(legacy_routes_left),
         )
     )
+    missing_required_routes = sorted(path for path in REQUIRED_ROUTE_PATHS if path not in route_paths)
+    results.append(
+        _result(
+            "production freight api routes present",
+            not missing_required_routes,
+            "all present" if not missing_required_routes else ", ".join(missing_required_routes),
+        )
+    )
 
     async with AsyncSessionLocal() as session:
         count_checks = [
@@ -182,12 +212,13 @@ async def verify() -> list[CheckResult]:
             ("commodity aliases", await _count(session, CommodityAlias), 80),
             ("ships", await _count(session, ShipProfile), 80),
             ("freights", await _count(session, Freight), 200),
-            ("source inbounds", await _count(session, FreightSourceInbound), 30),
-            ("ai parse tasks", await _count(session, FreightAiParseTask), 20),
+            ("wechat batch tasks", await _count(session, FreightBatchTask), 25),
+            ("tms inbounds", await _count(session, FreightTmsInbound), 10),
             ("freight candidates", await _count(session, FreightCandidate), 40),
             ("freight daily facts", await _count(session, FactFreightDaily), 90),
             ("freight city facts", await _count(session, FactFreightCityDaily), 60),
             ("freight flow facts", await _count(session, FactFreightFlowDaily), 180),
+            ("freight node facts", await _count(session, FactFreightNodeDaily), 60),
             ("ship city facts", await _count(session, FactShipCityDaily), 90),
             ("ship flow facts", await _count(session, FactShipFlowDaily), 300),
             ("analysis task definitions", await _count(session, AnalysisJobDefinition), 10),

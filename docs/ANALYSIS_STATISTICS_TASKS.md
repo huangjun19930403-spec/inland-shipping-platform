@@ -22,11 +22,11 @@
 ### ANALYSIS_FREIGHT_DAILY
 
 - 模块：货源分析。
-- 源表：`freight`、`freight_source_inbound`、`freight_candidate`。
+- 源表：`freight`、`freight_batch_task`、`freight_tms_inbound`、`freight_candidate`。
 - 目标表：`fact_freight_daily`。
 - 日期字段：`freight.published_at` 优先，否则 `freight.created_at`。
 - 过滤条件：`freight.deleted_at is null`，且 `status_code != DRAFT`。
-- 聚合口径：按日统计货源量、确认量、候选量、来源接入量、总吨位、预估金额、平均单价。
+- 聚合口径：按日统计正式货源量、确认量、候选量、微信/TMS 接入量、总吨位、预估金额、平均单价。
 
 ### ANALYSIS_FREIGHT_FLOW_DAILY
 
@@ -63,6 +63,15 @@
 - 日期字段：同货源日统计。
 - 过滤条件：同货源日统计，且起点或终点能映射到城市。
 - 聚合口径：按日期和城市统计货源热度、入流、出流、吨位，并记录城市主业务区域。
+
+### ANALYSIS_FREIGHT_NODE_DAILY
+
+- 模块：货源分析。
+- 源表：`freight`、`transport_node`。
+- 目标表：`fact_freight_node_daily`。
+- 日期字段：同货源日统计。
+- 过滤条件：同货源日统计，且起点或终点节点存在。
+- 聚合口径：按日期和运输节点统计货源热度、入流、出流、吨位和平均运价，用于货源分析页节点排行。
 
 ### ANALYSIS_SHIP_DAILY
 
@@ -106,7 +115,7 @@
 - 源表：以上任务的全部源表。
 - 目标表：以上任务的全部事实表。
 - 日期字段：由请求或定时调度传入。
-- 聚合口径：按固定顺序执行货源、船舶、城市、流向、区域和运价任务，用于每日调度和一键补算。
+- 聚合口径：按固定顺序执行货源、节点、船舶、城市、流向、区域和运价任务，用于每日调度和一键补算。
 
 ## API
 
