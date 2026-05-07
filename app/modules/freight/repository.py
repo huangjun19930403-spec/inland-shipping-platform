@@ -299,6 +299,7 @@ class FreightCandidateRepository:
         keyword: str | None,
         status_code: str | None,
         source_type_code: str | None,
+        source_batch_id: int | None,
         page: int,
         page_size: int,
     ) -> tuple[list[FreightCandidate], int]:
@@ -320,6 +321,8 @@ class FreightCandidateRepository:
             stmt = stmt.where(FreightCandidate.status_code == status_code)
         if source_type_code:
             stmt = stmt.where(FreightCandidate.source_type_code == source_type_code)
+        if source_batch_id is not None:
+            stmt = stmt.where(FreightCandidate.source_batch_id == source_batch_id)
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (
             await self.db.execute(

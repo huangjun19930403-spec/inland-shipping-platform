@@ -87,7 +87,7 @@ class FreightClueSplitItemSchema(BaseModel):
 class FreightContextNoteSchema(BaseModel):
     note_index: int | None = None
     raw_text: str
-    context_type_code: str = Field(default="OTHER", description="PRICE/CONTACT/REMARK/SETTLEMENT/LOADING/OTHER")
+    context_type_code: str = Field(default="OTHER", description="TONNAGE/PRICE/CONTACT/REMARK/SETTLEMENT/LOADING/OTHER")
     applies_to: list[int] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     confidence_score: float = 0.5
@@ -96,7 +96,7 @@ class FreightContextNoteSchema(BaseModel):
     @classmethod
     def _normalize_context_type(cls, value: Any) -> str:
         code = str(value or "OTHER").strip().upper()
-        return code if code in {"PRICE", "CONTACT", "REMARK", "SETTLEMENT", "LOADING", "OTHER"} else "OTHER"
+        return code if code in {"TONNAGE", "PRICE", "CONTACT", "REMARK", "SETTLEMENT", "LOADING", "OTHER"} else "OTHER"
 
     @field_validator("applies_to", "evidence", mode="before")
     @classmethod
@@ -146,6 +146,7 @@ class FreightSegmentSchema(BaseModel):
     commodity_name: str | None = None
     origin_text: str | None = None
     destination_text: str | None = None
+    raw_tonnage_text: str | None = None
     estimated_tonnage: float | None = None
     min_tonnage: float | None = None
     max_tonnage: float | None = None
@@ -211,6 +212,7 @@ def _json_schema_hint() -> dict[str, Any]:
                 "context_summary": "<继承的公共上下文摘要，不能写未在原文或 context_notes 中出现的信息>",
                 "inherited_context": {
                     "price": "<继承的价格原文或 null>",
+                    "tonnage": "<继承的吨位原文或 null>",
                     "contact": "<继承的联系人原文或 null>",
                     "remark": "<继承的装卸/结算/天气备注原文或 null>",
                     "evidence": ["<上下文证据片段>"],
@@ -222,6 +224,7 @@ def _json_schema_hint() -> dict[str, Any]:
                 "commodity_name": "<货品原文>",
                 "origin_text": "<装货地原文>",
                 "destination_text": "<卸货地原文>",
+                "raw_tonnage_text": "<吨位原文，例如 2000左右 或 1500-2000内>",
                 "estimated_tonnage": None,
                 "min_tonnage": None,
                 "max_tonnage": None,
@@ -251,6 +254,7 @@ def _clue_schema_hint() -> dict[str, Any]:
                 "context_summary": "<该线索继承了哪些公共备注、价格、联系人>",
                 "inherited_context": {
                     "price": "<继承的价格原文或 null>",
+                    "tonnage": "<继承的吨位原文或 null>",
                     "contact": "<继承的联系人原文或 null>",
                     "remark": "<继承的装卸/结算/天气备注原文或 null>",
                     "evidence": ["<继承依据原文片段>"],
@@ -265,8 +269,8 @@ def _clue_schema_hint() -> dict[str, Any]:
         "context_notes": [
             {
                 "note_index": 1,
-                "raw_text": "<公告、联系人、价格、装卸、结算或天气等上下文原文>",
-                "context_type_code": "REMARK",
+                "raw_text": "<公告、联系人、吨位、价格、装卸、结算或天气等上下文原文>",
+                "context_type_code": "TONNAGE",
                 "applies_to": [1],
                 "evidence": ["<该上下文可继承给哪些货源线索的判断依据>"],
                 "confidence_score": 0.86,
@@ -390,6 +394,7 @@ def _drop_unsupported_fields(segment: dict[str, Any], raw_content: str) -> list[
         "origin_text": "装货地",
         "destination_text": "卸货地",
         "commodity_name": "货品",
+        "raw_tonnage_text": "吨位原文",
         "unit_price": "运价",
         "total_price": "总价",
         "contact_name": "联系人",
@@ -444,7 +449,17 @@ def _segment_needs_strong_review(segment: dict[str, Any]) -> bool:
     except (TypeError, ValueError):
         confidence = 0
     required_missing = not segment.get("raw_text") or not segment.get("origin_text") or not segment.get("destination_text") or not segment.get("commodity_name")
-    return confidence < 0.65 or required_missing or str(segment.get("availability_status_code") or "").upper() == "UNKNOWN"
+    inherited = segment.get("inherited_context") if isinstance(segment.get("inherited_context"), dict) else {}
+    has_tonnage_fields = bool(segment.get("raw_tonnage_text") or segment.get("estimated_tonnage") or segment.get("min_tonnage") or segment.get("max_tonnage"))
+    price_without_price_field = bool(inherited.get("price")) and not segment.get("unit_price") and not segment.get("total_price") and not has_tonnage_fields
+    inherited_tonnage_missing = bool(inherited.get("tonnage")) and not has_tonnage_fields
+    return (
+        confidence < 0.65
+        or required_missing
+        or price_without_price_field
+        or inherited_tonnage_missing
+        or str(segment.get("availability_status_code") or "").upper() == "UNKNOWN"
+    )
 
 
 def _prepare_segments(raw_content: str, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
@@ -465,7 +480,7 @@ def _prepare_segments(raw_content: str, segments: list[dict[str, Any]]) -> tuple
 class DashScopeQwenFreightParserClient:
     """DashScope SDK freight parser."""
 
-    wechat_prompt_version = "freight_wechat_dashscope_stream_v5"
+    wechat_prompt_version = "freight_wechat_dashscope_stream_v6"
     tms_prompt_version = "freight_tms_dashscope_stream_v4"
     prompt_version = wechat_prompt_version
 
@@ -540,8 +555,9 @@ class DashScopeQwenFreightParserClient:
                     "输出必须分为 freight_clues 和 context_notes。"
                     "freight_clues 只能包含业务上可独立追溯的货源线索，必须有装货地、卸货地、货品主体。"
                     "公告、天气、联系人、价格、结算、装卸备注等上下文行不能单独成为 freight_clues，只能放入 context_notes。"
-                    "公共联系人、价格、结算、装卸备注由你判断继承范围，并写入 inherited_context、context_summary 和 evidence。"
+                    "公共联系人、吨位、价格、结算、装卸备注由你判断继承范围，并写入 inherited_context、context_summary 和 evidence。"
                     "一行或多行上下文可继承给多个 freight_clues，但不能因此新增不存在的货源。"
+                    "微信群货源里靠近路线和货品的 1500-2000内、2000左右、7500左右、2-3500吨通常是吨位，不是价格；只有出现元、运费、价格、现金等价格语义时才按价格处理。"
                     "不得使用 JSON 结构说明中的占位值作为真实字段。"
                 ),
             },
@@ -579,8 +595,11 @@ class DashScopeQwenFreightParserClient:
                 "输入 freight_clues 已由 AI 从同一段原文中切分得到，context_notes 是公共上下文。"
                 "不得新增 freight_clues 之外的货源；每个 freight_clue 最多输出一个 segment。"
                 "context_notes 只能用于继承联系人、价格、结算、装卸备注，不能单独输出为 segment。"
-                "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据原文与 clue 上下文判断。"
-                "非空字段必须能从原文、freight_clue、context_notes、evidence 或 inherited_context 中找到证据；没有证据必须填 null。"
+                    "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据原文与 clue 上下文判断。"
+                    "吨位原文必须写 raw_tonnage_text；单点吨位填 estimated_tonnage；范围吨位填 min_tonnage 和 max_tonnage。"
+                    "1500-2000内 表示 min_tonnage=1500、max_tonnage=2000；2000左右 表示 estimated_tonnage=2000；2000--2500吨 表示 min_tonnage=2000、max_tonnage=2500。"
+                    "2-3500吨这类微信群简写通常表示 2000-3500吨，若你能从上下文确认就填 min_tonnage=2000、max_tonnage=3500；不能确认则只填 raw_tonnage_text 并写 manual_review_reason。"
+                    "非空字段必须能从原文、freight_clue、context_notes、evidence 或 inherited_context 中找到证据；没有证据必须填 null。"
                 "如果某个 freight_clue 复核后不是完整货源线索，输出 is_freight_candidate=false 并写 drop_reason。"
                 "船已够、暂时不要、过几天要应标为 FULL 或 DEFERRED；滚动发、随船装缺明确装期时标为 UNKNOWN。"
                 "不得使用 JSON 结构说明中的占位值作为真实字段。"
@@ -606,8 +625,10 @@ class DashScopeQwenFreightParserClient:
                 "role": "system",
                 "content": (
                     "你是内河航运微信群货源复核助手。只输出 JSON。"
-                    "请复核输入 segments 的字段完整性、可发状态、上下文继承和证据来源。"
+                    "请复核输入 segments 的字段完整性、吨位归类、可发状态、上下文继承和证据来源。"
                     "不得新增货源，只能修正输入 segment 的字段、清空无证据字段，或把上下文-only/空线索标记为 is_freight_candidate=false。"
+                    "如果 inherited_context.price 中实际是吨位表达，应移入 raw_tonnage_text 和 estimated_tonnage/min_tonnage/max_tonnage，并清空价格字段。"
+                    "复核 2-3500吨 等简写时按微信群货源吨位语境处理，不能确认时保留 raw_tonnage_text 并要求人工判断。"
                     "发现字段来自 JSON 占位示例而非原文证据时必须清空，并写 manual_review_reason。"
                     "无法确定的字段保持 null 并给出 manual_review_reason。"
                 ),

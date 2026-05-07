@@ -32,6 +32,7 @@ class FreightListQuery(BaseModel):
 
 class FreightBasePayload(BaseModel):
     raw_commodity_name: str | None = Field(default=None, max_length=128)
+    raw_tonnage_text: str | None = Field(default=None, max_length=128)
     raw_origin_text: str | None = Field(default=None, max_length=256)
     raw_destination_text: str | None = Field(default=None, max_length=256)
     cargo_title: str = Field(min_length=1, max_length=256)
@@ -78,6 +79,7 @@ class FreightManualCreateRequest(FreightBasePayload):
 class FreightUpdateRequest(BaseModel):
     source_ref_no: str | None = Field(default=None, max_length=128)
     raw_commodity_name: str | None = Field(default=None, max_length=128)
+    raw_tonnage_text: str | None = Field(default=None, max_length=128)
     raw_origin_text: str | None = Field(default=None, max_length=256)
     raw_destination_text: str | None = Field(default=None, max_length=256)
     cargo_title: str | None = Field(default=None, min_length=1, max_length=256)
@@ -132,6 +134,7 @@ class FreightResponse(BaseModel):
     source_clue_id: int | None = None
     source_candidate_id: int | None = None
     raw_commodity_name: str | None = None
+    raw_tonnage_text: str | None = None
     raw_origin_text: str | None = None
     raw_destination_text: str | None = None
     cargo_title: str
@@ -388,6 +391,7 @@ class FreightTmsInboundDetailResponse(BaseModel):
 
 class FreightCandidateUpdateRequest(BaseModel):
     raw_commodity_name: str | None = Field(default=None, max_length=128)
+    raw_tonnage_text: str | None = Field(default=None, max_length=128)
     raw_origin_text: str | None = Field(default=None, max_length=256)
     raw_destination_text: str | None = Field(default=None, max_length=256)
     cargo_title: str | None = Field(default=None, min_length=1, max_length=256)
@@ -444,6 +448,7 @@ class FreightCandidateResponse(BaseModel):
     source_ref_no: str | None
     raw_text: str | None
     raw_commodity_name: str | None
+    raw_tonnage_text: str | None = None
     raw_origin_text: str | None
     raw_destination_text: str | None
     cargo_title: str

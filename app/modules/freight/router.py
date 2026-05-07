@@ -154,6 +154,7 @@ async def list_candidates(
     keyword: str | None = None,
     status_code: str | None = None,
     source_type_code: str | None = None,
+    source_batch_id: int | None = None,
     page: int = 1,
     page_size: int = 20,
     current_user=Depends(get_current_user),
@@ -165,6 +166,7 @@ async def list_candidates(
         keyword=keyword,
         status_code=status_code,
         source_type_code=source_type_code,
+        source_batch_id=source_batch_id,
         page=page,
         page_size=page_size,
     )

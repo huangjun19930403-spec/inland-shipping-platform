@@ -13,7 +13,7 @@
 
 - `freight` 支持装货地、卸货地的三类层级：`NODE` 节点级、`CITY` 城市级、`RAW` 原文级。
 - `freight` 支持货品两类层级：`STANDARD` 标准货品级、`RAW` 原文货品级。
-- 新增正式货源字段：`raw_origin_text`、`raw_destination_text`、`raw_commodity_name`、`origin_match_level_code`、`destination_match_level_code`、`commodity_match_level_code`。
+- 新增正式货源字段：`raw_origin_text`、`raw_destination_text`、`raw_commodity_name`、`raw_tonnage_text`、`origin_match_level_code`、`destination_match_level_code`、`commodity_match_level_code`。
 - `commodity_standard_id`、装卸城市/省份字段改为可空。平台未建节点、城市或标准货品时，业务人员仍可用原文级信息确认入库。
 - 入库最低门槛调整为：有装货地原文/城市/节点、卸货地原文/城市/节点，以及货品标题/原文货品/标准货品。
 - 选择节点级时后端自动回填城市和业务区域；选择城市级时自动回填省份和业务区域；选择原文级时清空对应标准化字段并保留原文。
@@ -28,7 +28,9 @@
 ## AI 与匹配链路
 
 - 微信采集使用 DashScope SDK 流式调用，快模型读取完整原文并由 AI 切分线索，低置信候选交给强模型复核。
-- 微信提示词版本升级为 `freight_wechat_dashscope_stream_v5`。AI 第一阶段输出拆为 `freight_clues` 和 `context_notes`，公告、联系人、价格、结算、装卸备注等上下文只允许进入 `context_notes`，不能单独生成候选。
+- 微信提示词版本升级为 `freight_wechat_dashscope_stream_v6`。AI 第一阶段输出拆为 `freight_clues` 和 `context_notes`，公告、联系人、价格、结算、装卸备注、吨位等上下文只允许进入 `context_notes`，不能单独生成候选。
+- `freight_candidate` 与 `freight` 新增 `raw_tonnage_text`，保留 `1500-2000内`、`2000左右`、`2-3500吨` 等微信群原始吨位表达；单点吨位写入 `estimated_tonnage`，范围吨位写入 `min_tonnage`、`max_tonnage`。
+- v6 提示词和强模型复核补充吨位归类约束：没有“元/运费/价格”等价格语义时，路线货品附近数字优先按吨位解析；`2-3500吨` 这类微信群简写由 AI 复核为 `2000-3500吨`，无法确认时只保留原文吨位并要求人工判断。
 - 结构化 schema hint 已移除真实姓名、手机号、地点、货品等示例值，统一使用中性占位说明，避免模型把提示词样例抄入解析结果。
 - 后端不使用正则、关键词或本地规则拆解微信群原文；本地代码只做 JSON schema 校验、证据约束、主数据匹配、候选入库和错误处理。
 - 候选生成前增加质量门禁：缺少装货地、卸货地、货品主体的 AI segment 会作为 `IGNORED` 线索保留审计记录，但不生成 `freight_candidate`；无原文证据的联系人、电话、地点、货品、价格字段会被清空并进入人工判断。
@@ -37,6 +39,9 @@
 - 解析接口投递 Celery `freight_ai` 后台任务，批次状态支持 `QUEUED`、`PARSING`、`PARSED`、`PARTIAL_FAILED`、`FAILED`。
 - 批次解析进度字段：`parse_stage_code`、`parse_stage_name`、`parse_stage_message`、`parse_progress_percent`、`parse_heartbeat_at`、`ai_elapsed_seconds`。
 - 候选确认接口允许显式清空节点、城市、标准货品字段，支持切换到原文级后确认入库。
+- 候选查询接口支持 `source_batch_id`，微信采集完成后既可在本批次内确认，也可进入跨批次“待确认货源”队列筛选处理。
+- 批次重新解析增加保护：只要该批次存在已确认候选或已生成正式货源，后端拒绝重新解析，避免历史确认结果被新解析覆盖。
+- 装卸地匹配顺序调整为：运输节点/节点别名优先；节点命中后直接带出城市、省份、区域，不再继续城市匹配；节点未命中时才匹配城市，城市也未命中则落原文级。
 
 ## 清洗任务
 
@@ -59,18 +64,18 @@
 
 ## Seed 与验收
 
-- 新增 Alembic 迁移：`0012_freight_raw_level_normalization`。
+- 新增 Alembic 迁移：`0012_freight_raw_level_normalization`、`0013_freight_raw_tonnage_text`。
 - 更新 `seed_system_base`，菜单增加“数据清洗”，货源菜单为：微信采集、采集批次、待确认货源、手工录入、正式货源、数据清洗、TMS 入站。
-- 更新 `seed_freight_samples`，保留节点级、城市级、原文级正式货源样例，并写入清洗建议样例。
-- 更新 `verify_local_acceptance`，校验新 API、清洗建议、原文级正式货源 seed 和旧入口删除。
+- 更新 `seed_freight_samples`，保留节点级、城市级、原文级正式货源样例，并写入清洗建议样例和原文吨位字段。
+- 更新 `verify_local_acceptance`，校验新 API、清洗建议、原文级正式货源 seed、原文吨位 seed 和旧入口删除。
 
 ## 验证结果
 
 本轮重构已完成本地验证：
 
 - `.venv/bin/python -m py_compile ...`：通过。
-- `.venv/bin/python -m pytest tests/test_freight_collection_rework.py -q`：12 passed，覆盖 schema 防污染、上下文-only 忽略、公共上下文继承和建德样例 4 条候选。
-- `.venv/bin/python -m pytest -q`：25 passed。
-- `.venv/bin/alembic upgrade head`：已升级至 `0012_freight_raw_level_normalization`。
+- `.venv/bin/python -m pytest tests/test_freight_collection_rework.py -q`：16 passed，覆盖 schema 防污染、上下文-only 忽略、公共上下文继承、建德样例 4 条候选、微信群吨位范围样例 9 条候选、批次重解析保护、按批次筛选待确认队列和节点优先匹配。
+- `.venv/bin/python -m pytest -q`：29 passed。
+- `.venv/bin/alembic upgrade head`：已升级至 `0013_freight_raw_tonnage_text`。
 - `.venv/bin/python -m scripts.seed_system_init`：通过。
-- `.venv/bin/python -m scripts.verify_local_acceptance`：通过，包含清洗建议、原文级正式货源、菜单和新接口校验。
+- `.venv/bin/python -m scripts.verify_local_acceptance`：通过，包含清洗建议、原文级正式货源、原文吨位、菜单和新接口校验。

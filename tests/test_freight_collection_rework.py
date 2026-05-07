@@ -178,6 +178,7 @@ def _segment(**overrides) -> dict:
         "commodity_name": "动力煤",
         "origin_text": "南京港",
         "destination_text": "芜湖港",
+        "raw_tonnage_text": "1000吨",
         "estimated_tonnage": 1000,
         "unit_price": "42",
         "price_unit": "元/吨",
@@ -357,6 +358,60 @@ async def test_wechat_shared_context_sample_creates_four_candidates(session: Asy
 
 
 @pytest.mark.asyncio
+async def test_wechat_tonnage_sample_persists_range_and_raw_tonnage(session: AsyncSession) -> None:
+    sample_rows = [
+        ("马鞍山当涂", "淮安黑山路", "石子", "1500-2000内", None, 1500, 2000),
+        ("池州牛头山", "淮安杨庄闸", "石子", "2000左右", 2000, None, None),
+        ("池州长久", "宿迁", "瓜子片", "2000吨", 2000, None, None),
+        ("铜陵", "凤阳", "石英沙", "2000吨左右船", 2000, None, None),
+        ("池州251", "南通七号桥", "石子", "1500-2000左右", None, 1500, 2000),
+        ("武穴亚东", "洪泽九牛", "石粉", "2-3500吨", None, 2000, 3500),
+        ("巢湖", "宿迁", "石英沙", "2000吨左右", 2000, None, None),
+        ("黄岗", "盱眙", "水渣", "2000--2500吨", None, 2000, 2500),
+        ("阳新华新", "靖江金桥", "石子", "7500左右", 7500, None, None),
+    ]
+    FakeFreightParser.segments = [
+        {
+            "segment_index": index,
+            "raw_text": f"{origin}—{destination} {commodity} {raw_tonnage}",
+            "context_summary": "继承公共联系人 18155088770",
+            "cargo_title": f"{origin} 至 {destination} {commodity}",
+            "commodity_name": commodity,
+            "origin_text": origin,
+            "destination_text": destination,
+            "raw_tonnage_text": raw_tonnage,
+            "estimated_tonnage": estimated,
+            "min_tonnage": min_tonnage,
+            "max_tonnage": max_tonnage,
+            "contact_phone": "18155088770",
+            "availability_status_code": "READY",
+            "confidence_score": 0.87,
+            "evidence": [f"{origin}—{destination} {commodity} {raw_tonnage}", "18155088770"],
+        }
+        for index, (origin, destination, commodity, raw_tonnage, estimated, min_tonnage, max_tonnage) in enumerate(sample_rows, start=1)
+    ]
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="微信群吨位样例\n18155088770"), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+
+    assert detail.batch.status_code == "PARSED"
+    assert detail.batch.candidate_count == 9
+    by_route = {(item.raw_origin_text, item.raw_destination_text): item for item in detail.candidates}
+    assert by_route[("马鞍山当涂", "淮安黑山路")].raw_tonnage_text == "1500-2000内"
+    assert by_route[("马鞍山当涂", "淮安黑山路")].min_tonnage == Decimal("1500.00")
+    assert by_route[("马鞍山当涂", "淮安黑山路")].max_tonnage == Decimal("2000.00")
+    assert by_route[("池州牛头山", "淮安杨庄闸")].estimated_tonnage == Decimal("2000.00")
+    assert by_route[("武穴亚东", "洪泽九牛")].raw_tonnage_text == "2-3500吨"
+    assert by_route[("武穴亚东", "洪泽九牛")].min_tonnage == Decimal("2000.00")
+    assert by_route[("武穴亚东", "洪泽九牛")].max_tonnage == Decimal("3500.00")
+    assert by_route[("黄岗", "盱眙")].min_tonnage == Decimal("2000.00")
+    assert by_route[("黄岗", "盱眙")].max_tonnage == Decimal("2500.00")
+    assert by_route[("阳新华新", "靖江金桥")].estimated_tonnage == Decimal("7500.00")
+    assert {item.contact_phone for item in detail.candidates} == {"18155088770"}
+
+
+@pytest.mark.asyncio
 async def test_tms_inbound_is_idempotent_and_parses_multiple_waybills(session: AsyncSession) -> None:
     FakeFreightParser.segments = [
         _segment(source_ref_no="TMS-001"),
@@ -489,6 +544,7 @@ async def test_candidate_confirm_writes_formal_freight_with_source_trace(session
         raw_origin_text="南京港",
         raw_destination_text="芜湖港",
         raw_commodity_name="动力煤",
+        raw_tonnage_text="1000吨",
         cargo_title="南京港至芜湖港动力煤",
         commodity_standard_id=commodity.id,
         commodity_match_level_code="STANDARD",
@@ -531,11 +587,118 @@ async def test_candidate_confirm_writes_formal_freight_with_source_trace(session
     assert stored.source_candidate_id == candidate.id
     assert stored.hall_status_code == "NOT_LISTED"
     assert stored.raw_origin_text == "南京港"
+    assert stored.raw_tonnage_text == "1000吨"
     assert stored.origin_match_level_code == "NODE"
     assert stored.commodity_match_level_code == "STANDARD"
     assert refreshed_candidate is not None
     assert refreshed_candidate.status_code == "CONFIRMED"
     assert refreshed_candidate.confirmed_freight_id == stored.id
+
+
+@pytest.mark.asyncio
+async def test_confirmed_batch_cannot_be_reparsed(session: AsyncSession) -> None:
+    batch = FreightBatchTask(batch_no="FBT-REPARSE", source_type_code="WECHAT", source_channel_code="WECHAT_TEXT", raw_text="已确认批次", status_code="PARSED")
+    session.add(batch)
+    await session.flush()
+    session.add(
+        FreightCandidate(
+            candidate_no="FCA-CONFIRMED",
+            source_type_code="WECHAT",
+            source_channel_code="WECHAT_TEXT",
+            source_batch_id=batch.id,
+            cargo_title="已确认货源",
+            raw_origin_text="南京港",
+            raw_destination_text="芜湖港",
+            raw_commodity_name="动力煤",
+            availability_status_code="READY",
+            status_code="CONFIRMED",
+            confirmed_freight_id=123,
+        )
+    )
+    await session.commit()
+
+    with pytest.raises(ValidationError, match="不能重新解析"):
+        await FreightBatchTaskService(session).parse(batch.id, requested_by=7)
+    with pytest.raises(ValidationError, match="不能重新解析"):
+        await FreightBatchTaskService(session).run_parse_now(batch.id, requested_by=7)
+
+
+@pytest.mark.asyncio
+async def test_candidate_list_filters_by_source_batch_id(session: AsyncSession) -> None:
+    batch_a = FreightBatchTask(batch_no="FBT-A", source_type_code="WECHAT", source_channel_code="WECHAT_TEXT", raw_text="A", status_code="PARSED")
+    batch_b = FreightBatchTask(batch_no="FBT-B", source_type_code="WECHAT", source_channel_code="WECHAT_TEXT", raw_text="B", status_code="PARSED")
+    session.add_all([batch_a, batch_b])
+    await session.flush()
+    session.add_all(
+        [
+            FreightCandidate(
+                candidate_no="FCA-A",
+                source_type_code="WECHAT",
+                source_channel_code="WECHAT_TEXT",
+                source_batch_id=batch_a.id,
+                raw_origin_text="南京港",
+                raw_destination_text="芜湖港",
+                raw_commodity_name="动力煤",
+                cargo_title="A 批次货源",
+                availability_status_code="READY",
+                status_code="PENDING",
+            ),
+            FreightCandidate(
+                candidate_no="FCA-B",
+                source_type_code="WECHAT",
+                source_channel_code="WECHAT_TEXT",
+                source_batch_id=batch_b.id,
+                raw_origin_text="南京港",
+                raw_destination_text="芜湖港",
+                raw_commodity_name="动力煤",
+                cargo_title="B 批次货源",
+                availability_status_code="READY",
+                status_code="PENDING",
+            ),
+        ]
+    )
+    await session.commit()
+
+    result = await FreightCandidateService(session).list_items(
+        keyword=None,
+        status_code=None,
+        source_type_code=None,
+        source_batch_id=batch_a.id,
+        page=1,
+        page_size=20,
+    )
+
+    assert result.total == 1
+    assert result.items[0].source_batch_id == batch_a.id
+    assert result.items[0].candidate_no == "FCA-A"
+
+
+@pytest.mark.asyncio
+async def test_location_matching_prefers_node_before_city(session: AsyncSession) -> None:
+    city = await session.scalar(select(AdminRegion).where(AdminRegion.code == "320100"))
+    assert city is not None
+    node = TransportNode(
+        code="ND-CITY-NAME",
+        name="南京市",
+        short_name="南京市",
+        node_type_code="PORT",
+        province_code="320000",
+        city_code="320100",
+        city_region_id=city.id,
+        status=1,
+        lifecycle_status_code="ACTIVE",
+        audit_status="APPROVED",
+    )
+    session.add(node)
+    await session.commit()
+
+    normalized, options, basis = await FreightCandidateService(session)._match_location("南京市")
+
+    assert normalized["match_level_code"] == "NODE"
+    assert normalized["node_id"] == node.id
+    assert normalized["city_code"] == "320100"
+    assert options[0]["level"] == "NODE"
+    assert basis["status"] == "MATCHED_NODE"
 
 
 @pytest.mark.asyncio

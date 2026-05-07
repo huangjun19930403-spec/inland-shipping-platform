@@ -250,6 +250,28 @@ async def verify() -> list[CheckResult]:
             or 0
         )
         results.append(_result("raw-level formal freights seeded", raw_freight_count >= 5, f"{raw_freight_count} >= 5"))
+        raw_tonnage_freight_count = int(
+            await session.scalar(
+                select(func.count(Freight.id)).where(Freight.raw_tonnage_text.is_not(None), Freight.raw_tonnage_text != "")
+            )
+            or 0
+        )
+        raw_tonnage_candidate_count = int(
+            await session.scalar(
+                select(func.count(FreightCandidate.id)).where(
+                    FreightCandidate.raw_tonnage_text.is_not(None),
+                    FreightCandidate.raw_tonnage_text != "",
+                )
+            )
+            or 0
+        )
+        results.append(
+            _result(
+                "freight raw tonnage seeded",
+                raw_tonnage_freight_count >= 100 and raw_tonnage_candidate_count >= 20,
+                f"freight {raw_tonnage_freight_count} >= 100, candidate {raw_tonnage_candidate_count} >= 20",
+            )
+        )
 
         task_codes = (await session.execute(select(AnalysisJobDefinition.job_code))).scalars().all()
         results.append(

@@ -280,6 +280,7 @@ def _to_freight_response(entity, ctx: dict[str, Any] | None = None) -> FreightRe
         source_clue_id=entity.source_clue_id,
         source_candidate_id=entity.source_candidate_id,
         raw_commodity_name=entity.raw_commodity_name,
+        raw_tonnage_text=entity.raw_tonnage_text,
         raw_origin_text=entity.raw_origin_text,
         raw_destination_text=entity.raw_destination_text,
         cargo_title=entity.cargo_title,
@@ -481,6 +482,7 @@ def _to_candidate_response(entity, ctx: dict[str, Any] | None = None) -> Freight
         source_ref_no=entity.source_ref_no,
         raw_text=entity.raw_text,
         raw_commodity_name=entity.raw_commodity_name,
+        raw_tonnage_text=entity.raw_tonnage_text,
         raw_origin_text=entity.raw_origin_text,
         raw_destination_text=entity.raw_destination_text,
         cargo_title=entity.cargo_title,
@@ -747,8 +749,7 @@ class FreightNormalizationMixin:
             return {}, [], {"status": "NO_TEXT"}
         nodes = (await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None)))).scalars().all()
         aliases = (await self.db.execute(select(NodeAlias))).scalars().all()
-        cities = (await self.db.execute(select(AdminRegion).where(AdminRegion.level == 2, AdminRegion.status == 1))).scalars().all()
-        options: list[dict[str, Any]] = []
+        node_options: list[dict[str, Any]] = []
         for node in nodes:
             names = [node.name, node.short_name or ""]
             score = None
@@ -757,7 +758,7 @@ class FreightNormalizationMixin:
             elif any(name and (name in text or text in name) for name in names):
                 score = Decimal("0.86")
             if score is not None:
-                options.append(
+                node_options.append(
                     {
                         "level": "NODE",
                         "node_id": int(node.id),
@@ -779,7 +780,7 @@ class FreightNormalizationMixin:
             if score is not None:
                 node = next((item for item in nodes if item.id == alias.node_id), None)
                 if node is not None:
-                    options.append(
+                    node_options.append(
                         {
                             "level": "NODE",
                             "node_id": int(node.id),
@@ -792,6 +793,21 @@ class FreightNormalizationMixin:
                             "basis": alias.alias_name,
                         }
                     )
+        ordered = sorted(node_options, key=lambda item: Decimal(str(item["score"])), reverse=True)[:6]
+        if ordered:
+            first = ordered[0]
+            normalized = {
+                "node_id": first.get("node_id"),
+                "province_code": first.get("province_code"),
+                "city_code": first.get("city_code"),
+                "district_code": first.get("district_code"),
+                "region_id": first.get("region_id"),
+                "match_score": Decimal(str(first["score"])),
+                "match_level_code": "NODE",
+            }
+            return normalized, ordered, {"status": "MATCHED_NODE", "text": text, "top": first}
+        cities = (await self.db.execute(select(AdminRegion).where(AdminRegion.level == 2, AdminRegion.status == 1))).scalars().all()
+        city_options: list[dict[str, Any]] = []
         for city in cities:
             score = None
             if text == city.name:
@@ -799,7 +815,7 @@ class FreightNormalizationMixin:
             elif city.name in text or text in city.name:
                 score = Decimal("0.76")
             if score is not None:
-                options.append(
+                city_options.append(
                     {
                         "level": "CITY",
                         "node_id": None,
@@ -813,7 +829,7 @@ class FreightNormalizationMixin:
                         "basis": city.name,
                     }
                 )
-        ordered = sorted(options, key=lambda item: Decimal(str(item["score"])), reverse=True)[:6]
+        ordered = sorted(city_options, key=lambda item: Decimal(str(item["score"])), reverse=True)[:6]
         if not ordered:
             return {"match_level_code": "RAW"}, [{"level": "RAW", "name": text, "score": "0.0"}], {"status": "UNMATCHED", "text": text}
         first = ordered[0]
@@ -845,11 +861,14 @@ class FreightNormalizationMixin:
         origin, origin_options, origin_basis = await self._match_location(origin_text)
         destination, destination_options, destination_basis = await self._match_location(destination_text)
         confidence = _to_decimal_or_none(_first(segment, "confidence_score", "confidence")) or Decimal("0.50")
+        parsed_tonnage = _to_decimal_or_none(_first(segment, "estimated_tonnage", "quantity_ton", "tonnage"))
+        min_tonnage = _to_decimal_or_none(segment.get("min_tonnage"))
+        max_tonnage = _to_decimal_or_none(segment.get("max_tonnage"))
         completeness_score = self._completeness_score(
             commodity_id=commodity_id,
             origin_city_code=origin.get("city_code"),
             destination_city_code=destination.get("city_code"),
-            tonnage=_to_decimal_or_none(_first(segment, "estimated_tonnage", "quantity_ton", "tonnage")),
+            tonnage=parsed_tonnage or max_tonnage or min_tonnage,
             unit_price=_to_decimal_or_none(_first(segment, "unit_price", "price")),
         )
         title = str(_first(segment, "cargo_title", "title") or "").strip()
@@ -873,6 +892,7 @@ class FreightNormalizationMixin:
             "source_ref_no": _first(segment, "source_ref_no", "waybill_no", "order_no"),
             "raw_text": raw_text or None,
             "raw_commodity_name": commodity_name or None,
+            "raw_tonnage_text": _first(segment, "raw_tonnage_text", "tonnage_text", "tonnage_raw"),
             "raw_origin_text": origin_text or None,
             "raw_destination_text": destination_text or None,
             "cargo_title": title,
@@ -883,9 +903,9 @@ class FreightNormalizationMixin:
             "commodity_match_level_code": commodity_level,
             "commodity_options_json": commodity_options,
             "packaging_form_code": _first(segment, "packaging_form_code", "packaging_form"),
-            "estimated_tonnage": _to_decimal_or_none(_first(segment, "estimated_tonnage", "quantity_ton", "tonnage")),
-            "min_tonnage": _to_decimal_or_none(segment.get("min_tonnage")),
-            "max_tonnage": _to_decimal_or_none(segment.get("max_tonnage")),
+            "estimated_tonnage": parsed_tonnage,
+            "min_tonnage": min_tonnage,
+            "max_tonnage": max_tonnage,
             "unit_price": _to_decimal_or_none(_first(segment, "unit_price", "price")),
             "total_price": _to_decimal_or_none(segment.get("total_price")),
             "price_unit": _first(segment, "price_unit") or "元/吨",
@@ -1275,6 +1295,9 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         batch = await self.repo.get_by_id(batch_id)
         if batch is None:
             raise NotFoundError("FreightBatchTask", batch_id)
+        existing = await self.candidate_repo.list_by_batch(batch_id)
+        if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
+            raise ValidationError("该采集批次已有确认入库货源，不能重新解析")
         if batch.status_code == "PARSING":
             stale_seconds = await self._stale_heartbeat_seconds()
             heartbeat = batch.parse_heartbeat_at or batch.updated_at or batch.started_at
@@ -1324,6 +1347,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         if batch is None:
             raise NotFoundError("FreightBatchTask", batch_id)
         existing = await self.candidate_repo.list_by_batch(batch_id)
+        if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
+            raise ValidationError("该采集批次已有确认入库货源，不能重新解析")
         if batch.status_code == "PARSED" and existing:
             return await self.get_detail(batch_id)
         clue_ids = await self.candidate_repo.delete_unconfirmed_by_batch(batch_id)
@@ -1622,6 +1647,7 @@ class FreightCandidateService(FreightNormalizationMixin):
         keyword: str | None,
         status_code: str | None,
         source_type_code: str | None,
+        source_batch_id: int | None,
         page: int,
         page_size: int,
     ) -> PageResponse[FreightCandidateResponse]:
@@ -1629,6 +1655,7 @@ class FreightCandidateService(FreightNormalizationMixin):
             keyword=keyword,
             status_code=status_code,
             source_type_code=source_type_code,
+            source_batch_id=source_batch_id,
             page=page,
             page_size=page_size,
         )
@@ -1694,6 +1721,7 @@ class FreightCandidateService(FreightNormalizationMixin):
                 "source_clue_id": candidate.clue_id,
                 "source_candidate_id": candidate.id,
                 "raw_commodity_name": candidate.raw_commodity_name,
+                "raw_tonnage_text": candidate.raw_tonnage_text,
                 "raw_origin_text": candidate.raw_origin_text,
                 "raw_destination_text": candidate.raw_destination_text,
                 "cargo_title": candidate.cargo_title,
@@ -1832,6 +1860,7 @@ class FreightCandidateService(FreightNormalizationMixin):
             "destination_city_code",
             "destination_match_level_code",
             "raw_destination_text",
+            "raw_tonnage_text",
             "estimated_tonnage",
             "unit_price",
             "availability_status_code",
