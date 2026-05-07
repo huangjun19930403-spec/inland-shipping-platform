@@ -46,7 +46,7 @@ SOURCE_PLAN = [
 STATUS_PLAN = ["PUBLISHED", "PUBLISHED", "PUBLISHED", "MATCHING", "DRAFT", "EXPIRED"]
 TAG_PLAN = ["URGENT", "HIGH_VALUE", "FIXED_ROUTE", "LONG_TERM"]
 AI_PIPELINE_VERSION = "freight_ai_humanized_parse_v1"
-WECHAT_PROMPT_VERSION = "freight_wechat_humanized_semantic_v9"
+WECHAT_PROMPT_VERSION = "freight_wechat_humanized_semantic_v10"
 
 
 def _money(value: int | float | Decimal) -> Decimal:
@@ -581,6 +581,213 @@ async def seed_freight_samples() -> None:
                         created_at=rejected_at,
                     )
                 )
+
+        sand_commodity = next((item for item in commodities if "沙" in item.name), commodities[0])
+        special_origin = nodes[1 % len(nodes)]
+        special_destinations = [nodes[2 % len(nodes)], nodes[3 % len(nodes)]]
+        inferred_origin = nodes[4 % len(nodes)]
+        inferred_destination = nodes[5 % len(nodes)]
+        special_contact = "13855459656"
+        special_received_at = now - timedelta(hours=150)
+        special_raw_text = (
+            "寻船\n"
+            f"{special_origin.name}一{special_destinations[0].name}，{special_destinations[1].name}，{sand_commodity.name}\n"
+            f"{inferred_origin.name}一{inferred_destination.name}，要船\n"
+            f"{special_contact}"
+        )
+        special_batch = FreightBatchTask(
+            batch_no="FBT-LOCAL-9001",
+            source_type_code="WECHAT",
+            source_channel_code="WECHAT_TEXT",
+            raw_text=special_raw_text,
+            status_code="PARSED",
+            review_flow_status_code="REVIEWING",
+            clue_count=3,
+            candidate_count=3,
+            success_count=3,
+            failed_count=0,
+            creator_id=1,
+            remark="本地样例：寻船无吨位、多目的地拆分、上下文推断货品",
+            prompt_version=WECHAT_PROMPT_VERSION,
+            parse_stage_code="DONE",
+            parse_stage_name="解析完成",
+            parse_stage_message="本地拟人化 AI 样例候选已生成",
+            parse_progress_percent=100,
+            parse_heartbeat_at=special_received_at + timedelta(minutes=2),
+            ai_elapsed_seconds=75,
+            ai_pipeline_version=AI_PIPELINE_VERSION,
+            ai_semantic_map_json={
+                "pipeline_version": AI_PIPELINE_VERSION,
+                "prompt_version": WECHAT_PROMPT_VERSION,
+                "context_blocks": [
+                    {
+                        "context_block_id": "B-SEED-HUMANIZED",
+                        "route_clue_ids": [1, 2, 3],
+                        "raw_text": special_raw_text,
+                        "shared_contact_phone": special_contact,
+                        "scope_reason": "末尾手机号覆盖同一连续寻船公告块；第二条缺货品按上下文推断。",
+                        "evidence": [special_contact, special_raw_text],
+                    }
+                ],
+                "context_notes": [],
+                "warnings": ["缺货品线索已按上下文推断，需人工判断"],
+            },
+            started_at=special_received_at + timedelta(minutes=1),
+            finished_at=special_received_at + timedelta(minutes=2),
+            raw_response_json={"segments": [], "seed_case": "humanized_context_contact_multi_destination"},
+            created_at=special_received_at,
+            updated_at=special_received_at + timedelta(minutes=2),
+        )
+        session.add(special_batch)
+        await session.flush()
+
+        special_specs = [
+            {
+                "suffix": "A",
+                "index": 1,
+                "line_ref": 2,
+                "origin": special_origin,
+                "destination": special_destinations[0],
+                "commodity": sand_commodity.name,
+                "review_status": "PASS",
+                "availability": "READY",
+                "review_reason": None,
+                "review_summary": "多目的地原文已拆分，本条目的地来自原文，寻船类无吨位不阻断确认。",
+            },
+            {
+                "suffix": "B",
+                "index": 2,
+                "line_ref": 2,
+                "origin": special_origin,
+                "destination": special_destinations[1],
+                "commodity": sand_commodity.name,
+                "review_status": "PASS",
+                "availability": "READY",
+                "review_reason": None,
+                "review_summary": "多目的地原文已拆分，本条目的地来自原文，寻船类无吨位不阻断确认。",
+            },
+            {
+                "suffix": "C",
+                "index": 3,
+                "line_ref": 3,
+                "origin": inferred_origin,
+                "destination": inferred_destination,
+                "commodity": sand_commodity.name,
+                "review_status": "REVIEW_REQUIRED",
+                "availability": "UNKNOWN",
+                "review_reason": f"本条缺少货品，AI 根据同一公告块上下文推断为{sand_commodity.name}",
+                "review_summary": "货品来自上下文推断，需人工确认后入库。",
+            },
+        ]
+        for spec in special_specs:
+            clue_raw_text = (
+                f"{special_origin.name}一{special_destinations[0].name}，{special_destinations[1].name}，{sand_commodity.name}"
+                if spec["index"] in {1, 2}
+                else f"{inferred_origin.name}一{inferred_destination.name}，要船"
+            )
+            clue = FreightClue(
+                clue_no=f"FCU-LOCAL-9001-{spec['suffix']}",
+                source_type_code="WECHAT",
+                source_channel_code="WECHAT_TEXT",
+                source_batch_id=special_batch.id,
+                source_tms_inbound_id=None,
+                segment_index=spec["index"],
+                semantic_role_code="ROUTE",
+                raw_text=clue_raw_text,
+                line_refs_json=[spec["line_ref"]],
+                context_summary="末尾手机号覆盖连续公告块；寻船类无吨位。",
+                extracted_fields_json={
+                    "segment_index": spec["index"],
+                    "context_block_id": "B-SEED-HUMANIZED",
+                    "raw_text": clue_raw_text,
+                    "origin_text": spec["origin"].name,
+                    "destination_text": spec["destination"].name,
+                    "commodity_name": spec["commodity"],
+                    "contact_phone": special_contact,
+                    "ai_review_status_code": spec["review_status"],
+                    "manual_review_reason": spec["review_reason"],
+                },
+                quality_score=Decimal("0.8600"),
+                status_code="CANDIDATE_CREATED",
+                created_at=special_received_at + timedelta(minutes=2),
+                updated_at=special_received_at + timedelta(minutes=2),
+            )
+            session.add(clue)
+            await session.flush()
+            session.add(
+                FreightCandidate(
+                    candidate_no=f"FCA-LOCAL-9001-{spec['suffix']}",
+                    source_type_code="WECHAT",
+                    source_channel_code="WECHAT_TEXT",
+                    source_batch_id=special_batch.id,
+                    clue_id=clue.id,
+                    source_ref_no=f"WX-GROUP-9001-{spec['suffix']}",
+                    raw_text=clue_raw_text,
+                    raw_commodity_name=spec["commodity"],
+                    raw_origin_text=spec["origin"].name,
+                    raw_destination_text=spec["destination"].name,
+                    cargo_title=f"{spec['origin'].short_name or spec['origin'].name}至{spec['destination'].short_name or spec['destination'].name}{spec['commodity']}",
+                    cargo_description="AI 样例候选：寻船类无吨位，联系人按连续公告块继承。",
+                    commodity_standard_id=sand_commodity.id,
+                    commodity_match_name=spec["commodity"],
+                    commodity_match_score=Decimal("1.0000"),
+                    commodity_match_level_code="STANDARD",
+                    commodity_options_json=[{"level": "STANDARD", "id": sand_commodity.id, "name": spec["commodity"], "score": 1.0}],
+                    origin_node_id=spec["origin"].id,
+                    destination_node_id=spec["destination"].id,
+                    origin_node_match_score=Decimal("1.0000"),
+                    destination_node_match_score=Decimal("1.0000"),
+                    origin_match_level_code="NODE",
+                    destination_match_level_code="NODE",
+                    origin_options_json=[{"level": "NODE", "node_id": spec["origin"].id, "node_name": spec["origin"].name, "city_code": spec["origin"].city_code, "score": 1.0}],
+                    destination_options_json=[{"level": "NODE", "node_id": spec["destination"].id, "node_name": spec["destination"].name, "city_code": spec["destination"].city_code, "score": 1.0}],
+                    origin_province_code=spec["origin"].province_code,
+                    origin_city_code=spec["origin"].city_code,
+                    origin_district_code=spec["origin"].district_code,
+                    destination_province_code=spec["destination"].province_code,
+                    destination_city_code=spec["destination"].city_code,
+                    destination_district_code=spec["destination"].district_code,
+                    origin_region_id_cache=await region_id(spec["origin"]),
+                    destination_region_id_cache=await region_id(spec["destination"]),
+                    publisher_org_name=PUBLISHERS[0],
+                    contact_phone=special_contact,
+                    confidence_score=Decimal("0.8600"),
+                    completeness_score=Decimal("0.8200"),
+                    match_basis_json={
+                        "commodity": {"level": "STANDARD", "name": spec["commodity"]},
+                        "origin": {"level": "NODE", "name": spec["origin"].name},
+                        "destination": {"level": "NODE", "name": spec["destination"].name},
+                        "evidence": [clue_raw_text, special_contact],
+                    },
+                    ai_suggestion_json={"summary": spec["review_summary"], "source_kind": "微信群文本"},
+                    ai_understanding_json={
+                        "semantic_role_code": "ROUTE",
+                        "line_refs": [spec["line_ref"]],
+                        "route": {"origin_text": spec["origin"].name, "destination_text": spec["destination"].name},
+                        "commodity_name": spec["commodity"],
+                        "tonnage": {"raw_text": None, "decision": {"status_code": "PASS", "selected_text": None, "reason": "寻船类样例无吨位"}},
+                        "inherited_context": {"contact": special_contact, "evidence": [special_contact]},
+                        "evidence": [clue_raw_text, special_contact],
+                    },
+                    ai_tool_match_json={
+                        "commodity": {"basis": {"status": "MATCHED_STANDARD"}, "selected_id": sand_commodity.id},
+                        "origin": {"basis": {"status": "MATCHED_NODE"}, "selected": {"node_id": spec["origin"].id, "city_code": spec["origin"].city_code}},
+                        "destination": {"basis": {"status": "MATCHED_NODE"}, "selected": {"node_id": spec["destination"].id, "city_code": spec["destination"].city_code}},
+                    },
+                    ai_review_json={
+                        "status_code": spec["review_status"],
+                        "reason": spec["review_reason"],
+                        "checks": [] if spec["review_status"] == "PASS" else ["INFERRED_COMMODITY"],
+                        "summary": spec["review_summary"],
+                    },
+                    ai_review_status_code=spec["review_status"],
+                    availability_status_code=spec["availability"],
+                    manual_review_reason=spec["review_reason"],
+                    status_code="PENDING",
+                    created_at=special_received_at + timedelta(minutes=2),
+                    updated_at=special_received_at + timedelta(minutes=2),
+                )
+            )
 
         await session.commit()
 

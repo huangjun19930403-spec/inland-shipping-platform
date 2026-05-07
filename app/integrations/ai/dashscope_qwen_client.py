@@ -350,7 +350,7 @@ def _json_schema_hint() -> dict[str, Any]:
                 "drop_reason": None,
                 "cargo_title": "<装货地 至 卸货地 货品>",
                 "cargo_description": "<装卸、结算、备注等原文信息>",
-                "commodity_name": "<货品原文>",
+                "commodity_name": "<货品原文；若由上下文强推断，填推断货品并在 ai_review_json 标明>",
                 "origin_text": "<装货地原文>",
                 "destination_text": "<卸货地原文>",
                 "origin_match_level_code": "<AI 判断装货地是 NODE/CITY/RAW，未知填 null>",
@@ -397,13 +397,13 @@ def _clue_schema_hint() -> dict[str, Any]:
                 "context_block_id": "<该线索所属上下文块 ID，未知填 null>",
                 "semantic_role_code": "ROUTE",
                 "line_refs": ["<原文行号或行标识>"],
-                "raw_text": "<包含装货地和卸货地的单条路线线索；缺货品也要保留>",
+                "raw_text": "<包含装货地和卸货地的单条路线线索；缺货品也要保留；多目的地拆分时可重复同一原文>",
                 "origin_text": "<装货地原文，未知填 null>",
                 "destination_text": "<卸货地原文，未知填 null>",
-                "commodity_name": "<货品原文，未知填 null>",
+                "commodity_name": "<货品原文；若由上下文强推断，填推断货品并在 missing_field_codes 写 INFERRED_COMMODITY>",
                 "origin_match_level_code": "<NODE/CITY/RAW 或 null>",
                 "destination_match_level_code": "<NODE/CITY/RAW 或 null>",
-                "missing_field_codes": ["<缺货品时写 COMMODITY，缺起讫地时写 ORIGIN/DESTINATION>"],
+                "missing_field_codes": ["<缺货品时写 COMMODITY；上下文推断货品写 INFERRED_COMMODITY；缺起讫地写 ORIGIN/DESTINATION>"],
                 "context_summary": "<该线索继承了哪些公共备注、价格、联系人>",
                 "inherited_context": {
                     "price": "<继承的价格原文或 null>",
@@ -609,11 +609,18 @@ def _normalize_segment_quality(segment: dict[str, Any], raw_content: str) -> tup
         if item in _segment_core_missing(normalized)
     ]
     core_missing = _segment_core_missing(normalized)
-    if route_missing:
+    semantic_role = str(normalized.get("semantic_role_code") or "ROUTE").strip().upper()
+    if route_missing and semantic_role != "ROUTE":
         reason = f"AI 输出不是可追溯路线线索，缺少{','.join(route_missing)}"
         normalized["availability_status_code"] = "UNKNOWN"
         normalized["is_freight_candidate"] = False
         normalized["drop_reason"] = normalized.get("drop_reason") or reason
+        _append_review_reason(normalized, reason)
+        warnings.append(reason)
+    elif route_missing:
+        reason = f"路线字段不完整，需人工判断：缺少{','.join(route_missing)}"
+        normalized["availability_status_code"] = "UNKNOWN"
+        normalized["needs_strong_review"] = True
         _append_review_reason(normalized, reason)
         warnings.append(reason)
     elif "货品" in core_missing:
@@ -783,7 +790,7 @@ def _apply_context_blocks_to_segments(
 class DashScopeQwenFreightParserClient:
     """DashScope SDK freight parser."""
 
-    wechat_prompt_version = "freight_wechat_humanized_semantic_v9"
+    wechat_prompt_version = "freight_wechat_humanized_semantic_v10"
     tms_prompt_version = "freight_tms_dashscope_stream_v4"
     prompt_version = wechat_prompt_version
 
@@ -857,10 +864,12 @@ class DashScopeQwenFreightParserClient:
                     "必须由你阅读完整原文并切分货源线索；不要依赖用户或系统预切分。"
                     "输出必须分为 route_clues、context_blocks、context_notes 和 ignored_notes。"
                     "先建立语义地图：逐行判断哪些是线路、哪些是公共联系人/备注/吨位候选、哪些不是货源；每条 route_clue 写 line_refs。"
-                    "route_clues 采用召回优先：只要有装货地和卸货地，就必须保留为路线线索；缺货品时写 commodity_name=null、missing_field_codes 包含 COMMODITY。"
+                    "route_clues 采用召回优先：只要有装货地和卸货地，就必须保留为路线线索；缺货品时优先根据同一连续公告块上下文判断，能强推断则填 commodity_name 并写 missing_field_codes=['INFERRED_COMMODITY']，不能强推断才填 null 和 COMMODITY。"
+                    "同一行出现多个目的地时，必须拆成多条 route_clues：共同装货地、货品、联系人和备注保留，每个目的地单独一条；可重复同一 raw_text，但 destination_text 必须分别填写。"
                     "公告、天气、联系人、价格、结算、装卸备注等上下文行不能单独成为 route_clues，只能放入 context_notes。"
                     "公共联系人、吨位、价格、结算、装卸备注必须抽成 context_blocks；每个 block 写 route_clue_ids、证据和 scope_reason。"
-                    "末尾电话或联系人通常适用于上方同一连续公告块内所有未出现其它联系人的 route_clues；若不适用必须说明证据。"
+                    "手机号或联系人紧跟某条路线下方时，必须归属该路线；若位于一组连续路线末尾，默认覆盖该连续公告块内所有未出现其它联系人的 route_clues；若不适用必须说明证据。"
+                    "横线、省略号、空行通常只是分隔，不应自动切断手机号对紧邻上方路线的归属；若同一发布人的多组路线之间没有新联系人，末尾电话可覆盖上方连续块。"
                     "每条 route_clue 必须写 context_block_id，并在 inherited_context、context_summary 和 evidence 中说明继承内容。"
                     "一行或多行上下文可继承给多个 route_clues，但不能因此新增不存在的货源。"
                     "吨位只能作为候选上下文记录，不能因为同一公告块就默认继承给所有路线；只有语义上明确属于某条路线时，后续结构化阶段才写入该 segment。"
@@ -874,7 +883,7 @@ class DashScopeQwenFreightParserClient:
                 "content": (
                     "请读取完整微信群原文，完成货源线索切分。"
                     "如果一段内容只有联系人、价格、公告、天气、结算或装卸说明，没有装货地和卸货地，必须输出到 context_blocks/context_notes 或 ignored_notes，不能输出为 route_clues。"
-                    "如果一段内容有装货地和卸货地但缺货品，也必须输出到 route_clues，后续由业务人员补货品。"
+                    "如果一段内容有装货地和卸货地但缺货品，也必须输出到 route_clues；能从同一连续公告块强推断货品时填推断值并标记 INFERRED_COMMODITY，后续进入人工判断。"
                     f"JSON 输出结构：{json.dumps(_clue_schema_hint(), ensure_ascii=False)}\n\n"
                     "微信群原文：\n"
                     f"{raw_content}"
@@ -903,20 +912,22 @@ class DashScopeQwenFreightParserClient:
             system_hint = (
                 "你是内河航运微信群货源结构化抽取助手。只输出 JSON。"
                 "输入 freight_clues 已由 AI 从同一段原文中切分得到，context_blocks 是公共上下文块，context_notes 是补充上下文。"
-                "不得新增 freight_clues 之外的货源；每个 freight_clue 最多输出一个 segment。"
+                "不得新增 freight_clues 之外的货源；普通 freight_clue 输出一个 segment，多目的地 freight_clue 可输出多个 segment，但每个 segment 必须保留同一 line_refs/raw_text 并分别填写 destination_text。"
                 "context_blocks/context_notes 只能用于继承联系人、价格、结算、装卸备注，不能单独输出为 segment。"
-                    "每个 segment 必须保留对应 freight_clue 的 context_block_id；属于同一 context_block 的公共联系人和电话必须继承到所有 segment。"
-                    "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据原文与 clue 上下文判断。"
-                    "有装货地和卸货地但缺货品的 clue 必须输出 segment，commodity_name 填 null，availability_status_code 填 UNKNOWN，manual_review_reason 写明缺货品，不能丢弃。"
-                    "请保留 clue 中的 origin_match_level_code/destination_match_level_code；只有具体设施才标 NODE，只有城市名或城市简称标 CITY。"
-                    "吨位原文必须写 raw_tonnage_text；单点吨位填 estimated_tonnage；范围吨位填 min_tonnage 和 max_tonnage。"
-                    "运输吨位必须只归属当前 freight_clue：同一公告里出现多条线路和多个吨位范围时，每个 segment 只能选择自己这一行或明确绑定上下文里的吨位。"
-                    "如果你发现多个吨位候选无法判断归属，raw_tonnage_text 填 null，tonnage_candidates 写候选，ai_review_status_code 填 REVIEW_REQUIRED。"
-                    "50米船、拖队一条、船型、米数、条数不是吨位；写入 quantity_description/vessel_description 或 cargo_description，不得写入 raw_tonnage_text。"
-                    "1500-2000内 表示 min_tonnage=1500、max_tonnage=2000；2000左右 表示 estimated_tonnage=2000；2000--2500吨 表示 min_tonnage=2000、max_tonnage=2500。"
-                    "2-3500吨这类微信群简写通常表示 2000-3500吨，若你能从上下文确认就填 min_tonnage=2000、max_tonnage=3500；不能确认则只填 raw_tonnage_text 并写 manual_review_reason。"
-                    "每个 segment 必须给出 tonnage_decision，说明吨位是否 PASS；无法确认时写 ai_review_reason，不要为了凑字段拼接其它线路的吨位。"
-                    "非空字段必须能从原文、freight_clue、context_notes、evidence 或 inherited_context 中找到证据；没有证据必须填 null。"
+                "每个 segment 必须保留对应 freight_clue 的 context_block_id；属于同一 context_block 的公共联系人和电话必须继承到所有 segment。"
+                "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据原文与 clue 上下文判断。"
+                "有装货地和卸货地但缺货品的 clue 必须输出 segment；若上下文强相关，可填推断货品，但 ai_review_status_code 必须 REVIEW_REQUIRED，manual_review_reason 写明 AI 根据上下文推断货品，不能一键确认。"
+                "如果目的地是多个地点，必须拆成多个 segments；不要把多个目的地塞进一个 destination_text。"
+                "请保留 clue 中的 origin_match_level_code/destination_match_level_code；只有具体设施才标 NODE，只有城市名或城市简称标 CITY。"
+                "吨位原文必须写 raw_tonnage_text；单点吨位填 estimated_tonnage；范围吨位填 min_tonnage 和 max_tonnage。"
+                "运输吨位必须只归属当前 freight_clue：同一公告里出现多条线路和多个吨位范围时，每个 segment 只能选择自己这一行或明确绑定上下文里的吨位。"
+                "如果你发现多个吨位候选无法判断归属，raw_tonnage_text 填 null，tonnage_candidates 写候选，ai_review_status_code 填 REVIEW_REQUIRED。"
+                "50米船、拖队一条、船型、米数、条数不是吨位；写入 quantity_description/vessel_description 或 cargo_description，不得写入 raw_tonnage_text。"
+                "1500-2000内 表示 min_tonnage=1500、max_tonnage=2000；2000左右 表示 estimated_tonnage=2000；2000--2500吨 表示 min_tonnage=2000、max_tonnage=2500。"
+                "2-3500吨这类微信群简写通常表示 2000-3500吨，若你能从上下文确认就填 min_tonnage=2000、max_tonnage=3500；不能确认则只填 raw_tonnage_text 并写 manual_review_reason。"
+                "每个 segment 必须给出 tonnage_decision，说明吨位是否 PASS；无法确认时写 ai_review_reason，不要为了凑字段拼接其它线路的吨位。"
+                "寻船、要船、现货类公告没有吨位是常见情况；只要路线、货品、联系人和可发状态可信，不要仅因为无吨位标记 REVIEW_REQUIRED。"
+                "非空字段必须能从原文、freight_clue、context_notes、evidence 或 inherited_context 中找到证据；没有证据必须填 null。"
                 "如果某个 freight_clue 复核后不是完整货源线索，输出 is_freight_candidate=false 并写 drop_reason。"
                 "船已够、暂时不要、过几天要应标为 FULL 或 DEFERRED；滚动发、随船装缺明确装期时标为 UNKNOWN。"
                 "不得使用 JSON 结构说明中的占位值作为真实字段。"
@@ -958,10 +969,12 @@ class DashScopeQwenFreightParserClient:
                 "content": (
                     "你是内河航运微信群货源复核助手。只输出 JSON。"
                     "请复核输入 segments 的字段完整性、吨位归类、可发状态、上下文继承和证据来源。"
-                    "不得新增货源，只能修正输入 segment 的字段、清空无证据字段，或把上下文-only/空线索标记为 is_freight_candidate=false。"
+                    "不得新增原文中不存在的货源；多目的地输入可拆成多个 segments，除此之外只能修正输入 segment 的字段、清空无证据字段，或把上下文-only/空线索标记为 is_freight_candidate=false。"
                     "必须核对 context_blocks 的 route_clue_ids：公共联系人、电话、装卸备注可继承到该 block 覆盖的所有 segment。"
                     "公共吨位不能自动继承；必须根据 route_clue 原文和上下文语义逐条裁决归属，不能把多个线路的吨位范围合并到一个 segment。"
-                    "如果同一 context_block 内只有部分 segment 继承联系人，应补齐其它 segment；证据不足则全部标记需人工判断。"
+                    "如果同一 context_block 内只有部分 segment 继承联系人，应补齐其它 segment；手机号紧跟路线或位于连续公告块末尾时，优先认为覆盖该块。证据不足则标记需人工判断，但不要丢弃路线。"
+                    "缺货品但上下文能强推断时，填推断货品并标记 REVIEW_REQUIRED；不要让采集人员从空白货品开始补。"
+                    "寻船、要船、现货类公告无吨位不应单独触发 REVIEW_REQUIRED。"
                     "如果 inherited_context.price 中实际是吨位表达，应移入 raw_tonnage_text 和 estimated_tonnage/min_tonnage/max_tonnage，并清空价格字段。"
                     "复核 2-3500吨 等简写时按微信群货源吨位语境处理，不能确认时保留 raw_tonnage_text 并要求人工判断。"
                     "发现字段来自 JSON 占位示例而非原文证据时必须清空，并写 manual_review_reason。"

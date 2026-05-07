@@ -145,7 +145,8 @@ def _segment_ignore_reason(segment: dict[str, Any]) -> str | None:
     if segment.get("is_freight_candidate") is False or segment.get("drop_reason"):
         return str(segment.get("drop_reason") or "AI 判断该片段不是完整货源线索")
     missing = _segment_route_missing(segment)
-    if missing:
+    semantic_role = str(_first(segment, "semantic_role_code", "role_code") or "ROUTE").strip().upper()
+    if missing and semantic_role != "ROUTE":
         return f"AI 输出不是可追溯路线线索，缺少{','.join(missing)}"
     return None
 
@@ -162,15 +163,6 @@ def _candidate_ai_review_reason(candidate: FreightCandidate) -> str | None:
             if value not in (None, ""):
                 return str(value)
     return getattr(candidate, "manual_review_reason", None)
-
-
-def _segment_has_tonnage(segment: dict[str, Any]) -> bool:
-    if _first(segment, "raw_tonnage_text", "tonnage_text", "tonnage_raw") not in (None, ""):
-        return True
-    return any(
-        segment.get(key) not in (None, "")
-        for key in ("estimated_tonnage", "quantity_ton", "tonnage", "min_tonnage", "max_tonnage")
-    )
 
 
 def _derive_segment_ai_review(segment: dict[str, Any], *, availability_status: str, manual_review_reason: Any) -> tuple[str, str | None, list[str]]:
@@ -192,9 +184,6 @@ def _derive_segment_ai_review(segment: dict[str, Any], *, availability_status: s
     if missing:
         reason = _append_reason(reason, f"缺少{','.join(missing)}，无法直接确认")
         checks.append("CORE_FIELDS_MISSING")
-    if not _segment_has_tonnage(segment):
-        reason = _append_reason(reason, "缺少可归属本条货源的吨位")
-        checks.append("TONNAGE_MISSING")
     return (AI_REVIEW_REQUIRED, reason, checks) if reason else (AI_REVIEW_PASS, None, checks)
 
 
@@ -1176,6 +1165,7 @@ class FreightNormalizationMixin:
             "raw_text": raw_text or None,
             "route": {"origin_text": origin_text or None, "destination_text": destination_text or None},
             "commodity_name": commodity_name or None,
+            "missing_field_codes": segment.get("missing_field_codes") or segment.get("missing_fields") or [],
             "tonnage": {
                 "raw_text": raw_tonnage_text,
                 "estimated_tonnage": _compact_json_value(parsed_tonnage),
@@ -1198,6 +1188,8 @@ class FreightNormalizationMixin:
             "reason": manual_review_reason,
             "checks": ai_review_checks,
             "llm_review": segment.get("ai_review_json") or segment.get("review_json"),
+            "missing_field_codes": segment.get("missing_field_codes") or segment.get("missing_fields") or [],
+            "inference_basis": segment.get("inference_basis_json") or segment.get("inference_basis"),
             "needs_strong_review": bool(segment.get("needs_strong_review")),
         }
         return {

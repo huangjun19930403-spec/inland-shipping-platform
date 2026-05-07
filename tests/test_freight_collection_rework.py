@@ -15,7 +15,14 @@ from sqlalchemy.types import BigInteger
 
 import app.models  # noqa: F401
 from app.core.exceptions import ValidationError
-from app.integrations.ai.dashscope_qwen_client import FreightClueSplitPayloadSchema, FreightParsePayloadSchema, _apply_context_blocks_to_segments, _clue_schema_hint, _json_schema_hint
+from app.integrations.ai.dashscope_qwen_client import (
+    FreightClueSplitPayloadSchema,
+    FreightParsePayloadSchema,
+    _apply_context_blocks_to_segments,
+    _clue_schema_hint,
+    _json_schema_hint,
+    _prepare_segments,
+)
 from app.models.address import AdminRegion, Region, RegionCityRelation, TransportNode
 from app.models.base import Base
 from app.models.commodity import CommodityCategory, CommodityStandard, CommodityType
@@ -349,6 +356,30 @@ def test_wechat_split_schema_accepts_route_clues_missing_commodity() -> None:
     assert payload.freight_clues[0].missing_field_codes == ["COMMODITY"]
 
 
+def test_prepare_segments_keeps_route_semantics_even_when_route_field_unstable() -> None:
+    accepted, ignored, warnings = _prepare_segments(
+        "镇江95号——巢湖 合肥沙子",
+        [
+            {
+                "segment_index": 1,
+                "semantic_role_code": "ROUTE",
+                "raw_text": "镇江95号——巢湖 合肥沙子",
+                "origin_text": "镇江95号",
+                "destination_text": None,
+                "commodity_name": "沙子",
+                "availability_status_code": "READY",
+                "confidence_score": 0.78,
+            }
+        ],
+    )
+
+    assert len(accepted) == 1
+    assert ignored == []
+    assert accepted[0]["availability_status_code"] == "UNKNOWN"
+    assert accepted[0]["needs_strong_review"] is True
+    assert any("路线字段不完整" in item for item in warnings)
+
+
 @pytest.mark.asyncio
 async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> None:
     FakeFreightParser.segments = [_segment()]
@@ -577,9 +608,9 @@ async def test_wechat_group_notice_humanized_parse_keeps_tonnage_on_own_line(ses
             "confidence_score": 0.9,
             "evidence": [f"{origin}至{destination}{commodity}{raw_tonnage or vessel or ''}", "13562723159"],
             "tonnage_decision": {
-                "status_code": "PASS" if raw_tonnage else "REVIEW_REQUIRED",
+                "status_code": "PASS",
                 "selected_text": raw_tonnage,
-                "reason": "吨位来自本行" if raw_tonnage else "本行只有船型/拖队描述，没有吨位",
+                "reason": "吨位来自本行" if raw_tonnage else "本行只有船型/拖队描述，不应误入吨位",
             },
         }
         for index, (origin, destination, commodity, raw_tonnage, estimated, min_tonnage, max_tonnage, vessel) in enumerate(rows, start=1)
@@ -617,21 +648,135 @@ async def test_wechat_group_notice_humanized_parse_keeps_tonnage_on_own_line(ses
     assert by_route[("微山", "扬州仪征")].raw_tonnage_text == "2000-2500吨"
     assert by_route[("微山", "扬州仪征")].max_tonnage == Decimal("2500.00")
     assert by_route[("济宁", "绍兴")].raw_tonnage_text is None
-    assert by_route[("济宁", "绍兴")].ai_review_status_code == "REVIEW_REQUIRED"
-    assert by_route[("济宁", "绍兴")].availability_status_code == "UNKNOWN"
+    assert by_route[("济宁", "绍兴")].ai_review_status_code == "PASS"
+    assert by_route[("济宁", "绍兴")].availability_status_code == "READY"
     assert "50米船" in (by_route[("济宁", "绍兴")].cargo_description or "")
     assert by_route[("万丰", "丹阳")].raw_tonnage_text is None
-    assert by_route[("万丰", "丹阳")].ai_review_status_code == "REVIEW_REQUIRED"
+    assert by_route[("万丰", "丹阳")].ai_review_status_code == "PASS"
+    assert by_route[("万丰", "丹阳")].availability_status_code == "READY"
     assert "拖队一条" in (by_route[("万丰", "丹阳")].cargo_description or "")
     assert {item.contact_phone for item in detail.candidates} == {"13562723159"}
     assert all("2000-2500吨、800" not in str(item.raw_tonnage_text or "") for item in detail.candidates)
 
     bulk = await FreightCandidateService(session).bulk_confirm_batch(batch.id, operator_id=7)
+    assert bulk.confirmed_count == 18
+    assert bulk.skipped_count == 0
+
+
+@pytest.mark.asyncio
+async def test_wechat_ship_notice_humanized_parse_splits_destinations_and_infers_review_only_fields(session: AsyncSession) -> None:
+    raw_text = """寻船
+淮南平圩一泰兴江边，矸石，要船，现货，装卸快💥
+
+澎泽一一准南，装卸快，石子，石粉，大小船不限💥💥
+
+准宾中心港一一淮南凤台，蚌埠五源，沙子
+13855459656
+…………
+………………
+怀远安澜一泗洪双沟，要船
+
+镇江95号——巢湖 合肥沙子
+13855459656
+—————
+铜陵一一一蚌埠闸下，石粉，要船
+
+牛头山一一蒙城双，石粉/石子💥💥💥
+
+芜湖一一临泉，石粉石子
+铜陵一一临泉 ，石粉石粉
+牛头山—临泉  石子石粉
+
+武穴一一一蚌埠闸下，石子
+码头镇一一蚌埠闸下石子
+
+武穴——一合肥，沙石
+牛头山长久一一合肥，石子
+牛头山长久一蚌埠闸下，要船，
+
+霍邱东湖码头—涡阳港城东码头，沙子
+13855459656"""
+    route_rows = [
+        (1, "淮南平圩", "泰兴江边", "矸石", "淮南平圩一泰兴江边，矸石，要船，现货，装卸快", "装卸快；要船；现货", "PASS", None, []),
+        (2, "澎泽", "准南", "石子/石粉", "澎泽一一准南，装卸快，石子，石粉，大小船不限", "装卸快；大小船不限", "PASS", None, []),
+        (3, "准宾中心港", "淮南凤台", "沙子", "准宾中心港一一淮南凤台，蚌埠五源，沙子", None, "PASS", None, []),
+        (3, "准宾中心港", "蚌埠五源", "沙子", "准宾中心港一一淮南凤台，蚌埠五源，沙子", None, "PASS", None, ["MULTI_DESTINATION_SPLIT"]),
+        (4, "怀远安澜", "泗洪双沟", "沙子", "怀远安澜一泗洪双沟，要船", "要船；货品由同一公告块前后沙子上下文推断", "REVIEW_REQUIRED", "本条缺少货品，AI 根据同一公告块上下文推断为沙子", ["INFERRED_COMMODITY"]),
+        (5, "镇江95号", "巢湖", "沙子", "镇江95号——巢湖 合肥沙子", None, "PASS", None, []),
+        (5, "镇江95号", "合肥", "沙子", "镇江95号——巢湖 合肥沙子", None, "PASS", None, ["MULTI_DESTINATION_SPLIT"]),
+        (6, "铜陵", "蚌埠闸下", "石粉", "铜陵一一一蚌埠闸下，石粉，要船", "要船", "PASS", None, []),
+        (7, "牛头山", "蒙城双", "石粉/石子", "牛头山一一蒙城双，石粉/石子", None, "PASS", None, []),
+        (8, "芜湖", "临泉", "石粉石子", "芜湖一一临泉，石粉石子", None, "PASS", None, []),
+        (9, "铜陵", "临泉", "石粉石粉", "铜陵一一临泉 ，石粉石粉", None, "PASS", None, []),
+        (10, "牛头山", "临泉", "石子石粉", "牛头山—临泉  石子石粉", None, "PASS", None, []),
+        (11, "武穴", "蚌埠闸下", "石子", "武穴一一一蚌埠闸下，石子", None, "PASS", None, []),
+        (12, "码头镇", "蚌埠闸下", "石子", "码头镇一一蚌埠闸下石子", None, "PASS", None, []),
+        (13, "武穴", "合肥", "沙石", "武穴——一合肥，沙石", None, "PASS", None, []),
+        (14, "牛头山长久", "合肥", "石子", "牛头山长久一一合肥，石子", None, "PASS", None, []),
+        (15, "牛头山长久", "蚌埠闸下", "石子", "牛头山长久一蚌埠闸下，要船，", "要船；货品由相邻牛头山长久至合肥石子推断", "REVIEW_REQUIRED", "本条缺少货品，AI 根据相邻同起点线路推断为石子", ["INFERRED_COMMODITY"]),
+        (16, "霍邱东湖码头", "涡阳港城东码头", "沙子", "霍邱东湖码头—涡阳港城东码头，沙子", None, "PASS", None, []),
+    ]
+    FakeFreightParser.segments = [
+        {
+            "segment_index": index,
+            "semantic_role_code": "ROUTE",
+            "line_refs": [index],
+            "raw_text": raw,
+            "cargo_title": f"{origin} 至 {destination} {commodity}",
+            "cargo_description": description,
+            "commodity_name": commodity,
+            "origin_text": origin,
+            "destination_text": destination,
+            "quantity_description": description,
+            "vessel_description": "要船" if description and "要船" in description else None,
+            "contact_phone": "13855459656",
+            "availability_status_code": "READY",
+            "manual_review_reason": review_reason,
+            "ai_review_status_code": review_status,
+            "ai_review_reason": review_reason,
+            "ai_review_json": {
+                "summary": review_reason or "AI 判断路线、货品、联系人可信；无吨位不阻断",
+                "inferred_field_codes": missing_codes,
+            },
+            "missing_field_codes": missing_codes,
+            "inference_basis": {"commodity": review_reason} if review_reason else None,
+            "confidence_score": 0.88 if review_status == "PASS" else 0.72,
+            "evidence": [raw, "13855459656"],
+        }
+        for index, origin, destination, commodity, raw, description, review_status, review_reason, missing_codes in route_rows
+    ]
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text=raw_text), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+    by_route = {(item.raw_origin_text, item.raw_destination_text): item for item in detail.candidates}
+
+    assert detail.batch.status_code == "PARSED"
+    assert detail.batch.candidate_count == 18
+    assert len(detail.candidates) == 18
+    assert ("准宾中心港", "淮南凤台") in by_route
+    assert ("准宾中心港", "蚌埠五源") in by_route
+    assert by_route[("准宾中心港", "淮南凤台")].contact_phone == "13855459656"
+    assert by_route[("准宾中心港", "蚌埠五源")].contact_phone == "13855459656"
+    assert ("镇江95号", "巢湖") in by_route
+    assert ("镇江95号", "合肥") in by_route
+    assert by_route[("镇江95号", "巢湖")].contact_phone == "13855459656"
+    assert by_route[("镇江95号", "合肥")].contact_phone == "13855459656"
+    assert by_route[("怀远安澜", "泗洪双沟")].raw_commodity_name == "沙子"
+    assert by_route[("怀远安澜", "泗洪双沟")].ai_review_status_code == "REVIEW_REQUIRED"
+    assert by_route[("怀远安澜", "泗洪双沟")].availability_status_code == "UNKNOWN"
+    assert by_route[("牛头山长久", "蚌埠闸下")].raw_commodity_name == "石子"
+    assert by_route[("牛头山长久", "蚌埠闸下")].ai_review_status_code == "REVIEW_REQUIRED"
+    assert by_route[("淮南平圩", "泰兴江边")].raw_tonnage_text is None
+    assert by_route[("淮南平圩", "泰兴江边")].ai_review_status_code == "PASS"
+    assert by_route[("淮南平圩", "泰兴江边")].availability_status_code == "READY"
+
+    bulk = await FreightCandidateService(session).bulk_confirm_batch(batch.id, operator_id=7)
     assert bulk.confirmed_count == 16
     assert bulk.skipped_count == 2
     assert {item["candidate_no"] for item in bulk.skipped} == {
-        by_route[("济宁", "绍兴")].candidate_no,
-        by_route[("万丰", "丹阳")].candidate_no,
+        by_route[("怀远安澜", "泗洪双沟")].candidate_no,
+        by_route[("牛头山长久", "蚌埠闸下")].candidate_no,
     }
 
 
