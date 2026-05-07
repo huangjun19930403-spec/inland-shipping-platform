@@ -17,19 +17,19 @@ python -m scripts.seed_system_init
 export DASHSCOPE_API_KEY="你的百炼 API Key"
 export DASHSCOPE_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 export DASHSCOPE_STREAM_TIMEOUT_SECONDS="120"
-export FREIGHT_AI_SEMANTIC_MODEL="qwen-turbo"
+export FREIGHT_AI_SEMANTIC_MODEL="qwen-plus"
 export FREIGHT_AI_DETAIL_MODEL="qwen-turbo"
 export FREIGHT_AI_REVIEW_MODEL="qwen-plus"
 export FREIGHT_AI_DETAIL_BATCH_SIZE="8"
 export FREIGHT_AI_DETAIL_CONCURRENCY="2"
-export FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD="0.65"
+export FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD="0.80"
 export FREIGHT_AI_WARN_RAW_CHARS="20000"
 export FREIGHT_AI_STALE_HEARTBEAT_SECONDS="180"
 ```
 
 说明：
 
-- `FREIGHT_AI_SEMANTIC_MODEL` 用于第一轮完整原文语义地图。
+- `FREIGHT_AI_SEMANTIC_MODEL` 用于第一轮完整原文语义地图，默认质量优先。
 - `FREIGHT_AI_DETAIL_MODEL` 用于第二轮基于 `clue_temp_id` 的字段补全。
 - `FREIGHT_AI_REVIEW_MODEL` 用于第三轮风险候选强复核，高置信度 `READY` 候选不会进入该阶段。
 - 当前主链路使用 DashScope SDK 流式调用，不再以 LangChain 作为主调用入口。

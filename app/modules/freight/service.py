@@ -1742,7 +1742,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         if batch.status_code == "PARSED" and existing:
             return await self.get_detail(batch_id)
         started = datetime.utcnow()
-        timings: dict[str, int] = {}
+        timings: dict[str, Any] = {}
         timer_started = time.monotonic()
 
         def mark_timing(stage_code: str) -> None:
@@ -1780,12 +1780,15 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 semantic_warnings = validator.validate_semantic_map(semantic_map)
                 mark_timing("AI_SEMANTIC_MAP")
 
-                segments, detail_raws, detail_warnings = await client.complete_candidate_fields(
+                segments, detail_raws, detail_warnings, detail_metrics = await client.complete_candidate_fields(
                     indexed_text,
                     semantic_map,
                     runtime=runtime,
                     progress_callback=callback,
                 )
+                timings["AI_DETAIL_REQUEST_COUNT"] = len(detail_metrics)
+                timings["AI_DETAIL_EVIDENCE_LINE_COUNTS"] = [int(item.get("evidence_line_count") or 0) for item in detail_metrics]
+                timings["AI_DETAIL_BATCH_METRICS"] = detail_metrics
                 semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
                 mark_timing("AI_DETAIL")
 
@@ -1802,13 +1805,16 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 await matcher.match_segments(segments)
                 mark_timing("MATCHING")
 
-                review_results, review_raw, review_failed_count = await client.review_risky_segments(
+                review_results, review_raw, review_failed_count, review_metrics = await client.review_risky_segments(
                     indexed_text,
                     semantic_map,
                     segments,
                     runtime=runtime,
                     progress_callback=callback,
                 )
+                timings["AI_REVIEW_REQUEST_COUNT"] = len(review_metrics)
+                timings["AI_REVIEW_EVIDENCE_LINE_COUNTS"] = [int(item.get("evidence_line_count") or 0) for item in review_metrics]
+                timings["AI_REVIEW_BATCH_METRICS"] = review_metrics
                 if review_results:
                     segments = client.merge_review_results(segments, review_results)
                     semantic_warnings.extend(validator.validate_segments(semantic_map, segments))

@@ -1265,7 +1265,7 @@ SYSTEM_CONFIGS = [
     {
         "config_key": FREIGHT_AI_SEMANTIC_MODEL,
         "config_name": "货源 AI 语义地图模型",
-        "config_value": "qwen-turbo",
+        "config_value": "qwen-plus",
         "value_type_code": "STRING",
         "config_group_code": "AI",
         "config_profile_code": DASHSCOPE_CONFIG_PROFILE,
@@ -1277,7 +1277,7 @@ SYSTEM_CONFIGS = [
         "last_test_status_code": None,
         "last_test_message": None,
         "last_tested_at": None,
-        "description": "微信货源第一轮语义地图模型。第一轮必须阅读全文，只输出 line_refs/context_blocks/route_clues 等语义地图。",
+        "description": "微信货源第一轮语义地图模型。质量优先，第一轮必须阅读全文，只输出 line_refs/context_blocks/route_clues 等语义地图。",
     },
     {
         "config_key": FREIGHT_AI_DETAIL_MODEL,
@@ -1401,7 +1401,7 @@ SYSTEM_CONFIGS = [
     {
         "config_key": FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD,
         "config_name": "货源 AI 强复核置信度阈值",
-        "config_value": "0.65",
+        "config_value": "0.80",
         "value_type_code": "FLOAT",
         "config_group_code": "AI",
         "config_profile_code": DASHSCOPE_CONFIG_PROFILE,
@@ -1413,7 +1413,7 @@ SYSTEM_CONFIGS = [
         "last_test_status_code": None,
         "last_test_message": None,
         "last_tested_at": None,
-        "description": "低于该置信度的微信货源候选进入强复核。高置信度 READY 候选不进入强复核。",
+        "description": "低于该置信度的微信货源候选进入强复核；联系人/上下文作用域风险也会强制复核。高置信度 READY 且无风险候选不进入强复核。",
     },
     {
         "config_key": FREIGHT_AI_WARN_RAW_CHARS,

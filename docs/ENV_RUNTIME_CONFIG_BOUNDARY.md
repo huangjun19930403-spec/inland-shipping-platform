@@ -77,7 +77,7 @@
 - 前端地图配置通过 `GET /api/v1/system/frontend-map-config` 获取。
 - 该接口只返回 `AMAP_JS_API_KEY` 与 `AMAP_SECURITY_JS_CODE`，不返回 `ROUTE_AMAP_WEB_API_KEY`。
 - 通义千问真实密钥 `DASHSCOPE_API_KEY` 优先从 ENV 读取，seed 只保存脱敏占位。
-- 微信货源解析主链路使用 DashScope SDK 流式调用，`FREIGHT_AI_SEMANTIC_MODEL` 负责语义地图，`FREIGHT_AI_DETAIL_MODEL` 负责字段补全，`FREIGHT_AI_REVIEW_MODEL` 只复核风险候选。
+- 微信货源解析主链路使用 DashScope SDK 流式调用，`FREIGHT_AI_SEMANTIC_MODEL` 负责质量优先的语义地图，`FREIGHT_AI_DETAIL_MODEL` 负责字段补全，`FREIGHT_AI_REVIEW_MODEL` 只复核风险候选。
 
 ## 7. 后续扩展规则
 

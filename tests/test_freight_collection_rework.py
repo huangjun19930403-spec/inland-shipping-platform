@@ -16,12 +16,15 @@ from sqlalchemy.types import BigInteger
 import app.models  # noqa: F401
 from app.core.exceptions import ValidationError
 from app.integrations.ai.dashscope_qwen_client import (
+    DashScopeQwenFreightParserClient,
     FreightClueSplitPayloadSchema,
     FreightParsePayloadSchema,
+    FreightSemanticMapPayloadSchema,
     _apply_context_blocks_to_segments,
     _clue_schema_hint,
     _json_schema_hint,
     _prepare_segments,
+    _segment_needs_strong_review,
 )
 from app.models.address import AdminRegion, Region, RegionCityRelation, TransportNode
 from app.models.base import Base
@@ -234,6 +237,152 @@ def test_semantic_validator_marks_untraceable_ai_output_for_review() -> None:
     assert segments[0]["needs_strong_review"] is True
 
 
+def test_semantic_validator_marks_cross_contact_context_block_for_review() -> None:
+    raw_text = "芜湖到江阴板坯\n17356202909王\n@所有人\n上海闵行到桐乡现金\n18226924092"
+    indexed = FreightTextIndexer().index(raw_text)
+    semantic_map = {
+        "route_clues": [
+            {"clue_temp_id": "C1", "line_refs": ["L1"], "context_block_id": "B1", "raw_text": "芜湖到江阴板坯"},
+            {"clue_temp_id": "C2", "line_refs": ["L4"], "context_block_id": "B1", "raw_text": "上海闵行到桐乡现金"},
+        ],
+        "context_blocks": [
+            {
+                "context_block_id": "B1",
+                "route_clue_ids": [1, "C2"],
+                "line_refs": ["L1", "L2", "L3", "L4", "L5"],
+                "raw_text": raw_text,
+                "shared_contact_phone": "17356202909",
+            }
+        ],
+    }
+    validator = FreightSemanticValidator(indexed)
+
+    warnings = validator.validate_semantic_map(semantic_map)
+    segments = [
+        {
+            "clue_temp_id": "C2",
+            "line_refs": ["L4"],
+            "raw_text": "上海闵行到桐乡现金",
+            "origin_text": "上海闵行",
+            "destination_text": "桐乡",
+            "commodity_name": "货源",
+            "contact_phone": "17356202909",
+            "context_block_id": "B1",
+            "availability_status_code": "READY",
+            "confidence_score": 0.95,
+        }
+    ]
+    segment_warnings = validator.validate_segments(semantic_map, segments)
+
+    assert any("MULTI_CONTACT_BLOCK" in item for item in warnings)
+    assert any("CONTEXT_BLOCK_CONFLICT" in item for item in warnings)
+    assert semantic_map["context_blocks"][0]["route_clue_ids"] == ["C1", "C2"]
+    assert segments[0]["contact_phone"] is None
+    assert segments[0]["needs_strong_review"] is True
+    assert any("CONTACT_SCOPE_CONFLICT" in item for item in segment_warnings)
+    assert _segment_needs_strong_review(segments[0], confidence_threshold=0.80) is True
+
+
+def test_semantic_validator_marks_low_route_recall_when_many_lines_become_one_clue() -> None:
+    raw_text = "\n".join([f"路线{i}" for i in range(1, 8)])
+    indexed = FreightTextIndexer().index(raw_text)
+    semantic_map = {
+        "route_clues": [
+            {
+                "clue_temp_id": "C1",
+                "line_refs": ["L1", "L2", "L3", "L4", "L5", "L6", "L7"],
+                "raw_text": raw_text,
+            }
+        ]
+    }
+    warnings = FreightSemanticValidator(indexed).validate_semantic_map(semantic_map)
+
+    assert any("LOW_ROUTE_RECALL" in item for item in warnings)
+    assert semantic_map["route_clues"][0]["needs_strong_review"] is True
+
+
+def test_user_multi_contact_sample_preserves_seventeen_clues_and_contact_scopes() -> None:
+    top_routes = [
+        "芜湖……江阴    板坯3300吨，8号船到就装，装卸速度快",
+        "芜湖---镇江   2-5000 板坯   20000吨货 11号档期",
+        "码头镇—江阴 石子8-10000  石子  9号",
+        "扬州恒润-上海蘊藻浜绿安库冷卷   1270吨，现金结账",
+        "池州-----淮安     2000左右 石子 长期货",
+        "湖口------东台  水渣   2000左右",
+        "马鞍山-----东台  水渣   2000左右",
+        "常州港-------东台    水渣  2000左右",
+        "黄石----连云港  石子  2000左右",
+    ]
+    bottom_routes = [
+        "上海闵行——桐乡600-900吨 装卸快 现金",
+        "9号 上海闵行——海盐 1000吨左右 装卸快 现金",
+        "扬州恒润——上海蘊藻浜绿安库  冷卷   1270吨",
+        "黄石——连云港   石子 2000左右",
+        "10号上海苏建——常州1150吨热卷",
+        "11-12号上海苏建——常州765吨热卷",
+        "⭐️江海河——马鞍山 1100吨左右 重废",
+        "南通中天——杭州 钢材 随船装（滚动发",
+    ]
+    raw_text = "\n".join([*top_routes, "17356202909王", "@所有人", *bottom_routes, "18226924092"])
+    indexed = FreightTextIndexer().index(raw_text)
+    route_clues = [
+        {"clue_temp_id": f"C{index}", "line_refs": [f"L{index}"], "context_block_id": "B1", "raw_text": raw}
+        for index, raw in enumerate(top_routes, start=1)
+    ] + [
+        {"clue_temp_id": f"C{index}", "line_refs": [f"L{index + 2}"], "context_block_id": "B2", "raw_text": raw}
+        for index, raw in enumerate(bottom_routes, start=10)
+    ]
+    semantic_map = {
+        "route_clues": route_clues,
+        "context_blocks": [
+            {
+                "context_block_id": "B1",
+                "route_clue_ids": [f"C{index}" for index in range(1, 10)],
+                "line_refs": [*[f"L{index}" for index in range(1, 10)], "L10"],
+                "shared_contact_name": "王",
+                "shared_contact_phone": "17356202909",
+                "evidence": ["17356202909王"],
+                "scope_reason": "联系人位于上半段连续路线之后，且未跨 @所有人",
+            },
+            {
+                "context_block_id": "B2",
+                "route_clue_ids": [f"C{index}" for index in range(10, 18)],
+                "line_refs": [*[f"L{index}" for index in range(12, 20)], "L20"],
+                "shared_contact_phone": "18226924092",
+                "evidence": ["18226924092"],
+                "scope_reason": "尾部手机号覆盖 @所有人 之后最近连续路线块",
+            },
+        ],
+    }
+    warnings = FreightSemanticValidator(indexed).validate_semantic_map(semantic_map)
+    segments = [
+        {
+            "clue_temp_id": f"C{index}",
+            "line_refs": clue["line_refs"],
+            "raw_text": clue["raw_text"],
+            "origin_text": "测试起点",
+            "destination_text": "测试终点",
+            "commodity_name": "测试货品",
+            "contact_phone": "17356202909" if index <= 9 else "18226924092",
+            "context_block_id": "B1" if index <= 9 else "B2",
+            "availability_status_code": "READY",
+            "confidence_score": 0.92,
+        }
+        for index, clue in enumerate(route_clues, start=1)
+    ]
+    segment_warnings = FreightSemanticValidator(indexed).validate_segments(semantic_map, segments)
+    top_payload, _ = DashScopeQwenFreightParserClient._build_evidence_payload(indexed, semantic_map, route_clues[:9])
+    bottom_payload, _ = DashScopeQwenFreightParserClient._build_evidence_payload(indexed, semantic_map, route_clues[9:])
+
+    assert len(semantic_map["route_clues"]) == 17
+    assert not any("LOW_ROUTE_RECALL" in item for item in warnings)
+    assert not segment_warnings
+    assert {item["contact_phone"] for item in segments[:9]} == {"17356202909"}
+    assert {item["contact_phone"] for item in segments[9:]} == {"18226924092"}
+    assert "18226924092" not in json.dumps(top_payload, ensure_ascii=False)
+    assert "17356202909" not in json.dumps(bottom_payload, ensure_ascii=False)
+
+
 @pytest.mark.asyncio
 async def test_code_sequence_service_reserves_multiple_codes_in_one_call(session: AsyncSession) -> None:
     codes = await CodeSequenceService(session).next_codes("FREIGHT_CLUE_NO", 3)
@@ -288,6 +437,70 @@ def test_ai_schema_hints_do_not_contain_real_example_values() -> None:
     assert "15381664761" not in hint_text
     assert "建德" not in hint_text
     assert "平湖" not in hint_text
+
+
+def test_semantic_map_schema_ignores_formal_candidate_fields_and_uses_string_clue_refs() -> None:
+    payload = FreightSemanticMapPayloadSchema.model_validate(
+        {
+            "route_clues": [
+                {
+                    "clue_temp_id": 1,
+                    "line_refs": ["L1"],
+                    "context_block_id": "B1",
+                    "raw_text": "芜湖到江阴板坯",
+                    "route_summary": "疑似路线线索",
+                    "origin_text": "芜湖",
+                    "destination_text": "江阴",
+                    "commodity_name": "板坯",
+                    "inherited_context": {"contact": "王"},
+                    "needs_strong_review": True,
+                }
+            ],
+            "context_blocks": [{"context_block_id": "B1", "route_clue_ids": [1], "line_refs": ["L2"], "shared_contact_phone": "17356202909"}],
+        }
+    )
+
+    clue = payload.route_clues[0].model_dump(exclude_none=True)
+    assert "origin_text" not in clue
+    assert "destination_text" not in clue
+    assert "commodity_name" not in clue
+    assert "inherited_context" not in clue
+    assert "needs_strong_review" not in clue
+    assert payload.context_blocks[0].route_clue_ids == ["C1"]
+
+
+def test_detail_evidence_pack_does_not_include_full_indexed_source_text() -> None:
+    raw_text = "L0 不应出现\n芜湖到江阴板坯\n17356202909王\n@所有人\n上海闵行到桐乡现金"
+    indexed = FreightTextIndexer().index(raw_text)
+    semantic_map = {
+        "route_clues": [
+            {"clue_temp_id": "C1", "line_refs": ["L2"], "context_block_id": "B1", "raw_text": "芜湖到江阴板坯"},
+            {"clue_temp_id": "C2", "line_refs": ["L5"], "context_block_id": "B2", "raw_text": "上海闵行到桐乡现金"},
+        ],
+        "context_blocks": [
+            {"context_block_id": "B1", "route_clue_ids": ["C1"], "line_refs": ["L3"], "shared_contact_phone": "17356202909"},
+            {"context_block_id": "B2", "route_clue_ids": ["C2"], "line_refs": ["L5"], "shared_contact_phone": "18226924092"},
+        ],
+    }
+
+    evidence_payload, metrics = DashScopeQwenFreightParserClient._build_evidence_payload(
+        indexed,
+        semantic_map,
+        [semantic_map["route_clues"][0]],
+    )
+    messages = DashScopeQwenFreightParserClient._detail_messages(evidence_payload)
+    review_messages = DashScopeQwenFreightParserClient._review_messages({**evidence_payload, "segments": [_segment(line_refs=["L2"], raw_text="芜湖到江阴板坯")]})
+    prompt_text = json.dumps(messages, ensure_ascii=False)
+    review_prompt_text = json.dumps(review_messages, ensure_ascii=False)
+
+    assert "indexed_source_text" not in prompt_text
+    assert "indexed_source_text" not in review_prompt_text
+    assert indexed.indexed_text not in prompt_text
+    assert indexed.indexed_text not in review_prompt_text
+    assert "上海闵行到桐乡现金" not in prompt_text
+    assert "上海闵行到桐乡现金" not in review_prompt_text
+    assert {line["line_ref"] for line in evidence_payload["evidence_lines"]} == {"L2", "L3"}
+    assert metrics["evidence_line_count"] == 2
 
 
 def test_wechat_split_schema_separates_freight_clues_and_context_notes() -> None:
@@ -407,8 +620,9 @@ def test_wechat_split_schema_accepts_route_clues_missing_commodity() -> None:
     )
 
     assert len(payload.freight_clues) == 1
-    assert payload.freight_clues[0].commodity_name is None
-    assert payload.freight_clues[0].missing_field_codes == ["COMMODITY"]
+    clue = payload.freight_clues[0].model_dump(exclude_none=True)
+    assert "commodity_name" not in clue
+    assert "missing_field_codes" not in clue
 
 
 def test_prepare_segments_keeps_route_semantics_even_when_route_field_unstable() -> None:
@@ -642,6 +856,72 @@ async def test_wechat_parse_around_twenty_routes_records_timings_and_heartbeat(s
     assert stored.ai_semantic_map_json["pipeline_version"] == "freight_ai_semantic_pipeline_v2"
     assert "MATCHING" in stored.raw_response_json["timings"]
     assert "SAVING" in stored.raw_response_json["timings"]
+
+
+@pytest.mark.asyncio
+async def test_staged_wechat_parse_records_evidence_metrics_in_timings(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    class StagedParser:
+        wechat_prompt_version = "staged_test"
+
+        def __init__(self, runtime_config) -> None:
+            self.runtime_config = runtime_config
+
+        async def _runtime(self) -> dict:
+            return {
+                "provider": "TEST",
+                "semantic_model": "qwen-plus",
+                "detail_model": "qwen-turbo",
+                "review_model": "qwen-plus",
+                "detail_batch_size": 8,
+                "detail_concurrency": 2,
+                "review_threshold": 0.80,
+            }
+
+        async def parse_semantic_map(self, indexed_text, *, runtime=None, progress_callback=None):  # noqa: ANN001
+            return (
+                {
+                    "route_clues": [{"clue_temp_id": "C1", "line_refs": ["L1"], "context_block_id": "B1", "raw_text": "南京港装动力煤到芜湖港"}],
+                    "context_blocks": [{"context_block_id": "B1", "route_clue_ids": ["C1"], "line_refs": ["L1"], "shared_contact_phone": "13800000000"}],
+                    "warnings": [],
+                },
+                {"ok": True},
+            )
+
+        async def complete_candidate_fields(self, indexed_text, semantic_map, *, runtime=None, progress_callback=None):  # noqa: ANN001
+            return (
+                [
+                    _segment(
+                        clue_temp_id="C1",
+                        line_refs=["L1"],
+                        context_block_id="B1",
+                        raw_text="南京港装动力煤到芜湖港",
+                        evidence=["南京港装动力煤到芜湖港", "13800000000"],
+                    )
+                ],
+                [{"ok": True}],
+                [],
+                [{"batch_index": 1, "clue_count": 1, "evidence_line_count": 1}],
+            )
+
+        async def review_risky_segments(self, indexed_text, semantic_map, segments, *, runtime=None, progress_callback=None):  # noqa: ANN001
+            return [], None, 0, []
+
+        def merge_review_results(self, segments, review_results):  # noqa: ANN001
+            return segments
+
+    monkeypatch.setattr(freight_service_module, "DashScopeQwenFreightParserClient", StagedParser)
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="南京港装动力煤到芜湖港，联系13800000000"), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+    stored = await session.scalar(select(FreightBatchTask).where(FreightBatchTask.id == batch.id))
+
+    assert detail.batch.status_code == "PARSED"
+    assert stored is not None
+    timings = stored.raw_response_json["timings"]
+    assert timings["AI_DETAIL_REQUEST_COUNT"] == 1
+    assert timings["AI_DETAIL_EVIDENCE_LINE_COUNTS"] == [1]
+    assert timings["AI_REVIEW_REQUEST_COUNT"] == 0
 
 
 @pytest.mark.asyncio
