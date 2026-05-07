@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -43,6 +44,9 @@ class CommodityStandard(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     __tablename__ = "commodity_standard"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    category_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_category.id"), nullable=True, index=True
+    )
     type_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("commodity_type.id"), nullable=False, index=True
     )
@@ -51,8 +55,20 @@ class CommodityStandard(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     short_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     english_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     main_unit_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    specification: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    cargo_form_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     density_range_desc: Mapped[str | None] = mapped_column(String(128), nullable=True)
     dangerous_grade_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_bulk_cargo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_container_suitable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_hazardous: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pollution_risk_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    loading_requirement: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unloading_requirement: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storage_requirement: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="MANUAL")
+    recognition_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
@@ -67,8 +83,31 @@ class CommodityAlias(Base, TimestampMixin):
         BigInteger, ForeignKey("commodity_standard.id"), nullable=False, index=True
     )
     alias_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    alias_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="COMMON_NAME")
     source_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    match_weight: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
+    remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class CommodityAttributeDefinition(Base, TimestampMixin):
+    __tablename__ = "commodity_attribute_definition"
+    __table_args__ = (
+        UniqueConstraint("attribute_code", name="uk_commodity_attribute_definition_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    attribute_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    attribute_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    attribute_group_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    unit_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    option_dict_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    is_required_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class CommodityStandardAttribute(Base, TimestampMixin):
@@ -85,13 +124,32 @@ class CommodityStandardAttribute(Base, TimestampMixin):
     commodity_standard_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("commodity_standard.id"), nullable=False, index=True
     )
-    attribute_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    attribute_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    attribute_value_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    attribute_definition_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_attribute_definition.id"), nullable=True, index=True
+    )
+    attribute_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attribute_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    attribute_value_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attribute_value: Mapped[str | None] = mapped_column(String(512), nullable=True)
     attribute_unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     default_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
     value_range_desc: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class CommodityStandardImage(Base, TimestampMixin):
+    __tablename__ = "commodity_standard_image"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    commodity_standard_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("commodity_standard.id"), nullable=False, index=True
+    )
+    file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("storage_file.id"), nullable=False, index=True)
+    image_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    image_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
@@ -111,6 +169,8 @@ class CommodityPackagingForm(Base):
     )
     packaging_form_code: Mapped[str] = mapped_column(String(64), nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -130,6 +190,8 @@ class CommodityTransportMode(Base):
     )
     transport_mode_element_code: Mapped[str] = mapped_column(String(64), nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -146,6 +208,9 @@ class CommodityShipTypeRule(Base):
         BigInteger, ForeignKey("commodity_standard.id"), nullable=False, index=True
     )
     ship_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="ALLOWED")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     allow_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     rule_desc: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -164,6 +229,10 @@ class CommodityNodeTypeRule(Base):
         BigInteger, ForeignKey("commodity_standard.id"), nullable=False, index=True
     )
     node_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    operation_side_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rule_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="ALLOWED")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     allow_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     rule_desc: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -184,6 +253,9 @@ class CommodityHandlingModeRule(Base):
         BigInteger, ForeignKey("commodity_standard.id"), nullable=False, index=True
     )
     handling_mode_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="ALLOWED")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     allow_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     rule_desc: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

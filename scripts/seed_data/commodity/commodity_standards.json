@@ -4,104 +4,91 @@
     "type_code": "SAND_STONE_AGGREGATE",
     "name": "砂石骨料",
     "short_name": "骨料",
+    "english_name": "Sand and stone aggregate",
     "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["石子", "石料", "机制砂", "河砂"],
+    "specification": "河砂、机制砂、碎石、卵石等骨料统称",
+    "cargo_form_code": "BULK_GRANULAR",
+    "is_bulk_cargo": true,
+    "is_container_suitable": false,
+    "is_hazardous": false,
+    "pollution_risk_level_code": "MEDIUM",
     "density_range_desc": "按砂石品类和含水率维护密度/规格描述",
     "dangerous_grade_code": "NON_DANGEROUS",
+    "loading_requirement": "散货装船前确认堆场含水、粒径和扬尘控制条件。",
+    "unloading_requirement": "优先使用抓斗或皮带机，注意落料扬尘。",
+    "storage_requirement": "露天堆存需防流失、防混料。",
+    "source_type_code": "SYSTEM",
+    "recognition_priority": 95,
+    "remark": "内河高频大宗散货，作为砂石类兜底标准货品。",
+    "is_active": true,
+    "aliases": [
+      {"alias_name": "石子", "alias_type_code": "COMMON_NAME", "match_weight": 92},
+      {"alias_name": "石料", "alias_type_code": "COMMON_NAME", "match_weight": 88},
+      {"alias_name": "机制砂", "alias_type_code": "COMMON_NAME", "match_weight": 90},
+      {"alias_name": "河砂", "alias_type_code": "COMMON_NAME", "match_weight": 90},
+      {"alias_name": "黄砂", "alias_type_code": "LOCAL_NAME", "match_weight": 82}
+    ],
+    "attributes": [
+      {"attribute_code": "PARTICLE_SIZE", "attribute_value": "按合同约定维护粒径，如 5-10mm、10-20mm"},
+      {"attribute_code": "MOISTURE_REQUIREMENT", "attribute_value": "雨季需关注含水率和装卸损耗"},
+      {"attribute_code": "POLLUTION_CONTROL", "attribute_value": "装卸、堆存和转运需控制扬尘"}
+    ],
     "packaging_forms": [
-      { "code": "BULK", "is_default": true },
-      { "code": "TON_BAG", "is_default": false }
+      {"code": "BULK", "is_default": true},
+      {"code": "TON_BAG", "is_default": false}
     ],
     "transport_modes": [
-      { "code": "WATER", "is_default": true },
-      { "code": "ROAD", "is_default": false }
+      {"code": "WATER", "is_default": true},
+      {"code": "ROAD", "is_default": false}
     ],
     "ship_type_rules": [
-      { "code": "BULK_CARRIER", "allow_flag": true, "rule_desc": "散货船优先" },
-      { "code": "SELF_UNLOADING_BULK", "allow_flag": true, "rule_desc": "具备自卸能力时可选" },
-      { "code": "CHEMICAL_TANKER", "allow_flag": false, "rule_desc": "液体化学品船不适配砂石骨料" }
+      {"code": "BULK_CARRIER", "rule_type_code": "RECOMMENDED", "priority": 90, "rule_desc": "散货船优先"},
+      {"code": "SELF_UNLOADING_BULK", "rule_type_code": "RECOMMENDED", "priority": 85, "rule_desc": "具备自卸能力时可选"},
+      {"code": "CHEMICAL_TANKER", "rule_type_code": "FORBIDDEN", "priority": 10, "rule_desc": "液体化学品船不适配砂石骨料"}
     ],
     "node_type_rules": [
-      { "code": "PORT", "allow_flag": true, "rule_desc": "港口散货泊位可作业" },
-      { "code": "TERMINAL", "allow_flag": true, "rule_desc": "码头需具备散货装卸能力" }
+      {"code": "PORT", "operation_side_code": "ANY", "rule_type_code": "ALLOWED", "priority": 80, "rule_desc": "港口散货泊位可作业"},
+      {"code": "TERMINAL", "operation_side_code": "ANY", "rule_type_code": "RECOMMENDED", "priority": 85, "rule_desc": "码头需具备散货装卸能力"}
     ],
     "handling_mode_rules": [
-      { "code": "GRAB", "allow_flag": true, "rule_desc": "抓斗装卸优先" },
-      { "code": "CONVEYOR", "allow_flag": true, "rule_desc": "皮带机适用于连续作业" },
-      { "code": "PIPELINE", "allow_flag": false, "rule_desc": "管输不适用于砂石骨料" }
+      {"code": "GRAB", "rule_type_code": "RECOMMENDED", "priority": 90, "rule_desc": "抓斗装卸优先"},
+      {"code": "CONVEYOR", "rule_type_code": "ALLOWED", "priority": 70, "rule_desc": "皮带机适用于连续作业"},
+      {"code": "PIPELINE", "rule_type_code": "FORBIDDEN", "priority": 10, "rule_desc": "管输不适用于砂石骨料"}
     ]
   },
-  {
-    "code": "STD_LIMESTONE",
-    "type_code": "LIMESTONE",
-    "name": "石灰石",
-    "short_name": "石灰石",
-    "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["灰石", "石灰岩"]
-  },
-  {
-    "code": "STD_CEMENT_CLINKER",
-    "type_code": "CEMENT_CLINKER",
-    "name": "水泥熟料",
-    "short_name": "熟料",
-    "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["熟料", "水泥熟料"]
-  },
-  {
-    "code": "STD_COAL",
-    "type_code": "COAL",
-    "name": "煤炭",
-    "short_name": "煤",
-    "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["煤", "动力煤", "电煤"]
-  },
-  {
-    "code": "STD_STEEL",
-    "type_code": "STEEL",
-    "name": "钢材",
-    "short_name": "钢",
-    "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["钢", "钢铁", "型钢"]
-  },
-  {
-    "code": "STD_GRAIN",
-    "type_code": "GRAIN",
-    "name": "粮食",
-    "short_name": "粮食",
-    "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["谷物", "粮"]
-  },
-  {
-    "code": "STD_LOG_TIMBER",
-    "type_code": "LOG_TIMBER",
-    "name": "木材",
-    "short_name": "木材",
-    "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["原木", "木料"]
-  },
-  {
-    "code": "STD_IRON_ORE",
-    "type_code": "IRON_ORE",
-    "name": "铁矿石",
-    "short_name": "铁矿",
-    "main_unit_code": "TON",
-    "is_active": true,
-    "aliases": ["铁矿", "矿石"]
-  },
-  {
-    "code": "STD_CONTAINER",
-    "type_code": "CONTAINER",
-    "name": "集装箱货",
-    "short_name": "集装箱",
-    "main_unit_code": "BOX",
-    "is_active": true,
-    "aliases": ["箱货", "集装箱"]
-  }
+  {"code": "STD_RIVER_SAND", "type_code": "SAND_STONE_AGGREGATE", "name": "河砂", "short_name": "河砂", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 90, "aliases": ["黄砂", "中砂", "江砂"], "attributes": [{"attribute_code": "PARTICLE_SIZE", "attribute_value": "按合同粒径维护"}]},
+  {"code": "STD_MACHINE_SAND", "type_code": "SAND_STONE_AGGREGATE", "name": "机制砂", "short_name": "机制砂", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 88, "aliases": ["机砂", "人工砂"]},
+  {"code": "STD_CRUSHED_STONE_10_20", "type_code": "GRAVEL", "name": "碎石 10-20mm", "short_name": "碎石", "main_unit_code": "TON", "cargo_form_code": "BLOCK", "source_type_code": "SYSTEM", "recognition_priority": 84, "aliases": ["瓜子片", "10-20碎石", "石子"]},
+  {"code": "STD_LIMESTONE", "type_code": "LIMESTONE", "name": "石灰石", "short_name": "石灰石", "main_unit_code": "TON", "cargo_form_code": "BLOCK", "source_type_code": "SYSTEM", "recognition_priority": 82, "aliases": ["灰石", "石灰岩"]},
+  {"code": "STD_LIMESTONE_POWDER", "type_code": "STONE_POWDER", "name": "石灰石粉", "short_name": "石粉", "main_unit_code": "TON", "cargo_form_code": "POWDER", "source_type_code": "SYSTEM", "recognition_priority": 78, "aliases": ["矿粉", "石灰粉"], "attributes": [{"attribute_code": "POLLUTION_CONTROL", "attribute_value": "粉状货需控制扬尘和防潮"}]},
+  {"code": "STD_CEMENT_CLINKER", "type_code": "CEMENT_CLINKER", "name": "水泥熟料", "short_name": "熟料", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 80, "aliases": ["熟料", "水泥熟料"]},
+  {"code": "STD_BULK_CEMENT_PO425", "type_code": "CEMENT_RAW_MATERIAL", "name": "散装水泥 P.O42.5", "short_name": "水泥", "main_unit_code": "TON", "cargo_form_code": "POWDER", "source_type_code": "SYSTEM", "recognition_priority": 78, "aliases": ["PO42.5水泥", "散水"]},
+  {"code": "STD_FLY_ASH", "type_code": "CEMENT_RAW_MATERIAL", "name": "粉煤灰", "short_name": "粉煤灰", "main_unit_code": "TON", "cargo_form_code": "POWDER", "source_type_code": "SYSTEM", "recognition_priority": 74, "aliases": ["二级粉煤灰", "灰粉"]},
+  {"code": "STD_STEAM_COAL_5500", "type_code": "COAL", "name": "动力煤 5500 大卡", "short_name": "动力煤", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 90, "aliases": ["电煤", "5500卡煤", "煤"]},
+  {"code": "STD_STEAM_COAL_5000", "type_code": "COAL", "name": "动力煤 5000 大卡", "short_name": "动力煤", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 86, "aliases": ["5000卡煤", "热煤"]},
+  {"code": "STD_COAL", "type_code": "COAL", "name": "煤炭", "short_name": "煤", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 85, "aliases": ["煤", "动力煤", "电煤"]},
+  {"code": "STD_COKE", "type_code": "COKE", "name": "冶金焦", "short_name": "焦炭", "main_unit_code": "TON", "cargo_form_code": "BLOCK", "source_type_code": "SYSTEM", "recognition_priority": 74, "aliases": ["焦炭", "块焦"]},
+  {"code": "STD_IRON_ORE", "type_code": "IRON_ORE", "name": "铁矿石", "short_name": "铁矿", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 82, "aliases": ["铁矿", "矿石"]},
+  {"code": "STD_IRON_ORE_FINE", "type_code": "IRON_ORE", "name": "铁矿粉", "short_name": "铁矿粉", "main_unit_code": "TON", "cargo_form_code": "POWDER", "source_type_code": "SYSTEM", "recognition_priority": 80, "aliases": ["矿粉", "铁粉"]},
+  {"code": "STD_STEEL", "type_code": "STEEL", "name": "钢材", "short_name": "钢", "main_unit_code": "TON", "cargo_form_code": "ROLL", "source_type_code": "SYSTEM", "recognition_priority": 82, "aliases": ["钢", "钢铁", "型钢"]},
+  {"code": "STD_STEEL_COIL", "type_code": "STEEL", "name": "热轧卷板", "short_name": "卷板", "main_unit_code": "TON", "cargo_form_code": "ROLL", "source_type_code": "SYSTEM", "recognition_priority": 78, "aliases": ["热卷", "卷钢"]},
+  {"code": "STD_REBAR", "type_code": "STEEL", "name": "螺纹钢", "short_name": "螺纹钢", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 74, "aliases": ["盘螺", "钢筋"]},
+  {"code": "STD_SCRAP_STEEL_HEAVY", "type_code": "SCRAP_STEEL", "name": "重废钢", "short_name": "废钢", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 70, "aliases": ["重废", "废钢"]},
+  {"code": "STD_GRAIN", "type_code": "GRAIN", "name": "粮食", "short_name": "粮食", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 78, "aliases": ["谷物", "粮"]},
+  {"code": "STD_CORN_BULK", "type_code": "WHEAT_CORN", "name": "散装玉米", "short_name": "玉米", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 74, "aliases": ["玉米粒", "东北玉米"]},
+  {"code": "STD_WHEAT_BULK", "type_code": "WHEAT_CORN", "name": "散装小麦", "short_name": "小麦", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 72, "aliases": ["麦子", "普麦"]},
+  {"code": "STD_RICE_BAGGED", "type_code": "RICE", "name": "袋装大米", "short_name": "大米", "main_unit_code": "TON", "cargo_form_code": "BAGGED", "source_type_code": "SYSTEM", "recognition_priority": 66, "aliases": ["成品米", "袋米"]},
+  {"code": "STD_SOYBEAN_MEAL", "type_code": "SOYBEAN_FEED", "name": "豆粕", "short_name": "豆粕", "main_unit_code": "TON", "cargo_form_code": "BULK_GRANULAR", "source_type_code": "SYSTEM", "recognition_priority": 65, "aliases": ["饲料豆粕", "豆饼"]},
+  {"code": "STD_LOG_TIMBER", "type_code": "LOG_TIMBER", "name": "原木", "short_name": "原木", "main_unit_code": "TON", "cargo_form_code": "EQUIPMENT", "source_type_code": "SYSTEM", "recognition_priority": 68, "aliases": ["木材", "圆木"]},
+  {"code": "STD_PULP_BOARD", "type_code": "PULP", "name": "纸浆板", "short_name": "纸浆", "main_unit_code": "TON", "cargo_form_code": "BAGGED", "source_type_code": "SYSTEM", "recognition_priority": 60, "aliases": ["浆板", "木浆"]},
+  {"code": "STD_CAUSTIC_SODA", "type_code": "SALT_CHEMICAL", "name": "烧碱", "short_name": "烧碱", "main_unit_code": "TON", "cargo_form_code": "BAGGED", "is_hazardous": true, "dangerous_grade_code": "CLASS_8", "pollution_risk_level_code": "HIGH", "source_type_code": "SYSTEM", "recognition_priority": 66, "aliases": ["液碱", "片碱"]},
+  {"code": "STD_SODA_ASH", "type_code": "SALT_CHEMICAL", "name": "纯碱", "short_name": "纯碱", "main_unit_code": "TON", "cargo_form_code": "POWDER", "source_type_code": "SYSTEM", "recognition_priority": 62, "aliases": ["碳酸钠", "轻碱"]},
+  {"code": "STD_UREA", "type_code": "FERTILIZER", "name": "尿素", "short_name": "尿素", "main_unit_code": "TON", "cargo_form_code": "BAGGED", "source_type_code": "SYSTEM", "recognition_priority": 58, "aliases": ["颗粒尿素", "化肥"]},
+  {"code": "STD_METHANOL", "type_code": "CHEMICAL_RAW_MATERIAL", "name": "甲醇", "short_name": "甲醇", "main_unit_code": "TON", "cargo_form_code": "LIQUID", "is_bulk_cargo": true, "is_hazardous": true, "dangerous_grade_code": "CLASS_3", "pollution_risk_level_code": "HIGH", "source_type_code": "SYSTEM", "recognition_priority": 55, "aliases": ["工业甲醇", "醇类"]},
+  {"code": "STD_PVC_RESIN", "type_code": "CHEMICAL_PRODUCTS", "name": "PVC 树脂", "short_name": "PVC", "main_unit_code": "TON", "cargo_form_code": "POWDER", "source_type_code": "SYSTEM", "recognition_priority": 54, "aliases": ["聚氯乙烯", "PVC粉"]},
+  {"code": "STD_CONTAINER", "type_code": "CONTAINER", "name": "集装箱货", "short_name": "集装箱", "main_unit_code": "BOX", "cargo_form_code": "CONTAINERIZED", "is_bulk_cargo": false, "is_container_suitable": true, "source_type_code": "SYSTEM", "recognition_priority": 82, "aliases": ["箱货", "集装箱"]},
+  {"code": "STD_CONTAINER_GENERAL", "type_code": "CONTAINER", "name": "集装箱普货", "short_name": "箱货", "main_unit_code": "BOX", "cargo_form_code": "CONTAINERIZED", "is_bulk_cargo": false, "is_container_suitable": true, "source_type_code": "SYSTEM", "recognition_priority": 76, "aliases": ["普箱", "重箱普货"]},
+  {"code": "STD_OPEN_TOP_STEEL", "type_code": "OPEN_TOP_CONTAINER_CARGO", "name": "开顶箱钢材", "short_name": "开顶箱", "main_unit_code": "BOX", "cargo_form_code": "CONTAINERIZED", "is_bulk_cargo": false, "is_container_suitable": true, "source_type_code": "SYSTEM", "recognition_priority": 62, "aliases": ["开顶箱货", "开顶钢材"]},
+  {"code": "STD_PALLETIZED_PARTS", "type_code": "PALLETIZED_CARGO", "name": "托盘机械配件", "short_name": "托盘件", "main_unit_code": "PIECE", "cargo_form_code": "CONTAINERIZED", "is_bulk_cargo": false, "is_container_suitable": true, "source_type_code": "SYSTEM", "recognition_priority": 55, "aliases": ["托盘货", "设备配件"]},
+  {"code": "STD_PROJECT_EQUIPMENT", "type_code": "PROJECT_CARGO", "name": "工程设备", "short_name": "工程件", "main_unit_code": "PIECE", "cargo_form_code": "EQUIPMENT", "is_bulk_cargo": false, "is_container_suitable": false, "source_type_code": "SYSTEM", "recognition_priority": 52, "aliases": ["大件设备", "项目货"]}
 ]

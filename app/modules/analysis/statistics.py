@@ -314,7 +314,7 @@ class AnalysisStatisticsService:
         types = (await self.db.execute(select(CommodityType))).scalars().all()
         type_category = {row.id: row.category_id for row in types}
         commodity_type = {row.id: row.type_id for row in commodities}
-        commodity_category = {row.id: type_category.get(row.type_id) for row in commodities}
+        commodity_category = {row.id: row.category_id or type_category.get(row.type_id) for row in commodities}
         acc: dict[tuple, dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "tonnage": Decimal("0"), "amount": Decimal("0")})
         for row in freights:
             stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)

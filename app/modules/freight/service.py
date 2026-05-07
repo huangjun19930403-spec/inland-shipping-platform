@@ -931,8 +931,26 @@ class FreightNormalizationMixin:
         text = raw_name.strip()
         if not text:
             return None, None, None, [], {"status": "NO_TEXT"}
-        standards = (await self.db.execute(select(CommodityStandard).where(CommodityStandard.deleted_at.is_(None)))).scalars().all()
-        aliases = (await self.db.execute(select(CommodityAlias))).scalars().all()
+        standards = (
+            await self.db.execute(
+                select(CommodityStandard).where(
+                    CommodityStandard.deleted_at.is_(None),
+                    CommodityStandard.is_active.is_(True),
+                )
+            )
+        ).scalars().all()
+        standard_by_id = {int(item.id): item for item in standards}
+        standard_ids = list(standard_by_id)
+        aliases = []
+        if standard_ids:
+            aliases = (
+                await self.db.execute(
+                    select(CommodityAlias).where(
+                        CommodityAlias.is_enabled.is_(True),
+                        CommodityAlias.commodity_standard_id.in_(standard_ids),
+                    )
+                )
+            ).scalars().all()
         options: list[dict[str, Any]] = []
         for standard in standards:
             score = None
@@ -942,7 +960,21 @@ class FreightNormalizationMixin:
             elif text in standard.name or standard.name in text:
                 score, level = Decimal("0.82"), "STANDARD"
             if score is not None:
-                options.append({"id": int(standard.id), "name": standard.name, "score": str(score), "match_level_code": level, "basis": "standard"})
+                priority_boost = Decimal(str(max(min(standard.recognition_priority or 50, 100), 0))) / Decimal("1000")
+                score = min(score + priority_boost, Decimal("1.0"))
+                options.append(
+                    {
+                        "id": int(standard.id),
+                        "code": standard.code,
+                        "name": standard.name,
+                        "category_id": int(standard.category_id) if standard.category_id is not None else None,
+                        "type_id": int(standard.type_id) if standard.type_id is not None else None,
+                        "score": str(score),
+                        "match_level_code": level,
+                        "basis": "标准名称/简称",
+                        "matched_text": text,
+                    }
+                )
         for alias in aliases:
             score = None
             if text == alias.alias_name:
@@ -950,14 +982,24 @@ class FreightNormalizationMixin:
             elif text in alias.alias_name or alias.alias_name in text:
                 score = Decimal("0.80")
             if score is not None:
-                standard = next((item for item in standards if item.id == alias.commodity_standard_id), None)
+                standard = standard_by_id.get(int(alias.commodity_standard_id))
+                if standard is None:
+                    continue
+                weight_boost = Decimal(str(max(min(alias.match_weight or 80, 100), 0))) / Decimal("1000")
+                priority_boost = Decimal(str(max(min(standard.recognition_priority or 50, 100), 0))) / Decimal("1000")
+                score = min(score + weight_boost + priority_boost, Decimal("1.0"))
                 options.append(
                     {
                         "id": int(alias.commodity_standard_id),
-                        "name": standard.name if standard is not None else alias.alias_name,
+                        "code": standard.code,
+                        "name": standard.name,
+                        "category_id": int(standard.category_id) if standard.category_id is not None else None,
+                        "type_id": int(standard.type_id) if standard.type_id is not None else None,
                         "score": str(score),
                         "match_level_code": "ALIAS",
-                        "basis": alias.alias_name,
+                        "basis": f"启用别名:{alias.alias_name}",
+                        "alias_type_code": alias.alias_type_code,
+                        "matched_text": alias.alias_name,
                     }
                 )
         dedup: dict[int, dict[str, Any]] = {}

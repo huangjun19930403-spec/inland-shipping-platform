@@ -1,7 +1,7 @@
 """基础数据本地验证样例 seed。
 
 本脚本只补齐第一轮重构需要的真实感基础数据：业务区域、运输节点、
-节点别名/能力，以及一批可用于货源解析和分析的标准货品。
+节点别名/能力；标准货品由 seed_commodity_standards.py 统一维护。
 """
 
 from __future__ import annotations
@@ -27,17 +27,7 @@ from app.models.address import (
     TransportNodePackagingForm,
     TransportNodeProfile,
 )
-from app.models.commodity import (
-    CommodityAlias,
-    CommodityCategory,
-    CommodityHandlingModeRule,
-    CommodityNodeTypeRule,
-    CommodityPackagingForm,
-    CommodityShipTypeRule,
-    CommodityStandard,
-    CommodityTransportMode,
-    CommodityType,
-)
+from app.models.commodity import CommodityCategory, CommodityType
 
 
 REGION_SEEDS: list[dict[str, Any]] = [
@@ -141,78 +131,6 @@ NODE_SEEDS: list[dict[str, Any]] = [
     {"code": "NODE_GZ_XINSHA_PORT", "name": "广州新沙港", "short": "新沙港", "type": "PORT", "city": "广州市", "lng": "113.6104", "lat": "23.0778", "address": "广州市增城区新沙港区", "aliases": ["新沙港", "广州新沙"], "categories": ["LOADING", "UNLOADING", "TRANSFER"], "packaging": ["BULK", "CONTAINER"], "handling": ["CRANE", "GRAB"], "berths": 16, "draft": "9.80"},
     {"code": "NODE_FS_SANSHUI_PORT", "name": "佛山三水港", "short": "三水港", "type": "PORT", "city": "佛山市", "lng": "112.8793", "lat": "23.1736", "address": "佛山市三水港区", "aliases": ["三水港", "佛山三水"], "categories": ["LOADING", "UNLOADING"], "packaging": ["BULK", "GENERAL_CARGO"], "handling": ["GRAB", "CRANE"], "berths": 9, "draft": "5.60"},
     {"code": "NODE_ZQ_XINGANG_PORT", "name": "肇庆新港", "short": "肇庆新港", "type": "PORT", "city": "肇庆市", "lng": "112.5130", "lat": "23.0603", "address": "肇庆市新港作业区", "aliases": ["肇庆新港", "肇庆港"], "categories": ["LOADING", "UNLOADING"], "packaging": ["BULK", "GENERAL_CARGO"], "handling": ["GRAB", "CRANE"], "berths": 8, "draft": "5.40"},
-]
-
-
-STANDARD_SEEDS: list[tuple[str, str, str, str, list[str]]] = [
-    ("STD_RIVER_SAND", "SAND_STONE_AGGREGATE", "河砂", "河砂", ["黄砂", "中砂", "江砂"]),
-    ("STD_MACHINE_SAND", "SAND_STONE_AGGREGATE", "机制砂", "机制砂", ["机砂", "人工砂"]),
-    ("STD_CRUSHED_STONE_10_20", "GRAVEL", "碎石 10-20mm", "碎石", ["瓜子片", "10-20碎石"]),
-    ("STD_GRAVEL_AGGREGATE", "GRAVEL", "卵石骨料", "卵石", ["砾石", "水洗石"]),
-    ("STD_LIMESTONE_BLOCK", "LIMESTONE", "石灰石块", "石灰石", ["灰石", "石灰石原矿"]),
-    ("STD_LIMESTONE_POWDER", "STONE_POWDER", "石灰石粉", "石粉", ["矿粉", "石灰粉"]),
-    ("STD_CEMENT_CLINKER_BULK", "CEMENT_CLINKER", "散装水泥熟料", "熟料", ["熟料", "水泥熟料"]),
-    ("STD_BULK_CEMENT_PO425", "CEMENT_RAW_MATERIAL", "散装水泥 P.O42.5", "水泥", ["PO42.5水泥", "散水"]),
-    ("STD_FLY_ASH", "CEMENT_RAW_MATERIAL", "粉煤灰", "粉煤灰", ["二级粉煤灰", "灰粉"]),
-    ("STD_STEAM_COAL_5500", "COAL", "动力煤 5500 大卡", "动力煤", ["电煤", "5500卡煤"]),
-    ("STD_STEAM_COAL_5000", "COAL", "动力煤 5000 大卡", "动力煤", ["5000卡煤", "热煤"]),
-    ("STD_COKING_COAL", "COAL", "炼焦煤", "焦煤", ["主焦煤", "焦煤"]),
-    ("STD_COKE", "COKE", "冶金焦", "焦炭", ["焦炭", "块焦"]),
-    ("STD_IRON_ORE_FINE", "IRON_ORE", "铁矿粉", "铁矿粉", ["矿粉", "铁粉"]),
-    ("STD_IRON_ORE_LUMP", "IRON_ORE", "铁矿石块矿", "块矿", ["铁矿石", "块矿"]),
-    ("STD_STEEL_COIL", "STEEL", "热轧卷板", "卷板", ["热卷", "卷钢"]),
-    ("STD_REBAR", "STEEL", "螺纹钢", "螺纹钢", ["盘螺", "钢筋"]),
-    ("STD_STEEL_BILLET", "STEEL", "钢坯", "钢坯", ["方坯", "连铸坯"]),
-    ("STD_SCRAP_STEEL_HEAVY", "SCRAP_STEEL", "重废钢", "废钢", ["重废", "废钢"]),
-    ("STD_CORN_BULK", "WHEAT_CORN", "散装玉米", "玉米", ["玉米粒", "东北玉米"]),
-    ("STD_WHEAT_BULK", "WHEAT_CORN", "散装小麦", "小麦", ["麦子", "普麦"]),
-    ("STD_RICE_BAGGED", "RICE", "袋装大米", "大米", ["成品米", "袋米"]),
-    ("STD_SOYBEAN_MEAL", "SOYBEAN_FEED", "豆粕", "豆粕", ["饲料豆粕", "豆饼"]),
-    ("STD_LOG_TIMBER", "LOG_TIMBER", "原木", "原木", ["木材", "圆木"]),
-    ("STD_PULP_BOARD", "PULP", "纸浆板", "纸浆", ["浆板", "木浆"]),
-    ("STD_CAUSTIC_SODA", "SALT_CHEMICAL", "烧碱", "烧碱", ["液碱", "片碱"]),
-    ("STD_SODA_ASH", "SALT_CHEMICAL", "纯碱", "纯碱", ["碳酸钠", "轻碱"]),
-    ("STD_UREA", "FERTILIZER", "尿素", "尿素", ["颗粒尿素", "化肥"]),
-    ("STD_CONTAINER_GENERAL", "CONTAINER", "集装箱普货", "箱货", ["普箱", "重箱普货"]),
-    ("STD_OPEN_TOP_STEEL", "OPEN_TOP_CONTAINER_CARGO", "开顶箱钢材", "开顶箱", ["开顶箱货", "开顶钢材"]),
-    ("STD_PALLETIZED_PARTS", "PALLETIZED_CARGO", "托盘机械配件", "托盘件", ["托盘货", "设备配件"]),
-    ("STD_PROJECT_EQUIPMENT", "PROJECT_CARGO", "工程设备", "工程件", ["大件设备", "项目货"]),
-    ("STD_DRY_MORTAR_RAW", "READY_MIX_DRY_MATERIAL", "干混砂浆原料", "干混料", ["砂浆原料", "干粉砂浆料"]),
-    ("STD_DESULFUR_GYPSUM", "CEMENT_RAW_MATERIAL", "脱硫石膏", "石膏", ["电厂石膏", "石膏粉"]),
-    ("STD_SLAG_POWDER", "CEMENT_RAW_MATERIAL", "矿渣微粉", "矿渣粉", ["微粉", "矿粉微粉"]),
-    ("STD_COAL_SLIME", "COAL_PRODUCTS", "煤泥", "煤泥", ["洗煤泥", "煤泥料"]),
-    ("STD_BLUE_CARBON", "COAL_PRODUCTS", "兰炭", "兰炭", ["半焦", "兰炭粒"]),
-    ("STD_DIESEL_BULK", "REFINED_OIL", "柴油", "柴油", ["0号柴油", "轻柴油"]),
-    ("STD_GASOLINE_BULK", "REFINED_OIL", "汽油", "汽油", ["成品汽油", "车用汽油"]),
-    ("STD_NONFERROUS_CONCENTRATE", "NONFERROUS_ORE", "有色金属精矿", "有色精矿", ["铜精矿", "铅锌精矿"]),
-    ("STD_COPPER_CATHODE", "NONFERROUS_METAL", "电解铜", "电铜", ["阴极铜", "铜板"]),
-    ("STD_ALUMINUM_INGOT", "NONFERROUS_METAL", "铝锭", "铝锭", ["A00铝", "铝块"]),
-    ("STD_FERROALLOY_SILICON", "FERROALLOY", "硅铁", "硅铁", ["硅铁合金", "铁合金"]),
-    ("STD_BAGGED_FLOUR", "WHEAT_CORN", "袋装面粉", "面粉", ["小麦粉", "袋面"]),
-    ("STD_RAPESEED_MEAL", "SOYBEAN_FEED", "菜粕", "菜粕", ["菜籽粕", "饲料菜粕"]),
-    ("STD_RAPESEED", "AGRICULTURAL_PRODUCTS", "油菜籽", "菜籽", ["菜籽", "油料"]),
-    ("STD_COTTON_BALE", "COTTON", "皮棉包", "皮棉", ["棉包", "皮棉"]),
-    ("STD_PLYWOOD", "WOOD_PRODUCTS", "胶合板", "胶合板", ["板材", "木板"]),
-    ("STD_PAPER_ROLL", "PAPER_PRODUCTS", "卷筒纸", "卷纸", ["纸卷", "原纸"]),
-    ("STD_METHANOL", "CHEMICAL_RAW_MATERIAL", "甲醇", "甲醇", ["工业甲醇", "醇类"]),
-    ("STD_ETHYLENE_GLYCOL", "CHEMICAL_RAW_MATERIAL", "乙二醇", "乙二醇", ["MEG", "化纤原料"]),
-    ("STD_PVC_RESIN", "CHEMICAL_PRODUCTS", "PVC 树脂", "PVC", ["聚氯乙烯", "PVC粉"]),
-    ("STD_PP_RESIN", "CHEMICAL_PRODUCTS", "PP 粒料", "PP", ["聚丙烯", "塑料粒子"]),
-    ("STD_COMPOUND_FERTILIZER", "FERTILIZER", "复合肥", "复合肥", ["复肥", "颗粒复合肥"]),
-    ("STD_POTASH_FERTILIZER", "FERTILIZER", "钾肥", "钾肥", ["氯化钾", "钾肥料"]),
-    ("STD_INDUSTRIAL_SALT", "SALT_CHEMICAL", "工业盐", "工业盐", ["原盐", "盐化原料"]),
-    ("STD_SULFURIC_ACID", "HAZARDOUS_CHEMICAL", "硫酸", "硫酸", ["工业硫酸", "危化液体"]),
-    ("STD_CAUSTIC_SODA_LIQUID", "HAZARDOUS_CHEMICAL", "液碱", "液碱", ["液体烧碱", "氢氧化钠溶液"]),
-    ("STD_EMPTY_CONTAINER", "CONTAINER", "空集装箱", "空箱", ["空箱", "空柜"]),
-    ("STD_REEFER_CONTAINER_CARGO", "CONTAINER", "冷藏箱货", "冷藏箱", ["冷链箱", "冻品箱"]),
-    ("STD_OPEN_TOP_MACHINERY", "OPEN_TOP_CONTAINER_CARGO", "开顶箱设备", "开顶设备", ["开顶设备货", "开顶大件"]),
-    ("STD_PALLETIZED_FOOD", "PALLETIZED_CARGO", "托盘食品", "托盘食品", ["食品托盘", "快消托盘"]),
-    ("STD_UNITIZED_BUILDING_MATERIAL", "UNITIZED_GENERAL_CARGO", "单元化建材", "单元建材", ["打包建材", "成组建材"]),
-    ("STD_GENERAL_BAGGED_CARGO", "GENERAL_CARGO", "袋装件杂货", "袋装件杂", ["袋装货", "件杂袋货"]),
-    ("STD_MACHINE_TOOL", "MACHINERY_EQUIPMENT", "机床设备", "机床", ["机械设备", "加工设备"]),
-    ("STD_WIND_POWER_COMPONENT", "PROJECT_CARGO", "风电部件", "风电件", ["叶片配件", "风电设备"]),
-    ("STD_VEHICLE_PARTS", "VEHICLE_CARGO", "汽车零部件", "汽配件", ["汽配", "车辆配件"]),
-    ("STD_NEW_ENERGY_VEHICLE", "VEHICLE_CARGO", "新能源整车", "新能源车", ["整车", "电动车"]),
 ]
 
 
@@ -407,17 +325,6 @@ async def _upsert_node(session, seed: dict[str, Any], cities: dict[str, AdminReg
     await _replace_node_codes(session, row, seed)
 
 
-def _standard_rules(type_code: str) -> tuple[list[str], list[str], list[str], list[str]]:
-    bulk_types = {"SAND_STONE_AGGREGATE", "STONE_POWDER", "LIMESTONE", "CEMENT_CLINKER", "CEMENT_RAW_MATERIAL", "GRAVEL", "COAL", "COKE", "IRON_ORE", "NONFERROUS_ORE", "GRAIN", "WHEAT_CORN", "SOYBEAN_FEED"}
-    if type_code in bulk_types:
-        return ["BULK"], ["WATER"], ["BULK_CARRIER", "SELF_UNLOADING_BULK", "BARGE"], ["PORT", "TERMINAL"]
-    if type_code in {"CONTAINER", "OPEN_TOP_CONTAINER_CARGO"}:
-        return ["CONTAINER"], ["WATER", "ROAD", "RAIL"], ["CONTAINER_SHIP", "MULTIPURPOSE"], ["PORT", "INTERMODAL_HUB"]
-    if type_code in {"STEEL", "SCRAP_STEEL", "PROJECT_CARGO", "MACHINERY_EQUIPMENT"}:
-        return ["GENERAL_CARGO", "TON_BAG"], ["WATER", "ROAD"], ["GENERAL_CARGO_SHIP", "MULTIPURPOSE", "BARGE"], ["PORT", "TERMINAL"]
-    return ["BULK", "BAGGED"], ["WATER", "ROAD"], ["GENERAL_CARGO_SHIP", "MULTIPURPOSE"], ["PORT", "TERMINAL"]
-
-
 def _supplemental_node_seeds(cities: dict[str, AdminRegion]) -> list[dict[str, Any]]:
     seeds: list[dict[str, Any]] = []
     for city_name, city in sorted(cities.items(), key=lambda item: item[1].code):
@@ -464,66 +371,6 @@ def _supplemental_node_seeds(cities: dict[str, AdminRegion]) -> list[dict[str, A
     return seeds
 
 
-async def _upsert_standard(session, seed: tuple[str, str, str, str, list[str]], sort_order: int) -> None:
-    code, type_code, name, short_name, aliases = seed
-    commodity_type = await session.scalar(select(CommodityType).where(CommodityType.code == type_code))
-    if commodity_type is None:
-        return
-    row = await session.scalar(select(CommodityStandard).where(CommodityStandard.code == code))
-    payload = {
-        "type_id": commodity_type.id,
-        "code": code,
-        "name": name,
-        "short_name": short_name,
-        "english_name": None,
-        "main_unit_code": "TON",
-        "density_range_desc": None,
-        "dangerous_grade_code": None,
-        "is_active": True,
-    }
-    if row is None:
-        row = CommodityStandard(**payload)
-        session.add(row)
-    else:
-        for key, value in payload.items():
-            setattr(row, key, value)
-        row.deleted_at = None
-    row.audit_status = "APPROVED"
-    await session.flush()
-
-    await session.execute(delete(CommodityAlias).where(CommodityAlias.commodity_standard_id == row.id))
-    alias_values = []
-    for alias in [name, short_name, *aliases]:
-        if alias and alias not in alias_values:
-            alias_values.append(alias)
-    for index, alias in enumerate(alias_values):
-        session.add(
-            CommodityAlias(
-                commodity_standard_id=row.id,
-                alias_name=alias,
-                source_type_code="SYSTEM",
-                is_primary=index == 0,
-            )
-        )
-
-    packaging, transport_modes, ship_types, node_types = _standard_rules(type_code)
-    now = datetime.utcnow()
-    relation_sets = [
-        (CommodityPackagingForm, "packaging_form_code", packaging, {"is_default": True}),
-        (CommodityTransportMode, "transport_mode_element_code", transport_modes, {"is_default": True}),
-        (CommodityShipTypeRule, "ship_type_code", ship_types, {"allow_flag": True, "rule_desc": "本地验证预制规则"}),
-        (CommodityNodeTypeRule, "node_type_code", node_types, {"allow_flag": True, "rule_desc": "本地验证预制规则"}),
-        (CommodityHandlingModeRule, "handling_mode_code", ["GRAB", "CRANE", "CONVEYOR"] if "BULK" in packaging else ["CRANE"], {"allow_flag": True, "rule_desc": "本地验证预制规则"}),
-    ]
-    for model, code_field, codes, extra in relation_sets:
-        await session.execute(delete(model).where(model.commodity_standard_id == row.id))
-        for idx, relation_code in enumerate(codes):
-            payload = dict(extra)
-            if "is_default" in payload:
-                payload["is_default"] = idx == 0
-            session.add(model(commodity_standard_id=row.id, **{code_field: relation_code}, created_at=now, **payload))
-
-
 async def seed_foundation_samples() -> None:
     async with AsyncSessionLocal() as session:
         cities = await _city_map(session)
@@ -537,8 +384,6 @@ async def seed_foundation_samples() -> None:
             category.audit_status = "APPROVED"
         for commodity_type in (await session.execute(select(CommodityType))).scalars().all():
             commodity_type.audit_status = "APPROVED"
-        for index, seed in enumerate(STANDARD_SEEDS, start=1):
-            await _upsert_standard(session, seed, index)
 
         await session.commit()
 

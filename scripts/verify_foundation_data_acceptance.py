@@ -116,7 +116,7 @@ async def verify() -> list[CheckResult]:
     results.append(
         _result(
             "commodity main unit column renamed",
-            "main_unit_code" in columns and "main_unit" not in columns,
+            {"main_unit_code", "category_id", "cargo_form_code"}.issubset(columns) and "main_unit" not in columns,
             ", ".join(sorted(columns)),
         )
     )
@@ -255,6 +255,13 @@ async def verify() -> list[CheckResult]:
                             "NODE_PHOTO_TYPE",
                             "HANDLING_MODE",
                             "VALUE_TYPE",
+                            "COMMODITY_CARGO_FORM",
+                            "COMMODITY_ALIAS_TYPE",
+                            "COMMODITY_IMAGE_TYPE",
+                            "COMMODITY_RULE_TYPE",
+                            "COMMODITY_OPERATION_SIDE",
+                            "POLLUTION_RISK_LEVEL",
+                            "COMMODITY_ATTRIBUTE_GROUP",
                         ]
                     ),
                     StdDict.status == 1,
@@ -279,6 +286,13 @@ async def verify() -> list[CheckResult]:
                         ("NODE_PHOTO_TYPE", "OVERVIEW"),
                         ("HANDLING_MODE", "GRAB"),
                         ("VALUE_TYPE", "STRING"),
+                        ("COMMODITY_CARGO_FORM", "BULK_GRANULAR"),
+                        ("COMMODITY_ALIAS_TYPE", "COMMON_NAME"),
+                        ("COMMODITY_IMAGE_TYPE", "OVERVIEW"),
+                        ("COMMODITY_RULE_TYPE", "RECOMMENDED"),
+                        ("COMMODITY_OPERATION_SIDE", "LOADING"),
+                        ("POLLUTION_RISK_LEVEL", "LOW"),
+                        ("COMMODITY_ATTRIBUTE_GROUP", "PHYSICAL"),
                     ]
                 ),
                 str({key: sorted(value)[:3] for key, value in option_names.items()}),
@@ -319,7 +333,7 @@ async def verify() -> list[CheckResult]:
                     any(item.name for item in detail.node_type_rules),
                     any(item.name for item in detail.handling_mode_rules),
                     not any(
-                        attr.attribute_value_type_code and not attr.attribute_value_type_name
+                        attr.value_type_code and not attr.value_type_name
                         for attr in detail.attributes
                     ),
                 ]

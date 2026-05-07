@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.system import SysUser
 from app.modules.commodity.schemas import (
     CommodityAliasReplaceRequest,
     CommodityAttributeReplaceRequest,
@@ -15,6 +16,8 @@ from app.modules.commodity.schemas import (
     CommodityMetadataResponse,
     CommodityStandardCreateRequest,
     CommodityStandardDetailResponse,
+    CommodityStandardImageResponse,
+    CommodityStandardImageUpdateRequest,
     CommodityStandardListQuery,
     CommodityStandardResponse,
     CommodityStandardUpdateRequest,
@@ -38,12 +41,21 @@ async def list_standards(
 ):
     service = CommodityStandardService(db)
     return await service.list_standards(
-        query.category_id,
-        query.type_id,
-        query.keyword,
-        query.status,
-        query.page,
-        query.page_size,
+        category_id=query.category_id,
+        type_id=query.type_id,
+        keyword=query.keyword,
+        status=query.status,
+        main_unit_code=query.main_unit_code,
+        cargo_form_code=query.cargo_form_code,
+        is_bulk_cargo=query.is_bulk_cargo,
+        is_container_suitable=query.is_container_suitable,
+        is_hazardous=query.is_hazardous,
+        source_type_code=query.source_type_code,
+        has_alias=query.has_alias,
+        has_image=query.has_image,
+        used_by_freight=query.used_by_freight,
+        page=query.page,
+        page_size=query.page_size,
     )
 
 
@@ -149,4 +161,60 @@ async def replace_handling_mode_rules(
 ):
     service = CommodityStandardService(db)
     await service.replace_handling_mode_rules(standard_id, body)
+    return {"ok": True}
+
+
+@router.get("/standards/{standard_id}/images", response_model=list[CommodityStandardImageResponse])
+async def list_standard_images(
+    standard_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = CommodityStandardService(db)
+    return await service.list_images(standard_id)
+
+
+@router.post("/standards/{standard_id}/images", response_model=CommodityStandardImageResponse)
+async def create_standard_image(
+    standard_id: int,
+    image_type_code: str = Form(...),
+    image_name: str | None = Form(default=None),
+    description: str | None = Form(default=None),
+    is_primary: bool = Form(default=False),
+    sort_order: int = Form(default=0),
+    file: UploadFile = File(...),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CommodityStandardService(db)
+    return await service.create_image(
+        standard_id,
+        file=file,
+        image_type_code=image_type_code,
+        image_name=image_name,
+        description=description,
+        is_primary=is_primary,
+        sort_order=sort_order,
+        uploaded_by=current_user.id,
+    )
+
+
+@router.put("/standards/{standard_id}/images/{image_id}", response_model=CommodityStandardImageResponse)
+async def update_standard_image(
+    standard_id: int,
+    image_id: int,
+    body: CommodityStandardImageUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = CommodityStandardService(db)
+    return await service.update_image(standard_id, image_id, body)
+
+
+@router.delete("/standards/{standard_id}/images/{image_id}")
+async def delete_standard_image(
+    standard_id: int,
+    image_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = CommodityStandardService(db)
+    await service.delete_image(standard_id, image_id)
     return {"ok": True}
