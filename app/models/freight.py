@@ -83,6 +83,9 @@ class FreightBatchTask(Base, TimestampMixin):
     source_channel_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="WECHAT_TEXT")
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    review_flow_status_code: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True, default="REVIEWING"
+    )
     clue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

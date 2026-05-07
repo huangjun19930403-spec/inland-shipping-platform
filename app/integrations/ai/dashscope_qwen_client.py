@@ -51,6 +51,12 @@ class QwenFreightParseResult:
 class FreightClueSplitItemSchema(BaseModel):
     segment_index: int | None = None
     raw_text: str = Field(description="AI 切分出的可追溯原文片段")
+    origin_text: str | None = Field(default=None, description="路线中出现的装货地原文，未知填 null")
+    destination_text: str | None = Field(default=None, description="路线中出现的卸货地原文，未知填 null")
+    commodity_name: str | None = Field(default=None, description="线索中出现的货品原文，未知填 null")
+    origin_match_level_code: str | None = Field(default=None, description="AI 对装货地粒度的判断：NODE/CITY/RAW")
+    destination_match_level_code: str | None = Field(default=None, description="AI 对卸货地粒度的判断：NODE/CITY/RAW")
+    missing_field_codes: list[str] = Field(default_factory=list, description="缺失字段：COMMODITY/ORIGIN/DESTINATION")
     context_summary: str | None = Field(default=None, description="AI 判断需要继承的公共上下文")
     inherited_context: dict[str, Any] | None = Field(default=None, description="从 context_notes 继承的联系人、价格、备注等上下文")
     is_freight_candidate: bool = True
@@ -58,6 +64,23 @@ class FreightClueSplitItemSchema(BaseModel):
     confidence_score: float = 0.5
     evidence: list[str] = Field(default_factory=list)
     needs_strong_review: bool = False
+
+    @field_validator("origin_match_level_code", "destination_match_level_code", mode="before")
+    @classmethod
+    def _normalize_match_level(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        code = str(value).strip().upper()
+        return code if code in {"NODE", "CITY", "RAW"} else None
+
+    @field_validator("missing_field_codes", mode="before")
+    @classmethod
+    def _default_missing_codes(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
 
     @field_validator("confidence_score", mode="before")
     @classmethod
@@ -116,6 +139,7 @@ class FreightContextNoteSchema(BaseModel):
 class FreightClueSplitPayloadSchema(BaseModel):
     freight_clues: list[FreightClueSplitItemSchema] = Field(default_factory=list)
     context_notes: list[FreightContextNoteSchema] = Field(default_factory=list)
+    ignored_notes: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -124,6 +148,10 @@ class FreightClueSplitPayloadSchema(BaseModel):
         if isinstance(value, dict) and "freight_clues" not in value and "clues" in value:
             copied = dict(value)
             copied["freight_clues"] = copied.get("clues")
+            return copied
+        if isinstance(value, dict) and "freight_clues" not in value and "route_clues" in value:
+            copied = dict(value)
+            copied["freight_clues"] = copied.get("route_clues")
             return copied
         return value
 
@@ -146,6 +174,8 @@ class FreightSegmentSchema(BaseModel):
     commodity_name: str | None = None
     origin_text: str | None = None
     destination_text: str | None = None
+    origin_match_level_code: str | None = None
+    destination_match_level_code: str | None = None
     raw_tonnage_text: str | None = None
     estimated_tonnage: float | None = None
     min_tonnage: float | None = None
@@ -166,6 +196,14 @@ class FreightSegmentSchema(BaseModel):
     confidence_score: float = 0.5
     evidence: list[str] = Field(default_factory=list)
     needs_strong_review: bool = False
+
+    @field_validator("origin_match_level_code", "destination_match_level_code", mode="before")
+    @classmethod
+    def _normalize_match_level(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        code = str(value or "").strip().upper()
+        return code if code in {"NODE", "CITY", "RAW"} else None
 
     @field_validator("availability_status_code", mode="before")
     @classmethod
@@ -224,6 +262,8 @@ def _json_schema_hint() -> dict[str, Any]:
                 "commodity_name": "<货品原文>",
                 "origin_text": "<装货地原文>",
                 "destination_text": "<卸货地原文>",
+                "origin_match_level_code": "<AI 判断装货地是 NODE/CITY/RAW，未知填 null>",
+                "destination_match_level_code": "<AI 判断卸货地是 NODE/CITY/RAW，未知填 null>",
                 "raw_tonnage_text": "<吨位原文，例如 2000左右 或 1500-2000内>",
                 "estimated_tonnage": None,
                 "min_tonnage": None,
@@ -247,10 +287,16 @@ def _json_schema_hint() -> dict[str, Any]:
 
 def _clue_schema_hint() -> dict[str, Any]:
     return {
-        "freight_clues": [
+        "route_clues": [
             {
                 "segment_index": 1,
-                "raw_text": "<包含装货地、卸货地、货品主体的单条货源线索>",
+                "raw_text": "<包含装货地和卸货地的单条路线线索；缺货品也要保留>",
+                "origin_text": "<装货地原文，未知填 null>",
+                "destination_text": "<卸货地原文，未知填 null>",
+                "commodity_name": "<货品原文，未知填 null>",
+                "origin_match_level_code": "<NODE/CITY/RAW 或 null>",
+                "destination_match_level_code": "<NODE/CITY/RAW 或 null>",
+                "missing_field_codes": ["<缺货品时写 COMMODITY，缺起讫地时写 ORIGIN/DESTINATION>"],
                 "context_summary": "<该线索继承了哪些公共备注、价格、联系人>",
                 "inherited_context": {
                     "price": "<继承的价格原文或 null>",
@@ -276,7 +322,14 @@ def _clue_schema_hint() -> dict[str, Any]:
                 "confidence_score": 0.86,
             }
         ],
-        "warnings": ["不确定是否为货源的内容不要输出为 clue"],
+        "ignored_notes": [
+            {
+                "note_index": 1,
+                "raw_text": "<公告标题、问候语或完全不能形成路线的片段>",
+                "drop_reason": "<忽略原因>",
+            }
+        ],
+        "warnings": ["有起讫地但缺货品的路线必须进入 route_clues，并写 missing_field_codes"],
     }
 
 
@@ -422,12 +475,23 @@ def _normalize_segment_quality(segment: dict[str, Any], raw_content: str) -> tup
     if normalized.get("is_freight_candidate") is None:
         normalized["is_freight_candidate"] = True
     explicit_drop = normalized.get("is_freight_candidate") is False or bool(normalized.get("drop_reason"))
-    missing = _segment_core_missing(normalized)
-    if missing:
-        reason = f"AI 输出不是完整货源线索，缺少{','.join(missing)}"
+    route_missing = [
+        item
+        for item in ("装货地", "卸货地")
+        if item in _segment_core_missing(normalized)
+    ]
+    core_missing = _segment_core_missing(normalized)
+    if route_missing:
+        reason = f"AI 输出不是可追溯路线线索，缺少{','.join(route_missing)}"
         normalized["availability_status_code"] = "UNKNOWN"
         normalized["is_freight_candidate"] = False
         normalized["drop_reason"] = normalized.get("drop_reason") or reason
+        _append_review_reason(normalized, reason)
+        warnings.append(reason)
+    elif "货品" in core_missing:
+        reason = "缺少货品，需业务人员补充后确认"
+        normalized["availability_status_code"] = "UNKNOWN"
+        normalized["needs_strong_review"] = True
         _append_review_reason(normalized, reason)
         warnings.append(reason)
     elif str(normalized.get("availability_status_code") or "").upper() == "READY":
@@ -480,7 +544,7 @@ def _prepare_segments(raw_content: str, segments: list[dict[str, Any]]) -> tuple
 class DashScopeQwenFreightParserClient:
     """DashScope SDK freight parser."""
 
-    wechat_prompt_version = "freight_wechat_dashscope_stream_v6"
+    wechat_prompt_version = "freight_wechat_dashscope_stream_v7"
     tms_prompt_version = "freight_tms_dashscope_stream_v4"
     prompt_version = wechat_prompt_version
 
@@ -552,11 +616,12 @@ class DashScopeQwenFreightParserClient:
                 "content": (
                     "你是内河航运微信群货源线索切分助手。只输出 JSON。"
                     "必须由你阅读完整原文并切分货源线索；不要依赖用户或系统预切分。"
-                    "输出必须分为 freight_clues 和 context_notes。"
-                    "freight_clues 只能包含业务上可独立追溯的货源线索，必须有装货地、卸货地、货品主体。"
-                    "公告、天气、联系人、价格、结算、装卸备注等上下文行不能单独成为 freight_clues，只能放入 context_notes。"
+                    "输出必须分为 route_clues、context_notes 和 ignored_notes。"
+                    "route_clues 采用召回优先：只要有装货地和卸货地，就必须保留为路线线索；缺货品时写 commodity_name=null、missing_field_codes 包含 COMMODITY。"
+                    "公告、天气、联系人、价格、结算、装卸备注等上下文行不能单独成为 route_clues，只能放入 context_notes。"
                     "公共联系人、吨位、价格、结算、装卸备注由你判断继承范围，并写入 inherited_context、context_summary 和 evidence。"
-                    "一行或多行上下文可继承给多个 freight_clues，但不能因此新增不存在的货源。"
+                    "一行或多行上下文可继承给多个 route_clues，但不能因此新增不存在的货源。"
+                    "请判断装卸地粒度：明确港口、码头、闸口、厂矿、装卸点等具体设施才是 NODE；只有城市名或城市简称时是 CITY；无法判断是 RAW。"
                     "微信群货源里靠近路线和货品的 1500-2000内、2000左右、7500左右、2-3500吨通常是吨位，不是价格；只有出现元、运费、价格、现金等价格语义时才按价格处理。"
                     "不得使用 JSON 结构说明中的占位值作为真实字段。"
                 ),
@@ -565,7 +630,8 @@ class DashScopeQwenFreightParserClient:
                 "role": "user",
                 "content": (
                     "请读取完整微信群原文，完成货源线索切分。"
-                    "如果一段内容只有联系人、价格、公告、天气、结算或装卸说明，没有装货地、卸货地、货品主体，必须输出到 context_notes，不能输出为 freight_clues。"
+                    "如果一段内容只有联系人、价格、公告、天气、结算或装卸说明，没有装货地和卸货地，必须输出到 context_notes 或 ignored_notes，不能输出为 route_clues。"
+                    "如果一段内容有装货地和卸货地但缺货品，也必须输出到 route_clues，后续由业务人员补货品。"
                     f"JSON 输出结构：{json.dumps(_clue_schema_hint(), ensure_ascii=False)}\n\n"
                     "微信群原文：\n"
                     f"{raw_content}"
@@ -596,6 +662,8 @@ class DashScopeQwenFreightParserClient:
                 "不得新增 freight_clues 之外的货源；每个 freight_clue 最多输出一个 segment。"
                 "context_notes 只能用于继承联系人、价格、结算、装卸备注，不能单独输出为 segment。"
                     "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据原文与 clue 上下文判断。"
+                    "有装货地和卸货地但缺货品的 clue 必须输出 segment，commodity_name 填 null，availability_status_code 填 UNKNOWN，manual_review_reason 写明缺货品，不能丢弃。"
+                    "请保留 clue 中的 origin_match_level_code/destination_match_level_code；只有具体设施才标 NODE，只有城市名或城市简称标 CITY。"
                     "吨位原文必须写 raw_tonnage_text；单点吨位填 estimated_tonnage；范围吨位填 min_tonnage 和 max_tonnage。"
                     "1500-2000内 表示 min_tonnage=1500、max_tonnage=2000；2000左右 表示 estimated_tonnage=2000；2000--2500吨 表示 min_tonnage=2000、max_tonnage=2500。"
                     "2-3500吨这类微信群简写通常表示 2000-3500吨，若你能从上下文确认就填 min_tonnage=2000、max_tonnage=3500；不能确认则只填 raw_tonnage_text 并写 manual_review_reason。"

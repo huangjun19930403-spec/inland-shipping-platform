@@ -325,6 +325,11 @@ async def seed_freight_samples() -> None:
                     source_channel_code=source_channel,
                     raw_text=raw_text,
                     status_code="PARSED",
+                    review_flow_status_code="COMPLETED"
+                    if idx <= 12 or idx % 7 == 0
+                    else "QUEUED_FOR_REVIEW"
+                    if idx % 5 == 0
+                    else "REVIEWING",
                     clue_count=1,
                     candidate_count=1,
                     success_count=1,

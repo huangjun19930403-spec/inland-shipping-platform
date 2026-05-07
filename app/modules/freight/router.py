@@ -20,6 +20,7 @@ from app.modules.freight.schemas import (
     FreightCandidateRejectRequest,
     FreightCandidateResponse,
     FreightCandidateUpdateRequest,
+    FreightBatchHandoffResponse,
     FreightContactReplaceRequest,
     FreightContactResponse,
     FreightDetailResponse,
@@ -104,6 +105,16 @@ async def bulk_confirm_batch_candidates(
 ):
     service = FreightCandidateService(db)
     return await service.bulk_confirm_batch(batch_id, operator_id=getattr(current_user, "id", None))
+
+
+@router.post("/batches/{batch_id}/handoff-review", response_model=FreightBatchHandoffResponse)
+async def handoff_batch_review(
+    batch_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightBatchTaskService(db)
+    return await service.handoff_review(batch_id, operator_id=getattr(current_user, "id", None))
 
 
 @router.get("/tms-inbounds", response_model=PageResponse[FreightTmsInboundResponse])

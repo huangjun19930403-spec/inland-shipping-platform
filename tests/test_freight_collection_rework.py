@@ -257,6 +257,33 @@ def test_wechat_split_schema_separates_freight_clues_and_context_notes() -> None
     assert payload.context_notes[0].context_type_code == "CONTACT"
 
 
+def test_wechat_split_schema_accepts_route_clues_missing_commodity() -> None:
+    payload = FreightClueSplitPayloadSchema.model_validate(
+        {
+            "route_clues": [
+                {
+                    "segment_index": 1,
+                    "raw_text": "怀远安澜一泗洪双沟，要船",
+                    "origin_text": "怀远安澜",
+                    "destination_text": "泗洪双沟",
+                    "commodity_name": None,
+                    "missing_field_codes": ["COMMODITY"],
+                    "origin_match_level_code": "RAW",
+                    "destination_match_level_code": "RAW",
+                    "is_freight_candidate": True,
+                    "evidence": ["怀远安澜一泗洪双沟"],
+                }
+            ],
+            "context_notes": [],
+            "ignored_notes": [{"raw_text": "寻船", "drop_reason": "公告标题"}],
+        }
+    )
+
+    assert len(payload.freight_clues) == 1
+    assert payload.freight_clues[0].commodity_name is None
+    assert payload.freight_clues[0].missing_field_codes == ["COMMODITY"]
+
+
 @pytest.mark.asyncio
 async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> None:
     FakeFreightParser.segments = [_segment()]
@@ -280,6 +307,36 @@ async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> 
     assert candidate.destination_node_name == "芜湖港"
     assert candidate.commodity_standard_name == "动力煤"
     assert candidate.availability_status_code == "READY"
+
+
+@pytest.mark.asyncio
+async def test_wechat_parse_keeps_route_clue_missing_commodity_for_manual_completion(session: AsyncSession) -> None:
+    FakeFreightParser.segments = [
+        {
+            "segment_index": 1,
+            "raw_text": "怀远安澜一泗洪双沟，要船",
+            "cargo_title": "怀远安澜 至 泗洪双沟 待补货品",
+            "commodity_name": None,
+            "origin_text": "怀远安澜",
+            "destination_text": "泗洪双沟",
+            "availability_status_code": "READY",
+            "confidence_score": 0.72,
+            "evidence": ["怀远安澜一泗洪双沟"],
+        }
+    ]
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="寻船\n怀远安澜一泗洪双沟，要船"), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+
+    assert detail.batch.status_code == "PARSED"
+    assert detail.batch.candidate_count == 1
+    candidate = detail.candidates[0]
+    assert candidate.raw_origin_text == "怀远安澜"
+    assert candidate.raw_destination_text == "泗洪双沟"
+    assert candidate.raw_commodity_name is None
+    assert candidate.availability_status_code == "UNKNOWN"
+    assert "缺少货品" in (candidate.manual_review_reason or "")
 
 
 @pytest.mark.asyncio
@@ -674,6 +731,52 @@ async def test_candidate_list_filters_by_source_batch_id(session: AsyncSession) 
 
 
 @pytest.mark.asyncio
+async def test_batch_detail_reports_parse_progress_for_reentry(session: AsyncSession) -> None:
+    batch = FreightBatchTask(
+        batch_no="FBT-PARSING",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        raw_text="解析中的原文",
+        status_code="PARSING",
+        parse_stage_code="AI_EXTRACT",
+        parse_stage_name="AI 抽取字段",
+        parse_stage_message="AI 正在抽取字段",
+        parse_progress_percent=55,
+        parse_heartbeat_at=datetime.utcnow(),
+        ai_elapsed_seconds=12,
+    )
+    session.add(batch)
+    await session.commit()
+
+    detail = await FreightBatchTaskService(session).get_detail(batch.id)
+
+    assert detail.batch.status_code == "PARSING"
+    assert detail.batch.parse_is_stale is False
+    assert detail.batch.next_action_code == "VIEW_PARSE_PROGRESS"
+    assert detail.batch.parse_stage_name == "AI 抽取字段"
+
+
+@pytest.mark.asyncio
+async def test_batch_handoff_review_blocks_reparse_and_keeps_pending_candidates(session: AsyncSession) -> None:
+    FakeFreightParser.segments = [_segment()]
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="南京港装动力煤到芜湖港"), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+    assert detail.batch.pending_count == 1
+
+    handoff = await service.handoff_review(batch.id, operator_id=7)
+    detail = await service.get_detail(batch.id)
+
+    assert handoff.handoff_count == 1
+    assert detail.batch.review_flow_status_code == "QUEUED_FOR_REVIEW"
+    assert detail.batch.next_action_code == "OPEN_PENDING_QUEUE"
+    assert detail.candidates[0].status_code == "PENDING"
+    with pytest.raises(ValidationError, match="已移交待确认"):
+        await service.parse(batch.id, requested_by=7)
+
+
+@pytest.mark.asyncio
 async def test_location_matching_prefers_node_before_city(session: AsyncSession) -> None:
     city = await session.scalar(select(AdminRegion).where(AdminRegion.code == "320100"))
     assert city is not None
@@ -699,6 +802,35 @@ async def test_location_matching_prefers_node_before_city(session: AsyncSession)
     assert normalized["city_code"] == "320100"
     assert options[0]["level"] == "NODE"
     assert basis["status"] == "MATCHED_NODE"
+
+
+@pytest.mark.asyncio
+async def test_location_matching_city_short_name_beats_weak_node_contains(session: AsyncSession) -> None:
+    city = AdminRegion(code="340500", name="马鞍山市", short_name="马鞍山", level=2, province_code="340000", city_code="340500", status=1)
+    session.add(city)
+    await session.flush()
+    node = TransportNode(
+        code="ND-MAS-CIHU",
+        name="马鞍山慈湖港",
+        short_name="慈湖港",
+        node_type_code="PORT",
+        province_code="340000",
+        city_code="340500",
+        city_region_id=city.id,
+        status=1,
+        lifecycle_status_code="ACTIVE",
+        audit_status="APPROVED",
+    )
+    session.add(node)
+    await session.commit()
+
+    normalized, options, basis = await FreightCandidateService(session)._match_location("马鞍山", "CITY")
+
+    assert normalized["match_level_code"] == "CITY"
+    assert normalized["city_code"] == "340500"
+    assert normalized.get("node_id") is None
+    assert options[0]["level"] == "CITY"
+    assert basis["status"] == "MATCHED_CITY"
 
 
 @pytest.mark.asyncio

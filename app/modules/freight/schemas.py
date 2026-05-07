@@ -310,6 +310,8 @@ class FreightBatchResponse(BaseModel):
     raw_text: str
     status_code: str
     status_name: str | None = None
+    review_flow_status_code: str = "REVIEWING"
+    review_flow_status_name: str | None = None
     clue_count: int
     candidate_count: int
     success_count: int
@@ -330,6 +332,10 @@ class FreightBatchResponse(BaseModel):
     parse_stage_message: str | None = None
     parse_progress_percent: int = 0
     parse_heartbeat_at: datetime | None = None
+    parse_is_stale: bool = False
+    parse_heartbeat_age_seconds: int | None = None
+    next_action_code: str | None = None
+    next_action_name: str | None = None
     ai_elapsed_seconds: int = 0
     started_at: datetime | None
     finished_at: datetime | None
@@ -539,6 +545,13 @@ class FreightCandidateBulkConfirmResponse(BaseModel):
     skipped_count: int
     freight_ids: list[int] = Field(default_factory=list)
     skipped: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FreightBatchHandoffResponse(BaseModel):
+    batch_id: int
+    handoff_count: int
+    review_flow_status_code: str
+    message: str
 
 
 class FreightNormalizationSuggestionListQuery(BaseModel):

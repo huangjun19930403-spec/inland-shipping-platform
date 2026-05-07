@@ -34,6 +34,7 @@ from app.modules.freight.repository import (
 from app.modules.freight.schemas import (
     FreightAttachmentResponse,
     FreightBatchDetailResponse,
+    FreightBatchHandoffResponse,
     FreightBatchResponse,
     FreightCandidateBulkConfirmResponse,
     FreightCandidateResponse,
@@ -60,6 +61,7 @@ DISPLAY_DICT_CODES = [
     "AUDIT_STATUS",
     "PACKAGING_FORM",
     "FREIGHT_BATCH_STATUS",
+    "FREIGHT_BATCH_REVIEW_FLOW",
     "FREIGHT_TMS_INBOUND_STATUS",
     "FREIGHT_CLUE_STATUS",
     "FREIGHT_CANDIDATE_STATUS",
@@ -114,6 +116,15 @@ def _segment_core_missing(segment: dict[str, Any]) -> list[str]:
     return missing
 
 
+def _segment_route_missing(segment: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if not str(_first(segment, "origin_text", "loading_place", "origin", "from") or "").strip():
+        missing.append("装货地")
+    if not str(_first(segment, "destination_text", "unloading_place", "destination", "to") or "").strip():
+        missing.append("卸货地")
+    return missing
+
+
 def _append_reason(current: Any, reason: str) -> str:
     text = str(current or "").strip()
     if not text:
@@ -124,10 +135,47 @@ def _append_reason(current: Any, reason: str) -> str:
 def _segment_ignore_reason(segment: dict[str, Any]) -> str | None:
     if segment.get("is_freight_candidate") is False or segment.get("drop_reason"):
         return str(segment.get("drop_reason") or "AI 判断该片段不是完整货源线索")
-    missing = _segment_core_missing(segment)
+    missing = _segment_route_missing(segment)
     if missing:
-        return f"AI 输出不是完整货源线索，缺少{','.join(missing)}"
+        return f"AI 输出不是可追溯路线线索，缺少{','.join(missing)}"
     return None
+
+
+def _parse_heartbeat_age_seconds(entity) -> int | None:
+    heartbeat = entity.parse_heartbeat_at
+    if heartbeat is None:
+        return None
+    return max(0, int((datetime.utcnow() - heartbeat).total_seconds()))
+
+
+def _derive_batch_review_flow(entity, summary: dict[str, Any]) -> str:
+    stored = str(getattr(entity, "review_flow_status_code", "") or "").upper()
+    pending = int(summary.get("pending_count") or 0)
+    candidate_count = int(summary.get("candidate_count") or entity.candidate_count or 0)
+    handled = int(summary.get("confirmed_count") or 0) + int(summary.get("rejected_count") or 0)
+    if stored == "QUEUED_FOR_REVIEW" and pending > 0:
+        return "QUEUED_FOR_REVIEW"
+    if candidate_count > 0 and pending == 0 and handled >= candidate_count:
+        return "COMPLETED"
+    return "REVIEWING"
+
+
+def _derive_batch_next_action(entity, summary: dict[str, Any], *, parse_is_stale: bool) -> tuple[str, str]:
+    status = str(entity.status_code or "").upper()
+    review_flow = _derive_batch_review_flow(entity, summary)
+    pending = int(summary.get("pending_count") or 0)
+    candidate_count = int(summary.get("candidate_count") or entity.candidate_count or 0)
+    if status in {"QUEUED", "PARSING"} and not parse_is_stale:
+        return "VIEW_PARSE_PROGRESS", "查看解析进度"
+    if parse_is_stale or status in {"NEW", "FAILED"}:
+        return "RETRY_PARSE", "重新解析"
+    if review_flow == "QUEUED_FOR_REVIEW" and pending > 0:
+        return "OPEN_PENDING_QUEUE", "去待确认货源"
+    if pending > 0:
+        return "REVIEW_IN_BATCH", "进入确认"
+    if candidate_count > 0:
+        return "VIEW_RESULT", "查看结果"
+    return "VIEW_DETAIL", "查看详情"
 
 
 async def _load_display_context(
@@ -381,6 +429,14 @@ def _to_tag_response(entity) -> FreightTagRelationResponse:
 def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatchResponse:
     ctx = ctx or {}
     summary = (ctx.get("batch_candidate_summary") or {}).get(entity.id, {})
+    stale_seconds = int(ctx.get("stale_heartbeat_seconds") or settings.FREIGHT_AI_STALE_HEARTBEAT_SECONDS)
+    heartbeat_age = _parse_heartbeat_age_seconds(entity)
+    parse_is_stale = (
+        str(entity.status_code or "").upper() == "PARSING"
+        and (heartbeat_age is None or heartbeat_age >= max(30, stale_seconds))
+    )
+    review_flow = _derive_batch_review_flow(entity, summary)
+    next_action_code, next_action_name = _derive_batch_next_action(entity, summary, parse_is_stale=parse_is_stale)
     return FreightBatchResponse(
         id=entity.id,
         batch_no=entity.batch_no,
@@ -391,6 +447,8 @@ def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatc
         raw_text=entity.raw_text,
         status_code=entity.status_code,
         status_name=_label(ctx, "FREIGHT_BATCH_STATUS", entity.status_code),
+        review_flow_status_code=review_flow,
+        review_flow_status_name=_label(ctx, "FREIGHT_BATCH_REVIEW_FLOW", review_flow),
         clue_count=entity.clue_count,
         candidate_count=entity.candidate_count,
         success_count=entity.success_count,
@@ -411,6 +469,10 @@ def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatc
         parse_stage_message=entity.parse_stage_message,
         parse_progress_percent=entity.parse_progress_percent,
         parse_heartbeat_at=entity.parse_heartbeat_at,
+        parse_is_stale=parse_is_stale,
+        parse_heartbeat_age_seconds=heartbeat_age,
+        next_action_code=next_action_code,
+        next_action_name=next_action_name,
         ai_elapsed_seconds=entity.ai_elapsed_seconds,
         started_at=entity.started_at,
         finished_at=entity.finished_at,
@@ -743,60 +805,105 @@ class FreightNormalizationMixin:
         first = ordered[0]
         return int(first["id"]), Decimal(str(first["score"])), str(first["match_level_code"]), ordered, {"status": "MATCHED", "text": text, "top": first}
 
-    async def _match_location(self, raw_text: str) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    async def _match_location(
+        self, raw_text: str, ai_level_code: str | None = None
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         text = raw_text.strip()
         if not text:
             return {}, [], {"status": "NO_TEXT"}
+        ai_level = str(ai_level_code or "").strip().upper()
+        if ai_level not in {"NODE", "CITY", "RAW"}:
+            ai_level = ""
         nodes = (await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None)))).scalars().all()
         aliases = (await self.db.execute(select(NodeAlias))).scalars().all()
-        node_options: list[dict[str, Any]] = []
+        cities = (await self.db.execute(select(AdminRegion).where(AdminRegion.level == 2, AdminRegion.status == 1))).scalars().all()
+        exact_node_options: list[dict[str, Any]] = []
+        strong_node_options: list[dict[str, Any]] = []
+        weak_node_options: list[dict[str, Any]] = []
+        city_options: list[dict[str, Any]] = []
+        exact_city_options: list[dict[str, Any]] = []
+
+        async def make_node_option(node, *, score: Decimal, basis: str, strength: str) -> dict[str, Any]:
+            return {
+                "level": "NODE",
+                "node_id": int(node.id),
+                "node_name": node.name,
+                "city_code": node.city_code,
+                "province_code": node.province_code,
+                "district_code": node.district_code,
+                "region_id": await self._business_region_id(node.city_region_id),
+                "score": str(score),
+                "basis": basis,
+                "match_strength": strength,
+            }
+
         for node in nodes:
-            names = [node.name, node.short_name or ""]
-            score = None
-            if any(text == name for name in names if name):
-                score = Decimal("1.0")
-            elif any(name and (name in text or text in name) for name in names):
-                score = Decimal("0.86")
-            if score is not None:
-                node_options.append(
-                    {
-                        "level": "NODE",
-                        "node_id": int(node.id),
-                        "node_name": node.name,
-                        "city_code": node.city_code,
-                        "province_code": node.province_code,
-                        "district_code": node.district_code,
-                        "region_id": await self._business_region_id(node.city_region_id),
-                        "score": str(score),
-                        "basis": node.name,
-                    }
-                )
+            names = [name for name in [node.name, node.short_name or ""] if name]
+            if any(text == name for name in names):
+                exact_node_options.append(await make_node_option(node, score=Decimal("1.0"), basis=node.name, strength="EXACT"))
+            elif any(name in text for name in names if len(name) >= 3):
+                strong_node_options.append(await make_node_option(node, score=Decimal("0.92"), basis=node.name, strength="NODE_NAME_IN_TEXT"))
+            elif any(text in name for name in names if len(text) >= 2):
+                weak_node_options.append(await make_node_option(node, score=Decimal("0.72"), basis=node.name, strength="TEXT_IN_NODE_NAME"))
         for alias in aliases:
+            alias_name = (alias.alias_name or "").strip()
+            if not alias_name:
+                continue
+            node = next((item for item in nodes if item.id == alias.node_id), None)
+            if node is None:
+                continue
+            if text == alias_name:
+                exact_node_options.append(await make_node_option(node, score=Decimal("1.0"), basis=alias_name, strength="ALIAS_EXACT"))
+            elif alias_name in text and len(alias_name) >= 2:
+                strong_node_options.append(await make_node_option(node, score=Decimal("0.90"), basis=alias_name, strength="ALIAS_IN_TEXT"))
+            elif text in alias_name and len(text) >= 2:
+                weak_node_options.append(await make_node_option(node, score=Decimal("0.72"), basis=alias_name, strength="TEXT_IN_ALIAS"))
+        for city in cities:
+            names = [name for name in [city.name, city.short_name or ""] if name]
             score = None
-            if text == alias.alias_name:
-                score = Decimal("1.0")
-            elif alias.alias_name in text or text in alias.alias_name:
-                score = Decimal("0.82")
-            if score is not None:
-                node = next((item for item in nodes if item.id == alias.node_id), None)
-                if node is not None:
-                    node_options.append(
-                        {
-                            "level": "NODE",
-                            "node_id": int(node.id),
-                            "node_name": node.name,
-                            "city_code": node.city_code,
-                            "province_code": node.province_code,
-                            "district_code": node.district_code,
-                            "region_id": await self._business_region_id(node.city_region_id),
-                            "score": str(score),
-                            "basis": alias.alias_name,
-                        }
-                    )
-        ordered = sorted(node_options, key=lambda item: Decimal(str(item["score"])), reverse=True)[:6]
-        if ordered:
-            first = ordered[0]
-            normalized = {
+            strength = ""
+            basis = city.name
+            if any(text == name for name in names):
+                score = Decimal("0.98")
+                strength = "CITY_EXACT"
+                basis = city.short_name if text == (city.short_name or "") else city.name
+            elif city.name and city.name in text and len(city.name) >= 3:
+                score = Decimal("0.78")
+                strength = "CITY_NAME_IN_TEXT"
+            elif city.short_name and city.short_name in text and len(city.short_name) >= 2:
+                score = Decimal("0.76")
+                strength = "CITY_SHORT_IN_TEXT"
+                basis = city.short_name
+            if score is None:
+                continue
+            option = {
+                "level": "CITY",
+                "node_id": None,
+                "node_name": None,
+                "city_code": city.code,
+                "city_name": city.name,
+                "province_code": city.province_code or city.code[:2].ljust(6, "0"),
+                "district_code": None,
+                "region_id": await self._business_region_id(city.id),
+                "score": str(score),
+                "basis": basis,
+                "match_strength": strength,
+            }
+            city_options.append(option)
+            if strength == "CITY_EXACT":
+                exact_city_options.append(option)
+
+        def order_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            dedup: dict[tuple[str, Any, Any], dict[str, Any]] = {}
+            for option in sorted(options, key=lambda item: Decimal(str(item["score"])), reverse=True):
+                key = (str(option.get("level")), option.get("node_id"), option.get("city_code"))
+                dedup.setdefault(key, option)
+            return list(dedup.values())[:6]
+
+        all_options = order_options(exact_node_options + strong_node_options + exact_city_options + city_options + weak_node_options)
+
+        def normalize_node(first: dict[str, Any]) -> dict[str, Any]:
+            return {
                 "node_id": first.get("node_id"),
                 "province_code": first.get("province_code"),
                 "city_code": first.get("city_code"),
@@ -805,44 +912,37 @@ class FreightNormalizationMixin:
                 "match_score": Decimal(str(first["score"])),
                 "match_level_code": "NODE",
             }
-            return normalized, ordered, {"status": "MATCHED_NODE", "text": text, "top": first}
-        cities = (await self.db.execute(select(AdminRegion).where(AdminRegion.level == 2, AdminRegion.status == 1))).scalars().all()
-        city_options: list[dict[str, Any]] = []
-        for city in cities:
-            score = None
-            if text == city.name:
-                score = Decimal("0.90")
-            elif city.name in text or text in city.name:
-                score = Decimal("0.76")
-            if score is not None:
-                city_options.append(
-                    {
-                        "level": "CITY",
-                        "node_id": None,
-                        "node_name": None,
-                        "city_code": city.code,
-                        "city_name": city.name,
-                        "province_code": city.province_code or city.code[:2].ljust(6, "0"),
-                        "district_code": None,
-                        "region_id": await self._business_region_id(city.id),
-                        "score": str(score),
-                        "basis": city.name,
-                    }
-                )
-        ordered = sorted(city_options, key=lambda item: Decimal(str(item["score"])), reverse=True)[:6]
-        if not ordered:
-            return {"match_level_code": "RAW"}, [{"level": "RAW", "name": text, "score": "0.0"}], {"status": "UNMATCHED", "text": text}
-        first = ordered[0]
-        normalized = {
-            "node_id": first.get("node_id"),
-            "province_code": first.get("province_code"),
-            "city_code": first.get("city_code"),
-            "district_code": first.get("district_code"),
-            "region_id": first.get("region_id"),
-            "match_score": Decimal(str(first["score"])),
-            "match_level_code": first["level"],
-        }
-        return normalized, ordered, {"status": "MATCHED", "text": text, "top": first}
+
+        def normalize_city(first: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "node_id": None,
+                "province_code": first.get("province_code"),
+                "city_code": first.get("city_code"),
+                "district_code": None,
+                "region_id": first.get("region_id"),
+                "match_score": Decimal(str(first["score"])),
+                "match_level_code": "CITY",
+            }
+
+        if exact_node_options:
+            first = order_options(exact_node_options)[0]
+            return normalize_node(first), all_options, {"status": "MATCHED_NODE", "text": text, "top": first, "ai_level": ai_level}
+        if exact_city_options and ai_level != "NODE":
+            first = order_options(exact_city_options)[0]
+            return normalize_city(first), all_options, {"status": "MATCHED_CITY", "text": text, "top": first, "ai_level": ai_level}
+        if strong_node_options and ai_level == "NODE":
+            first = order_options(strong_node_options)[0]
+            return normalize_node(first), all_options, {"status": "MATCHED_NODE_AI", "text": text, "top": first, "ai_level": ai_level}
+        if city_options and ai_level in {"CITY", ""}:
+            first = order_options(city_options)[0]
+            return normalize_city(first), all_options, {"status": "MATCHED_CITY", "text": text, "top": first, "ai_level": ai_level}
+        if strong_node_options:
+            first = order_options(strong_node_options)[0]
+            return normalize_node(first), all_options, {"status": "MATCHED_NODE_STRONG", "text": text, "top": first, "ai_level": ai_level}
+        if city_options:
+            first = order_options(city_options)[0]
+            return normalize_city(first), all_options, {"status": "MATCHED_CITY", "text": text, "top": first, "ai_level": ai_level}
+        return {"match_level_code": "RAW"}, all_options or [{"level": "RAW", "name": text, "score": "0.0"}], {"status": "UNMATCHED", "text": text, "ai_level": ai_level}
 
     async def _candidate_from_segment(
         self,
@@ -858,8 +958,12 @@ class FreightNormalizationMixin:
         commodity_id, commodity_score, commodity_level, commodity_options, commodity_basis = await self._match_commodity(commodity_name)
         origin_text = str(_first(segment, "origin_text", "loading_place", "origin", "from") or "").strip()
         destination_text = str(_first(segment, "destination_text", "unloading_place", "destination", "to") or "").strip()
-        origin, origin_options, origin_basis = await self._match_location(origin_text)
-        destination, destination_options, destination_basis = await self._match_location(destination_text)
+        origin, origin_options, origin_basis = await self._match_location(
+            origin_text, str(_first(segment, "origin_match_level_code", "origin_level_code") or "")
+        )
+        destination, destination_options, destination_basis = await self._match_location(
+            destination_text, str(_first(segment, "destination_match_level_code", "destination_level_code") or "")
+        )
         confidence = _to_decimal_or_none(_first(segment, "confidence_score", "confidence")) or Decimal("0.50")
         parsed_tonnage = _to_decimal_or_none(_first(segment, "estimated_tonnage", "quantity_ton", "tonnage"))
         min_tonnage = _to_decimal_or_none(segment.get("min_tonnage"))
@@ -1150,6 +1254,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         rows, total = await self.repo.list_items(keyword=keyword, status_code=status_code, page=page, page_size=page_size)
         ctx = await _load_display_context(self.db, batches=rows)
         ctx["batch_candidate_summary"] = await self._batch_candidate_summary([int(item.id) for item in rows])
+        ctx["stale_heartbeat_seconds"] = await self._stale_heartbeat_seconds()
         return PageResponse[FreightBatchResponse](total=total, page=page, page_size=page_size, items=[_to_batch_response(item, ctx) for item in rows])
 
     async def _batch_candidate_summary(self, batch_ids: list[int]) -> dict[int, dict[str, Any]]:
@@ -1161,6 +1266,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             data = summary.setdefault(
                 int(item.source_batch_id),
                 {
+                    "candidate_count": 0,
                     "pending_count": 0,
                     "confirmed_count": 0,
                     "rejected_count": 0,
@@ -1170,6 +1276,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     "contacts": set(),
                 },
             )
+            data["candidate_count"] += 1
             if item.status_code == "PENDING":
                 data["pending_count"] += 1
             if item.status_code == "CONFIRMED":
@@ -1264,6 +1371,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 "source_channel_code": "WECHAT_TEXT",
                 "raw_text": payload.raw_text.strip(),
                 "status_code": "NEW",
+                "review_flow_status_code": "REVIEWING",
                 "parse_stage_code": "NEW",
                 "parse_stage_name": "待解析",
                 "parse_stage_message": "批次已保存，尚未提交 AI 解析",
@@ -1285,6 +1393,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         candidates = await self.candidate_repo.list_by_batch(batch_id)
         ctx = await _load_display_context(self.db, batches=[batch], clues=clues, candidates=candidates)
         ctx["batch_candidate_summary"] = await self._batch_candidate_summary([batch_id])
+        ctx["stale_heartbeat_seconds"] = await self._stale_heartbeat_seconds()
         return FreightBatchDetailResponse(
             batch=_to_batch_response(batch, ctx),
             clues=[_to_clue_response(item, ctx) for item in clues],
@@ -1298,6 +1407,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         existing = await self.candidate_repo.list_by_batch(batch_id)
         if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
             raise ValidationError("该采集批次已有确认入库货源，不能重新解析")
+        if str(getattr(batch, "review_flow_status_code", "") or "").upper() == "QUEUED_FOR_REVIEW":
+            raise ValidationError("该采集批次已移交待确认货源队列，不能重新解析")
         if batch.status_code == "PARSING":
             stale_seconds = await self._stale_heartbeat_seconds()
             heartbeat = batch.parse_heartbeat_at or batch.updated_at or batch.started_at
@@ -1308,6 +1419,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             batch_id,
             {
                 "status_code": "QUEUED",
+                "review_flow_status_code": "REVIEWING",
                 "error_message": None,
                 "finished_at": None,
                 "parse_stage_code": "QUEUED",
@@ -1349,6 +1461,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         existing = await self.candidate_repo.list_by_batch(batch_id)
         if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
             raise ValidationError("该采集批次已有确认入库货源，不能重新解析")
+        if str(getattr(batch, "review_flow_status_code", "") or "").upper() == "QUEUED_FOR_REVIEW":
+            raise ValidationError("该采集批次已移交待确认货源队列，不能重新解析")
         if batch.status_code == "PARSED" and existing:
             return await self.get_detail(batch_id)
         clue_ids = await self.candidate_repo.delete_unconfirmed_by_batch(batch_id)
@@ -1358,6 +1472,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             batch_id,
             {
                 "status_code": "PARSING",
+                "review_flow_status_code": "REVIEWING",
                 "started_at": started,
                 "finished_at": None,
                 "error_message": None,
@@ -1446,6 +1561,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 batch_id,
                 {
                     "status_code": status,
+                    "review_flow_status_code": "REVIEWING" if status != "FAILED" else "REVIEWING",
                     "clue_count": clue_count,
                     "candidate_count": candidate_count,
                     "success_count": candidate_count,
@@ -1483,6 +1599,26 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             await self.db.commit()
             raise
         return await self.get_detail(batch_id)
+
+    async def handoff_review(self, batch_id: int, operator_id: int | None = None) -> FreightBatchHandoffResponse:
+        _ = operator_id
+        batch = await self.repo.get_by_id(batch_id)
+        if batch is None:
+            raise NotFoundError("FreightBatchTask", batch_id)
+        if batch.status_code not in {"PARSED", "PARTIAL_FAILED"}:
+            raise ValidationError("只有解析完成的批次可以移交待确认货源队列")
+        candidates = await self.candidate_repo.list_by_batch(batch_id)
+        pending_count = sum(1 for item in candidates if item.status_code == "PENDING")
+        if pending_count <= 0:
+            raise ValidationError("该批次没有待确认候选货源")
+        await self.repo.update(batch_id, {"review_flow_status_code": "QUEUED_FOR_REVIEW"})
+        await self.db.commit()
+        return FreightBatchHandoffResponse(
+            batch_id=batch_id,
+            handoff_count=pending_count,
+            review_flow_status_code="QUEUED_FOR_REVIEW",
+            message=f"已移交 {pending_count} 条候选货源到待确认货源队列",
+        )
 
 
 class FreightTmsInboundService(FreightNormalizationMixin):
