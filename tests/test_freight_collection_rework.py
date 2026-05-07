@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from sqlalchemy.types import BigInteger
 
 import app.models  # noqa: F401
 from app.core.exceptions import ValidationError
-from app.integrations.ai.dashscope_qwen_client import FreightParsePayloadSchema
+from app.integrations.ai.dashscope_qwen_client import FreightClueSplitPayloadSchema, FreightParsePayloadSchema, _clue_schema_hint, _json_schema_hint
 from app.models.address import AdminRegion, Region, RegionCityRelation, TransportNode
 from app.models.base import Base
 from app.models.commodity import CommodityCategory, CommodityStandard, CommodityType
@@ -216,6 +217,45 @@ def test_ai_parse_schema_normalizes_null_availability_status() -> None:
     assert segment.needs_strong_review is False
 
 
+def test_ai_schema_hints_do_not_contain_real_example_values() -> None:
+    hint_text = json.dumps({"extract": _json_schema_hint(), "split": _clue_schema_hint()}, ensure_ascii=False)
+
+    assert "蒋姐" not in hint_text
+    assert "15381664761" not in hint_text
+    assert "建德" not in hint_text
+    assert "平湖" not in hint_text
+
+
+def test_wechat_split_schema_separates_freight_clues_and_context_notes() -> None:
+    payload = FreightClueSplitPayloadSchema.model_validate(
+        {
+            "freight_clues": [
+                {
+                    "segment_index": 1,
+                    "raw_text": "A地—B地：货品",
+                    "context_summary": "继承公共运价和联系人",
+                    "inherited_context": {"price": "公共运价", "contact": "公共联系人"},
+                    "is_freight_candidate": True,
+                    "evidence": ["路线", "货品", "公共联系人"],
+                }
+            ],
+            "context_notes": [
+                {
+                    "note_index": 1,
+                    "raw_text": "公共联系人",
+                    "context_type_code": "CONTACT",
+                    "applies_to": [1],
+                    "evidence": ["跟随上一组路线"],
+                }
+            ],
+        }
+    )
+
+    assert len(payload.freight_clues) == 1
+    assert len(payload.context_notes) == 1
+    assert payload.context_notes[0].context_type_code == "CONTACT"
+
+
 @pytest.mark.asyncio
 async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> None:
     FakeFreightParser.segments = [_segment()]
@@ -239,6 +279,81 @@ async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> 
     assert candidate.destination_node_name == "芜湖港"
     assert candidate.commodity_standard_name == "动力煤"
     assert candidate.availability_status_code == "READY"
+
+
+@pytest.mark.asyncio
+async def test_wechat_parse_ignores_context_only_segments(session: AsyncSession) -> None:
+    FakeFreightParser.segments = [
+        _segment(),
+        {
+            "segment_index": 2,
+            "raw_text": "运费18元装卸快",
+            "context_summary": "公共运价和装卸备注",
+            "is_freight_candidate": False,
+            "drop_reason": "上下文片段不能单独生成货源候选",
+            "confidence_score": 0.9,
+            "availability_status_code": "UNKNOWN",
+        },
+    ]
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="路线和公共上下文"), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+
+    assert detail.batch.status_code == "PARSED"
+    assert detail.batch.clue_count == 2
+    assert detail.batch.candidate_count == 1
+    assert len(detail.candidates) == 1
+    assert [item.status_code for item in detail.clues].count("IGNORED") == 1
+
+
+@pytest.mark.asyncio
+async def test_wechat_shared_context_sample_creates_four_candidates(session: AsyncSession) -> None:
+    FakeFreightParser.segments = [
+        {
+            "segment_index": index,
+            "raw_text": raw_text,
+            "context_summary": "继承下雨天正常装卸、运费18元装卸快、联系19521552671陈",
+            "cargo_title": f"{origin} 至 {destination} {commodity}",
+            "commodity_name": commodity,
+            "origin_text": origin,
+            "destination_text": destination,
+            "unit_price": 18,
+            "price_unit": "元/吨",
+            "contact_name": "陈",
+            "contact_phone": "19521552671",
+            "availability_status_code": "READY",
+            "confidence_score": 0.9,
+            "evidence": [raw_text, "下雨天正常装卸", "运费18元装卸快", "联系19521552671陈"],
+        }
+        for index, (origin, destination, commodity, raw_text) in enumerate(
+            [
+                ("建德", "平湖", "塘渣", "建德—平湖：塘渣"),
+                ("建德", "嘉兴", "塘渣", "建德—嘉兴：塘渣"),
+                ("建德", "德清", "塘渣", "建德—德清：塘渣"),
+                ("建德", "绍兴", "机沙", "建德—绍兴：机沙"),
+            ],
+            start=1,
+        )
+    ]
+    raw_text = "群公告\n建德—平湖：塘渣\n建德—嘉兴：塘渣\n建德—德清：塘渣\n下雨天正常装卸\n建德—绍兴：机沙\n运费18元装卸快\n联系19521552671陈"
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text=raw_text), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+
+    assert detail.batch.status_code == "PARSED"
+    assert detail.batch.candidate_count == 4
+    assert {(item.raw_origin_text, item.raw_destination_text, item.raw_commodity_name) for item in detail.candidates} == {
+        ("建德", "平湖", "塘渣"),
+        ("建德", "嘉兴", "塘渣"),
+        ("建德", "德清", "塘渣"),
+        ("建德", "绍兴", "机沙"),
+    }
+    assert {item.contact_name for item in detail.candidates} == {"陈"}
+    assert {item.contact_phone for item in detail.candidates} == {"19521552671"}
+    assert "蒋姐" not in json.dumps([item.model_dump(mode="json") for item in detail.candidates], ensure_ascii=False)
+    assert "15381664761" not in json.dumps([item.model_dump(mode="json") for item in detail.candidates], ensure_ascii=False)
 
 
 @pytest.mark.asyncio

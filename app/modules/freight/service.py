@@ -103,6 +103,33 @@ def _first(segment: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _segment_core_missing(segment: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if not str(_first(segment, "origin_text", "loading_place", "origin", "from") or "").strip():
+        missing.append("装货地")
+    if not str(_first(segment, "destination_text", "unloading_place", "destination", "to") or "").strip():
+        missing.append("卸货地")
+    if not str(_first(segment, "commodity_name", "cargo_name", "goods_name", "cargo") or "").strip():
+        missing.append("货品")
+    return missing
+
+
+def _append_reason(current: Any, reason: str) -> str:
+    text = str(current or "").strip()
+    if not text:
+        return reason
+    return text if reason in text else f"{text}；{reason}"
+
+
+def _segment_ignore_reason(segment: dict[str, Any]) -> str | None:
+    if segment.get("is_freight_candidate") is False or segment.get("drop_reason"):
+        return str(segment.get("drop_reason") or "AI 判断该片段不是完整货源线索")
+    missing = _segment_core_missing(segment)
+    if missing:
+        return f"AI 输出不是完整货源线索，缺少{','.join(missing)}"
+    return None
+
+
 async def _load_display_context(
     db: AsyncSession,
     *,
@@ -830,6 +857,12 @@ class FreightNormalizationMixin:
             pieces = [origin_text, destination_text, commodity_name or "货源"]
             title = " - ".join([item for item in pieces if item])[:256] or "待确认货源"
         raw_text = str(_first(segment, "raw_text", "source_text") or "").strip()
+        availability_status = str(_first(segment, "availability_status_code") or "UNKNOWN").upper()
+        manual_review_reason = _first(segment, "manual_review_reason", "review_reason")
+        missing = _segment_core_missing(segment)
+        if missing:
+            availability_status = "UNKNOWN"
+            manual_review_reason = _append_reason(manual_review_reason, f"缺少{','.join(missing)}，无法直接确认")
         return {
             "candidate_no": await self.sequence_service.next_code("FREIGHT_CANDIDATE_NO"),
             "source_type_code": source_type_code,
@@ -886,8 +919,8 @@ class FreightNormalizationMixin:
                 "evidence": segment.get("evidence") or [],
             },
             "ai_suggestion_json": segment,
-            "availability_status_code": str(_first(segment, "availability_status_code") or "UNKNOWN").upper(),
-            "manual_review_reason": _first(segment, "manual_review_reason", "review_reason"),
+            "availability_status_code": availability_status,
+            "manual_review_reason": manual_review_reason,
             "ai_warning_json": segment.get("ai_warning_json"),
             "status_code": "PENDING",
         }
@@ -1331,9 +1364,14 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             clue_count = 0
             candidate_count = 0
             failed_count = 0
-            total_segments = max(len(parsed.segments), 1)
-            for index, segment in enumerate(parsed.segments, start=1):
+            ignored_segments = list(getattr(parsed, "ignored_segments", []) or [])
+            work_items = [("ignored", item) for item in ignored_segments] + [("candidate", item) for item in parsed.segments]
+            total_segments = max(len(work_items), 1)
+            for index, (item_type, segment) in enumerate(work_items, start=1):
                 try:
+                    ignore_reason = str(segment.get("drop_reason") or "") if item_type == "ignored" else _segment_ignore_reason(segment)
+                    if ignore_reason:
+                        segment = {**segment, "drop_reason": ignore_reason, "is_freight_candidate": False}
                     clue = await self.clue_repo.create(
                         {
                             "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
@@ -1341,14 +1379,17 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                             "source_channel_code": "WECHAT_TEXT",
                             "source_batch_id": batch_id,
                             "source_tms_inbound_id": None,
-                            "segment_index": index,
+                            "segment_index": int(segment.get("segment_index") or index),
                             "raw_text": str(segment.get("raw_text") or batch.raw_text),
-                            "context_summary": segment.get("context_summary"),
+                            "context_summary": segment.get("context_summary") or ignore_reason or segment.get("manual_review_reason"),
                             "extracted_fields_json": segment,
                             "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
-                            "status_code": "CANDIDATE_CREATED",
+                            "status_code": "IGNORED" if ignore_reason else "CANDIDATE_CREATED",
                         }
                     )
+                    clue_count += 1
+                    if ignore_reason:
+                        continue
                     await self.candidate_repo.create(
                         await self._candidate_from_segment(
                             source_type_code="WECHAT",
@@ -1359,7 +1400,6 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                             segment=segment,
                         )
                     )
-                    clue_count += 1
                     candidate_count += 1
                 except Exception:  # noqa: BLE001
                     failed_count += 1

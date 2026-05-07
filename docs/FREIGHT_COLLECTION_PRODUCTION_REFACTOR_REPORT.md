@@ -28,7 +28,11 @@
 ## AI 与匹配链路
 
 - 微信采集使用 DashScope SDK 流式调用，快模型读取完整原文并由 AI 切分线索，低置信候选交给强模型复核。
-- 后端不使用正则、关键词或本地规则拆解微信群原文；本地代码只做 JSON schema 校验、主数据匹配、候选入库和错误处理。
+- 微信提示词版本升级为 `freight_wechat_dashscope_stream_v5`。AI 第一阶段输出拆为 `freight_clues` 和 `context_notes`，公告、联系人、价格、结算、装卸备注等上下文只允许进入 `context_notes`，不能单独生成候选。
+- 结构化 schema hint 已移除真实姓名、手机号、地点、货品等示例值，统一使用中性占位说明，避免模型把提示词样例抄入解析结果。
+- 后端不使用正则、关键词或本地规则拆解微信群原文；本地代码只做 JSON schema 校验、证据约束、主数据匹配、候选入库和错误处理。
+- 候选生成前增加质量门禁：缺少装货地、卸货地、货品主体的 AI segment 会作为 `IGNORED` 线索保留审计记录，但不生成 `freight_candidate`；无原文证据的联系人、电话、地点、货品、价格字段会被清空并进入人工判断。
+- 强模型复核职责补充为：检查候选数量异常、上下文-only 片段误入候选、字段证据不足和 schema 占位污染；可把错误 segment 标记为 `is_freight_candidate=false`。
 - TMS 入站继续处理单条消息内多条标准运单或运单数组。
 - 解析接口投递 Celery `freight_ai` 后台任务，批次状态支持 `QUEUED`、`PARSING`、`PARSED`、`PARTIAL_FAILED`、`FAILED`。
 - 批次解析进度字段：`parse_stage_code`、`parse_stage_name`、`parse_stage_message`、`parse_progress_percent`、`parse_heartbeat_at`、`ai_elapsed_seconds`。
@@ -65,8 +69,8 @@
 本轮重构已完成本地验证：
 
 - `.venv/bin/python -m py_compile ...`：通过。
-- `PYTHONPATH=. .venv/bin/pytest tests/test_freight_collection_rework.py -q`：7 passed。
-- `.venv/bin/python -m pytest -q`：20 passed。
+- `.venv/bin/python -m pytest tests/test_freight_collection_rework.py -q`：12 passed，覆盖 schema 防污染、上下文-only 忽略、公共上下文继承和建德样例 4 条候选。
+- `.venv/bin/python -m pytest -q`：25 passed。
 - `.venv/bin/alembic upgrade head`：已升级至 `0012_freight_raw_level_normalization`。
 - `.venv/bin/python -m scripts.seed_system_init`：通过。
 - `.venv/bin/python -m scripts.verify_local_acceptance`：通过，包含清洗建议、原文级正式货源、菜单和新接口校验。
