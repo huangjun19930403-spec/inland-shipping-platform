@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -14,11 +15,15 @@ from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.integrations.config_keys import DASHSCOPE_CONFIG_PROFILE, FREIGHT_AI_STALE_HEARTBEAT_SECONDS
 from app.integrations.ai import DashScopeQwenFreightParserClient
+from app.integrations.ai.dashscope_qwen_client import _prepare_segments
 from app.models.address import AdminRegion, NodeAlias, Region, RegionCityRelation, TransportNode
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.dictionary import StdDict, StdDictItem
 from app.models.freight import Freight, FreightCandidate, FreightContact, FreightNormalizationSuggestion, FreightNormalizationTask
 from app.modules.dictionary.service import CodeSequenceService
+from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
+from app.modules.freight.ai_text_index import FreightTextIndexer
+from app.modules.freight.master_data_matcher import FreightMasterDataBatchMatcher
 from app.modules.freight.repository import (
     FreightAttachmentRepository,
     FreightBatchTaskRepository,
@@ -78,7 +83,7 @@ DISPLAY_DICT_CODES = [
 AI_REVIEW_PASS = "PASS"
 AI_REVIEW_REQUIRED = "REVIEW_REQUIRED"
 AI_REVIEW_MANUAL_ACCEPTED = "MANUAL_ACCEPTED"
-FREIGHT_AI_PIPELINE_VERSION = "freight_ai_humanized_parse_v1"
+FREIGHT_AI_PIPELINE_VERSION = "freight_ai_semantic_pipeline_v2"
 
 
 def _to_decimal_or_none(value: Any) -> Decimal | None:
@@ -1159,17 +1164,35 @@ class FreightNormalizationMixin:
         source_tms_inbound_id: int | None,
         clue_id: int,
         segment: dict[str, Any],
+        candidate_no: str | None = None,
+        match_result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         commodity_name = str(_first(segment, "commodity_name", "cargo_name", "goods_name", "cargo") or "").strip()
-        commodity_id, commodity_score, commodity_level, commodity_options, commodity_basis = await self._match_commodity(commodity_name)
         origin_text = str(_first(segment, "origin_text", "loading_place", "origin", "from") or "").strip()
         destination_text = str(_first(segment, "destination_text", "unloading_place", "destination", "to") or "").strip()
-        origin, origin_options, origin_basis = await self._match_location(
-            origin_text, str(_first(segment, "origin_match_level_code", "origin_level_code") or "")
-        )
-        destination, destination_options, destination_basis = await self._match_location(
-            destination_text, str(_first(segment, "destination_match_level_code", "destination_level_code") or "")
-        )
+        if match_result is None:
+            commodity_id, commodity_score, commodity_level, commodity_options, commodity_basis = await self._match_commodity(commodity_name)
+            origin, origin_options, origin_basis = await self._match_location(
+                origin_text, str(_first(segment, "origin_match_level_code", "origin_level_code") or "")
+            )
+            destination, destination_options, destination_basis = await self._match_location(
+                destination_text, str(_first(segment, "destination_match_level_code", "destination_level_code") or "")
+            )
+        else:
+            commodity_match = match_result.get("commodity") or {}
+            origin_match = match_result.get("origin") or {}
+            destination_match = match_result.get("destination") or {}
+            commodity_id = commodity_match.get("id")
+            commodity_score = commodity_match.get("score")
+            commodity_level = commodity_match.get("level")
+            commodity_options = commodity_match.get("options") or []
+            commodity_basis = commodity_match.get("basis") or {}
+            origin = origin_match.get("selected") or {}
+            origin_options = origin_match.get("options") or []
+            origin_basis = origin_match.get("basis") or {}
+            destination = destination_match.get("selected") or {}
+            destination_options = destination_match.get("options") or []
+            destination_basis = destination_match.get("basis") or {}
         confidence = _to_decimal_or_none(_first(segment, "confidence_score", "confidence")) or Decimal("0.50")
         parsed_tonnage = _to_decimal_or_none(_first(segment, "estimated_tonnage", "quantity_ton", "tonnage"))
         min_tonnage = _to_decimal_or_none(segment.get("min_tonnage"))
@@ -1235,7 +1258,7 @@ class FreightNormalizationMixin:
             "needs_strong_review": bool(segment.get("needs_strong_review")),
         }
         return {
-            "candidate_no": await self.sequence_service.next_code("FREIGHT_CANDIDATE_NO"),
+            "candidate_no": candidate_no or await self.sequence_service.next_code("FREIGHT_CANDIDATE_NO"),
             "source_type_code": source_type_code,
             "source_channel_code": source_channel_code,
             "source_batch_id": source_batch_id,
@@ -1718,9 +1741,13 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             raise ValidationError("该采集批次已移交待确认货源队列，不能重新解析")
         if batch.status_code == "PARSED" and existing:
             return await self.get_detail(batch_id)
-        clue_ids = await self.candidate_repo.delete_unconfirmed_by_batch(batch_id)
-        await self.clue_repo.delete_by_ids(clue_ids)
         started = datetime.utcnow()
+        timings: dict[str, int] = {}
+        timer_started = time.monotonic()
+
+        def mark_timing(stage_code: str) -> None:
+            timings[stage_code] = int((time.monotonic() - timer_started) * 1000)
+
         await self.repo.update(
             batch_id,
             {
@@ -1729,10 +1756,10 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 "started_at": started,
                 "finished_at": None,
                 "error_message": None,
-                "parse_stage_code": "AI_SPLIT",
-                "parse_stage_name": "AI 切分线索",
-                "parse_stage_message": "快模型正在阅读完整微信群原文并切分货源线索",
-                "parse_progress_percent": 12,
+                "parse_stage_code": "PREPARE",
+                "parse_stage_name": "准备解析",
+                "parse_stage_message": "系统正在准备原文行号索引和解析上下文",
+                "parse_progress_percent": 8,
                 "parse_heartbeat_at": started,
                 "ai_elapsed_seconds": 0,
             },
@@ -1740,78 +1767,212 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         await self.db.commit()
         client = DashScopeQwenFreightParserClient(runtime_config=RuntimeConfigService(self.db))
         try:
-            parsed = await client.parse(
-                batch.raw_text,
-                source_type_code="WECHAT",
-                progress_callback=await self._progress_callback(batch_id, started),
-            )
+            callback = await self._progress_callback(batch_id, started)
+            if hasattr(client, "parse_semantic_map") and hasattr(client, "complete_candidate_fields"):
+                runtime = await client._runtime()  # noqa: SLF001 - staged orchestration uses the parser runtime contract.
+                indexed_text = FreightTextIndexer().index(batch.raw_text)
+                semantic_map, semantic_raw = await client.parse_semantic_map(
+                    indexed_text,
+                    runtime=runtime,
+                    progress_callback=callback,
+                )
+                validator = FreightSemanticValidator(indexed_text)
+                semantic_warnings = validator.validate_semantic_map(semantic_map)
+                mark_timing("AI_SEMANTIC_MAP")
+
+                segments, detail_raws, detail_warnings = await client.complete_candidate_fields(
+                    indexed_text,
+                    semantic_map,
+                    runtime=runtime,
+                    progress_callback=callback,
+                )
+                semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
+                mark_timing("AI_DETAIL")
+
+                await self._update_parse_progress(
+                    batch_id,
+                    stage_code="MATCHING",
+                    stage_name="标准化匹配",
+                    stage_message="系统正在批量匹配运输节点、城市和标准货品",
+                    percent=68,
+                    started_at=started,
+                    status_code="PARSING",
+                )
+                matcher = FreightMasterDataBatchMatcher(self.db)
+                await matcher.match_segments(segments)
+                mark_timing("MATCHING")
+
+                review_results, review_raw, review_failed_count = await client.review_risky_segments(
+                    indexed_text,
+                    semantic_map,
+                    segments,
+                    runtime=runtime,
+                    progress_callback=callback,
+                )
+                if review_results:
+                    segments = client.merge_review_results(segments, review_results)
+                    semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
+                mark_timing("AI_REVIEW")
+
+                accepted_segments, ignored_segments, quality_warnings = _prepare_segments(batch.raw_text, segments)
+                final_match_results = await matcher.match_segments(accepted_segments)
+                warnings = list(
+                    dict.fromkeys(
+                        [
+                            *(semantic_map.get("warnings") or []),
+                            *semantic_warnings,
+                            *detail_warnings,
+                            *quality_warnings,
+                        ]
+                    )
+                )
+                parsed = type(
+                    "StagedFreightParseResult",
+                    (),
+                    {
+                        "segments": accepted_segments,
+                        "ignored_segments": ignored_segments,
+                        "prompt_version": client.wechat_prompt_version,
+                        "model": " -> ".join(
+                            dict.fromkeys(
+                                [
+                                    runtime["semantic_model"],
+                                    runtime["detail_model"],
+                                    *([runtime["review_model"]] if review_raw is not None else []),
+                                ]
+                            )
+                        ),
+                        "parsed_payload": {
+                            "segments": accepted_segments,
+                            "ignored_segments": ignored_segments,
+                            "context_blocks": semantic_map.get("context_blocks") or [],
+                            "context_notes": semantic_map.get("context_notes") or [],
+                            "warnings": warnings,
+                        },
+                        "raw_response": {
+                            "provider": runtime["provider"],
+                            "pipeline": "freight_ai_semantic_pipeline_v2",
+                            "semantic_map": semantic_raw,
+                            "detail": detail_raws,
+                            "review": review_raw,
+                        },
+                        "review_failed_count": review_failed_count,
+                        "semantic_map": semantic_map,
+                        "review_results": review_results,
+                        "match_results": final_match_results,
+                    },
+                )()
+            else:
+                parsed = await client.parse(
+                    batch.raw_text,
+                    source_type_code="WECHAT",
+                    progress_callback=callback,
+                )
+                await self._update_parse_progress(
+                    batch_id,
+                    stage_code="MATCHING",
+                    stage_name="标准化匹配",
+                    stage_message="系统正在批量匹配运输节点、城市和标准货品",
+                    percent=68,
+                    started_at=started,
+                    status_code="PARSING",
+                )
+                matcher = FreightMasterDataBatchMatcher(self.db)
+                parsed.match_results = await matcher.match_segments(list(getattr(parsed, "segments", []) or []))
+                mark_timing("MATCHING")
+                mark_timing("AI_REVIEW")
+
             await self._update_parse_progress(
                 batch_id,
-                stage_code="MATCHING",
-                stage_name="标准化匹配",
-                stage_message="系统正在根据 AI 抽取结果匹配运输节点、城市和标准货品",
-                percent=84,
+                stage_code="SAVING",
+                stage_name="保存候选",
+                stage_message="系统正在批量生成编码并保存候选货源",
+                percent=88,
                 started_at=started,
                 status_code="PARSING",
             )
-            clue_count = 0
-            candidate_count = 0
-            failed_count = 0
+            mark_timing("SAVING_START")
             ignored_segments = list(getattr(parsed, "ignored_segments", []) or [])
             work_items = [("ignored", item) for item in ignored_segments] + [("candidate", item) for item in parsed.segments]
-            total_segments = max(len(work_items), 1)
+            candidate_segments = [segment for item_type, segment in work_items if item_type == "candidate" and not _segment_ignore_reason(segment)]
+            if not candidate_segments:
+                raise ValidationError("AI 未生成可入库候选")
+            clue_nos = await self.sequence_service.next_codes("FREIGHT_CLUE_NO", len(work_items))
+            candidate_nos = await self.sequence_service.next_codes("FREIGHT_CANDIDATE_NO", len(candidate_segments))
+            match_results = list(getattr(parsed, "match_results", []) or [])
+
+            clue_rows: list[dict[str, Any]] = []
+            normalized_work_items: list[tuple[str, dict[str, Any], str | None]] = []
             for index, (item_type, segment) in enumerate(work_items, start=1):
-                try:
-                    ignore_reason = str(segment.get("drop_reason") or "") if item_type == "ignored" else _segment_ignore_reason(segment)
-                    if ignore_reason:
-                        segment = {**segment, "drop_reason": ignore_reason, "is_freight_candidate": False}
-                    clue = await self.clue_repo.create(
-                        {
-                            "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
-                            "source_type_code": "WECHAT",
-                            "source_channel_code": "WECHAT_TEXT",
-                            "source_batch_id": batch_id,
-                            "source_tms_inbound_id": None,
-                            "segment_index": int(segment.get("segment_index") or index),
-                            "semantic_role_code": _first(segment, "semantic_role_code", "role_code") or ("IGNORED" if ignore_reason else "ROUTE"),
-                            "raw_text": str(segment.get("raw_text") or batch.raw_text),
-                            "line_refs_json": segment.get("line_refs") or segment.get("line_refs_json"),
-                            "context_summary": segment.get("context_summary") or ignore_reason or segment.get("manual_review_reason"),
-                            "extracted_fields_json": segment,
-                            "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
-                            "status_code": "IGNORED" if ignore_reason else "CANDIDATE_CREATED",
-                        }
-                    )
-                    clue_count += 1
-                    if ignore_reason:
-                        continue
-                    await self.candidate_repo.create(
-                        await self._candidate_from_segment(
-                            source_type_code="WECHAT",
-                            source_channel_code="WECHAT_TEXT",
-                            source_batch_id=batch_id,
-                            source_tms_inbound_id=None,
-                            clue_id=clue.id,
-                            segment=segment,
-                        )
-                    )
-                    candidate_count += 1
-                except Exception:  # noqa: BLE001
-                    failed_count += 1
+                ignore_reason = str(segment.get("drop_reason") or "") if item_type == "ignored" else _segment_ignore_reason(segment)
+                if ignore_reason:
+                    segment = {**segment, "drop_reason": ignore_reason, "is_freight_candidate": False}
+                normalized_work_items.append((item_type, segment, ignore_reason))
+                clue_rows.append(
+                    {
+                        "clue_no": clue_nos[index - 1],
+                        "source_type_code": "WECHAT",
+                        "source_channel_code": "WECHAT_TEXT",
+                        "source_batch_id": batch_id,
+                        "source_tms_inbound_id": None,
+                        "segment_index": int(segment.get("segment_index") or index),
+                        "semantic_role_code": _first(segment, "semantic_role_code", "role_code") or ("IGNORED" if ignore_reason else "ROUTE"),
+                        "raw_text": str(segment.get("raw_text") or batch.raw_text),
+                        "line_refs_json": segment.get("line_refs") or segment.get("line_refs_json"),
+                        "context_summary": segment.get("context_summary") or ignore_reason or segment.get("manual_review_reason"),
+                        "extracted_fields_json": segment,
+                        "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
+                        "status_code": "IGNORED" if ignore_reason else "CANDIDATE_CREATED",
+                    }
+                )
+
+            clue_ids = await self.candidate_repo.delete_unconfirmed_by_batch(batch_id)
+            await self.clue_repo.delete_by_ids(clue_ids)
+            clues = await self.clue_repo.bulk_create(clue_rows)
+            candidate_rows: list[dict[str, Any]] = []
+            candidate_index = 0
+            for item_index, (item_type, segment, ignore_reason) in enumerate(normalized_work_items):
+                if item_type != "candidate" or ignore_reason:
                     continue
-                if index == total_segments or index % 5 == 0:
-                    await self._update_parse_progress(
-                        batch_id,
-                        stage_code="WRITING",
-                        stage_name="写入候选",
-                        stage_message=f"正在写入候选货源 {index}/{total_segments}",
-                        percent=90 + min(7, int(index / total_segments * 7)),
-                        started_at=started,
-                        status_code="PARSING",
+                candidate_rows.append(
+                    await self._candidate_from_segment(
+                        source_type_code="WECHAT",
+                        source_channel_code="WECHAT_TEXT",
+                        source_batch_id=batch_id,
+                        source_tms_inbound_id=None,
+                        clue_id=clues[item_index].id,
+                        segment=segment,
+                        candidate_no=candidate_nos[candidate_index],
+                        match_result=match_results[candidate_index] if candidate_index < len(match_results) else None,
                     )
-            failed_count += int(getattr(parsed, "review_failed_count", 0) or 0)
+                )
+                candidate_index += 1
+            await self.candidate_repo.bulk_create(candidate_rows)
+            clue_count = len(clue_rows)
+            candidate_count = len(candidate_rows)
+            failed_count = int(getattr(parsed, "review_failed_count", 0) or 0)
+            mark_timing("SAVING")
             status = "PARSED" if candidate_count and failed_count == 0 else "PARTIAL_FAILED" if candidate_count else "FAILED"
             finished = datetime.utcnow()
+            semantic_map_json = getattr(parsed, "semantic_map", None) or {
+                "context_blocks": (getattr(parsed, "parsed_payload", {}) or {}).get("context_blocks") or [],
+                "context_notes": (getattr(parsed, "parsed_payload", {}) or {}).get("context_notes") or [],
+                "ignored_segments": (getattr(parsed, "parsed_payload", {}) or {}).get("ignored_segments") or [],
+                "warnings": (getattr(parsed, "parsed_payload", {}) or {}).get("warnings") or [],
+            }
+            semantic_map_json = {
+                "pipeline_version": FREIGHT_AI_PIPELINE_VERSION,
+                "prompt_version": parsed.prompt_version,
+                **semantic_map_json,
+            }
+            raw_response_json = {
+                "semantic_map": semantic_map_json,
+                "segments": (getattr(parsed, "parsed_payload", {}) or {}).get("segments") or [],
+                "review_results": getattr(parsed, "review_results", []) or [],
+                "warnings": (getattr(parsed, "parsed_payload", {}) or {}).get("warnings") or [],
+                "timings": timings,
+                "raw_response": getattr(parsed, "raw_response", {}),
+            }
             await self.repo.update(
                 batch_id,
                 {
@@ -1823,14 +1984,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     "failed_count": failed_count if candidate_count else 1,
                     "prompt_version": parsed.prompt_version,
                     "ai_pipeline_version": FREIGHT_AI_PIPELINE_VERSION,
-                    "ai_semantic_map_json": {
-                        "pipeline_version": FREIGHT_AI_PIPELINE_VERSION,
-                        "prompt_version": parsed.prompt_version,
-                        "context_blocks": (getattr(parsed, "parsed_payload", {}) or {}).get("context_blocks") or [],
-                        "context_notes": (getattr(parsed, "parsed_payload", {}) or {}).get("context_notes") or [],
-                        "ignored_segments": (getattr(parsed, "parsed_payload", {}) or {}).get("ignored_segments") or [],
-                        "warnings": (getattr(parsed, "parsed_payload", {}) or {}).get("warnings") or [],
-                    },
+                    "ai_semantic_map_json": semantic_map_json,
                     "finished_at": finished,
                     "parse_stage_code": "DONE" if status != "FAILED" else "FAILED",
                     "parse_stage_name": "解析完成" if status != "FAILED" else "解析失败",
@@ -1838,7 +1992,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     "parse_progress_percent": 100,
                     "parse_heartbeat_at": finished,
                     "ai_elapsed_seconds": int((finished - started).total_seconds()),
-                    "raw_response_json": {"parsed_payload": parsed.parsed_payload, "raw_response": parsed.raw_response},
+                    "raw_response_json": raw_response_json,
                 },
             )
             await self.db.commit()

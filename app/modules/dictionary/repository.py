@@ -231,8 +231,11 @@ class CodeSequenceRepository:
         ).scalars().all()
         return list(items), total
 
-    async def get_sequence_by_biz_code(self, biz_code: str) -> CodeSequence | None:
-        return await self.db.scalar(select(CodeSequence).where(CodeSequence.biz_code == biz_code))
+    async def get_sequence_by_biz_code(self, biz_code: str, *, for_update: bool = False) -> CodeSequence | None:
+        stmt = select(CodeSequence).where(CodeSequence.biz_code == biz_code)
+        if for_update:
+            stmt = stmt.with_for_update()
+        return await self.db.scalar(stmt)
 
     async def get_sequence_by_code(self, business_code: str) -> CodeSequence | None:
         return await self.get_sequence_by_biz_code(business_code)
@@ -255,7 +258,7 @@ class CodeSequenceRepository:
         return entity
 
     async def next_code(self, biz_code: str, reset: bool = False) -> CodeSequence | None:
-        entity = await self.get_sequence_by_biz_code(biz_code)
+        entity = await self.get_sequence_by_biz_code(biz_code, for_update=True)
         if entity is None:
             return None
         if reset:
@@ -264,4 +267,18 @@ class CodeSequenceRepository:
         entity.updated_at = datetime.utcnow()
         await self.db.flush()
         await self.db.refresh(entity)
+        return entity
+
+    async def reserve_codes(self, biz_code: str, count: int, reset: bool = False) -> CodeSequence | None:
+        entity = await self.get_sequence_by_biz_code(biz_code, for_update=True)
+        if entity is None:
+            return None
+        if count <= 0:
+            return entity
+        if reset:
+            entity.current_value = 0
+        step = int(entity.step or 1)
+        entity.current_value = int(entity.current_value or 0) + step * int(count)
+        entity.updated_at = datetime.utcnow()
+        await self.db.flush()
         return entity

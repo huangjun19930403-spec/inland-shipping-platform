@@ -29,6 +29,10 @@ from app.models.commodity import CommodityCategory, CommodityStandard, Commodity
 from app.models.common import CodeSequence
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightNormalizationSuggestion, FreightNormalizationTask
 from app.modules.freight import service as freight_service_module
+from app.modules.dictionary.service import CodeSequenceService
+from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
+from app.modules.freight.ai_text_index import FreightTextIndexer
+from app.modules.freight.master_data_matcher import FreightMasterDataBatchMatcher
 from app.modules.freight.schemas import (
     FreightBatchCreateRequest,
     FreightCandidateConfirmRequest,
@@ -198,6 +202,57 @@ def _segment(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def test_freight_text_indexer_preserves_lines_and_empty_context() -> None:
+    raw_text = "第一行\n\n第三行\n"
+    indexed = FreightTextIndexer().index(raw_text)
+
+    assert indexed.raw_text == raw_text
+    assert indexed.line_map == {"L1": "第一行", "L2": "", "L3": "第三行", "L4": ""}
+    assert indexed.indexed_text == "L1 第一行\nL2 \nL3 第三行\nL4 "
+
+
+def test_semantic_validator_marks_untraceable_ai_output_for_review() -> None:
+    indexed = FreightTextIndexer().index("南京港装动力煤\n到芜湖港")
+    semantic_map = {
+        "route_clues": [
+            {"clue_temp_id": "C1", "line_refs": ["L9"], "raw_text": "南京港装动力煤"},
+            {"clue_temp_id": "C2", "line_refs": ["L1"], "raw_text": "不存在的路线"},
+        ]
+    }
+    validator = FreightSemanticValidator(indexed)
+
+    warnings = validator.validate_semantic_map(semantic_map)
+    segments = [{"clue_temp_id": "C3", "line_refs": ["L1"], "raw_text": "南京港装动力煤"}]
+    segment_warnings = validator.validate_segments(semantic_map, segments)
+
+    assert any("line_refs 不存在" in item for item in warnings)
+    assert any("raw_text 无法" in item for item in warnings)
+    assert all(item["needs_strong_review"] is True for item in semantic_map["route_clues"])
+    assert any("clue_temp_id 不存在" in item for item in segment_warnings)
+    assert segments[0]["needs_strong_review"] is True
+
+
+@pytest.mark.asyncio
+async def test_code_sequence_service_reserves_multiple_codes_in_one_call(session: AsyncSession) -> None:
+    codes = await CodeSequenceService(session).next_codes("FREIGHT_CLUE_NO", 3)
+    next_code = await CodeSequenceService(session).next_code("FREIGHT_CLUE_NO")
+
+    assert codes == ["FCU0001", "FCU0002", "FCU0003"]
+    assert next_code == "FCU0004"
+
+
+@pytest.mark.asyncio
+async def test_master_data_batch_matcher_matches_segments_with_single_loaded_cache(session: AsyncSession) -> None:
+    matcher = FreightMasterDataBatchMatcher(session)
+
+    results = await matcher.match_segments([_segment(), _segment(destination_text="芜湖", destination_match_level_code="CITY")])
+
+    assert results[0]["origin"]["selected"]["node_id"] is not None
+    assert results[0]["destination"]["selected"]["node_id"] is not None
+    assert results[0]["commodity"]["level"] == "STANDARD"
+    assert results[1]["destination"]["selected"]["match_level_code"] == "CITY"
 
 
 def test_ai_parse_schema_normalizes_null_availability_status() -> None:
@@ -562,6 +617,92 @@ async def test_wechat_tonnage_sample_persists_range_and_raw_tonnage(session: Asy
     assert by_route[("黄岗", "盱眙")].max_tonnage == Decimal("2500.00")
     assert by_route[("阳新华新", "靖江金桥")].estimated_tonnage == Decimal("7500.00")
     assert {item.contact_phone for item in detail.candidates} == {"18155088770"}
+
+
+@pytest.mark.asyncio
+async def test_wechat_parse_around_twenty_routes_records_timings_and_heartbeat(session: AsyncSession) -> None:
+    FakeFreightParser.segments = [
+        _segment(
+            segment_index=index,
+            raw_text=f"南京港装动力煤第{index}船到芜湖港",
+            cargo_title=f"南京港至芜湖港动力煤 {index}",
+        )
+        for index in range(1, 21)
+    ]
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="20 条微信群路线样例"), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+    stored = await session.scalar(select(FreightBatchTask).where(FreightBatchTask.id == batch.id))
+
+    assert detail.batch.status_code == "PARSED"
+    assert detail.batch.candidate_count == 20
+    assert detail.batch.parse_heartbeat_at is not None
+    assert stored is not None
+    assert stored.ai_semantic_map_json["pipeline_version"] == "freight_ai_semantic_pipeline_v2"
+    assert "MATCHING" in stored.raw_response_json["timings"]
+    assert "SAVING" in stored.raw_response_json["timings"]
+
+
+@pytest.mark.asyncio
+async def test_wechat_reparse_saving_failure_keeps_existing_unconfirmed_data(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    batch = FreightBatchTask(
+        batch_no="FBT-RETRY",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        raw_text="旧批次重新解析",
+        status_code="FAILED",
+        review_flow_status_code="REVIEWING",
+    )
+    session.add(batch)
+    await session.flush()
+    clue = FreightClue(
+        clue_no="FCU-OLD",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        source_batch_id=batch.id,
+        segment_index=1,
+        raw_text="旧线索",
+        status_code="CANDIDATE_CREATED",
+    )
+    session.add(clue)
+    await session.flush()
+    session.add(
+        FreightCandidate(
+            candidate_no="FCA-OLD",
+            source_type_code="WECHAT",
+            source_channel_code="WECHAT_TEXT",
+            source_batch_id=batch.id,
+            clue_id=clue.id,
+            raw_origin_text="南京港",
+            raw_destination_text="芜湖港",
+            raw_commodity_name="动力煤",
+            cargo_title="旧候选",
+            availability_status_code="READY",
+            status_code="PENDING",
+        )
+    )
+    await session.commit()
+    FakeFreightParser.segments = [_segment(raw_text="新线索")]
+
+    async def fail_bulk_create(self, rows):  # noqa: ANN001
+        raise RuntimeError("模拟保存失败")
+
+    monkeypatch.setattr(freight_service_module.FreightCandidateRepository, "bulk_create", fail_bulk_create)
+
+    with pytest.raises(RuntimeError, match="模拟保存失败"):
+        await FreightBatchTaskService(session).run_parse_now(batch.id, requested_by=7)
+
+    candidates = await freight_service_module.FreightCandidateRepository(session).list_by_batch(batch.id)
+    clues = await freight_service_module.FreightClueRepository(session).list_by_batch(batch.id)
+    refreshed = await session.scalar(select(FreightBatchTask).where(FreightBatchTask.id == batch.id))
+    assert [item.candidate_no for item in candidates] == ["FCA-OLD"]
+    assert [item.clue_no for item in clues] == ["FCU-OLD"]
+    assert refreshed is not None
+    assert refreshed.status_code == "FAILED"
 
 
 @pytest.mark.asyncio

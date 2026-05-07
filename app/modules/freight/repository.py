@@ -252,6 +252,14 @@ class FreightClueRepository:
         await self.db.refresh(row)
         return row
 
+    async def bulk_create(self, rows: list[dict[str, Any]]) -> list[FreightClue]:
+        entities = [FreightClue(**data) for data in rows]
+        if not entities:
+            return []
+        self.db.add_all(entities)
+        await self.db.flush()
+        return entities
+
     async def delete_by_ids(self, clue_ids: list[int]) -> None:
         if clue_ids:
             await self.db.execute(delete(FreightClue).where(FreightClue.id.in_(clue_ids)))
@@ -338,6 +346,14 @@ class FreightCandidateRepository:
         await self.db.flush()
         await self.db.refresh(row)
         return row
+
+    async def bulk_create(self, rows: list[dict[str, Any]]) -> list[FreightCandidate]:
+        entities = [FreightCandidate(**data) for data in rows]
+        if not entities:
+            return []
+        self.db.add_all(entities)
+        await self.db.flush()
+        return entities
 
     async def update(self, candidate_id: int, data: dict[str, Any]) -> FreightCandidate | None:
         row = await self.get_by_id(candidate_id)

@@ -285,13 +285,13 @@ class CodeSequenceService:
         return fmt
 
     @classmethod
-    def _format_code(cls, item, now: datetime) -> str:
+    def _format_code(cls, item, now: datetime, serial_value: int | None = None) -> str:
         date_text = None
         normalized_format = cls._normalize_date_format(item.date_format)
         if normalized_format:
             date_text = now.strftime(normalized_format)
 
-        serial_text = str(item.current_value).zfill(item.value_length)
+        serial_text = str(item.current_value if serial_value is None else serial_value).zfill(item.value_length)
         parts = [item.prefix or ""]
         if date_text:
             parts.append(date_text)
@@ -396,3 +396,21 @@ class CodeSequenceService:
         if updated is None:
             raise NotFoundError("CodeSequence", business_code)
         return self._format_code(updated, now)
+
+    async def next_codes(self, business_code: str, count: int) -> list[str]:
+        if count <= 0:
+            return []
+        current = await self.repo.get_sequence_by_biz_code(business_code)
+        if current is None:
+            raise NotFoundError("CodeSequence", business_code)
+        if not current.is_enabled:
+            raise ValidationError(f"sequence is disabled: {business_code}")
+
+        now = datetime.utcnow()
+        reset_needed = self._should_reset(current, now)
+        start_value = 0 if reset_needed else int(current.current_value or 0)
+        step = int(current.step or 1)
+        updated = await self.repo.reserve_codes(business_code, count, reset=reset_needed)
+        if updated is None:
+            raise NotFoundError("CodeSequence", business_code)
+        return [self._format_code(updated, now, start_value + step * index) for index in range(1, count + 1)]

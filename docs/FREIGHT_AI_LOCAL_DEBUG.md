@@ -16,19 +16,24 @@ python -m scripts.seed_system_init
 ```bash
 export DASHSCOPE_API_KEY="你的百炼 API Key"
 export DASHSCOPE_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-export DASHSCOPE_FAST_MODEL="qwen-turbo"
-export DASHSCOPE_MODEL="qwen-plus"
 export DASHSCOPE_STREAM_TIMEOUT_SECONDS="120"
-export DASHSCOPE_STRONG_REVIEW_ENABLED="true"
+export FREIGHT_AI_SEMANTIC_MODEL="qwen-turbo"
+export FREIGHT_AI_DETAIL_MODEL="qwen-turbo"
+export FREIGHT_AI_REVIEW_MODEL="qwen-plus"
+export FREIGHT_AI_DETAIL_BATCH_SIZE="8"
+export FREIGHT_AI_DETAIL_CONCURRENCY="2"
+export FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD="0.65"
+export FREIGHT_AI_WARN_RAW_CHARS="20000"
 export FREIGHT_AI_STALE_HEARTBEAT_SECONDS="180"
 ```
 
 说明：
 
-- `DASHSCOPE_FAST_MODEL` 用于 AI 线索切分和字段抽取。
-- `DASHSCOPE_MODEL` 用于低置信度候选的强模型复核。
+- `FREIGHT_AI_SEMANTIC_MODEL` 用于第一轮完整原文语义地图。
+- `FREIGHT_AI_DETAIL_MODEL` 用于第二轮基于 `clue_temp_id` 的字段补全。
+- `FREIGHT_AI_REVIEW_MODEL` 用于第三轮风险候选强复核，高置信度 `READY` 候选不会进入该阶段。
 - 当前主链路使用 DashScope SDK 流式调用，不再以 LangChain 作为主调用入口。
-- 微信原文拆解必须由 AI 完成，后端不会用正则、关键词或本地规则切分微信群原文。
+- 微信原文在 AI 前只做 L 行号索引；后端不会用正则、关键词或本地规则提前决定货源边界。
 
 ## 方式一：Celery eager 单机调试
 
