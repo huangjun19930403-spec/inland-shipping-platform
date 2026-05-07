@@ -293,6 +293,35 @@ def test_context_blocks_inherit_trailing_contact_to_all_segments() -> None:
     assert all(item["inherited_context"]["contact"] == "小王 18205543462" for item in segments)
 
 
+def test_context_blocks_do_not_auto_inherit_shared_tonnage() -> None:
+    segments, warnings = _apply_context_blocks_to_segments(
+        [
+            {
+                "segment_index": 1,
+                "context_block_id": "B1",
+                "raw_text": "济宁到绍兴吨包50米船",
+                "origin_text": "济宁",
+                "destination_text": "绍兴",
+                "commodity_name": "吨包",
+            }
+        ],
+        [
+            {
+                "context_block_id": "B1",
+                "route_clue_ids": [1],
+                "shared_tonnage_text": "2000-2500吨、800-950",
+                "shared_contact_phone": "13562723159",
+                "evidence": ["13562723159"],
+                "scope_reason": "同一公告块联系人覆盖路线；吨位仅作为候选上下文",
+            }
+        ],
+    )
+
+    assert segments[0].get("contact_phone") == "13562723159"
+    assert segments[0].get("raw_tonnage_text") is None
+    assert any("公共吨位" in item for item in warnings)
+
+
 def test_wechat_split_schema_accepts_route_clues_missing_commodity() -> None:
     payload = FreightClueSplitPayloadSchema.model_validate(
         {
@@ -502,6 +531,149 @@ async def test_wechat_tonnage_sample_persists_range_and_raw_tonnage(session: Asy
     assert by_route[("黄岗", "盱眙")].max_tonnage == Decimal("2500.00")
     assert by_route[("阳新华新", "靖江金桥")].estimated_tonnage == Decimal("7500.00")
     assert {item.contact_phone for item in detail.candidates} == {"18155088770"}
+
+
+@pytest.mark.asyncio
+async def test_wechat_group_notice_humanized_parse_keeps_tonnage_on_own_line(session: AsyncSession) -> None:
+    rows = [
+        ("济宁", "泰州", "货源", "700—1400", None, 700, 1400, None),
+        ("江阴", "高邮", "货源", "1200吨", 1200, None, None, None),
+        ("微山", "扬州仪征", "吨包", "2000-2500吨", None, 2000, 2500, None),
+        ("济宁", "绍兴", "吨包", None, None, None, None, "50米船"),
+        ("万丰", "丹阳", "焦炭", None, None, None, None, "拖队一条"),
+        ("嘉祥", "如东", "货源", "800–950", None, 800, 950, None),
+        ("微山鱼台", "张家港永兴", "货源", "800–1300", None, 800, 1300, None),
+        ("微山，鱼台", "南浔至桐乡", "货源", "800–1300", None, 800, 1300, None),
+        ("微山，鱼台", "如东", "货源", "650–900", None, 650, 900, None),
+        ("济宁", "高邮", "货源", "800–1400", None, 800, 1400, None),
+        ("鱼台", "盱眙", "货", "1000–1500", None, 1000, 1500, None),
+        ("鱼台", "宝应", "货源", "2000–3000", None, 2000, 3000, None),
+        ("滕州", "阜宁", "货源", "600–1200", None, 600, 1200, None),
+        ("鱼台", "如皋", "货源", "800–1100", None, 800, 1100, None),
+        ("六干河", "阜宁", "货源", "800-1500", None, 800, 1500, None),
+        ("上海", "盐城", "货源", "800–1800", None, 800, 1800, None),
+        ("微山.宋闸.滕州.枣庄", "巨野，万丰", "货源", "800–2000", None, 800, 2000, None),
+        ("济宁", "泰兴", "货源", "700–1000", None, 700, 1000, None),
+    ]
+    FakeFreightParser.segments = [
+        {
+            "segment_index": index,
+            "semantic_role_code": "ROUTE",
+            "line_refs": [index + 1],
+            "raw_text": f"{origin}至{destination}{commodity}{raw_tonnage or vessel or ''}",
+            "cargo_title": f"{origin} 至 {destination} {commodity}",
+            "cargo_description": vessel,
+            "commodity_name": commodity,
+            "origin_text": origin,
+            "destination_text": destination,
+            "raw_tonnage_text": raw_tonnage,
+            "estimated_tonnage": estimated,
+            "min_tonnage": min_tonnage,
+            "max_tonnage": max_tonnage,
+            "quantity_description": vessel,
+            "vessel_description": vessel,
+            "contact_phone": "13562723159",
+            "availability_status_code": "READY",
+            "confidence_score": 0.9,
+            "evidence": [f"{origin}至{destination}{commodity}{raw_tonnage or vessel or ''}", "13562723159"],
+            "tonnage_decision": {
+                "status_code": "PASS" if raw_tonnage else "REVIEW_REQUIRED",
+                "selected_text": raw_tonnage,
+                "reason": "吨位来自本行" if raw_tonnage else "本行只有船型/拖队描述，没有吨位",
+            },
+        }
+        for index, (origin, destination, commodity, raw_tonnage, estimated, min_tonnage, max_tonnage, vessel) in enumerate(rows, start=1)
+    ]
+    raw_text = """群公告
+济宁至泰州700—1400
+江阴到高邮1200吨
+微山到扬州仪征吨包2000-2500吨
+济宁到绍兴吨包50米船
+万丰到丹阳焦炭拖队一条
+嘉祥至如东800–950
+微山鱼台至张家港永兴800–1300
+微山，鱼台至南浔至桐乡800–1300
+微山，鱼台至如东650–900
+济宁至高邮800–1400
+鱼台至盱眙货1000–1500
+鱼台至宝应2000–3000
+滕州至阜宁600–1200
+鱼台至如皋800–1100
+六干河至阜宁800-1500
+上海至盐城800–1800
+微山.宋闸.滕州.枣庄至巨野，万丰800–2000
+济宁至泰兴700–1000
+13562723159"""
+
+    service = FreightBatchTaskService(session)
+    batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text=raw_text), creator_id=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
+    by_route = {(item.raw_origin_text, item.raw_destination_text): item for item in detail.candidates}
+
+    assert detail.batch.status_code == "PARSED"
+    assert detail.batch.candidate_count == 18
+    assert ("济宁", "泰州") in by_route
+    assert by_route[("济宁", "泰州")].min_tonnage == Decimal("700.00")
+    assert by_route[("微山", "扬州仪征")].raw_tonnage_text == "2000-2500吨"
+    assert by_route[("微山", "扬州仪征")].max_tonnage == Decimal("2500.00")
+    assert by_route[("济宁", "绍兴")].raw_tonnage_text is None
+    assert by_route[("济宁", "绍兴")].ai_review_status_code == "REVIEW_REQUIRED"
+    assert by_route[("济宁", "绍兴")].availability_status_code == "UNKNOWN"
+    assert "50米船" in (by_route[("济宁", "绍兴")].cargo_description or "")
+    assert by_route[("万丰", "丹阳")].raw_tonnage_text is None
+    assert by_route[("万丰", "丹阳")].ai_review_status_code == "REVIEW_REQUIRED"
+    assert "拖队一条" in (by_route[("万丰", "丹阳")].cargo_description or "")
+    assert {item.contact_phone for item in detail.candidates} == {"13562723159"}
+    assert all("2000-2500吨、800" not in str(item.raw_tonnage_text or "") for item in detail.candidates)
+
+    bulk = await FreightCandidateService(session).bulk_confirm_batch(batch.id, operator_id=7)
+    assert bulk.confirmed_count == 16
+    assert bulk.skipped_count == 2
+    assert {item["candidate_no"] for item in bulk.skipped} == {
+        by_route[("济宁", "绍兴")].candidate_no,
+        by_route[("万丰", "丹阳")].candidate_no,
+    }
+
+
+@pytest.mark.asyncio
+async def test_candidate_ai_review_required_blocks_quick_confirm_and_manual_accepts(session: AsyncSession) -> None:
+    candidate = FreightCandidate(
+        candidate_no="FCA-AI-REVIEW",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        raw_origin_text="济宁",
+        raw_destination_text="绍兴",
+        raw_commodity_name="吨包",
+        cargo_title="济宁至绍兴吨包",
+        cargo_description="50米船",
+        commodity_match_level_code="RAW",
+        origin_match_level_code="RAW",
+        destination_match_level_code="RAW",
+        availability_status_code="UNKNOWN",
+        ai_review_status_code="REVIEW_REQUIRED",
+        ai_review_json={"reason": "缺少可归属本条货源的吨位"},
+        manual_review_reason="缺少可归属本条货源的吨位",
+        status_code="PENDING",
+    )
+    session.add(candidate)
+    await session.commit()
+
+    with pytest.raises(ValidationError, match="需要编辑确认"):
+        await FreightCandidateService(session).confirm(candidate.id, FreightCandidateConfirmRequest(remark="确认"), operator_id=1)
+
+    freight = await FreightCandidateService(session).confirm(
+        candidate.id,
+        FreightCandidateConfirmRequest(
+            remark="人工补吨位确认",
+            overrides={"raw_tonnage_text": "2000吨", "estimated_tonnage": Decimal("2000"), "availability_status_code": "READY"},
+        ),
+        operator_id=1,
+    )
+    refreshed = await session.scalar(select(FreightCandidate).where(FreightCandidate.id == candidate.id))
+
+    assert freight.raw_tonnage_text == "2000吨"
+    assert refreshed is not None
+    assert refreshed.ai_review_status_code == "MANUAL_ACCEPTED"
 
 
 @pytest.mark.asyncio

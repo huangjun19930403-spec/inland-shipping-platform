@@ -50,6 +50,9 @@ class QwenFreightParseResult:
 
 class FreightClueSplitItemSchema(BaseModel):
     segment_index: int | None = None
+    context_block_id: str | int | None = None
+    semantic_role_code: str | None = Field(default="ROUTE", description="ROUTE/CONTEXT/IGNORED")
+    line_refs: list[str | int] = Field(default_factory=list, description="原文行号或行标识")
     raw_text: str = Field(description="AI 切分出的可追溯原文片段")
     origin_text: str | None = Field(default=None, description="路线中出现的装货地原文，未知填 null")
     destination_text: str | None = Field(default=None, description="路线中出现的卸货地原文，未知填 null")
@@ -79,6 +82,15 @@ class FreightClueSplitItemSchema(BaseModel):
         if value is None:
             return []
         if isinstance(value, str):
+            return [value]
+        return value
+
+    @field_validator("line_refs", mode="before")
+    @classmethod
+    def _default_line_refs(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, (str, int)):
             return [value]
         return value
 
@@ -213,6 +225,8 @@ class FreightClueSplitPayloadSchema(BaseModel):
 class FreightSegmentSchema(BaseModel):
     segment_index: int | None = None
     context_block_id: str | int | None = None
+    semantic_role_code: str | None = Field(default="ROUTE", description="ROUTE/CONTEXT/IGNORED")
+    line_refs: list[str | int] = Field(default_factory=list, description="原文行号或行标识")
     raw_text: str = Field(description="原文片段，必须可在原文中追溯")
     context_summary: str | None = Field(default=None, description="AI 判断的上下文继承说明")
     inherited_context: dict[str, Any] | None = Field(default=None, description="从公共上下文继承到该货源的价格、联系人、备注等信息")
@@ -229,6 +243,10 @@ class FreightSegmentSchema(BaseModel):
     estimated_tonnage: float | None = None
     min_tonnage: float | None = None
     max_tonnage: float | None = None
+    quantity_description: str | None = Field(default=None, description="数量/船型/拖队等非吨位原文说明")
+    vessel_description: str | None = Field(default=None, description="船型、拖队、米数等非吨位信息")
+    tonnage_decision: dict[str, Any] | None = Field(default=None, description="AI 对本条吨位归属的裁决")
+    tonnage_candidates: list[dict[str, Any]] = Field(default_factory=list, description="AI 在本条上下文中考虑过的吨位候选")
     unit_price: float | None = None
     total_price: float | None = None
     price_unit: str | None = None
@@ -242,6 +260,9 @@ class FreightSegmentSchema(BaseModel):
     contact_wechat: str | None = None
     availability_status_code: str = Field(default="UNKNOWN", description="READY/DEFERRED/FULL/UNKNOWN")
     manual_review_reason: str | None = None
+    ai_review_status_code: str | None = Field(default=None, description="PASS/REVIEW_REQUIRED")
+    ai_review_reason: str | None = None
+    ai_review_json: dict[str, Any] | None = None
     confidence_score: float = 0.5
     evidence: list[str] = Field(default_factory=list)
     needs_strong_review: bool = False
@@ -274,6 +295,24 @@ class FreightSegmentSchema(BaseModel):
             return [value]
         return value
 
+    @field_validator("line_refs", mode="before")
+    @classmethod
+    def _default_line_refs(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, (str, int)):
+            return [value]
+        return value
+
+    @field_validator("tonnage_candidates", mode="before")
+    @classmethod
+    def _default_tonnage_candidates(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return [value]
+        return value
+
     @field_validator("needs_strong_review", mode="before")
     @classmethod
     def _default_review_flag(cls, value: Any) -> bool:
@@ -296,11 +335,13 @@ def _json_schema_hint() -> dict[str, Any]:
             {
                 "segment_index": 1,
                 "context_block_id": "<继承上下文块 ID，未知填 null>",
+                "semantic_role_code": "ROUTE",
+                "line_refs": ["<原文行号或行标识>"],
                 "raw_text": "<完整货源线索原文片段>",
                 "context_summary": "<继承的公共上下文摘要，不能写未在原文或 context_notes 中出现的信息>",
                 "inherited_context": {
                     "price": "<继承的价格原文或 null>",
-                    "tonnage": "<继承的吨位原文或 null>",
+                    "tonnage": "<仅当 AI 已裁决该吨位明确归属本条线索时填写，否则 null>",
                     "contact": "<继承的联系人原文或 null>",
                     "remark": "<继承的装卸/结算/天气备注原文或 null>",
                     "evidence": ["<上下文证据片段>"],
@@ -318,6 +359,16 @@ def _json_schema_hint() -> dict[str, Any]:
                 "estimated_tonnage": None,
                 "min_tonnage": None,
                 "max_tonnage": None,
+                "quantity_description": "<50米船、拖队一条等数量/船型描述；不是吨位时写这里>",
+                "vessel_description": "<船型、拖队、米数等非吨位信息>",
+                "tonnage_decision": {
+                    "status_code": "PASS",
+                    "selected_text": "<本条货源自己的吨位原文或 null>",
+                    "reason": "<为什么这个吨位属于本条货源；不输出思考过程，只输出结论证据>",
+                },
+                "tonnage_candidates": [
+                    {"text": "<候选吨位原文>", "line_ref": "<来源行>", "belongs_to_current_segment": True}
+                ],
                 "unit_price": None,
                 "total_price": None,
                 "price_unit": "<价格单位原文或 null>",
@@ -326,6 +377,9 @@ def _json_schema_hint() -> dict[str, Any]:
                 "contact_phone": "<手机号原文或 null>",
                 "availability_status_code": "READY",
                 "manual_review_reason": None,
+                "ai_review_status_code": "PASS",
+                "ai_review_reason": None,
+                "ai_review_json": {"summary": "<业务复核结论>"},
                 "confidence_score": 0.86,
                 "evidence": ["<路线证据>", "<货品证据>", "<继承上下文证据>"],
                 "needs_strong_review": False,
@@ -341,6 +395,8 @@ def _clue_schema_hint() -> dict[str, Any]:
             {
                 "segment_index": 1,
                 "context_block_id": "<该线索所属上下文块 ID，未知填 null>",
+                "semantic_role_code": "ROUTE",
+                "line_refs": ["<原文行号或行标识>"],
                 "raw_text": "<包含装货地和卸货地的单条路线线索；缺货品也要保留>",
                 "origin_text": "<装货地原文，未知填 null>",
                 "destination_text": "<卸货地原文，未知填 null>",
@@ -488,7 +544,6 @@ def _append_review_reason(segment: dict[str, Any], reason: str) -> None:
 
 def _support_text(raw_content: str, segment: dict[str, Any]) -> str:
     pieces = [
-        raw_content,
         segment.get("raw_text"),
         segment.get("context_summary"),
         json.dumps(segment.get("evidence") or [], ensure_ascii=False),
@@ -567,6 +622,12 @@ def _normalize_segment_quality(segment: dict[str, Any], raw_content: str) -> tup
         normalized["needs_strong_review"] = True
         _append_review_reason(normalized, reason)
         warnings.append(reason)
+    elif normalized.get("needs_strong_review") or normalized.get("manual_review_reason") or normalized.get("ai_review_reason"):
+        normalized["availability_status_code"] = "UNKNOWN"
+        normalized["needs_strong_review"] = True
+        if normalized.get("ai_review_reason"):
+            _append_review_reason(normalized, str(normalized.get("ai_review_reason")))
+        warnings.append(str(normalized.get("manual_review_reason") or normalized.get("ai_review_reason") or "AI 复核需人工判断"))
     elif str(normalized.get("availability_status_code") or "").upper() == "READY":
         normalized["availability_status_code"] = "READY"
     if explicit_drop:
@@ -580,6 +641,11 @@ def _segment_needs_strong_review(segment: dict[str, Any]) -> bool:
     if segment.get("is_freight_candidate") is False or segment.get("drop_reason"):
         return True
     if bool(segment.get("needs_strong_review")):
+        return True
+    if segment.get("manual_review_reason") or segment.get("ai_review_reason"):
+        return True
+    review_status = str(segment.get("ai_review_status_code") or segment.get("review_status_code") or "").upper()
+    if review_status and review_status != "PASS":
         return True
     try:
         confidence = float(segment.get("confidence_score") or 0)
@@ -680,7 +746,6 @@ def _apply_context_blocks_to_segments(
             "contact_name": ("shared_contact_name", "contact_name"),
             "contact_phone": ("shared_contact_phone", "contact_phone", "phone"),
             "contact_wechat": ("shared_contact_wechat", "contact_wechat"),
-            "raw_tonnage_text": ("shared_tonnage_text", "tonnage", "raw_tonnage_text"),
             "unit_price": ("shared_unit_price", "unit_price"),
             "total_price": ("shared_total_price", "total_price"),
             "price_unit": ("shared_price_unit", "price_unit"),
@@ -692,6 +757,11 @@ def _apply_context_blocks_to_segments(
                 if value not in (None, ""):
                     item[field_name] = value
                     warnings.append(f"segment {item.get('segment_index') or index}: 已按 AI 上下文块继承{field_name}")
+        shared_tonnage = _context_value(block, "shared_tonnage_text", "tonnage", "raw_tonnage_text")
+        if shared_tonnage and item.get("raw_tonnage_text") in (None, ""):
+            warnings.append(
+                f"segment {item.get('segment_index') or index}: AI 上下文块存在公共吨位，但未自动继承，需由 segment 吨位裁决明确归属"
+            )
         remark = _append_text(_context_value(block, "shared_loading_remark"), _context_value(block, "shared_remark"))
         if remark:
             item["cargo_description"] = _append_text(item.get("cargo_description"), remark)
@@ -713,7 +783,7 @@ def _apply_context_blocks_to_segments(
 class DashScopeQwenFreightParserClient:
     """DashScope SDK freight parser."""
 
-    wechat_prompt_version = "freight_wechat_dashscope_stream_v8"
+    wechat_prompt_version = "freight_wechat_humanized_semantic_v9"
     tms_prompt_version = "freight_tms_dashscope_stream_v4"
     prompt_version = wechat_prompt_version
 
@@ -786,12 +856,14 @@ class DashScopeQwenFreightParserClient:
                     "你是内河航运微信群货源线索切分助手。只输出 JSON。"
                     "必须由你阅读完整原文并切分货源线索；不要依赖用户或系统预切分。"
                     "输出必须分为 route_clues、context_blocks、context_notes 和 ignored_notes。"
+                    "先建立语义地图：逐行判断哪些是线路、哪些是公共联系人/备注/吨位候选、哪些不是货源；每条 route_clue 写 line_refs。"
                     "route_clues 采用召回优先：只要有装货地和卸货地，就必须保留为路线线索；缺货品时写 commodity_name=null、missing_field_codes 包含 COMMODITY。"
                     "公告、天气、联系人、价格、结算、装卸备注等上下文行不能单独成为 route_clues，只能放入 context_notes。"
                     "公共联系人、吨位、价格、结算、装卸备注必须抽成 context_blocks；每个 block 写 route_clue_ids、证据和 scope_reason。"
                     "末尾电话或联系人通常适用于上方同一连续公告块内所有未出现其它联系人的 route_clues；若不适用必须说明证据。"
                     "每条 route_clue 必须写 context_block_id，并在 inherited_context、context_summary 和 evidence 中说明继承内容。"
                     "一行或多行上下文可继承给多个 route_clues，但不能因此新增不存在的货源。"
+                    "吨位只能作为候选上下文记录，不能因为同一公告块就默认继承给所有路线；只有语义上明确属于某条路线时，后续结构化阶段才写入该 segment。"
                     "请判断装卸地粒度：明确港口、码头、闸口、厂矿、装卸点等具体设施才是 NODE；只有城市名或城市简称时是 CITY；无法判断是 RAW。"
                     "微信群货源里靠近路线和货品的 1500-2000内、2000左右、7500左右、2-3500吨通常是吨位，不是价格；只有出现元、运费、价格、现金等价格语义时才按价格处理。"
                     "不得使用 JSON 结构说明中的占位值作为真实字段。"
@@ -838,8 +910,12 @@ class DashScopeQwenFreightParserClient:
                     "有装货地和卸货地但缺货品的 clue 必须输出 segment，commodity_name 填 null，availability_status_code 填 UNKNOWN，manual_review_reason 写明缺货品，不能丢弃。"
                     "请保留 clue 中的 origin_match_level_code/destination_match_level_code；只有具体设施才标 NODE，只有城市名或城市简称标 CITY。"
                     "吨位原文必须写 raw_tonnage_text；单点吨位填 estimated_tonnage；范围吨位填 min_tonnage 和 max_tonnage。"
+                    "运输吨位必须只归属当前 freight_clue：同一公告里出现多条线路和多个吨位范围时，每个 segment 只能选择自己这一行或明确绑定上下文里的吨位。"
+                    "如果你发现多个吨位候选无法判断归属，raw_tonnage_text 填 null，tonnage_candidates 写候选，ai_review_status_code 填 REVIEW_REQUIRED。"
+                    "50米船、拖队一条、船型、米数、条数不是吨位；写入 quantity_description/vessel_description 或 cargo_description，不得写入 raw_tonnage_text。"
                     "1500-2000内 表示 min_tonnage=1500、max_tonnage=2000；2000左右 表示 estimated_tonnage=2000；2000--2500吨 表示 min_tonnage=2000、max_tonnage=2500。"
                     "2-3500吨这类微信群简写通常表示 2000-3500吨，若你能从上下文确认就填 min_tonnage=2000、max_tonnage=3500；不能确认则只填 raw_tonnage_text 并写 manual_review_reason。"
+                    "每个 segment 必须给出 tonnage_decision，说明吨位是否 PASS；无法确认时写 ai_review_reason，不要为了凑字段拼接其它线路的吨位。"
                     "非空字段必须能从原文、freight_clue、context_notes、evidence 或 inherited_context 中找到证据；没有证据必须填 null。"
                 "如果某个 freight_clue 复核后不是完整货源线索，输出 is_freight_candidate=false 并写 drop_reason。"
                 "船已够、暂时不要、过几天要应标为 FULL 或 DEFERRED；滚动发、随船装缺明确装期时标为 UNKNOWN。"
@@ -883,7 +959,8 @@ class DashScopeQwenFreightParserClient:
                     "你是内河航运微信群货源复核助手。只输出 JSON。"
                     "请复核输入 segments 的字段完整性、吨位归类、可发状态、上下文继承和证据来源。"
                     "不得新增货源，只能修正输入 segment 的字段、清空无证据字段，或把上下文-only/空线索标记为 is_freight_candidate=false。"
-                    "必须核对 context_blocks 的 route_clue_ids：公共联系人、电话、装卸备注、公共吨位应继承到该 block 覆盖的所有 segment。"
+                    "必须核对 context_blocks 的 route_clue_ids：公共联系人、电话、装卸备注可继承到该 block 覆盖的所有 segment。"
+                    "公共吨位不能自动继承；必须根据 route_clue 原文和上下文语义逐条裁决归属，不能把多个线路的吨位范围合并到一个 segment。"
                     "如果同一 context_block 内只有部分 segment 继承联系人，应补齐其它 segment；证据不足则全部标记需人工判断。"
                     "如果 inherited_context.price 中实际是吨位表达，应移入 raw_tonnage_text 和 estimated_tonnage/min_tonnage/max_tonnage，并清空价格字段。"
                     "复核 2-3500吨 等简写时按微信群货源吨位语境处理，不能确认时保留 raw_tonnage_text 并要求人工判断。"

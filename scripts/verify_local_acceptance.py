@@ -277,6 +277,34 @@ async def verify() -> list[CheckResult]:
                 f"freight {raw_tonnage_freight_count} >= 100, candidate {raw_tonnage_candidate_count} >= 20",
             )
         )
+        ai_review_candidate_count = int(
+            await session.scalar(
+                select(func.count(FreightCandidate.id)).where(
+                    FreightCandidate.ai_review_status_code.in_(["PASS", "REVIEW_REQUIRED", "MANUAL_ACCEPTED"]),
+                    FreightCandidate.ai_understanding_json.is_not(None),
+                    FreightCandidate.ai_tool_match_json.is_not(None),
+                    FreightCandidate.ai_review_json.is_not(None),
+                )
+            )
+            or 0
+        )
+        semantic_batch_count = int(
+            await session.scalar(
+                select(func.count(FreightBatchTask.id)).where(
+                    FreightBatchTask.source_type_code == "WECHAT",
+                    FreightBatchTask.ai_pipeline_version.is_not(None),
+                    FreightBatchTask.ai_semantic_map_json.is_not(None),
+                )
+            )
+            or 0
+        )
+        results.append(
+            _result(
+                "freight ai humanized seed fields",
+                ai_review_candidate_count >= 40 and semantic_batch_count >= 25,
+                f"candidate ai fields {ai_review_candidate_count} >= 40, semantic batches {semantic_batch_count} >= 25",
+            )
+        )
 
         task_codes = (await session.execute(select(AnalysisJobDefinition.job_code))).scalars().all()
         results.append(

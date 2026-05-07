@@ -72,7 +72,13 @@ DISPLAY_DICT_CODES = [
     "FREIGHT_MATCH_LEVEL",
     "FREIGHT_HALL_STATUS",
     "FREIGHT_AVAILABILITY_STATUS",
+    "FREIGHT_AI_REVIEW_STATUS",
 ]
+
+AI_REVIEW_PASS = "PASS"
+AI_REVIEW_REQUIRED = "REVIEW_REQUIRED"
+AI_REVIEW_MANUAL_ACCEPTED = "MANUAL_ACCEPTED"
+FREIGHT_AI_PIPELINE_VERSION = "freight_ai_humanized_parse_v1"
 
 
 def _to_decimal_or_none(value: Any) -> Decimal | None:
@@ -142,6 +148,54 @@ def _segment_ignore_reason(segment: dict[str, Any]) -> str | None:
     if missing:
         return f"AI 输出不是可追溯路线线索，缺少{','.join(missing)}"
     return None
+
+
+def _candidate_ai_review_pass(candidate: FreightCandidate) -> bool:
+    return str(getattr(candidate, "ai_review_status_code", None) or AI_REVIEW_PASS).upper() == AI_REVIEW_PASS
+
+
+def _candidate_ai_review_reason(candidate: FreightCandidate) -> str | None:
+    review = getattr(candidate, "ai_review_json", None)
+    if isinstance(review, dict):
+        for key in ("reason", "review_reason", "summary"):
+            value = review.get(key)
+            if value not in (None, ""):
+                return str(value)
+    return getattr(candidate, "manual_review_reason", None)
+
+
+def _segment_has_tonnage(segment: dict[str, Any]) -> bool:
+    if _first(segment, "raw_tonnage_text", "tonnage_text", "tonnage_raw") not in (None, ""):
+        return True
+    return any(
+        segment.get(key) not in (None, "")
+        for key in ("estimated_tonnage", "quantity_ton", "tonnage", "min_tonnage", "max_tonnage")
+    )
+
+
+def _derive_segment_ai_review(segment: dict[str, Any], *, availability_status: str, manual_review_reason: Any) -> tuple[str, str | None, list[str]]:
+    checks: list[str] = []
+    reason = str(manual_review_reason or "").strip() or None
+    explicit_status = str(
+        _first(segment, "ai_review_status_code", "review_status_code", "business_review_status_code") or ""
+    ).strip().upper()
+    if explicit_status and explicit_status != AI_REVIEW_PASS:
+        reason = _append_reason(reason, str(_first(segment, "ai_review_reason", "review_reason") or "AI 裁决需人工判断"))
+        checks.append("AI_REVIEW_FLAG")
+    if bool(segment.get("needs_strong_review")):
+        reason = _append_reason(reason, "AI 复核标记需人工判断")
+        checks.append("STRONG_REVIEW_FLAG")
+    if str(availability_status or "").upper() != "READY":
+        reason = _append_reason(reason, "AI 未判断为可直接确认")
+        checks.append("NOT_READY")
+    missing = _segment_core_missing(segment)
+    if missing:
+        reason = _append_reason(reason, f"缺少{','.join(missing)}，无法直接确认")
+        checks.append("CORE_FIELDS_MISSING")
+    if not _segment_has_tonnage(segment):
+        reason = _append_reason(reason, "缺少可归属本条货源的吨位")
+        checks.append("TONNAGE_MISSING")
+    return (AI_REVIEW_REQUIRED, reason, checks) if reason else (AI_REVIEW_PASS, None, checks)
 
 
 def _parse_heartbeat_age_seconds(entity) -> int | None:
@@ -566,6 +620,8 @@ def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatc
         remark=entity.remark,
         error_message=entity.error_message,
         prompt_version=entity.prompt_version,
+        ai_pipeline_version=getattr(entity, "ai_pipeline_version", None),
+        ai_semantic_map_json=getattr(entity, "ai_semantic_map_json", None),
         parse_stage_code=entity.parse_stage_code,
         parse_stage_name=entity.parse_stage_name,
         parse_stage_message=entity.parse_stage_message,
@@ -619,7 +675,9 @@ def _to_clue_response(entity, ctx: dict[str, Any] | None = None) -> FreightClueR
         source_batch_id=entity.source_batch_id,
         source_tms_inbound_id=entity.source_tms_inbound_id,
         segment_index=entity.segment_index,
+        semantic_role_code=getattr(entity, "semantic_role_code", None),
         raw_text=entity.raw_text,
+        line_refs_json=getattr(entity, "line_refs_json", None),
         context_summary=entity.context_summary,
         extracted_fields_json=entity.extracted_fields_json,
         quality_score=entity.quality_score,
@@ -695,6 +753,11 @@ def _to_candidate_response(entity, ctx: dict[str, Any] | None = None) -> Freight
         completeness_score=entity.completeness_score,
         match_basis_json=entity.match_basis_json,
         ai_suggestion_json=entity.ai_suggestion_json,
+        ai_understanding_json=getattr(entity, "ai_understanding_json", None),
+        ai_tool_match_json=getattr(entity, "ai_tool_match_json", None),
+        ai_review_json=getattr(entity, "ai_review_json", None),
+        ai_review_status_code=getattr(entity, "ai_review_status_code", None) or AI_REVIEW_PASS,
+        ai_review_status_name=_label(ctx, "FREIGHT_AI_REVIEW_STATUS", getattr(entity, "ai_review_status_code", None) or AI_REVIEW_PASS),
         availability_status_code=entity.availability_status_code,
         availability_status_name=_label(ctx, "FREIGHT_AVAILABILITY_STATUS", entity.availability_status_code),
         manual_review_reason=entity.manual_review_reason,
@@ -1098,6 +1161,45 @@ class FreightNormalizationMixin:
         if missing:
             availability_status = "UNKNOWN"
             manual_review_reason = _append_reason(manual_review_reason, f"缺少{','.join(missing)}，无法直接确认")
+        ai_review_status, ai_review_reason, ai_review_checks = _derive_segment_ai_review(
+            segment,
+            availability_status=availability_status,
+            manual_review_reason=manual_review_reason,
+        )
+        if ai_review_status != AI_REVIEW_PASS:
+            availability_status = "UNKNOWN" if availability_status == "READY" else availability_status
+            manual_review_reason = ai_review_reason
+        raw_tonnage_text = _first(segment, "raw_tonnage_text", "tonnage_text", "tonnage_raw")
+        ai_understanding = {
+            "semantic_role_code": _first(segment, "semantic_role_code", "role_code") or "ROUTE",
+            "line_refs": segment.get("line_refs") or segment.get("line_refs_json") or [],
+            "raw_text": raw_text or None,
+            "route": {"origin_text": origin_text or None, "destination_text": destination_text or None},
+            "commodity_name": commodity_name or None,
+            "tonnage": {
+                "raw_text": raw_tonnage_text,
+                "estimated_tonnage": _compact_json_value(parsed_tonnage),
+                "min_tonnage": _compact_json_value(min_tonnage),
+                "max_tonnage": _compact_json_value(max_tonnage),
+                "decision": segment.get("tonnage_decision_json") or segment.get("tonnage_decision"),
+                "candidates": segment.get("tonnage_candidates_json") or segment.get("tonnage_candidates") or [],
+            },
+            "quantity_description": _first(segment, "quantity_description", "vessel_description", "ship_description"),
+            "inherited_context": segment.get("inherited_context") or {},
+            "evidence": segment.get("evidence") or [],
+        }
+        ai_tool_match = {
+            "commodity": {"basis": commodity_basis, "options": commodity_options, "selected_id": commodity_id},
+            "origin": {"basis": origin_basis, "options": origin_options, "selected": origin},
+            "destination": {"basis": destination_basis, "options": destination_options, "selected": destination},
+        }
+        ai_review = {
+            "status_code": ai_review_status,
+            "reason": manual_review_reason,
+            "checks": ai_review_checks,
+            "llm_review": segment.get("ai_review_json") or segment.get("review_json"),
+            "needs_strong_review": bool(segment.get("needs_strong_review")),
+        }
         return {
             "candidate_no": await self.sequence_service.next_code("FREIGHT_CANDIDATE_NO"),
             "source_type_code": source_type_code,
@@ -1108,7 +1210,7 @@ class FreightNormalizationMixin:
             "source_ref_no": _first(segment, "source_ref_no", "waybill_no", "order_no"),
             "raw_text": raw_text or None,
             "raw_commodity_name": commodity_name or None,
-            "raw_tonnage_text": _first(segment, "raw_tonnage_text", "tonnage_text", "tonnage_raw"),
+            "raw_tonnage_text": raw_tonnage_text,
             "raw_origin_text": origin_text or None,
             "raw_destination_text": destination_text or None,
             "cargo_title": title,
@@ -1155,6 +1257,10 @@ class FreightNormalizationMixin:
                 "evidence": segment.get("evidence") or [],
             },
             "ai_suggestion_json": segment,
+            "ai_understanding_json": _compact_json_value(ai_understanding),
+            "ai_tool_match_json": _compact_json_value(ai_tool_match),
+            "ai_review_json": _compact_json_value(ai_review),
+            "ai_review_status_code": ai_review_status,
             "availability_status_code": availability_status,
             "manual_review_reason": manual_review_reason,
             "ai_warning_json": segment.get("ai_warning_json"),
@@ -1395,7 +1501,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 data["confirmed_count"] += 1
             if item.status_code == "REJECTED":
                 data["rejected_count"] += 1
-            if item.availability_status_code == "READY":
+            if item.status_code == "PENDING" and item.availability_status_code == "READY" and _candidate_ai_review_pass(item):
                 data["ready_count"] += 1
             elif item.status_code == "PENDING":
                 data["review_count"] += 1
@@ -1489,6 +1595,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 "parse_stage_message": "批次已保存，尚未提交 AI 解析",
                 "parse_progress_percent": 0,
                 "ai_elapsed_seconds": 0,
+                "ai_pipeline_version": FREIGHT_AI_PIPELINE_VERSION,
                 "creator_id": creator_id,
                 "remark": payload.remark,
             }
@@ -1632,7 +1739,9 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                             "source_batch_id": batch_id,
                             "source_tms_inbound_id": None,
                             "segment_index": int(segment.get("segment_index") or index),
+                            "semantic_role_code": _first(segment, "semantic_role_code", "role_code") or ("IGNORED" if ignore_reason else "ROUTE"),
                             "raw_text": str(segment.get("raw_text") or batch.raw_text),
+                            "line_refs_json": segment.get("line_refs") or segment.get("line_refs_json"),
                             "context_summary": segment.get("context_summary") or ignore_reason or segment.get("manual_review_reason"),
                             "extracted_fields_json": segment,
                             "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
@@ -1679,6 +1788,15 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     "success_count": candidate_count,
                     "failed_count": failed_count if candidate_count else 1,
                     "prompt_version": parsed.prompt_version,
+                    "ai_pipeline_version": FREIGHT_AI_PIPELINE_VERSION,
+                    "ai_semantic_map_json": {
+                        "pipeline_version": FREIGHT_AI_PIPELINE_VERSION,
+                        "prompt_version": parsed.prompt_version,
+                        "context_blocks": (getattr(parsed, "parsed_payload", {}) or {}).get("context_blocks") or [],
+                        "context_notes": (getattr(parsed, "parsed_payload", {}) or {}).get("context_notes") or [],
+                        "ignored_segments": (getattr(parsed, "parsed_payload", {}) or {}).get("ignored_segments") or [],
+                        "warnings": (getattr(parsed, "parsed_payload", {}) or {}).get("warnings") or [],
+                    },
                     "finished_at": finished,
                     "parse_stage_code": "DONE" if status != "FAILED" else "FAILED",
                     "parse_stage_name": "解析完成" if status != "FAILED" else "解析失败",
@@ -1836,7 +1954,9 @@ class FreightTmsInboundService(FreightNormalizationMixin):
                             "source_batch_id": None,
                             "source_tms_inbound_id": inbound_id,
                             "segment_index": index,
+                            "semantic_role_code": _first(segment, "semantic_role_code", "role_code") or "ROUTE",
                             "raw_text": str(segment.get("raw_text") or inbound.raw_content),
+                            "line_refs_json": segment.get("line_refs") or segment.get("line_refs_json"),
                             "context_summary": segment.get("context_summary"),
                             "extracted_fields_json": segment,
                             "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
@@ -1958,6 +2078,19 @@ class FreightCandidateService(FreightNormalizationMixin):
                 candidate = await self.repo.update(candidate_id, updates) or candidate
                 action_code = "EDIT_CONFIRM"
         self._validate_candidate_ready(candidate, allow_review_override=has_overrides)
+        if has_overrides:
+            candidate = await self.repo.update(
+                candidate_id,
+                {
+                    "ai_review_status_code": AI_REVIEW_MANUAL_ACCEPTED,
+                    "ai_review_json": {
+                        **(candidate.ai_review_json or {}),
+                        "status_code": AI_REVIEW_MANUAL_ACCEPTED,
+                        "reason": "人工编辑确认后接受",
+                        "accepted_by": operator_id,
+                    },
+                },
+            ) or candidate
         now = datetime.utcnow()
         freight_payload = {
                 "freight_no": await self.sequence_service.next_code("FREIGHT_NO"),
@@ -2079,6 +2212,9 @@ class FreightCandidateService(FreightNormalizationMixin):
             if row.availability_status_code != "READY":
                 skipped.append({"candidate_id": row.id, "candidate_no": row.candidate_no, "reason": row.manual_review_reason or "需要人工编辑确认"})
                 continue
+            if not _candidate_ai_review_pass(row):
+                skipped.append({"candidate_id": row.id, "candidate_no": row.candidate_no, "reason": _candidate_ai_review_reason(row) or "AI 复核状态需人工判断"})
+                continue
             try:
                 freight = await self.confirm(row.id, type("Payload", (), {"remark": "批次一键确认入库", "overrides": None})(), operator_id)
                 confirmed_ids.append(freight.id)
@@ -2113,6 +2249,7 @@ class FreightCandidateService(FreightNormalizationMixin):
             "unit_price",
             "availability_status_code",
             "manual_review_reason",
+            "ai_review_status_code",
             "status_code",
         ]
 
@@ -2120,6 +2257,9 @@ class FreightCandidateService(FreightNormalizationMixin):
     def _validate_candidate_ready(candidate, *, allow_review_override: bool = False) -> None:
         if candidate.availability_status_code != "READY" and not allow_review_override:
             reason = candidate.manual_review_reason or "AI 未判断为可直接发布"
+            raise ValidationError(f"候选货源需要编辑确认后才能入库：{reason}")
+        if not _candidate_ai_review_pass(candidate) and not allow_review_override:
+            reason = _candidate_ai_review_reason(candidate) or "AI 复核状态需人工判断"
             raise ValidationError(f"候选货源需要编辑确认后才能入库：{reason}")
         missing: list[str] = []
         if str(candidate.commodity_match_level_code or "").upper() == "STANDARD" and candidate.commodity_standard_id is None:

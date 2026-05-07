@@ -45,6 +45,8 @@ SOURCE_PLAN = [
 
 STATUS_PLAN = ["PUBLISHED", "PUBLISHED", "PUBLISHED", "MATCHING", "DRAFT", "EXPIRED"]
 TAG_PLAN = ["URGENT", "HIGH_VALUE", "FIXED_ROUTE", "LONG_TERM"]
+AI_PIPELINE_VERSION = "freight_ai_humanized_parse_v1"
+WECHAT_PROMPT_VERSION = "freight_wechat_humanized_semantic_v9"
 
 
 def _money(value: int | float | Decimal) -> Decimal:
@@ -308,6 +310,9 @@ async def seed_freight_samples() -> None:
                 f"运价{price}元/吨，三天内装，联系李经理13{idx % 10}{(idx * 4567) % 100000000:08d}"
             )
             segment_payload = {
+                "segment_index": 1,
+                "semantic_role_code": "ROUTE",
+                "line_refs": [1],
                 "raw_text": raw_text,
                 "cargo_title": f"{origin.short_name or origin.name}至{destination.short_name or destination.name}{commodity.name}",
                 "commodity_name": commodity.name,
@@ -318,6 +323,10 @@ async def seed_freight_samples() -> None:
                 "unit_price": str(price),
                 "price_unit": "元/吨",
                 "contact_name": "李经理",
+                "availability_status_code": "READY",
+                "tonnage_decision": {"status_code": "PASS", "selected_text": f"{int(tonnage)}吨", "reason": "吨位来自本条样例原文"},
+                "ai_review_status_code": "PASS",
+                "ai_review_json": {"summary": "字段完整，可由采集人员直接确认"},
                 "confidence_score": 0.86,
                 "context_summary": "本地样例：单条货源线索，装卸地、货品、吨位、运价和联系人完整。",
             }
@@ -344,7 +353,7 @@ async def seed_freight_samples() -> None:
                     clue_count=1,
                     candidate_count=1,
                     processed_at=received_at + timedelta(minutes=2),
-                    prompt_version="freight_tms_waybill_split_v3",
+                    prompt_version="freight_tms_waybill_split_v4",
                     raw_response_json={"segments": [segment_payload]},
                     created_at=received_at,
                     updated_at=received_at + timedelta(minutes=2),
@@ -368,13 +377,21 @@ async def seed_freight_samples() -> None:
                     failed_count=0,
                     creator_id=1,
                     remark="本地样例：微信群粘贴采集",
-                    prompt_version="freight_wechat_dashscope_stream_v4",
+                    prompt_version=WECHAT_PROMPT_VERSION,
                     parse_stage_code="DONE",
                     parse_stage_name="解析完成",
                     parse_stage_message="本地样例候选已生成",
                     parse_progress_percent=100,
                     parse_heartbeat_at=received_at + timedelta(minutes=2),
                     ai_elapsed_seconds=60,
+                    ai_pipeline_version=AI_PIPELINE_VERSION,
+                    ai_semantic_map_json={
+                        "pipeline_version": AI_PIPELINE_VERSION,
+                        "prompt_version": WECHAT_PROMPT_VERSION,
+                        "context_blocks": [],
+                        "context_notes": [],
+                        "warnings": [],
+                    },
                     started_at=received_at + timedelta(minutes=1),
                     finished_at=received_at + timedelta(minutes=2),
                     raw_response_json={"segments": [segment_payload]},
@@ -391,7 +408,9 @@ async def seed_freight_samples() -> None:
                 source_batch_id=batch.id if batch is not None else None,
                 source_tms_inbound_id=tms_inbound.id if tms_inbound is not None else None,
                 segment_index=1,
+                semantic_role_code="ROUTE",
                 raw_text=raw_text,
+                line_refs_json=[1],
                 context_summary=segment_payload["context_summary"],
                 extracted_fields_json=segment_payload,
                 quality_score=Decimal("0.8600"),
@@ -416,6 +435,9 @@ async def seed_freight_samples() -> None:
                 freight_rows[idx - 1].confirmed_by = 1
             elif idx % 7 == 0:
                 status = "REJECTED"
+            ai_review_status = "REVIEW_REQUIRED" if status == "REJECTED" else "PASS"
+            availability_status = "UNKNOWN" if status == "REJECTED" else "READY"
+            manual_review_reason = "本地样例：业务驳回，需人工判断" if status == "REJECTED" else None
 
             candidate = FreightCandidate(
                 candidate_no=f"FCA-LOCAL-{idx:04d}",
@@ -495,6 +517,34 @@ async def seed_freight_samples() -> None:
                     "risk_flags": [],
                     "source_kind": "TMS 标准运单" if is_tms else "微信群文本",
                 },
+                ai_understanding_json={
+                    "semantic_role_code": "ROUTE",
+                    "line_refs": [1],
+                    "route": {"origin_text": origin.name, "destination_text": destination.name},
+                    "commodity_name": commodity.name,
+                    "tonnage": {
+                        "raw_text": f"{int(tonnage)}吨",
+                        "estimated_tonnage": str(tonnage),
+                        "decision": segment_payload["tonnage_decision"],
+                    },
+                    "evidence": [raw_text],
+                },
+                ai_tool_match_json={
+                    "commodity": {"basis": {"status": "MATCHED_STANDARD"}, "selected_id": commodity.id},
+                    "origin": {"basis": {"status": "MATCHED_NODE"}, "selected": {"node_id": origin.id, "city_code": origin.city_code}},
+                    "destination": {
+                        "basis": {"status": "MATCHED_NODE"},
+                        "selected": {"node_id": destination.id, "city_code": destination.city_code},
+                    },
+                },
+                ai_review_json={
+                    "status_code": ai_review_status,
+                    "reason": manual_review_reason,
+                    "checks": [] if ai_review_status == "PASS" else ["MANUAL_SAMPLE_REVIEW"],
+                },
+                ai_review_status_code=ai_review_status,
+                availability_status_code=availability_status,
+                manual_review_reason=manual_review_reason,
                 status_code=status,
                 confirmed_freight_id=confirmed_freight_id,
                 confirmed_at=confirmed_at,

@@ -277,7 +277,9 @@ class FreightClueResponse(BaseModel):
     source_batch_id: int | None
     source_tms_inbound_id: int | None
     segment_index: int
+    semantic_role_code: str | None = None
     raw_text: str
+    line_refs_json: list[Any] | None = None
     context_summary: str | None
     extracted_fields_json: dict[str, Any] | None
     quality_score: Decimal | None
@@ -327,6 +329,8 @@ class FreightBatchResponse(BaseModel):
     remark: str | None
     error_message: str | None
     prompt_version: str | None
+    ai_pipeline_version: str | None = None
+    ai_semantic_map_json: dict[str, Any] | None = None
     parse_stage_code: str | None = None
     parse_stage_name: str | None = None
     parse_stage_message: str | None = None
@@ -503,6 +507,11 @@ class FreightCandidateResponse(BaseModel):
     completeness_score: Decimal | None
     match_basis_json: dict[str, Any] | None
     ai_suggestion_json: dict[str, Any] | None
+    ai_understanding_json: dict[str, Any] | None = None
+    ai_tool_match_json: dict[str, Any] | None = None
+    ai_review_json: dict[str, Any] | None = None
+    ai_review_status_code: str = "PASS"
+    ai_review_status_name: str | None = None
     availability_status_code: str
     availability_status_name: str | None = None
     manual_review_reason: str | None

@@ -102,6 +102,8 @@ class FreightBatchTask(Base, TimestampMixin):
     ai_elapsed_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ai_pipeline_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_semantic_map_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     raw_response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
@@ -140,7 +142,9 @@ class FreightClue(Base, TimestampMixin):
         BigInteger, ForeignKey("freight_tms_inbound.id"), nullable=True, index=True
     )
     segment_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    semantic_role_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    line_refs_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     context_summary: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     extracted_fields_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     quality_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
@@ -220,6 +224,10 @@ class FreightCandidate(Base, TimestampMixin):
     completeness_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     match_basis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ai_suggestion_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_understanding_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_tool_match_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_review_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_review_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PASS", index=True)
     manual_overrides_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     availability_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN", index=True)
     manual_review_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
