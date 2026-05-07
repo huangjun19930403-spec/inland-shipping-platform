@@ -304,6 +304,12 @@ class FreightBatchResponse(BaseModel):
     remark: str | None
     error_message: str | None
     prompt_version: str | None
+    parse_stage_code: str | None = None
+    parse_stage_name: str | None = None
+    parse_stage_message: str | None = None
+    parse_progress_percent: int = 0
+    parse_heartbeat_at: datetime | None = None
+    ai_elapsed_seconds: int = 0
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime

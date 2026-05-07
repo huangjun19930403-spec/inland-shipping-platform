@@ -82,10 +82,14 @@ async def main() -> None:
     parser.add_argument("--source", default="WECHAT", choices=["WECHAT", "TMS"], help="来源类型")
     args = parser.parse_args()
     raw_text = _read_text(args)
+
+    async def progress(stage_code: str, stage_name: str, stage_message: str, percent: int) -> None:
+        print(f"[{percent:>3}%] {stage_code} {stage_name}: {stage_message}", file=sys.stderr)
+
     async with AsyncSessionLocal() as db:
         runtime_config = RuntimeConfigService(db)
         ai_client = DashScopeQwenFreightParserClient(runtime_config=runtime_config)
-        parsed = await ai_client.parse(raw_text, source_type_code=args.source)
+        parsed = await ai_client.parse(raw_text, source_type_code=args.source, progress_callback=progress)
         service = FreightBatchTaskService(db)
         output = {
             "provider": parsed.provider,

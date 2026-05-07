@@ -71,9 +71,13 @@ class Settings(BaseSettings):
     # 通义千问 / 阿里云百炼 DashScope
     AI_PROVIDER: str = "DASHSCOPE_QWEN"
     DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    DASHSCOPE_FAST_MODEL: str = "qwen-turbo"
     DASHSCOPE_MODEL: str = "qwen-plus"
     DASHSCOPE_API_KEY: str = ""
     DASHSCOPE_TIMEOUT_SECONDS: float = 60.0
+    DASHSCOPE_STREAM_TIMEOUT_SECONDS: float = 120.0
+    DASHSCOPE_STRONG_REVIEW_ENABLED: bool = True
+    FREIGHT_AI_STALE_HEARTBEAT_SECONDS: int = 180
 
 
 settings = Settings()

@@ -42,13 +42,16 @@ class FakeFreightParser:
     def __init__(self, runtime_config) -> None:
         self.runtime_config = runtime_config
 
-    async def parse(self, raw_content: str, *, source_type_code: str = "WECHAT"):
+    async def parse(self, raw_content: str, *, source_type_code: str = "WECHAT", progress_callback=None):
         self.__class__.last_source_type = source_type_code
+        if progress_callback is not None:
+            await progress_callback("AI_EXTRACT", "AI 抽取字段", "测试解析进度", 50)
         return SimpleNamespace(
             segments=list(self.__class__.segments),
             prompt_version=self.__class__.prompt_version,
             parsed_payload={"segments": list(self.__class__.segments), "source": raw_content},
             raw_response={"ok": True},
+            review_failed_count=0,
         )
 
 
@@ -192,6 +195,9 @@ async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> 
     assert FakeFreightParser.last_source_type == "WECHAT"
     assert detail.batch.status_code == "PARSED"
     assert detail.batch.prompt_version == "test_prompt_v2"
+    assert detail.batch.parse_stage_code == "DONE"
+    assert detail.batch.parse_progress_percent == 100
+    assert detail.batch.ai_elapsed_seconds >= 0
     assert len(detail.clues) == 1
     assert len(detail.candidates) == 1
     candidate = detail.candidates[0]

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.integrations.config_keys import DASHSCOPE_CONFIG_PROFILE, FREIGHT_AI_STALE_HEARTBEAT_SECONDS
 from app.integrations.ai import DashScopeQwenFreightParserClient
 from app.models.address import AdminRegion, NodeAlias, Region, RegionCityRelation, TransportNode
 from app.models.commodity import CommodityAlias, CommodityStandard
@@ -349,6 +351,12 @@ def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatc
         remark=entity.remark,
         error_message=entity.error_message,
         prompt_version=entity.prompt_version,
+        parse_stage_code=entity.parse_stage_code,
+        parse_stage_name=entity.parse_stage_name,
+        parse_stage_message=entity.parse_stage_message,
+        parse_progress_percent=entity.parse_progress_percent,
+        parse_heartbeat_at=entity.parse_heartbeat_at,
+        ai_elapsed_seconds=entity.ai_elapsed_seconds,
         started_at=entity.started_at,
         finished_at=entity.finished_at,
         created_at=entity.created_at,
@@ -961,6 +969,68 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             data["contact_summary"] = "、".join(contacts[:3]) if contacts else None
         return summary
 
+    async def _stale_heartbeat_seconds(self) -> int:
+        value = await RuntimeConfigService(self.db).get_int(
+            FREIGHT_AI_STALE_HEARTBEAT_SECONDS,
+            settings.FREIGHT_AI_STALE_HEARTBEAT_SECONDS,
+            profile_code=DASHSCOPE_CONFIG_PROFILE,
+        )
+        return max(30, value)
+
+    async def _update_parse_progress(
+        self,
+        batch_id: int,
+        *,
+        stage_code: str,
+        stage_name: str,
+        stage_message: str,
+        percent: int,
+        started_at: datetime | None,
+        status_code: str | None = None,
+        error_message: str | None = None,
+        finished_at: datetime | None = None,
+    ) -> None:
+        now = datetime.utcnow()
+        updates: dict[str, Any] = {
+            "parse_stage_code": stage_code,
+            "parse_stage_name": stage_name,
+            "parse_stage_message": stage_message,
+            "parse_progress_percent": max(0, min(int(percent), 100)),
+            "parse_heartbeat_at": now,
+            "ai_elapsed_seconds": int((now - started_at).total_seconds()) if started_at else 0,
+        }
+        if status_code is not None:
+            updates["status_code"] = status_code
+        if error_message is not None:
+            updates["error_message"] = error_message
+        if finished_at is not None:
+            updates["finished_at"] = finished_at
+        await self.repo.update(batch_id, updates)
+        await self.db.commit()
+
+    async def _progress_callback(self, batch_id: int, started_at: datetime):
+        last_update = {"at": 0.0, "stage": ""}
+
+        async def callback(stage_code: str, stage_name: str, stage_message: str, percent: int) -> None:
+            import time
+
+            now = time.monotonic()
+            if last_update["stage"] == stage_code and now - float(last_update["at"]) < 3:
+                return
+            last_update["stage"] = stage_code
+            last_update["at"] = now
+            await self._update_parse_progress(
+                batch_id,
+                stage_code=stage_code,
+                stage_name=stage_name,
+                stage_message=stage_message,
+                percent=percent,
+                started_at=started_at,
+                status_code="PARSING",
+            )
+
+        return callback
+
     async def create_wechat_batch(self, payload, creator_id: int | None) -> FreightBatchResponse:
         batch_no = (payload.batch_no or "").strip() or await self.sequence_service.next_code("FREIGHT_BATCH_NO")
         row = await self.repo.create(
@@ -970,6 +1040,11 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 "source_channel_code": "WECHAT_TEXT",
                 "raw_text": payload.raw_text.strip(),
                 "status_code": "NEW",
+                "parse_stage_code": "NEW",
+                "parse_stage_name": "待解析",
+                "parse_stage_message": "批次已保存，尚未提交 AI 解析",
+                "parse_progress_percent": 0,
+                "ai_elapsed_seconds": 0,
                 "creator_id": creator_id,
                 "remark": payload.remark,
             }
@@ -997,15 +1072,44 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         if batch is None:
             raise NotFoundError("FreightBatchTask", batch_id)
         if batch.status_code == "PARSING":
-            return await self.get_detail(batch_id)
-        await self.repo.update(batch_id, {"status_code": "QUEUED", "error_message": None, "finished_at": None})
+            stale_seconds = await self._stale_heartbeat_seconds()
+            heartbeat = batch.parse_heartbeat_at or batch.updated_at or batch.started_at
+            if heartbeat and datetime.utcnow() - heartbeat < timedelta(seconds=stale_seconds):
+                return await self.get_detail(batch_id)
+        now = datetime.utcnow()
+        await self.repo.update(
+            batch_id,
+            {
+                "status_code": "QUEUED",
+                "error_message": None,
+                "finished_at": None,
+                "parse_stage_code": "QUEUED",
+                "parse_stage_name": "排队中",
+                "parse_stage_message": "解析任务已提交，等待 Celery worker 消费",
+                "parse_progress_percent": 5,
+                "parse_heartbeat_at": now,
+                "ai_elapsed_seconds": 0,
+            },
+        )
         await self.db.commit()
         try:
             from app.tasks.freight_ai_tasks import parse_wechat_batch_task
 
             parse_wechat_batch_task.delay(batch_id, requested_by)
         except Exception as exc:  # noqa: BLE001
-            await self.repo.update(batch_id, {"status_code": "FAILED", "finished_at": datetime.utcnow(), "error_message": f"解析任务投递失败：{exc}"})
+            await self.repo.update(
+                batch_id,
+                {
+                    "status_code": "FAILED",
+                    "finished_at": datetime.utcnow(),
+                    "error_message": f"解析任务投递失败：{exc}",
+                    "parse_stage_code": "FAILED",
+                    "parse_stage_name": "投递失败",
+                    "parse_stage_message": f"解析任务投递失败：{exc}",
+                    "parse_progress_percent": 100,
+                    "parse_heartbeat_at": datetime.utcnow(),
+                },
+            )
             await self.db.commit()
             raise ValidationError(f"解析任务投递失败：{exc}") from exc
         return await self.get_detail(batch_id)
@@ -1021,14 +1125,42 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         clue_ids = await self.candidate_repo.delete_unconfirmed_by_batch(batch_id)
         await self.clue_repo.delete_by_ids(clue_ids)
         started = datetime.utcnow()
-        await self.repo.update(batch_id, {"status_code": "PARSING", "started_at": started, "finished_at": None, "error_message": None})
+        await self.repo.update(
+            batch_id,
+            {
+                "status_code": "PARSING",
+                "started_at": started,
+                "finished_at": None,
+                "error_message": None,
+                "parse_stage_code": "AI_SPLIT",
+                "parse_stage_name": "AI 切分线索",
+                "parse_stage_message": "快模型正在阅读完整微信群原文并切分货源线索",
+                "parse_progress_percent": 12,
+                "parse_heartbeat_at": started,
+                "ai_elapsed_seconds": 0,
+            },
+        )
         await self.db.commit()
         client = DashScopeQwenFreightParserClient(runtime_config=RuntimeConfigService(self.db))
         try:
-            parsed = await client.parse(batch.raw_text, source_type_code="WECHAT")
+            parsed = await client.parse(
+                batch.raw_text,
+                source_type_code="WECHAT",
+                progress_callback=await self._progress_callback(batch_id, started),
+            )
+            await self._update_parse_progress(
+                batch_id,
+                stage_code="MATCHING",
+                stage_name="标准化匹配",
+                stage_message="系统正在根据 AI 抽取结果匹配运输节点、城市和标准货品",
+                percent=84,
+                started_at=started,
+                status_code="PARSING",
+            )
             clue_count = 0
             candidate_count = 0
             failed_count = 0
+            total_segments = max(len(parsed.segments), 1)
             for index, segment in enumerate(parsed.segments, start=1):
                 try:
                     clue = await self.clue_repo.create(
@@ -1061,7 +1193,19 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 except Exception:  # noqa: BLE001
                     failed_count += 1
                     continue
+                if index == total_segments or index % 5 == 0:
+                    await self._update_parse_progress(
+                        batch_id,
+                        stage_code="WRITING",
+                        stage_name="写入候选",
+                        stage_message=f"正在写入候选货源 {index}/{total_segments}",
+                        percent=90 + min(7, int(index / total_segments * 7)),
+                        started_at=started,
+                        status_code="PARSING",
+                    )
+            failed_count += int(getattr(parsed, "review_failed_count", 0) or 0)
             status = "PARSED" if candidate_count and failed_count == 0 else "PARTIAL_FAILED" if candidate_count else "FAILED"
+            finished = datetime.utcnow()
             await self.repo.update(
                 batch_id,
                 {
@@ -1071,7 +1215,13 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     "success_count": candidate_count,
                     "failed_count": failed_count if candidate_count else 1,
                     "prompt_version": parsed.prompt_version,
-                    "finished_at": datetime.utcnow(),
+                    "finished_at": finished,
+                    "parse_stage_code": "DONE" if status != "FAILED" else "FAILED",
+                    "parse_stage_name": "解析完成" if status != "FAILED" else "解析失败",
+                    "parse_stage_message": "候选货源已生成，可进入确认入库" if status != "FAILED" else "AI 未生成可入库候选",
+                    "parse_progress_percent": 100,
+                    "parse_heartbeat_at": finished,
+                    "ai_elapsed_seconds": int((finished - started).total_seconds()),
                     "raw_response_json": {"parsed_payload": parsed.parsed_payload, "raw_response": parsed.raw_response},
                 },
             )
@@ -1079,7 +1229,21 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         except Exception as exc:
             message = str(exc)
             await self.db.rollback()
-            await self.repo.update(batch_id, {"status_code": "FAILED", "finished_at": datetime.utcnow(), "error_message": message})
+            finished = datetime.utcnow()
+            await self.repo.update(
+                batch_id,
+                {
+                    "status_code": "FAILED",
+                    "finished_at": finished,
+                    "error_message": message,
+                    "parse_stage_code": "FAILED",
+                    "parse_stage_name": "解析失败",
+                    "parse_stage_message": message,
+                    "parse_progress_percent": 100,
+                    "parse_heartbeat_at": finished,
+                    "ai_elapsed_seconds": int((finished - started).total_seconds()),
+                },
+            )
             await self.db.commit()
             raise
         return await self.get_detail(batch_id)
