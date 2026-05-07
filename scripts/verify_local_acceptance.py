@@ -97,6 +97,7 @@ REQUIRED_ROUTE_PATHS = {
     "/api/v1/freight/manual",
     "/api/v1/freight/batches/wechat",
     "/api/v1/freight/batches/{batch_id}/parse",
+    "/api/v1/freight/batches/{batch_id}/candidates/bulk-confirm",
     "/api/v1/freight/tms-inbounds",
     "/api/v1/freight/tms-inbounds/{inbound_id}/parse",
     "/api/v1/freight/candidates/{candidate_id}/confirm",

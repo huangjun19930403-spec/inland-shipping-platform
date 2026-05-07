@@ -16,6 +16,7 @@ from app.modules.freight.schemas import (
     FreightBatchListQuery,
     FreightBatchResponse,
     FreightCandidateConfirmRequest,
+    FreightCandidateBulkConfirmResponse,
     FreightCandidateRejectRequest,
     FreightCandidateResponse,
     FreightCandidateUpdateRequest,
@@ -88,6 +89,16 @@ async def parse_freight_batch(
 ):
     service = FreightBatchTaskService(db)
     return await service.parse(batch_id, requested_by=getattr(current_user, "id", None))
+
+
+@router.post("/batches/{batch_id}/candidates/bulk-confirm", response_model=FreightCandidateBulkConfirmResponse)
+async def bulk_confirm_batch_candidates(
+    batch_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightCandidateService(db)
+    return await service.bulk_confirm_batch(batch_id, operator_id=getattr(current_user, "id", None))
 
 
 @router.get("/tms-inbounds", response_model=PageResponse[FreightTmsInboundResponse])

@@ -247,6 +247,10 @@ class FreightClueRepository:
         await self.db.refresh(row)
         return row
 
+    async def delete_by_ids(self, clue_ids: list[int]) -> None:
+        if clue_ids:
+            await self.db.execute(delete(FreightClue).where(FreightClue.id.in_(clue_ids)))
+
 
 class FreightCandidateRepository:
     def __init__(self, db: AsyncSession) -> None:
@@ -259,6 +263,18 @@ class FreightCandidateRepository:
         rows = (
             await self.db.execute(
                 select(FreightCandidate).where(FreightCandidate.source_batch_id == batch_id).order_by(FreightCandidate.id.asc())
+            )
+        ).scalars().all()
+        return list(rows)
+
+    async def list_by_batch_ids(self, batch_ids: list[int]) -> list[FreightCandidate]:
+        if not batch_ids:
+            return []
+        rows = (
+            await self.db.execute(
+                select(FreightCandidate)
+                .where(FreightCandidate.source_batch_id.in_(batch_ids))
+                .order_by(FreightCandidate.source_batch_id.asc(), FreightCandidate.id.asc())
             )
         ).scalars().all()
         return list(rows)
@@ -324,6 +340,38 @@ class FreightCandidateRepository:
         await self.db.flush()
         await self.db.refresh(row)
         return row
+
+    async def delete_unconfirmed_by_batch(self, batch_id: int) -> list[int]:
+        rows = (
+            await self.db.execute(
+                select(FreightCandidate.id, FreightCandidate.clue_id).where(
+                    FreightCandidate.source_batch_id == batch_id,
+                    FreightCandidate.status_code != "CONFIRMED",
+                    FreightCandidate.confirmed_freight_id.is_(None),
+                )
+            )
+        ).all()
+        candidate_ids = [int(row[0]) for row in rows]
+        clue_ids = [int(row[1]) for row in rows if row[1] is not None]
+        if candidate_ids:
+            await self.db.execute(delete(FreightCandidate).where(FreightCandidate.id.in_(candidate_ids)))
+        return clue_ids
+
+    async def delete_unconfirmed_by_tms_inbound(self, inbound_id: int) -> list[int]:
+        rows = (
+            await self.db.execute(
+                select(FreightCandidate.id, FreightCandidate.clue_id).where(
+                    FreightCandidate.source_tms_inbound_id == inbound_id,
+                    FreightCandidate.status_code != "CONFIRMED",
+                    FreightCandidate.confirmed_freight_id.is_(None),
+                )
+            )
+        ).all()
+        candidate_ids = [int(row[0]) for row in rows]
+        clue_ids = [int(row[1]) for row in rows if row[1] is not None]
+        if candidate_ids:
+            await self.db.execute(delete(FreightCandidate).where(FreightCandidate.id.in_(candidate_ids)))
+        return clue_ids
 
 
 class FreightCandidateManualFeedbackRepository:

@@ -173,6 +173,7 @@ def _segment(**overrides) -> dict:
         "price_unit": "元/吨",
         "contact_name": "王经理",
         "contact_phone": "13800000000",
+        "availability_status_code": "READY",
         "confidence_score": 0.91,
         "context_summary": "完整货源线索",
     }
@@ -186,7 +187,7 @@ async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> 
 
     service = FreightBatchTaskService(session)
     batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="群消息：南京港装动力煤到芜湖港"), creator_id=7)
-    detail = await service.parse(batch.id, requested_by=7)
+    detail = await service.run_parse_now(batch.id, requested_by=7)
 
     assert FakeFreightParser.last_source_type == "WECHAT"
     assert detail.batch.status_code == "PARSED"
@@ -199,6 +200,7 @@ async def test_wechat_parse_creates_matched_candidate(session: AsyncSession) -> 
     assert candidate.origin_node_name == "南京港"
     assert candidate.destination_node_name == "芜湖港"
     assert candidate.commodity_standard_name == "动力煤"
+    assert candidate.availability_status_code == "READY"
 
 
 @pytest.mark.asyncio
@@ -217,7 +219,7 @@ async def test_tms_inbound_is_idempotent_and_parses_multiple_waybills(session: A
     service = FreightTmsInboundService(session)
     first = await service.create(payload)
     second = await service.create(payload)
-    detail = await service.parse(first.id)
+    detail = await service.run_parse_now(first.id)
 
     assert first.id == second.id
     assert FakeFreightParser.last_source_type == "TMS"
@@ -243,6 +245,30 @@ async def test_candidate_confirm_blocks_missing_required_fields(session: AsyncSe
     await session.commit()
 
     with pytest.raises(ValidationError):
+        await FreightCandidateService(session).confirm(candidate.id, FreightCandidateConfirmRequest(remark="确认"), operator_id=1)
+
+
+@pytest.mark.asyncio
+async def test_candidate_confirm_blocks_non_ready_without_edit(session: AsyncSession) -> None:
+    commodity = await session.scalar(select(CommodityStandard).where(CommodityStandard.code == "CS-COAL"))
+    candidate = FreightCandidate(
+        candidate_no="FCA-FULL",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        cargo_title="船已够线索",
+        commodity_standard_id=commodity.id,
+        status_code="PENDING",
+        availability_status_code="FULL",
+        manual_review_reason="原文显示船已经够了",
+        origin_province_code="320000",
+        origin_city_code="320100",
+        destination_province_code="340000",
+        destination_city_code="340200",
+    )
+    session.add(candidate)
+    await session.commit()
+
+    with pytest.raises(ValidationError, match="需要编辑确认"):
         await FreightCandidateService(session).confirm(candidate.id, FreightCandidateConfirmRequest(remark="确认"), operator_id=1)
 
 
@@ -290,6 +316,7 @@ async def test_candidate_confirm_writes_formal_freight_with_source_trace(session
         contact_phone="13800000000",
         confidence_score=Decimal("0.91"),
         completeness_score=Decimal("1.00"),
+        availability_status_code="READY",
         status_code="PENDING",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),

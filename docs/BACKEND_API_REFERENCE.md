@@ -146,6 +146,7 @@ Base URL: `/api/v1`
 - `POST /freight/batches/wechat`
 - `GET /freight/batches/{batch_id}`
 - `POST /freight/batches/{batch_id}/parse`
+- `POST /freight/batches/{batch_id}/candidates/bulk-confirm`
 - `GET /freight/tms-inbounds`
 - `POST /freight/tms-inbounds`
 - `GET /freight/tms-inbounds/{inbound_id}`
@@ -156,7 +157,7 @@ Base URL: `/api/v1`
 - `POST /freight/candidates/{id}/confirm`
 - `POST /freight/candidates/{id}/reject`
 
-手工录入直接生成正式货源。微信批次和 TMS 入站先执行 AI 线索切分，再通过节点、城市、区域和标准货品匹配生成候选货源，人工确认后写入 `freight`。旧 `/freight/source-inbounds*` 和 `/freight/ai/parse-tasks*` 已移除。
+手工录入直接生成正式货源。微信批次和 TMS 入站的解析接口会投递 Celery `freight_ai` 后台任务并返回批次状态；任务完成后生成线索和候选货源。候选可发状态为 `READY` 时允许一键确认，`DEFERRED`、`FULL`、`UNKNOWN` 必须编辑确认或驳回。旧 `/freight/source-inbounds*` 和 `/freight/ai/parse-tasks*` 已移除。
 
 ## Route
 

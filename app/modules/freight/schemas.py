@@ -293,6 +293,13 @@ class FreightBatchResponse(BaseModel):
     candidate_count: int
     success_count: int
     failed_count: int
+    pending_count: int = 0
+    confirmed_count: int = 0
+    rejected_count: int = 0
+    ready_count: int = 0
+    review_count: int = 0
+    route_summary: str | None = None
+    contact_summary: str | None = None
     creator_id: int | None
     remark: str | None
     error_message: str | None
@@ -383,6 +390,8 @@ class FreightCandidateUpdateRequest(BaseModel):
     contact_name: str | None = Field(default=None, max_length=64)
     contact_phone: str | None = Field(default=None, max_length=32)
     contact_wechat: str | None = Field(default=None, max_length=64)
+    availability_status_code: str | None = Field(default=None, max_length=64)
+    manual_review_reason: str | None = Field(default=None, max_length=512)
 
 
 class FreightCandidateConfirmRequest(BaseModel):
@@ -455,6 +464,10 @@ class FreightCandidateResponse(BaseModel):
     completeness_score: Decimal | None
     match_basis_json: dict[str, Any] | None
     ai_suggestion_json: dict[str, Any] | None
+    availability_status_code: str
+    availability_status_name: str | None = None
+    manual_review_reason: str | None
+    ai_warning_json: dict[str, Any] | None
     status_code: str
     status_name: str | None = None
     confirmed_freight_id: int | None
@@ -485,3 +498,11 @@ class FreightDetailResponse(BaseModel):
     source_clue: FreightClueResponse | None = None
     source_candidate: FreightCandidateResponse | None = None
     confirmation_records: list[FreightConfirmationResponse] = Field(default_factory=list)
+
+
+class FreightCandidateBulkConfirmResponse(BaseModel):
+    batch_id: int
+    confirmed_count: int
+    skipped_count: int
+    freight_ids: list[int] = Field(default_factory=list)
+    skipped: list[dict[str, Any]] = Field(default_factory=list)

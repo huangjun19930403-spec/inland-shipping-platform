@@ -19,7 +19,7 @@ celery_app = Celery(
     "inland_shipping_analysis",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.analysis_tasks"],
+    include=["app.tasks.analysis_tasks", "app.tasks.freight_ai_tasks"],
 )
 
 celery_app.conf.update(
@@ -33,6 +33,11 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_always_eager=settings.ANALYSIS_CELERY_EAGER,
     task_eager_propagates=settings.ANALYSIS_CELERY_EAGER,
+    task_routes={
+        "analysis.run_job": {"queue": "analysis"},
+        "freight.parse_wechat_batch": {"queue": "freight_ai"},
+        "freight.parse_tms_inbound": {"queue": "freight_ai"},
+    },
 )
 
 celery_app.conf.beat_schedule = {

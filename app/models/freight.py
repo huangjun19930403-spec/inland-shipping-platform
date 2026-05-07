@@ -204,6 +204,9 @@ class FreightCandidate(Base, TimestampMixin):
     match_basis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ai_suggestion_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     manual_overrides_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    availability_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN", index=True)
+    manual_review_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    ai_warning_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     confirmed_freight_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("freight.id"), nullable=True, index=True

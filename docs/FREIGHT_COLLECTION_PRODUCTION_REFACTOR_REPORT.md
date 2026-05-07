@@ -19,15 +19,17 @@
 
 ## AI 与匹配链路
 
-- 微信采集使用 `freight_wechat_clue_split_v2` 提示词，重点处理群消息上下文、多段话、多线索和原文证据。
-- TMS 入站使用 `freight_tms_waybill_split_v2` 提示词，重点处理单条消息内多条标准运单或运单数组。
+- 微信采集使用 `freight_wechat_clue_split_v3` 提示词，重点处理群消息上下文、多段话、多线索、联系人复用、公共备注继承和原文证据。
+- TMS 入站使用 `freight_tms_waybill_split_v3` 提示词，重点处理单条消息内多条标准运单或运单数组。
+- 解析接口改为投递 Celery `freight_ai` 后台任务，批次状态支持 `QUEUED`、`PARSING`、`PARSED`、`PARTIAL_FAILED`、`FAILED`，避免复杂群消息同步请求超时。
 - 解析结果先写入 `freight_clue`，再通过匹配服务查找运输节点、城市、区域和标准货品，生成 `freight_candidate`。
-- 候选货源同时保存原文级、节点级、城市级、区域级和标准货品级推荐，人工可编辑确认或驳回。
+- 候选货源同时保存原文级、节点级、城市级、区域级和标准货品级推荐，并增加可发状态：`READY`、`DEFERRED`、`FULL`、`UNKNOWN`。非 `READY` 候选不能一键确认，必须编辑确认或驳回。
 
 ## API 变化
 
 - 手工录入：`POST /freight/manual`。
 - 微信批次：`POST /freight/batches/wechat`、`GET /freight/batches`、`GET /freight/batches/{id}`、`POST /freight/batches/{id}/parse`。
+- 微信批量确认：`POST /freight/batches/{id}/candidates/bulk-confirm`。
 - TMS 入站：`POST /freight/tms-inbounds`、`GET /freight/tms-inbounds`、`GET /freight/tms-inbounds/{id}`、`POST /freight/tms-inbounds/{id}/parse`。
 - 候选确认：`GET /freight/candidates`、`GET /freight/candidates/{id}`、`PUT /freight/candidates/{id}`、`POST /freight/candidates/{id}/confirm`、`POST /freight/candidates/{id}/reject`。
 - 正式货源：保留 `GET /freight`、`GET /freight/{id}`、`PUT /freight/{id}`、状态、联系人、附件和标签接口。
@@ -38,7 +40,7 @@
 - 货源分析继续以 `freight` 为正式事实源，采集批次和候选仅用于接入量、候选量等采集过程指标。
 - 新增 `ANALYSIS_FREIGHT_NODE_DAILY` 任务和 `/analysis/freight/node-ranking` 接口。
 - 更新 `seed_builtin_dicts`、`seed_code_sequences`、`seed_system_base`、`seed_freight_samples`、`seed_analysis_samples`、`verify_local_acceptance`。
-- 菜单调整为：微信采集、待确认货源、手工录入、正式货源、TMS 入站记录。
+- 菜单调整为：微信采集、采集批次、待确认货源、手工录入、正式货源、TMS 入站。
 - 验收脚本会校验旧表和旧接口删除、新表数据量、节点事实数据、菜单无旧入口。
 
 ## 验证结果
@@ -46,6 +48,6 @@
 已完成本地验证：
 
 - `.venv/bin/python -m pytest -q`：17 passed。
-- `.venv/bin/alembic upgrade head`：升级至 `0009_freight_collection_production_rework`。
+- `.venv/bin/alembic upgrade head`：升级至 `0010_freight_ai_async_and_availability`。
 - `.venv/bin/python -m scripts.seed_system_init`：初始化通过。
 - `.venv/bin/python -m scripts.verify_local_acceptance`：全部 OK。

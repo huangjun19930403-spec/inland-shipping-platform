@@ -32,6 +32,7 @@ from app.modules.freight.schemas import (
     FreightAttachmentResponse,
     FreightBatchDetailResponse,
     FreightBatchResponse,
+    FreightCandidateBulkConfirmResponse,
     FreightCandidateResponse,
     FreightClueResponse,
     FreightConfirmationResponse,
@@ -59,6 +60,7 @@ DISPLAY_DICT_CODES = [
     "FREIGHT_CONFIRM_ACTION",
     "FREIGHT_MATCH_LEVEL",
     "FREIGHT_HALL_STATUS",
+    "FREIGHT_AVAILABILITY_STATUS",
 ]
 
 
@@ -321,6 +323,7 @@ def _to_tag_response(entity) -> FreightTagRelationResponse:
 
 def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatchResponse:
     ctx = ctx or {}
+    summary = (ctx.get("batch_candidate_summary") or {}).get(entity.id, {})
     return FreightBatchResponse(
         id=entity.id,
         batch_no=entity.batch_no,
@@ -335,6 +338,13 @@ def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatc
         candidate_count=entity.candidate_count,
         success_count=entity.success_count,
         failed_count=entity.failed_count,
+        pending_count=int(summary.get("pending_count") or 0),
+        confirmed_count=int(summary.get("confirmed_count") or 0),
+        rejected_count=int(summary.get("rejected_count") or 0),
+        ready_count=int(summary.get("ready_count") or 0),
+        review_count=int(summary.get("review_count") or 0),
+        route_summary=summary.get("route_summary"),
+        contact_summary=summary.get("contact_summary"),
         creator_id=entity.creator_id,
         remark=entity.remark,
         error_message=entity.error_message,
@@ -457,6 +467,10 @@ def _to_candidate_response(entity, ctx: dict[str, Any] | None = None) -> Freight
         completeness_score=entity.completeness_score,
         match_basis_json=entity.match_basis_json,
         ai_suggestion_json=entity.ai_suggestion_json,
+        availability_status_code=entity.availability_status_code,
+        availability_status_name=_label(ctx, "FREIGHT_AVAILABILITY_STATUS", entity.availability_status_code),
+        manual_review_reason=entity.manual_review_reason,
+        ai_warning_json=entity.ai_warning_json,
         status_code=entity.status_code,
         status_name=_label(ctx, "FREIGHT_CANDIDATE_STATUS", entity.status_code),
         confirmed_freight_id=entity.confirmed_freight_id,
@@ -741,6 +755,9 @@ class FreightNormalizationMixin:
                 "evidence": segment.get("evidence") or [],
             },
             "ai_suggestion_json": segment,
+            "availability_status_code": str(_first(segment, "availability_status_code") or "UNKNOWN").upper(),
+            "manual_review_reason": _first(segment, "manual_review_reason", "review_reason"),
+            "ai_warning_json": segment.get("ai_warning_json"),
             "status_code": "PENDING",
         }
 
@@ -900,7 +917,49 @@ class FreightBatchTaskService(FreightNormalizationMixin):
     ) -> PageResponse[FreightBatchResponse]:
         rows, total = await self.repo.list_items(keyword=keyword, status_code=status_code, page=page, page_size=page_size)
         ctx = await _load_display_context(self.db, batches=rows)
+        ctx["batch_candidate_summary"] = await self._batch_candidate_summary([int(item.id) for item in rows])
         return PageResponse[FreightBatchResponse](total=total, page=page, page_size=page_size, items=[_to_batch_response(item, ctx) for item in rows])
+
+    async def _batch_candidate_summary(self, batch_ids: list[int]) -> dict[int, dict[str, Any]]:
+        rows = await self.candidate_repo.list_by_batch_ids(batch_ids)
+        summary: dict[int, dict[str, Any]] = {}
+        for item in rows:
+            if item.source_batch_id is None:
+                continue
+            data = summary.setdefault(
+                int(item.source_batch_id),
+                {
+                    "pending_count": 0,
+                    "confirmed_count": 0,
+                    "rejected_count": 0,
+                    "ready_count": 0,
+                    "review_count": 0,
+                    "routes": [],
+                    "contacts": set(),
+                },
+            )
+            if item.status_code == "PENDING":
+                data["pending_count"] += 1
+            if item.status_code == "CONFIRMED":
+                data["confirmed_count"] += 1
+            if item.status_code == "REJECTED":
+                data["rejected_count"] += 1
+            if item.availability_status_code == "READY":
+                data["ready_count"] += 1
+            elif item.status_code == "PENDING":
+                data["review_count"] += 1
+            origin = item.raw_origin_text or item.origin_city_code or "-"
+            dest = item.raw_destination_text or item.destination_city_code or "-"
+            commodity = item.raw_commodity_name or item.commodity_match_name or ""
+            data["routes"].append(f"{origin}->{dest}{f' {commodity}' if commodity else ''}")
+            if item.contact_phone:
+                data["contacts"].add(f"{item.contact_name or ''}{item.contact_phone}".strip())
+        for data in summary.values():
+            routes = data.pop("routes")
+            contacts = sorted(data.pop("contacts"))
+            data["route_summary"] = "；".join(routes[:3]) + ("..." if len(routes) > 3 else "") if routes else None
+            data["contact_summary"] = "、".join(contacts[:3]) if contacts else None
+        return summary
 
     async def create_wechat_batch(self, payload, creator_id: int | None) -> FreightBatchResponse:
         batch_no = (payload.batch_no or "").strip() or await self.sequence_service.next_code("FREIGHT_BATCH_NO")
@@ -926,6 +985,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         clues = await self.clue_repo.list_by_batch(batch_id)
         candidates = await self.candidate_repo.list_by_batch(batch_id)
         ctx = await _load_display_context(self.db, batches=[batch], clues=clues, candidates=candidates)
+        ctx["batch_candidate_summary"] = await self._batch_candidate_summary([batch_id])
         return FreightBatchDetailResponse(
             batch=_to_batch_response(batch, ctx),
             clues=[_to_clue_response(item, ctx) for item in clues],
@@ -936,9 +996,30 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         batch = await self.repo.get_by_id(batch_id)
         if batch is None:
             raise NotFoundError("FreightBatchTask", batch_id)
+        if batch.status_code == "PARSING":
+            return await self.get_detail(batch_id)
+        await self.repo.update(batch_id, {"status_code": "QUEUED", "error_message": None, "finished_at": None})
+        await self.db.commit()
+        try:
+            from app.tasks.freight_ai_tasks import parse_wechat_batch_task
+
+            parse_wechat_batch_task.delay(batch_id, requested_by)
+        except Exception as exc:  # noqa: BLE001
+            await self.repo.update(batch_id, {"status_code": "FAILED", "finished_at": datetime.utcnow(), "error_message": f"解析任务投递失败：{exc}"})
+            await self.db.commit()
+            raise ValidationError(f"解析任务投递失败：{exc}") from exc
+        return await self.get_detail(batch_id)
+
+    async def run_parse_now(self, batch_id: int, requested_by: int | None = None) -> FreightBatchDetailResponse:
+        _ = requested_by
+        batch = await self.repo.get_by_id(batch_id)
+        if batch is None:
+            raise NotFoundError("FreightBatchTask", batch_id)
         existing = await self.candidate_repo.list_by_batch(batch_id)
         if batch.status_code == "PARSED" and existing:
             return await self.get_detail(batch_id)
+        clue_ids = await self.candidate_repo.delete_unconfirmed_by_batch(batch_id)
+        await self.clue_repo.delete_by_ids(clue_ids)
         started = datetime.utcnow()
         await self.repo.update(batch_id, {"status_code": "PARSING", "started_at": started, "finished_at": None, "error_message": None})
         await self.db.commit()
@@ -947,35 +1028,40 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             parsed = await client.parse(batch.raw_text, source_type_code="WECHAT")
             clue_count = 0
             candidate_count = 0
+            failed_count = 0
             for index, segment in enumerate(parsed.segments, start=1):
-                clue = await self.clue_repo.create(
-                    {
-                        "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
-                        "source_type_code": "WECHAT",
-                        "source_channel_code": "WECHAT_TEXT",
-                        "source_batch_id": batch_id,
-                        "source_tms_inbound_id": None,
-                        "segment_index": index,
-                        "raw_text": str(segment.get("raw_text") or batch.raw_text),
-                        "context_summary": segment.get("context_summary"),
-                        "extracted_fields_json": segment,
-                        "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
-                        "status_code": "CANDIDATE_CREATED",
-                    }
-                )
-                await self.candidate_repo.create(
-                    await self._candidate_from_segment(
-                        source_type_code="WECHAT",
-                        source_channel_code="WECHAT_TEXT",
-                        source_batch_id=batch_id,
-                        source_tms_inbound_id=None,
-                        clue_id=clue.id,
-                        segment=segment,
+                try:
+                    clue = await self.clue_repo.create(
+                        {
+                            "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
+                            "source_type_code": "WECHAT",
+                            "source_channel_code": "WECHAT_TEXT",
+                            "source_batch_id": batch_id,
+                            "source_tms_inbound_id": None,
+                            "segment_index": index,
+                            "raw_text": str(segment.get("raw_text") or batch.raw_text),
+                            "context_summary": segment.get("context_summary"),
+                            "extracted_fields_json": segment,
+                            "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
+                            "status_code": "CANDIDATE_CREATED",
+                        }
                     )
-                )
-                clue_count += 1
-                candidate_count += 1
-            status = "PARSED" if candidate_count else "FAILED"
+                    await self.candidate_repo.create(
+                        await self._candidate_from_segment(
+                            source_type_code="WECHAT",
+                            source_channel_code="WECHAT_TEXT",
+                            source_batch_id=batch_id,
+                            source_tms_inbound_id=None,
+                            clue_id=clue.id,
+                            segment=segment,
+                        )
+                    )
+                    clue_count += 1
+                    candidate_count += 1
+                except Exception:  # noqa: BLE001
+                    failed_count += 1
+                    continue
+            status = "PARSED" if candidate_count and failed_count == 0 else "PARTIAL_FAILED" if candidate_count else "FAILED"
             await self.repo.update(
                 batch_id,
                 {
@@ -983,7 +1069,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     "clue_count": clue_count,
                     "candidate_count": candidate_count,
                     "success_count": candidate_count,
-                    "failed_count": 0 if candidate_count else 1,
+                    "failed_count": failed_count if candidate_count else 1,
                     "prompt_version": parsed.prompt_version,
                     "finished_at": datetime.utcnow(),
                     "raw_response_json": {"parsed_payload": parsed.parsed_payload, "raw_response": parsed.raw_response},
@@ -1057,6 +1143,24 @@ class FreightTmsInboundService(FreightNormalizationMixin):
         )
 
     async def parse(self, inbound_id: int, requested_by: int | None = None) -> FreightTmsInboundDetailResponse:
+        inbound = await self.repo.get_by_id(inbound_id)
+        if inbound is None:
+            raise NotFoundError("FreightTmsInbound", inbound_id)
+        if inbound.status_code == "PARSING":
+            return await self.get_detail(inbound_id)
+        await self.repo.update(inbound_id, {"status_code": "QUEUED", "error_message": None})
+        await self.db.commit()
+        try:
+            from app.tasks.freight_ai_tasks import parse_tms_inbound_task
+
+            parse_tms_inbound_task.delay(inbound_id, requested_by)
+        except Exception as exc:  # noqa: BLE001
+            await self.repo.update(inbound_id, {"status_code": "FAILED", "processed_at": datetime.utcnow(), "error_message": f"解析任务投递失败：{exc}"})
+            await self.db.commit()
+            raise ValidationError(f"解析任务投递失败：{exc}") from exc
+        return await self.get_detail(inbound_id)
+
+    async def run_parse_now(self, inbound_id: int, requested_by: int | None = None) -> FreightTmsInboundDetailResponse:
         _ = requested_by
         inbound = await self.repo.get_by_id(inbound_id)
         if inbound is None:
@@ -1064,6 +1168,8 @@ class FreightTmsInboundService(FreightNormalizationMixin):
         existing = await self.candidate_repo.list_by_tms_inbound(inbound_id)
         if inbound.status_code == "PARSED" and existing:
             return await self.get_detail(inbound_id)
+        clue_ids = await self.candidate_repo.delete_unconfirmed_by_tms_inbound(inbound_id)
+        await self.clue_repo.delete_by_ids(clue_ids)
         await self.repo.update(inbound_id, {"status_code": "PARSING", "error_message": None})
         await self.db.commit()
         client = DashScopeQwenFreightParserClient(runtime_config=RuntimeConfigService(self.db))
@@ -1071,35 +1177,40 @@ class FreightTmsInboundService(FreightNormalizationMixin):
             parsed = await client.parse(inbound.raw_content, source_type_code="TMS")
             clue_count = 0
             candidate_count = 0
+            failed_count = 0
             for index, segment in enumerate(parsed.segments, start=1):
-                clue = await self.clue_repo.create(
-                    {
-                        "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
-                        "source_type_code": "TMS",
-                        "source_channel_code": inbound.source_channel_code,
-                        "source_batch_id": None,
-                        "source_tms_inbound_id": inbound_id,
-                        "segment_index": index,
-                        "raw_text": str(segment.get("raw_text") or inbound.raw_content),
-                        "context_summary": segment.get("context_summary"),
-                        "extracted_fields_json": segment,
-                        "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
-                        "status_code": "CANDIDATE_CREATED",
-                    }
-                )
-                await self.candidate_repo.create(
-                    await self._candidate_from_segment(
-                        source_type_code="TMS",
-                        source_channel_code=inbound.source_channel_code,
-                        source_batch_id=None,
-                        source_tms_inbound_id=inbound_id,
-                        clue_id=clue.id,
-                        segment=segment,
+                try:
+                    clue = await self.clue_repo.create(
+                        {
+                            "clue_no": await self.sequence_service.next_code("FREIGHT_CLUE_NO"),
+                            "source_type_code": "TMS",
+                            "source_channel_code": inbound.source_channel_code,
+                            "source_batch_id": None,
+                            "source_tms_inbound_id": inbound_id,
+                            "segment_index": index,
+                            "raw_text": str(segment.get("raw_text") or inbound.raw_content),
+                            "context_summary": segment.get("context_summary"),
+                            "extracted_fields_json": segment,
+                            "quality_score": _to_decimal_or_none(segment.get("confidence_score")),
+                            "status_code": "CANDIDATE_CREATED",
+                        }
                     )
-                )
-                clue_count += 1
-                candidate_count += 1
-            status = "PARSED" if candidate_count else "FAILED"
+                    await self.candidate_repo.create(
+                        await self._candidate_from_segment(
+                            source_type_code="TMS",
+                            source_channel_code=inbound.source_channel_code,
+                            source_batch_id=None,
+                            source_tms_inbound_id=inbound_id,
+                            clue_id=clue.id,
+                            segment=segment,
+                        )
+                    )
+                    clue_count += 1
+                    candidate_count += 1
+                except Exception:  # noqa: BLE001
+                    failed_count += 1
+                    continue
+            status = "PARSED" if candidate_count and failed_count == 0 else "PARTIAL_FAILED" if candidate_count else "FAILED"
             await self.repo.update(
                 inbound_id,
                 {
@@ -1181,6 +1292,7 @@ class FreightCandidateService(FreightNormalizationMixin):
             raise ValidationError("只有待确认候选货源可以确认入库")
         before = _entity_snapshot(candidate, self._candidate_snapshot_fields())
         action_code = "CONFIRM"
+        has_overrides = payload.overrides is not None and bool(payload.overrides.model_dump(exclude_none=True))
         if payload.overrides is not None:
             updates = payload.overrides.model_dump(exclude_none=True)
             if updates:
@@ -1191,7 +1303,7 @@ class FreightCandidateService(FreightNormalizationMixin):
                 updates["manual_overrides_json"] = manual
                 candidate = await self.repo.update(candidate_id, updates) or candidate
                 action_code = "EDIT_CONFIRM"
-        self._validate_candidate_ready(candidate)
+        self._validate_candidate_ready(candidate, allow_review_override=has_overrides)
         now = datetime.utcnow()
         freight = await self.freight_repo.create_freight(
             {
@@ -1295,6 +1407,30 @@ class FreightCandidateService(FreightNormalizationMixin):
         ctx = await _load_display_context(self.db, candidates=[row])
         return _to_candidate_response(row, ctx)
 
+    async def bulk_confirm_batch(self, batch_id: int, operator_id: int | None) -> FreightCandidateBulkConfirmResponse:
+        rows = await self.repo.list_by_batch(batch_id)
+        confirmed_ids: list[int] = []
+        skipped: list[dict[str, Any]] = []
+        for row in rows:
+            if row.status_code != "PENDING":
+                skipped.append({"candidate_id": row.id, "candidate_no": row.candidate_no, "reason": "不是待确认状态"})
+                continue
+            if row.availability_status_code != "READY":
+                skipped.append({"candidate_id": row.id, "candidate_no": row.candidate_no, "reason": row.manual_review_reason or "需要人工编辑确认"})
+                continue
+            try:
+                freight = await self.confirm(row.id, type("Payload", (), {"remark": "批次一键确认入库", "overrides": None})(), operator_id)
+                confirmed_ids.append(freight.id)
+            except Exception as exc:  # noqa: BLE001
+                skipped.append({"candidate_id": row.id, "candidate_no": row.candidate_no, "reason": str(exc)})
+        return FreightCandidateBulkConfirmResponse(
+            batch_id=batch_id,
+            confirmed_count=len(confirmed_ids),
+            skipped_count=len(skipped),
+            freight_ids=confirmed_ids,
+            skipped=skipped,
+        )
+
     @staticmethod
     def _candidate_snapshot_fields() -> list[str]:
         return [
@@ -1307,11 +1443,16 @@ class FreightCandidateService(FreightNormalizationMixin):
             "destination_city_code",
             "estimated_tonnage",
             "unit_price",
+            "availability_status_code",
+            "manual_review_reason",
             "status_code",
         ]
 
     @staticmethod
-    def _validate_candidate_ready(candidate) -> None:
+    def _validate_candidate_ready(candidate, *, allow_review_override: bool = False) -> None:
+        if candidate.availability_status_code != "READY" and not allow_review_override:
+            reason = candidate.manual_review_reason or "AI 未判断为可直接发布"
+            raise ValidationError(f"候选货源需要编辑确认后才能入库：{reason}")
         missing: list[str] = []
         if candidate.commodity_standard_id is None:
             missing.append("标准货品")
