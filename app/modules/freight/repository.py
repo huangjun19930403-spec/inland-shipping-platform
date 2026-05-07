@@ -15,6 +15,7 @@ from app.models.freight import (
     FreightCandidateManualFeedback,
     FreightClue,
     FreightContact,
+    FreightNormalizationSuggestion,
     FreightSourceAttachment,
     FreightTagRelation,
     FreightTmsInbound,
@@ -48,6 +49,9 @@ class FreightRepository:
                     Freight.freight_no.ilike(like_value),
                     Freight.cargo_title.ilike(like_value),
                     Freight.cargo_description.ilike(like_value),
+                    Freight.raw_commodity_name.ilike(like_value),
+                    Freight.raw_origin_text.ilike(like_value),
+                    Freight.raw_destination_text.ilike(like_value),
                     Freight.publisher_org_name.ilike(like_value),
                     Freight.source_ref_no.ilike(like_value),
                 )
@@ -396,6 +400,73 @@ class FreightCandidateManualFeedbackRepository:
             )
         ).scalars().all()
         return list(rows)
+
+
+class FreightNormalizationSuggestionRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get_by_id(self, suggestion_id: int) -> FreightNormalizationSuggestion | None:
+        return await self.db.scalar(
+            select(FreightNormalizationSuggestion).where(FreightNormalizationSuggestion.id == suggestion_id)
+        )
+
+    async def find_open(self, freight_id: int, suggestion_type_code: str) -> FreightNormalizationSuggestion | None:
+        return await self.db.scalar(
+            select(FreightNormalizationSuggestion).where(
+                FreightNormalizationSuggestion.freight_id == freight_id,
+                FreightNormalizationSuggestion.suggestion_type_code == suggestion_type_code,
+                FreightNormalizationSuggestion.status_code == "PENDING",
+            )
+        )
+
+    async def list_items(
+        self,
+        *,
+        keyword: str | None,
+        status_code: str | None,
+        suggestion_type_code: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[FreightNormalizationSuggestion], int]:
+        stmt = select(FreightNormalizationSuggestion).join(Freight, Freight.id == FreightNormalizationSuggestion.freight_id)
+        if keyword:
+            like_value = f"%{keyword.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Freight.freight_no.ilike(like_value),
+                    Freight.cargo_title.ilike(like_value),
+                    FreightNormalizationSuggestion.raw_text.ilike(like_value),
+                )
+            )
+        if status_code:
+            stmt = stmt.where(FreightNormalizationSuggestion.status_code == status_code)
+        if suggestion_type_code:
+            stmt = stmt.where(FreightNormalizationSuggestion.suggestion_type_code == suggestion_type_code)
+        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
+        rows = (
+            await self.db.execute(
+                stmt.order_by(FreightNormalizationSuggestion.id.desc()).offset((page - 1) * page_size).limit(page_size)
+            )
+        ).scalars().all()
+        return list(rows), total
+
+    async def create(self, data: dict[str, Any]) -> FreightNormalizationSuggestion:
+        row = FreightNormalizationSuggestion(**data)
+        self.db.add(row)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
+
+    async def update(self, suggestion_id: int, data: dict[str, Any]) -> FreightNormalizationSuggestion | None:
+        row = await self.get_by_id(suggestion_id)
+        if row is None:
+            return None
+        for key, value in data.items():
+            setattr(row, key, value)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
 
 
 class FreightContactRepository:

@@ -32,7 +32,7 @@ from app.models.analysis import (
 )
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
-from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightTmsInbound
+from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightNormalizationSuggestion, FreightTmsInbound
 from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
 from app.models.ship import ShipProfile
 from app.models.system import SysMenu, SystemConfig
@@ -102,6 +102,11 @@ REQUIRED_ROUTE_PATHS = {
     "/api/v1/freight/tms-inbounds/{inbound_id}/parse",
     "/api/v1/freight/candidates/{candidate_id}/confirm",
     "/api/v1/freight/candidates/{candidate_id}/reject",
+    "/api/v1/freight/normalization-suggestions",
+    "/api/v1/freight/normalization-suggestions/{suggestion_id}/apply",
+    "/api/v1/freight/normalization-suggestions/{suggestion_id}/reject",
+    "/api/v1/freight/normalization/clean",
+    "/api/v1/freight/normalization/quality",
     "/api/v1/analysis/freight/node-ranking",
 }
 
@@ -216,6 +221,7 @@ async def verify() -> list[CheckResult]:
             ("wechat batch tasks", await _count(session, FreightBatchTask), 25),
             ("tms inbounds", await _count(session, FreightTmsInbound), 10),
             ("freight candidates", await _count(session, FreightCandidate), 40),
+            ("freight normalization suggestions", await _count(session, FreightNormalizationSuggestion), 5),
             ("freight daily facts", await _count(session, FactFreightDaily), 90),
             ("freight city facts", await _count(session, FactFreightCityDaily), 60),
             ("freight flow facts", await _count(session, FactFreightFlowDaily), 180),
@@ -232,6 +238,18 @@ async def verify() -> list[CheckResult]:
         ]
         for name, actual, expected in count_checks:
             results.append(_result(name, actual >= expected, f"{actual} >= {expected}"))
+
+        raw_freight_count = int(
+            await session.scalar(
+                select(func.count(Freight.id)).where(
+                    (Freight.origin_match_level_code == "RAW")
+                    | (Freight.destination_match_level_code == "RAW")
+                    | (Freight.commodity_match_level_code == "RAW")
+                )
+            )
+            or 0
+        )
+        results.append(_result("raw-level formal freights seeded", raw_freight_count >= 5, f"{raw_freight_count} >= 5"))
 
         task_codes = (await session.execute(select(AnalysisJobDefinition.job_code))).scalars().all()
         results.append(

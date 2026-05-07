@@ -19,6 +19,7 @@ from app.models.freight import (
     FreightCandidateManualFeedback,
     FreightClue,
     FreightContact,
+    FreightNormalizationSuggestion,
     FreightTagRelation,
     FreightTmsInbound,
 )
@@ -100,6 +101,10 @@ async def _clear_sample_data(session) -> None:
     sample_freight_ids = (
         await session.execute(select(Freight.id).where(Freight.freight_no.like("FR-LOCAL-%")))
     ).scalars().all()
+    if sample_freight_ids:
+        await session.execute(
+            delete(FreightNormalizationSuggestion).where(FreightNormalizationSuggestion.freight_id.in_(sample_freight_ids))
+        )
     if sample_candidates:
         await session.execute(
             delete(FreightCandidateManualFeedback).where(FreightCandidateManualFeedback.candidate_id.in_(sample_candidates))
@@ -151,9 +156,13 @@ async def seed_freight_samples() -> None:
                 source_type_code=source_type,
                 source_channel_code=source_channel,
                 source_ref_no=f"{source_channel}-{idx:04d}",
+                raw_commodity_name=commodity.name,
+                raw_origin_text=origin.name,
+                raw_destination_text=destination.name,
                 cargo_title=f"{origin.short_name or origin.name}至{destination.short_name or destination.name}{commodity.short_name or commodity.name}",
                 cargo_description=f"{commodity.name}内河运输，起运 {origin.name}，到达 {destination.name}，适合散货/件杂货常规船型。",
-                commodity_standard_id=commodity.id,
+                commodity_standard_id=None if idx % 70 == 0 else commodity.id,
+                commodity_match_level_code="RAW" if idx % 70 == 0 else "STANDARD",
                 packaging_form_code="CONTAINER" if "箱" in commodity.name else "BULK",
                 estimated_tonnage=tonnage,
                 min_tonnage=(tonnage * Decimal("0.85")).quantize(Decimal("0.01")),
@@ -162,16 +171,18 @@ async def seed_freight_samples() -> None:
                 total_price=(tonnage * unit_price).quantize(Decimal("0.01")),
                 price_unit="元/吨",
                 settlement_method_code=None,
-                origin_node_id=origin.id,
-                destination_node_id=destination.id,
+                origin_node_id=None if idx % 40 == 0 else origin.id,
+                destination_node_id=None if idx % 55 == 0 else destination.id,
+                origin_match_level_code="CITY" if idx % 40 == 0 else "NODE",
+                destination_match_level_code="RAW" if idx % 55 == 0 else "NODE",
                 origin_province_code=origin.province_code,
                 origin_city_code=origin.city_code,
-                origin_district_code=origin.district_code,
-                destination_province_code=destination.province_code,
-                destination_city_code=destination.city_code,
-                destination_district_code=destination.district_code,
+                origin_district_code=None if idx % 40 == 0 else origin.district_code,
+                destination_province_code=None if idx % 55 == 0 else destination.province_code,
+                destination_city_code=None if idx % 55 == 0 else destination.city_code,
+                destination_district_code=None if idx % 55 == 0 else destination.district_code,
                 origin_region_id_cache=await region_id(origin),
-                destination_region_id_cache=await region_id(destination),
+                destination_region_id_cache=None if idx % 55 == 0 else await region_id(destination),
                 loading_time_from=published_at + timedelta(days=1),
                 loading_time_to=published_at + timedelta(days=4),
                 unloading_time_from=published_at + timedelta(days=3),
@@ -188,6 +199,46 @@ async def seed_freight_samples() -> None:
             )
             session.add(freight)
             await session.flush()
+            if idx % 55 == 0:
+                session.add(
+                    FreightNormalizationSuggestion(
+                        freight_id=freight.id,
+                        suggestion_type_code="DESTINATION",
+                        raw_text=destination.name,
+                        current_level_code="RAW",
+                        suggested_level_code="NODE",
+                        suggested_node_id=destination.id,
+                        suggested_province_code=destination.province_code,
+                        suggested_city_code=destination.city_code,
+                        suggested_district_code=destination.district_code,
+                        suggested_region_id=await region_id(destination),
+                        confidence_score=Decimal("0.8600"),
+                        status_code="PENDING",
+                        auto_apply_flag=False,
+                        match_basis_json={"seed": True, "basis": destination.name},
+                        before_json={"destination_match_level_code": "RAW"},
+                        created_at=published_at,
+                        updated_at=published_at,
+                    )
+                )
+            if idx % 70 == 0:
+                session.add(
+                    FreightNormalizationSuggestion(
+                        freight_id=freight.id,
+                        suggestion_type_code="COMMODITY",
+                        raw_text=commodity.name,
+                        current_level_code="RAW",
+                        suggested_level_code="STANDARD",
+                        suggested_commodity_standard_id=commodity.id,
+                        confidence_score=Decimal("0.8200"),
+                        status_code="PENDING",
+                        auto_apply_flag=False,
+                        match_basis_json={"seed": True, "basis": commodity.name},
+                        before_json={"commodity_match_level_code": "RAW"},
+                        created_at=published_at,
+                        updated_at=published_at,
+                    )
+                )
             freight_rows.append(freight)
             session.add(
                 FreightContact(

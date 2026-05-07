@@ -25,6 +25,10 @@ from app.modules.freight.schemas import (
     FreightDetailResponse,
     FreightListQuery,
     FreightManualCreateRequest,
+    FreightNormalizationCleanResponse,
+    FreightNormalizationQualityResponse,
+    FreightNormalizationSuggestionListQuery,
+    FreightNormalizationSuggestionResponse,
     FreightResponse,
     FreightStatusChangeRequest,
     FreightTagRelationResponse,
@@ -41,6 +45,7 @@ from app.modules.freight.service import (
     FreightBatchTaskService,
     FreightCandidateService,
     FreightContactService,
+    FreightNormalizationSuggestionService,
     FreightService,
     FreightTagService,
     FreightTmsInboundService,
@@ -208,6 +213,62 @@ async def reject_candidate(
 ):
     service = FreightCandidateService(db)
     return await service.reject(candidate_id, body, operator_id=getattr(current_user, "id", None))
+
+
+@router.get("/normalization-suggestions", response_model=PageResponse[FreightNormalizationSuggestionResponse])
+async def list_normalization_suggestions(
+    query: FreightNormalizationSuggestionListQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = FreightNormalizationSuggestionService(db)
+    return await service.list_items(
+        keyword=query.keyword,
+        status_code=query.status_code,
+        suggestion_type_code=query.suggestion_type_code,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
+@router.get("/normalization/quality", response_model=FreightNormalizationQualityResponse)
+async def get_normalization_quality(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = FreightNormalizationSuggestionService(db)
+    return await service.quality()
+
+
+@router.post("/normalization/clean", response_model=FreightNormalizationCleanResponse)
+async def clean_freight_normalization(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightNormalizationSuggestionService(db)
+    return await service.clean(operator_id=getattr(current_user, "id", None))
+
+
+@router.post("/normalization-suggestions/{suggestion_id}/apply", response_model=FreightNormalizationSuggestionResponse)
+async def apply_normalization_suggestion(
+    suggestion_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightNormalizationSuggestionService(db)
+    return await service.apply(suggestion_id, operator_id=getattr(current_user, "id", None))
+
+
+@router.post("/normalization-suggestions/{suggestion_id}/reject", response_model=FreightNormalizationSuggestionResponse)
+async def reject_normalization_suggestion(
+    suggestion_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightNormalizationSuggestionService(db)
+    return await service.reject(suggestion_id, operator_id=getattr(current_user, "id", None))
 
 
 @router.get("", response_model=PageResponse[FreightResponse])

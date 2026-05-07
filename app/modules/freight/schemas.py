@@ -31,9 +31,13 @@ class FreightListQuery(BaseModel):
 
 
 class FreightBasePayload(BaseModel):
+    raw_commodity_name: str | None = Field(default=None, max_length=128)
+    raw_origin_text: str | None = Field(default=None, max_length=256)
+    raw_destination_text: str | None = Field(default=None, max_length=256)
     cargo_title: str = Field(min_length=1, max_length=256)
     cargo_description: str | None = Field(default=None, max_length=1024)
-    commodity_standard_id: int
+    commodity_standard_id: int | None = None
+    commodity_match_level_code: str | None = Field(default=None, max_length=64)
     packaging_form_code: str | None = Field(default=None, max_length=64)
     estimated_tonnage: Decimal | None = None
     min_tonnage: Decimal | None = None
@@ -44,11 +48,13 @@ class FreightBasePayload(BaseModel):
     settlement_method_code: str | None = Field(default=None, max_length=64)
     origin_node_id: int | None = None
     destination_node_id: int | None = None
-    origin_province_code: str = Field(min_length=1, max_length=12)
-    origin_city_code: str = Field(min_length=1, max_length=12)
+    origin_match_level_code: str | None = Field(default=None, max_length=64)
+    destination_match_level_code: str | None = Field(default=None, max_length=64)
+    origin_province_code: str | None = Field(default=None, max_length=12)
+    origin_city_code: str | None = Field(default=None, max_length=12)
     origin_district_code: str | None = Field(default=None, max_length=12)
-    destination_province_code: str = Field(min_length=1, max_length=12)
-    destination_city_code: str = Field(min_length=1, max_length=12)
+    destination_province_code: str | None = Field(default=None, max_length=12)
+    destination_city_code: str | None = Field(default=None, max_length=12)
     destination_district_code: str | None = Field(default=None, max_length=12)
     origin_region_id_cache: int | None = None
     destination_region_id_cache: int | None = None
@@ -71,9 +77,13 @@ class FreightManualCreateRequest(FreightBasePayload):
 
 class FreightUpdateRequest(BaseModel):
     source_ref_no: str | None = Field(default=None, max_length=128)
+    raw_commodity_name: str | None = Field(default=None, max_length=128)
+    raw_origin_text: str | None = Field(default=None, max_length=256)
+    raw_destination_text: str | None = Field(default=None, max_length=256)
     cargo_title: str | None = Field(default=None, min_length=1, max_length=256)
     cargo_description: str | None = Field(default=None, max_length=1024)
     commodity_standard_id: int | None = None
+    commodity_match_level_code: str | None = Field(default=None, max_length=64)
     packaging_form_code: str | None = Field(default=None, max_length=64)
     estimated_tonnage: Decimal | None = None
     min_tonnage: Decimal | None = None
@@ -84,11 +94,13 @@ class FreightUpdateRequest(BaseModel):
     settlement_method_code: str | None = Field(default=None, max_length=64)
     origin_node_id: int | None = None
     destination_node_id: int | None = None
-    origin_province_code: str | None = Field(default=None, min_length=1, max_length=12)
-    origin_city_code: str | None = Field(default=None, min_length=1, max_length=12)
+    origin_match_level_code: str | None = Field(default=None, max_length=64)
+    destination_match_level_code: str | None = Field(default=None, max_length=64)
+    origin_province_code: str | None = Field(default=None, max_length=12)
+    origin_city_code: str | None = Field(default=None, max_length=12)
     origin_district_code: str | None = Field(default=None, max_length=12)
-    destination_province_code: str | None = Field(default=None, min_length=1, max_length=12)
-    destination_city_code: str | None = Field(default=None, min_length=1, max_length=12)
+    destination_province_code: str | None = Field(default=None, max_length=12)
+    destination_city_code: str | None = Field(default=None, max_length=12)
     destination_district_code: str | None = Field(default=None, max_length=12)
     origin_region_id_cache: int | None = None
     destination_region_id_cache: int | None = None
@@ -119,11 +131,15 @@ class FreightResponse(BaseModel):
     source_tms_inbound_id: int | None = None
     source_clue_id: int | None = None
     source_candidate_id: int | None = None
+    raw_commodity_name: str | None = None
+    raw_origin_text: str | None = None
+    raw_destination_text: str | None = None
     cargo_title: str
     cargo_description: str | None
-    commodity_standard_id: int
+    commodity_standard_id: int | None
     commodity_standard_code: str | None = None
     commodity_standard_name: str | None = None
+    commodity_match_level_code: str | None = None
     packaging_form_code: str | None
     packaging_form_name: str | None = None
     estimated_tonnage: Decimal | None
@@ -138,12 +154,14 @@ class FreightResponse(BaseModel):
     origin_node_name: str | None = None
     destination_node_id: int | None
     destination_node_name: str | None = None
-    origin_province_code: str
-    origin_city_code: str
+    origin_match_level_code: str | None = None
+    destination_match_level_code: str | None = None
+    origin_province_code: str | None
+    origin_city_code: str | None
     origin_city_name: str | None = None
     origin_district_code: str | None
-    destination_province_code: str
-    destination_city_code: str
+    destination_province_code: str | None
+    destination_city_code: str | None
     destination_city_name: str | None = None
     destination_district_code: str | None
     origin_region_id_cache: int | None
@@ -369,9 +387,13 @@ class FreightTmsInboundDetailResponse(BaseModel):
 
 
 class FreightCandidateUpdateRequest(BaseModel):
+    raw_commodity_name: str | None = Field(default=None, max_length=128)
+    raw_origin_text: str | None = Field(default=None, max_length=256)
+    raw_destination_text: str | None = Field(default=None, max_length=256)
     cargo_title: str | None = Field(default=None, min_length=1, max_length=256)
     cargo_description: str | None = Field(default=None, max_length=1024)
     commodity_standard_id: int | None = None
+    commodity_match_level_code: str | None = Field(default=None, max_length=64)
     packaging_form_code: str | None = Field(default=None, max_length=64)
     estimated_tonnage: Decimal | None = None
     min_tonnage: Decimal | None = None
@@ -512,3 +534,62 @@ class FreightCandidateBulkConfirmResponse(BaseModel):
     skipped_count: int
     freight_ids: list[int] = Field(default_factory=list)
     skipped: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FreightNormalizationSuggestionListQuery(BaseModel):
+    keyword: str | None = None
+    status_code: str | None = None
+    suggestion_type_code: str | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=200)
+
+
+class FreightNormalizationSuggestionResponse(BaseModel):
+    id: int
+    freight_id: int
+    freight_no: str | None = None
+    cargo_title: str | None = None
+    suggestion_type_code: str
+    raw_text: str | None
+    current_level_code: str | None
+    suggested_level_code: str
+    suggested_node_id: int | None
+    suggested_node_name: str | None = None
+    suggested_commodity_standard_id: int | None
+    suggested_commodity_standard_name: str | None = None
+    suggested_province_code: str | None
+    suggested_city_code: str | None
+    suggested_city_name: str | None = None
+    suggested_district_code: str | None
+    suggested_region_id: int | None
+    suggested_region_name: str | None = None
+    confidence_score: Decimal | None
+    status_code: str
+    auto_apply_flag: bool
+    match_basis_json: dict[str, Any] | None
+    before_json: dict[str, Any] | None
+    after_json: dict[str, Any] | None
+    applied_at: datetime | None
+    applied_by: int | None
+    rejected_at: datetime | None
+    rejected_by: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FreightNormalizationCleanResponse(BaseModel):
+    scanned_count: int
+    suggestion_count: int
+    auto_applied_count: int
+    pending_count: int
+    affected_date_from: datetime | None = None
+    affected_date_to: datetime | None = None
+
+
+class FreightNormalizationQualityResponse(BaseModel):
+    freight_count: int
+    raw_origin_count: int
+    raw_destination_count: int
+    raw_commodity_count: int
+    pending_suggestion_count: int
+    auto_applied_suggestion_count: int

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -17,7 +17,7 @@ from app.integrations.ai import DashScopeQwenFreightParserClient
 from app.models.address import AdminRegion, NodeAlias, Region, RegionCityRelation, TransportNode
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.dictionary import StdDict, StdDictItem
-from app.models.freight import FreightCandidate
+from app.models.freight import Freight, FreightCandidate, FreightNormalizationSuggestion
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.freight.repository import (
     FreightAttachmentRepository,
@@ -26,6 +26,7 @@ from app.modules.freight.repository import (
     FreightCandidateRepository,
     FreightClueRepository,
     FreightContactRepository,
+    FreightNormalizationSuggestionRepository,
     FreightRepository,
     FreightTagRelationRepository,
     FreightTmsInboundRepository,
@@ -40,6 +41,9 @@ from app.modules.freight.schemas import (
     FreightConfirmationResponse,
     FreightContactResponse,
     FreightDetailResponse,
+    FreightNormalizationCleanResponse,
+    FreightNormalizationQualityResponse,
+    FreightNormalizationSuggestionResponse,
     FreightResponse,
     FreightTagRelationResponse,
     FreightTmsInboundDetailResponse,
@@ -108,6 +112,7 @@ async def _load_display_context(
     tms_inbounds: list[Any] | None = None,
     clues: list[Any] | None = None,
     feedback: list[Any] | None = None,
+    suggestions: list[Any] | None = None,
 ) -> dict[str, Any]:
     freights = freights or []
     candidates = candidates or []
@@ -115,6 +120,7 @@ async def _load_display_context(
     tms_inbounds = tms_inbounds or []
     clues = clues or []
     feedback = feedback or []
+    suggestions = suggestions or []
 
     dict_rows = (
         await db.execute(
@@ -132,6 +138,11 @@ async def _load_display_context(
         for item in [*freights, *candidates]
         if getattr(item, "commodity_standard_id", None) is not None
     }
+    commodity_ids.update(
+        item.suggested_commodity_standard_id
+        for item in suggestions
+        if getattr(item, "suggested_commodity_standard_id", None) is not None
+    )
     commodities: dict[int, CommodityStandard] = {}
     if commodity_ids:
         rows = (await db.execute(select(CommodityStandard).where(CommodityStandard.id.in_(commodity_ids)))).scalars().all()
@@ -143,6 +154,7 @@ async def _load_display_context(
         for node_id in (getattr(item, "origin_node_id", None), getattr(item, "destination_node_id", None))
         if node_id is not None
     }
+    node_ids.update(item.suggested_node_id for item in suggestions if getattr(item, "suggested_node_id", None) is not None)
     nodes: dict[int, TransportNode] = {}
     if node_ids:
         rows = (await db.execute(select(TransportNode).where(TransportNode.id.in_(node_ids)))).scalars().all()
@@ -154,6 +166,7 @@ async def _load_display_context(
         for code in (getattr(item, "origin_city_code", None), getattr(item, "destination_city_code", None))
         if code
     }
+    city_codes.update(item.suggested_city_code for item in suggestions if getattr(item, "suggested_city_code", None))
     cities: dict[str, AdminRegion] = {}
     if city_codes:
         rows = (await db.execute(select(AdminRegion).where(AdminRegion.code.in_(city_codes)))).scalars().all()
@@ -165,6 +178,13 @@ async def _load_display_context(
         for region_id in (getattr(item, "origin_region_id_cache", None), getattr(item, "destination_region_id_cache", None))
         if region_id is not None
     }
+    region_ids.update(item.suggested_region_id for item in suggestions if getattr(item, "suggested_region_id", None) is not None)
+
+    freight_ids = {item.freight_id for item in suggestions if getattr(item, "freight_id", None) is not None}
+    freights_by_id: dict[int, Freight] = {}
+    if freight_ids:
+        rows = (await db.execute(select(Freight).where(Freight.id.in_(freight_ids)))).scalars().all()
+        freights_by_id = {int(row.id): row for row in rows}
     regions: dict[int, Region] = {}
     if region_ids:
         rows = (await db.execute(select(Region).where(Region.id.in_(region_ids)))).scalars().all()
@@ -180,6 +200,7 @@ async def _load_display_context(
         "tms_inbounds": tms_inbounds,
         "clues": clues,
         "feedback": feedback,
+        "freights_by_id": freights_by_id,
     }
 
 
@@ -231,11 +252,15 @@ def _to_freight_response(entity, ctx: dict[str, Any] | None = None) -> FreightRe
         source_tms_inbound_id=entity.source_tms_inbound_id,
         source_clue_id=entity.source_clue_id,
         source_candidate_id=entity.source_candidate_id,
+        raw_commodity_name=entity.raw_commodity_name,
+        raw_origin_text=entity.raw_origin_text,
+        raw_destination_text=entity.raw_destination_text,
         cargo_title=entity.cargo_title,
         cargo_description=entity.cargo_description,
         commodity_standard_id=entity.commodity_standard_id,
         commodity_standard_code=commodity.code if commodity is not None else None,
         commodity_standard_name=commodity.name if commodity is not None else None,
+        commodity_match_level_code=entity.commodity_match_level_code,
         packaging_form_code=entity.packaging_form_code,
         packaging_form_name=_label(ctx, "PACKAGING_FORM", entity.packaging_form_code),
         estimated_tonnage=entity.estimated_tonnage,
@@ -250,6 +275,8 @@ def _to_freight_response(entity, ctx: dict[str, Any] | None = None) -> FreightRe
         origin_node_name=_node_name(ctx, entity.origin_node_id),
         destination_node_id=entity.destination_node_id,
         destination_node_name=_node_name(ctx, entity.destination_node_id),
+        origin_match_level_code=entity.origin_match_level_code,
+        destination_match_level_code=entity.destination_match_level_code,
         origin_province_code=entity.origin_province_code,
         origin_city_code=entity.origin_city_code,
         origin_city_name=_city_name(ctx, entity.origin_city_code),
@@ -503,6 +530,46 @@ def _to_feedback_response(entity, candidate: FreightCandidate | None, ctx: dict[
     )
 
 
+def _to_normalization_suggestion_response(
+    entity: FreightNormalizationSuggestion, ctx: dict[str, Any] | None = None
+) -> FreightNormalizationSuggestionResponse:
+    ctx = ctx or {}
+    freight = ctx.get("freights_by_id", {}).get(int(entity.freight_id))
+    commodity = _commodity(ctx, entity.suggested_commodity_standard_id)
+    return FreightNormalizationSuggestionResponse(
+        id=entity.id,
+        freight_id=entity.freight_id,
+        freight_no=freight.freight_no if freight is not None else None,
+        cargo_title=freight.cargo_title if freight is not None else None,
+        suggestion_type_code=entity.suggestion_type_code,
+        raw_text=entity.raw_text,
+        current_level_code=entity.current_level_code,
+        suggested_level_code=entity.suggested_level_code,
+        suggested_node_id=entity.suggested_node_id,
+        suggested_node_name=_node_name(ctx, entity.suggested_node_id),
+        suggested_commodity_standard_id=entity.suggested_commodity_standard_id,
+        suggested_commodity_standard_name=commodity.name if commodity is not None else None,
+        suggested_province_code=entity.suggested_province_code,
+        suggested_city_code=entity.suggested_city_code,
+        suggested_city_name=_city_name(ctx, entity.suggested_city_code),
+        suggested_district_code=entity.suggested_district_code,
+        suggested_region_id=entity.suggested_region_id,
+        suggested_region_name=_region_name(ctx, entity.suggested_region_id),
+        confidence_score=entity.confidence_score,
+        status_code=entity.status_code,
+        auto_apply_flag=entity.auto_apply_flag,
+        match_basis_json=entity.match_basis_json,
+        before_json=entity.before_json,
+        after_json=entity.after_json,
+        applied_at=entity.applied_at,
+        applied_by=entity.applied_by,
+        rejected_at=entity.rejected_at,
+        rejected_by=entity.rejected_by,
+        created_at=entity.created_at,
+        updated_at=entity.updated_at,
+    )
+
+
 class FreightNormalizationMixin:
     db: AsyncSession
     sequence_service: CodeSequenceService
@@ -533,6 +600,18 @@ class FreightNormalizationMixin:
         province_key = f"{prefix}_province_code"
         district_key = f"{prefix}_district_code"
         region_key = f"{prefix}_region_id_cache"
+        level_key = f"{prefix}_match_level_code"
+        requested_level = str(updates.get(level_key) or "").upper()
+        if requested_level == "RAW":
+            updates[node_key] = None
+            updates[province_key] = None
+            updates[city_key] = None
+            updates[district_key] = None
+            updates[region_key] = None
+            updates[level_key] = "RAW"
+            return
+        if requested_level == "CITY":
+            updates[node_key] = None
         if node_key in updates and updates.get(node_key):
             node = await self._node_by_id(updates[node_key])
             if node is not None:
@@ -540,14 +619,58 @@ class FreightNormalizationMixin:
                 updates[city_key] = node.city_code
                 updates[district_key] = node.district_code
                 updates[region_key] = await self._business_region_id(node.city_region_id)
-                updates[f"{prefix}_match_level_code"] = "NODE"
+                updates[level_key] = "NODE"
             return
+        if node_key in updates and updates.get(node_key) is None and requested_level != "CITY":
+            updates[province_key] = None
+            updates[city_key] = None
+            updates[district_key] = None
+            updates[region_key] = None
+            updates[level_key] = requested_level or "RAW"
         if city_key in updates and updates.get(city_key):
             city = await self._city_by_code(updates[city_key])
             if city is not None:
+                updates[node_key] = None
                 updates[province_key] = city.province_code or city.code[:2].ljust(6, "0")
+                updates[district_key] = None
                 updates[region_key] = await self._business_region_id(city.id)
-                updates[f"{prefix}_match_level_code"] = updates.get(f"{prefix}_match_level_code") or "CITY"
+                updates[level_key] = "CITY"
+
+    async def _enrich_commodity_updates(self, updates: dict[str, Any]) -> None:
+        if str(updates.get("commodity_match_level_code") or "").upper() == "RAW":
+            updates["commodity_standard_id"] = None
+            updates["commodity_match_level_code"] = "RAW"
+            return
+        if "commodity_standard_id" in updates and updates.get("commodity_standard_id"):
+            standard = await self.db.scalar(
+                select(CommodityStandard).where(
+                    CommodityStandard.id == updates["commodity_standard_id"],
+                    CommodityStandard.deleted_at.is_(None),
+                )
+            )
+            if standard is not None:
+                updates["commodity_match_level_code"] = "STANDARD"
+        elif "commodity_standard_id" in updates and updates.get("commodity_standard_id") is None:
+            updates["commodity_match_level_code"] = updates.get("commodity_match_level_code") or "RAW"
+
+    @staticmethod
+    def _fill_default_raw_levels(data: dict[str, Any]) -> None:
+        if not data.get("commodity_match_level_code"):
+            data["commodity_match_level_code"] = "STANDARD" if data.get("commodity_standard_id") is not None else "RAW"
+        if not data.get("origin_match_level_code"):
+            if data.get("origin_node_id") is not None:
+                data["origin_match_level_code"] = "NODE"
+            elif data.get("origin_city_code"):
+                data["origin_match_level_code"] = "CITY"
+            elif data.get("raw_origin_text"):
+                data["origin_match_level_code"] = "RAW"
+        if not data.get("destination_match_level_code"):
+            if data.get("destination_node_id") is not None:
+                data["destination_match_level_code"] = "NODE"
+            elif data.get("destination_city_code"):
+                data["destination_match_level_code"] = "CITY"
+            elif data.get("raw_destination_text"):
+                data["destination_match_level_code"] = "RAW"
 
     async def _match_commodity(self, raw_name: str) -> tuple[int | None, Decimal | None, str | None, list[dict[str, Any]], dict[str, Any]]:
         text = raw_name.strip()
@@ -587,7 +710,7 @@ class FreightNormalizationMixin:
             dedup.setdefault(int(option["id"]), option)
         ordered = list(dedup.values())[:5]
         if not ordered:
-            return None, Decimal("0.0"), "UNMATCHED", [], {"status": "UNMATCHED", "text": text}
+            return None, Decimal("0.0"), "RAW", [{"level": "RAW", "name": text, "score": "0.0"}], {"status": "UNMATCHED", "text": text}
         first = ordered[0]
         return int(first["id"]), Decimal(str(first["score"])), str(first["match_level_code"]), ordered, {"status": "MATCHED", "text": text, "top": first}
 
@@ -665,7 +788,7 @@ class FreightNormalizationMixin:
                 )
         ordered = sorted(options, key=lambda item: Decimal(str(item["score"])), reverse=True)[:6]
         if not ordered:
-            return {}, [], {"status": "UNMATCHED", "text": text}
+            return {"match_level_code": "RAW"}, [{"level": "RAW", "name": text, "score": "0.0"}], {"status": "UNMATCHED", "text": text}
         first = ordered[0]
         normalized = {
             "node_id": first.get("node_id"),
@@ -832,6 +955,11 @@ class FreightService(FreightNormalizationMixin):
         freight_no = (payload.freight_no or "").strip() or await self.sequence_service.next_code("FREIGHT_NO")
         if await self.repo.exists_freight_no(freight_no):
             raise ConflictError(f"freight_no already exists: {freight_no}")
+        await self._enrich_location_updates(data, "origin")
+        await self._enrich_location_updates(data, "destination")
+        await self._enrich_commodity_updates(data)
+        self._fill_default_raw_levels(data)
+        self._validate_freight_minimum(data)
         data.update(
             {
                 "freight_no": freight_no,
@@ -852,9 +980,13 @@ class FreightService(FreightNormalizationMixin):
         return _to_freight_response(row, ctx)
 
     async def update_freight(self, freight_id: int, payload) -> FreightResponse:
-        updates = payload.model_dump(exclude_none=True)
+        updates = payload.model_dump(exclude_unset=True)
         if not updates:
             raise ValidationError("no update fields provided")
+        await self._enrich_location_updates(updates, "origin")
+        await self._enrich_location_updates(updates, "destination")
+        await self._enrich_commodity_updates(updates)
+        self._fill_default_raw_levels(updates)
         if updates.get("hall_status_code") == "PUBLISHED" and updates.get("hall_published_at") is None:
             updates["hall_published_at"] = datetime.utcnow()
             updates["hall_unpublished_at"] = None
@@ -863,6 +995,7 @@ class FreightService(FreightNormalizationMixin):
         row = await self.repo.update_freight(freight_id, updates)
         if row is None:
             raise NotFoundError("Freight", freight_id)
+        self._validate_freight_minimum(_entity_snapshot(row, self._freight_minimum_fields()))
         await self.db.commit()
         ctx = await _load_display_context(self.db, freights=[row])
         return _to_freight_response(row, ctx)
@@ -905,6 +1038,44 @@ class FreightService(FreightNormalizationMixin):
         if not ok:
             raise NotFoundError("Freight", freight_id)
         await self.db.commit()
+
+    @staticmethod
+    def _freight_minimum_fields() -> list[str]:
+        return [
+            "cargo_title",
+            "raw_commodity_name",
+            "commodity_standard_id",
+            "raw_origin_text",
+            "origin_node_id",
+            "origin_city_code",
+            "raw_destination_text",
+            "destination_node_id",
+            "destination_city_code",
+        ]
+
+    @staticmethod
+    def _validate_freight_minimum(data: dict[str, Any]) -> None:
+        missing: list[str] = []
+        if str(data.get("commodity_match_level_code") or "").upper() == "STANDARD" and not data.get("commodity_standard_id"):
+            missing.append("标准货品")
+        if not (str(data.get("cargo_title") or "").strip() or str(data.get("raw_commodity_name") or "").strip() or data.get("commodity_standard_id")):
+            missing.append("货品原文或货源标题")
+        origin_level = str(data.get("origin_match_level_code") or "").upper()
+        destination_level = str(data.get("destination_match_level_code") or "").upper()
+        if origin_level == "NODE" and not data.get("origin_node_id"):
+            missing.append("装货节点")
+        if origin_level == "CITY" and not data.get("origin_city_code"):
+            missing.append("装货城市")
+        if destination_level == "NODE" and not data.get("destination_node_id"):
+            missing.append("卸货节点")
+        if destination_level == "CITY" and not data.get("destination_city_code"):
+            missing.append("卸货城市")
+        if not (str(data.get("raw_origin_text") or "").strip() or data.get("origin_node_id") or data.get("origin_city_code")):
+            missing.append("装货地原文")
+        if not (str(data.get("raw_destination_text") or "").strip() or data.get("destination_node_id") or data.get("destination_city_code")):
+            missing.append("卸货地原文")
+        if missing:
+            raise ValidationError(f"正式货源缺少最低入库字段：{', '.join(missing)}")
 
 
 class FreightBatchTaskService(FreightNormalizationMixin):
@@ -1432,11 +1603,13 @@ class FreightCandidateService(FreightNormalizationMixin):
         return _to_candidate_response(row, ctx)
 
     async def update(self, candidate_id: int, payload) -> FreightCandidateResponse:
-        updates = payload.model_dump(exclude_none=True)
+        updates = payload.model_dump(exclude_unset=True)
         if not updates:
             raise ValidationError("no update fields provided")
         await self._enrich_location_updates(updates, "origin")
         await self._enrich_location_updates(updates, "destination")
+        await self._enrich_commodity_updates(updates)
+        self._fill_default_raw_levels(updates)
         row = await self.repo.get_by_id(candidate_id)
         if row is None:
             raise NotFoundError("FreightCandidate", candidate_id)
@@ -1456,12 +1629,14 @@ class FreightCandidateService(FreightNormalizationMixin):
             raise ValidationError("只有待确认候选货源可以确认入库")
         before = _entity_snapshot(candidate, self._candidate_snapshot_fields())
         action_code = "CONFIRM"
-        has_overrides = payload.overrides is not None and bool(payload.overrides.model_dump(exclude_none=True))
+        has_overrides = payload.overrides is not None and bool(payload.overrides.model_dump(exclude_unset=True))
         if payload.overrides is not None:
-            updates = payload.overrides.model_dump(exclude_none=True)
+            updates = payload.overrides.model_dump(exclude_unset=True)
             if updates:
                 await self._enrich_location_updates(updates, "origin")
                 await self._enrich_location_updates(updates, "destination")
+                await self._enrich_commodity_updates(updates)
+                self._fill_default_raw_levels(updates)
                 manual = dict(candidate.manual_overrides_json or {})
                 manual.update(_compact_json_value(updates))
                 updates["manual_overrides_json"] = manual
@@ -1469,8 +1644,7 @@ class FreightCandidateService(FreightNormalizationMixin):
                 action_code = "EDIT_CONFIRM"
         self._validate_candidate_ready(candidate, allow_review_override=has_overrides)
         now = datetime.utcnow()
-        freight = await self.freight_repo.create_freight(
-            {
+        freight_payload = {
                 "freight_no": await self.sequence_service.next_code("FREIGHT_NO"),
                 "source_type_code": candidate.source_type_code,
                 "source_channel_code": candidate.source_channel_code,
@@ -1479,9 +1653,13 @@ class FreightCandidateService(FreightNormalizationMixin):
                 "source_tms_inbound_id": candidate.source_tms_inbound_id,
                 "source_clue_id": candidate.clue_id,
                 "source_candidate_id": candidate.id,
+                "raw_commodity_name": candidate.raw_commodity_name,
+                "raw_origin_text": candidate.raw_origin_text,
+                "raw_destination_text": candidate.raw_destination_text,
                 "cargo_title": candidate.cargo_title,
                 "cargo_description": candidate.cargo_description,
                 "commodity_standard_id": candidate.commodity_standard_id,
+                "commodity_match_level_code": candidate.commodity_match_level_code,
                 "packaging_form_code": candidate.packaging_form_code,
                 "estimated_tonnage": candidate.estimated_tonnage,
                 "min_tonnage": candidate.min_tonnage,
@@ -1492,6 +1670,8 @@ class FreightCandidateService(FreightNormalizationMixin):
                 "settlement_method_code": candidate.settlement_method_code,
                 "origin_node_id": candidate.origin_node_id,
                 "destination_node_id": candidate.destination_node_id,
+                "origin_match_level_code": candidate.origin_match_level_code,
+                "destination_match_level_code": candidate.destination_match_level_code,
                 "origin_province_code": candidate.origin_province_code,
                 "origin_city_code": candidate.origin_city_code,
                 "origin_district_code": candidate.origin_district_code,
@@ -1513,7 +1693,8 @@ class FreightCandidateService(FreightNormalizationMixin):
                 "hall_status_code": "NOT_LISTED",
                 "audit_status": "APPROVED",
             }
-        )
+        self._fill_default_raw_levels(freight_payload)
+        freight = await self.freight_repo.create_freight(freight_payload)
         candidate = await self.repo.update(
             candidate.id,
             {"status_code": "CONFIRMED", "confirmed_freight_id": freight.id, "confirmed_at": now},
@@ -1601,10 +1782,16 @@ class FreightCandidateService(FreightNormalizationMixin):
             "candidate_no",
             "cargo_title",
             "commodity_standard_id",
+            "commodity_match_level_code",
+            "raw_commodity_name",
             "origin_node_id",
             "origin_city_code",
+            "origin_match_level_code",
+            "raw_origin_text",
             "destination_node_id",
             "destination_city_code",
+            "destination_match_level_code",
+            "raw_destination_text",
             "estimated_tonnage",
             "unit_price",
             "availability_status_code",
@@ -1618,14 +1805,347 @@ class FreightCandidateService(FreightNormalizationMixin):
             reason = candidate.manual_review_reason or "AI 未判断为可直接发布"
             raise ValidationError(f"候选货源需要编辑确认后才能入库：{reason}")
         missing: list[str] = []
-        if candidate.commodity_standard_id is None:
+        if str(candidate.commodity_match_level_code or "").upper() == "STANDARD" and candidate.commodity_standard_id is None:
             missing.append("标准货品")
-        if not candidate.origin_province_code or not candidate.origin_city_code:
+        if not (
+            str(candidate.cargo_title or "").strip()
+            or str(candidate.raw_commodity_name or "").strip()
+            or candidate.commodity_standard_id is not None
+        ):
+            missing.append("货品原文或货源标题")
+        origin_level = str(candidate.origin_match_level_code or "").upper()
+        destination_level = str(candidate.destination_match_level_code or "").upper()
+        if origin_level == "NODE" and candidate.origin_node_id is None:
+            missing.append("装货节点")
+        if origin_level == "CITY" and not candidate.origin_city_code:
             missing.append("装货城市")
-        if not candidate.destination_province_code or not candidate.destination_city_code:
+        if destination_level == "NODE" and candidate.destination_node_id is None:
+            missing.append("卸货节点")
+        if destination_level == "CITY" and not candidate.destination_city_code:
             missing.append("卸货城市")
+        if not (
+            str(candidate.raw_origin_text or "").strip()
+            or candidate.origin_node_id is not None
+            or bool(candidate.origin_city_code)
+        ):
+            missing.append("装货地原文")
+        if not (
+            str(candidate.raw_destination_text or "").strip()
+            or candidate.destination_node_id is not None
+            or bool(candidate.destination_city_code)
+        ):
+            missing.append("卸货地原文")
         if missing:
             raise ValidationError(f"候选货源缺少确认入库字段：{', '.join(missing)}")
+
+
+class FreightNormalizationSuggestionService(FreightNormalizationMixin):
+    AUTO_LOCATION_THRESHOLD = Decimal("0.86")
+    AUTO_COMMODITY_THRESHOLD = Decimal("0.82")
+
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+        self.repo = FreightNormalizationSuggestionRepository(db)
+        self.freight_repo = FreightRepository(db)
+        self.sequence_service = CodeSequenceService(db)
+
+    async def list_items(
+        self,
+        *,
+        keyword: str | None,
+        status_code: str | None,
+        suggestion_type_code: str | None,
+        page: int,
+        page_size: int,
+    ) -> PageResponse[FreightNormalizationSuggestionResponse]:
+        rows, total = await self.repo.list_items(
+            keyword=keyword,
+            status_code=status_code,
+            suggestion_type_code=suggestion_type_code,
+            page=page,
+            page_size=page_size,
+        )
+        ctx = await _load_display_context(self.db, suggestions=rows)
+        return PageResponse[FreightNormalizationSuggestionResponse](
+            total=total,
+            page=page,
+            page_size=page_size,
+            items=[_to_normalization_suggestion_response(item, ctx) for item in rows],
+        )
+
+    async def quality(self) -> FreightNormalizationQualityResponse:
+        freight_count = int(
+            await self.db.scalar(select(func.count(Freight.id)).where(Freight.deleted_at.is_(None)))
+            or 0
+        )
+        raw_origin_count = int(
+            await self.db.scalar(
+                select(func.count(Freight.id)).where(
+                    Freight.deleted_at.is_(None),
+                    or_(Freight.origin_match_level_code == "RAW", Freight.origin_city_code.is_(None)),
+                )
+            )
+            or 0
+        )
+        raw_destination_count = int(
+            await self.db.scalar(
+                select(func.count(Freight.id)).where(
+                    Freight.deleted_at.is_(None),
+                    or_(Freight.destination_match_level_code == "RAW", Freight.destination_city_code.is_(None)),
+                )
+            )
+            or 0
+        )
+        raw_commodity_count = int(
+            await self.db.scalar(
+                select(func.count(Freight.id)).where(
+                    Freight.deleted_at.is_(None),
+                    or_(Freight.commodity_match_level_code == "RAW", Freight.commodity_standard_id.is_(None)),
+                )
+            )
+            or 0
+        )
+        pending = int(
+            await self.db.scalar(
+                select(func.count(FreightNormalizationSuggestion.id)).where(
+                    FreightNormalizationSuggestion.status_code == "PENDING"
+                )
+            )
+            or 0
+        )
+        auto_applied = int(
+            await self.db.scalar(
+                select(func.count(FreightNormalizationSuggestion.id)).where(
+                    FreightNormalizationSuggestion.status_code == "AUTO_APPLIED"
+                )
+            )
+            or 0
+        )
+        return FreightNormalizationQualityResponse(
+            freight_count=freight_count,
+            raw_origin_count=raw_origin_count,
+            raw_destination_count=raw_destination_count,
+            raw_commodity_count=raw_commodity_count,
+            pending_suggestion_count=pending,
+            auto_applied_suggestion_count=auto_applied,
+        )
+
+    async def clean(self, operator_id: int | None = None) -> FreightNormalizationCleanResponse:
+        rows = (
+            await self.db.execute(
+                select(Freight)
+                .where(
+                    Freight.deleted_at.is_(None),
+                    or_(
+                        Freight.origin_match_level_code == "RAW",
+                        Freight.origin_city_code.is_(None),
+                        Freight.destination_match_level_code == "RAW",
+                        Freight.destination_city_code.is_(None),
+                        Freight.commodity_match_level_code == "RAW",
+                        Freight.commodity_standard_id.is_(None),
+                    ),
+                )
+                .order_by(Freight.id.asc())
+            )
+        ).scalars().all()
+        suggestion_count = 0
+        auto_applied_count = 0
+        pending_count = 0
+        affected_dates: list[datetime] = []
+        for freight in rows:
+            for suggestion_type in ("ORIGIN", "DESTINATION", "COMMODITY"):
+                suggestion = await self._suggest_for_freight(freight, suggestion_type)
+                if suggestion is None:
+                    continue
+                suggestion_count += 1
+                if suggestion.auto_apply_flag:
+                    await self._apply_suggestion(suggestion, operator_id=operator_id, auto=True)
+                    auto_applied_count += 1
+                    affected_date = freight.published_at or freight.confirmed_at or freight.created_at
+                    if affected_date is not None:
+                        affected_dates.append(affected_date)
+                else:
+                    pending_count += 1
+        await self.db.commit()
+        if affected_dates:
+            await self._rebuild_affected_analysis(min(affected_dates), max(affected_dates))
+        return FreightNormalizationCleanResponse(
+            scanned_count=len(rows),
+            suggestion_count=suggestion_count,
+            auto_applied_count=auto_applied_count,
+            pending_count=pending_count,
+            affected_date_from=min(affected_dates) if affected_dates else None,
+            affected_date_to=max(affected_dates) if affected_dates else None,
+        )
+
+    async def apply(self, suggestion_id: int, operator_id: int | None = None) -> FreightNormalizationSuggestionResponse:
+        row = await self.repo.get_by_id(suggestion_id)
+        if row is None:
+            raise NotFoundError("FreightNormalizationSuggestion", suggestion_id)
+        if row.status_code != "PENDING":
+            raise ValidationError("只有待确认清洗建议可以应用")
+        await self._apply_suggestion(row, operator_id=operator_id, auto=False)
+        await self.db.commit()
+        ctx = await _load_display_context(self.db, suggestions=[row])
+        return _to_normalization_suggestion_response(row, ctx)
+
+    async def reject(self, suggestion_id: int, operator_id: int | None = None) -> FreightNormalizationSuggestionResponse:
+        row = await self.repo.get_by_id(suggestion_id)
+        if row is None:
+            raise NotFoundError("FreightNormalizationSuggestion", suggestion_id)
+        if row.status_code != "PENDING":
+            raise ValidationError("只有待确认清洗建议可以拒绝")
+        row = await self.repo.update(
+            suggestion_id,
+            {"status_code": "REJECTED", "rejected_at": datetime.utcnow(), "rejected_by": operator_id},
+        ) or row
+        await self.db.commit()
+        ctx = await _load_display_context(self.db, suggestions=[row])
+        return _to_normalization_suggestion_response(row, ctx)
+
+    async def _suggest_for_freight(self, freight: Freight, suggestion_type: str) -> FreightNormalizationSuggestion | None:
+        current = await self.repo.find_open(freight.id, suggestion_type)
+        if current is not None:
+            return None
+        if suggestion_type == "ORIGIN":
+            if freight.origin_match_level_code != "RAW" and freight.origin_city_code:
+                return None
+            raw_text = freight.raw_origin_text
+            normalized, options, basis = await self._match_location(raw_text or "")
+            return await self._create_location_suggestion(freight, suggestion_type, raw_text, freight.origin_match_level_code, normalized, options, basis)
+        if suggestion_type == "DESTINATION":
+            if freight.destination_match_level_code != "RAW" and freight.destination_city_code:
+                return None
+            raw_text = freight.raw_destination_text
+            normalized, options, basis = await self._match_location(raw_text or "")
+            return await self._create_location_suggestion(freight, suggestion_type, raw_text, freight.destination_match_level_code, normalized, options, basis)
+        if freight.commodity_match_level_code != "RAW" and freight.commodity_standard_id is not None:
+            return None
+        raw_text = freight.raw_commodity_name or freight.cargo_title
+        commodity_id, score, level, options, basis = await self._match_commodity(raw_text or "")
+        if commodity_id is None or level == "RAW":
+            return None
+        return await self._create_suggestion(
+            freight=freight,
+            suggestion_type_code="COMMODITY",
+            raw_text=raw_text,
+            current_level_code=freight.commodity_match_level_code,
+            suggested_level_code="STANDARD",
+            confidence_score=score,
+            auto_apply_flag=score is not None and score >= self.AUTO_COMMODITY_THRESHOLD,
+            match_basis_json={"commodity": basis, "options": options},
+            suggested_commodity_standard_id=commodity_id,
+        )
+
+    async def _create_location_suggestion(
+        self,
+        freight: Freight,
+        suggestion_type: str,
+        raw_text: str | None,
+        current_level: str | None,
+        normalized: dict[str, Any],
+        options: list[dict[str, Any]],
+        basis: dict[str, Any],
+    ) -> FreightNormalizationSuggestion | None:
+        level = normalized.get("match_level_code")
+        if level not in {"NODE", "CITY"}:
+            return None
+        score = _to_decimal_or_none(normalized.get("match_score")) or Decimal("0")
+        return await self._create_suggestion(
+            freight=freight,
+            suggestion_type_code=suggestion_type,
+            raw_text=raw_text,
+            current_level_code=current_level,
+            suggested_level_code=level,
+            suggested_node_id=normalized.get("node_id"),
+            suggested_province_code=normalized.get("province_code"),
+            suggested_city_code=normalized.get("city_code"),
+            suggested_district_code=normalized.get("district_code"),
+            suggested_region_id=normalized.get("region_id"),
+            confidence_score=score,
+            auto_apply_flag=score >= self.AUTO_LOCATION_THRESHOLD,
+            match_basis_json={"location": basis, "options": options},
+        )
+
+    async def _create_suggestion(self, **data: Any) -> FreightNormalizationSuggestion:
+        now = datetime.utcnow()
+        freight = data.pop("freight")
+        auto_apply = bool(data.get("auto_apply_flag"))
+        return await self.repo.create(
+            {
+                "freight_id": freight.id,
+                "status_code": "PENDING",
+                "before_json": _entity_snapshot(freight, self._freight_snapshot_fields()),
+                "created_at": now,
+                "updated_at": now,
+                **data,
+                "auto_apply_flag": auto_apply,
+            }
+        )
+
+    async def _apply_suggestion(self, row: FreightNormalizationSuggestion, *, operator_id: int | None, auto: bool) -> None:
+        freight = await self.freight_repo.get_freight_by_id(row.freight_id)
+        if freight is None:
+            raise NotFoundError("Freight", row.freight_id)
+        updates = self._updates_from_suggestion(row)
+        after_preview = dict(_entity_snapshot(freight, self._freight_snapshot_fields()))
+        after_preview.update(_compact_json_value(updates))
+        await self.freight_repo.update_freight(freight.id, updates)
+        await self.repo.update(
+            row.id,
+            {
+                "status_code": "AUTO_APPLIED" if auto else "APPLIED",
+                "after_json": after_preview,
+                "applied_at": datetime.utcnow(),
+                "applied_by": operator_id,
+            },
+        )
+
+    def _updates_from_suggestion(self, row: FreightNormalizationSuggestion) -> dict[str, Any]:
+        if row.suggestion_type_code == "COMMODITY":
+            return {
+                "commodity_standard_id": row.suggested_commodity_standard_id,
+                "commodity_match_level_code": row.suggested_level_code,
+            }
+        prefix = "origin" if row.suggestion_type_code == "ORIGIN" else "destination"
+        return {
+            f"{prefix}_node_id": row.suggested_node_id,
+            f"{prefix}_province_code": row.suggested_province_code,
+            f"{prefix}_city_code": row.suggested_city_code,
+            f"{prefix}_district_code": row.suggested_district_code,
+            f"{prefix}_region_id_cache": row.suggested_region_id,
+            f"{prefix}_match_level_code": row.suggested_level_code,
+        }
+
+    async def _rebuild_affected_analysis(self, start_at: datetime, end_at: datetime) -> None:
+        from app.modules.analysis.statistics import AnalysisStatisticsService
+
+        service = AnalysisStatisticsService(self.db)
+        start = start_at.date()
+        end = end_at.date()
+        await service.run_freight_flow_daily(start, end)
+        await service.run_freight_commodity_daily(start, end)
+        await service.run_freight_city_daily(start, end)
+        await service.run_freight_node_daily(start, end)
+        await self.db.commit()
+
+    @staticmethod
+    def _freight_snapshot_fields() -> list[str]:
+        return [
+            "freight_no",
+            "cargo_title",
+            "raw_commodity_name",
+            "commodity_standard_id",
+            "commodity_match_level_code",
+            "raw_origin_text",
+            "origin_node_id",
+            "origin_city_code",
+            "origin_match_level_code",
+            "raw_destination_text",
+            "destination_node_id",
+            "destination_city_code",
+            "destination_match_level_code",
+        ]
 
 
 class FreightContactService:

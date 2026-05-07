@@ -20,11 +20,15 @@ class Freight(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     source_tms_inbound_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     source_clue_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     source_candidate_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    raw_commodity_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    raw_origin_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    raw_destination_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
     cargo_title: Mapped[str] = mapped_column(String(256), nullable=False)
     cargo_description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    commodity_standard_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("commodity_standard.id"), nullable=False, index=True
+    commodity_standard_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_standard.id"), nullable=True, index=True
     )
+    commodity_match_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     packaging_form_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     estimated_tonnage: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     min_tonnage: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
@@ -39,11 +43,13 @@ class Freight(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     destination_node_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True
     )
-    origin_province_code: Mapped[str] = mapped_column(String(12), nullable=False)
-    origin_city_code: Mapped[str] = mapped_column(String(12), nullable=False)
+    origin_match_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    destination_match_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    origin_province_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    origin_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     origin_district_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
-    destination_province_code: Mapped[str] = mapped_column(String(12), nullable=False)
-    destination_city_code: Mapped[str] = mapped_column(String(12), nullable=False)
+    destination_province_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    destination_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     destination_district_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     origin_region_id_cache: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("region.id"), nullable=True, index=True
@@ -234,6 +240,37 @@ class FreightCandidateManualFeedback(Base):
     operator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     operated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class FreightNormalizationSuggestion(Base, TimestampMixin):
+    __tablename__ = "freight_normalization_suggestion"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    freight_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("freight.id"), nullable=False, index=True)
+    suggestion_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    raw_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    current_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    suggested_level_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    suggested_node_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True
+    )
+    suggested_commodity_standard_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_standard.id"), nullable=True, index=True
+    )
+    suggested_province_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    suggested_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    suggested_district_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    suggested_region_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("region.id"), nullable=True, index=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    auto_apply_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    match_basis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    before_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    after_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    applied_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class FreightContact(Base, TimestampMixin):

@@ -18,14 +18,19 @@ from app.models.address import AdminRegion, Region, RegionCityRelation, Transpor
 from app.models.base import Base
 from app.models.commodity import CommodityCategory, CommodityStandard, CommodityType
 from app.models.common import CodeSequence
-from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue
+from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightNormalizationSuggestion
 from app.modules.freight import service as freight_service_module
 from app.modules.freight.schemas import (
     FreightBatchCreateRequest,
     FreightCandidateConfirmRequest,
     FreightTmsInboundCreateRequest,
 )
-from app.modules.freight.service import FreightBatchTaskService, FreightCandidateService, FreightTmsInboundService
+from app.modules.freight.service import (
+    FreightBatchTaskService,
+    FreightCandidateService,
+    FreightNormalizationSuggestionService,
+    FreightTmsInboundService,
+)
 
 
 @compiles(BigInteger, "sqlite")
@@ -240,18 +245,52 @@ async def test_candidate_confirm_blocks_missing_required_fields(session: AsyncSe
         candidate_no="FCA-BLOCK",
         source_type_code="WECHAT",
         source_channel_code="WECHAT_TEXT",
-        cargo_title="缺少标准货品",
+        cargo_title="缺少装卸地原文",
         status_code="PENDING",
-        origin_province_code="320000",
-        origin_city_code="320100",
-        destination_province_code="340000",
-        destination_city_code="340200",
+        availability_status_code="READY",
     )
     session.add(candidate)
     await session.commit()
 
     with pytest.raises(ValidationError):
         await FreightCandidateService(session).confirm(candidate.id, FreightCandidateConfirmRequest(remark="确认"), operator_id=1)
+
+
+@pytest.mark.asyncio
+async def test_raw_level_candidate_can_confirm_without_standard_master_data(session: AsyncSession) -> None:
+    candidate = FreightCandidate(
+        candidate_no="FCA-RAW",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        raw_origin_text="马鞍山",
+        raw_destination_text="昆山",
+        raw_commodity_name="矿粉",
+        cargo_title="马鞍山至昆山矿粉",
+        commodity_standard_id=None,
+        commodity_match_level_code="RAW",
+        origin_match_level_code="RAW",
+        destination_match_level_code="RAW",
+        availability_status_code="READY",
+        status_code="PENDING",
+    )
+    session.add(candidate)
+    await session.commit()
+
+    freight = await FreightCandidateService(session).confirm(
+        candidate.id,
+        FreightCandidateConfirmRequest(remark="原文级确认"),
+        operator_id=1,
+    )
+    stored = await session.scalar(select(Freight).where(Freight.id == freight.id))
+
+    assert stored is not None
+    assert stored.commodity_standard_id is None
+    assert stored.origin_city_code is None
+    assert stored.destination_city_code is None
+    assert stored.raw_origin_text == "马鞍山"
+    assert stored.raw_destination_text == "昆山"
+    assert stored.raw_commodity_name == "矿粉"
+    assert stored.origin_match_level_code == "RAW"
 
 
 @pytest.mark.asyncio
@@ -305,13 +344,19 @@ async def test_candidate_confirm_writes_formal_freight_with_source_trace(session
         clue_id=clue.id,
         source_ref_no="WX-001",
         raw_text=clue.raw_text,
+        raw_origin_text="南京港",
+        raw_destination_text="芜湖港",
+        raw_commodity_name="动力煤",
         cargo_title="南京港至芜湖港动力煤",
         commodity_standard_id=commodity.id,
+        commodity_match_level_code="STANDARD",
         estimated_tonnage=Decimal("1000"),
         unit_price=Decimal("42"),
         price_unit="元/吨",
         origin_node_id=origin.id,
         destination_node_id=destination.id,
+        origin_match_level_code="NODE",
+        destination_match_level_code="NODE",
         origin_province_code=origin.province_code,
         origin_city_code=origin.city_code,
         destination_province_code=destination.province_code,
@@ -343,6 +388,46 @@ async def test_candidate_confirm_writes_formal_freight_with_source_trace(session
     assert stored.source_clue_id == clue.id
     assert stored.source_candidate_id == candidate.id
     assert stored.hall_status_code == "NOT_LISTED"
+    assert stored.raw_origin_text == "南京港"
+    assert stored.origin_match_level_code == "NODE"
+    assert stored.commodity_match_level_code == "STANDARD"
     assert refreshed_candidate is not None
     assert refreshed_candidate.status_code == "CONFIRMED"
     assert refreshed_candidate.confirmed_freight_id == stored.id
+
+
+@pytest.mark.asyncio
+async def test_normalization_clean_auto_applies_high_confidence_raw_freight(session: AsyncSession) -> None:
+    freight = Freight(
+        freight_no="FR-RAW-0001",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        raw_origin_text="南京港",
+        raw_destination_text="芜湖港",
+        raw_commodity_name="动力煤",
+        cargo_title="南京港至芜湖港动力煤",
+        commodity_standard_id=None,
+        commodity_match_level_code="RAW",
+        origin_match_level_code="RAW",
+        destination_match_level_code="RAW",
+        estimated_tonnage=Decimal("1000"),
+        unit_price=Decimal("42"),
+        price_unit="元/吨",
+        status_code="PUBLISHED",
+        published_at=datetime.utcnow(),
+        hall_status_code="NOT_LISTED",
+        audit_status="APPROVED",
+    )
+    session.add(freight)
+    await session.commit()
+
+    result = await FreightNormalizationSuggestionService(session).clean(operator_id=2)
+    stored = await session.scalar(select(Freight).where(Freight.id == freight.id))
+    suggestions = (await session.execute(select(FreightNormalizationSuggestion))).scalars().all()
+
+    assert result.auto_applied_count >= 3
+    assert stored is not None
+    assert stored.commodity_standard_id is not None
+    assert stored.origin_city_code == "320100"
+    assert stored.destination_city_code == "340200"
+    assert {item.status_code for item in suggestions} == {"AUTO_APPLIED"}

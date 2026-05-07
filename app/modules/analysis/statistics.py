@@ -320,6 +320,8 @@ class AnalysisStatisticsService:
             stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
             if stat_date is None:
                 continue
+            if row.commodity_standard_id is None:
+                continue
             key = (stat_date, row.commodity_standard_id)
             item = acc[key]
             tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)

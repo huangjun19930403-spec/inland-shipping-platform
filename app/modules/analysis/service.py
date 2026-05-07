@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -27,6 +27,7 @@ from app.models.analysis import (
     FactShipFlowDaily,
 )
 from app.models.commodity import CommodityStandard
+from app.models.freight import Freight
 from app.models.dictionary import StdDict, StdDictItem
 from app.modules.analysis.schemas import (
     AnalysisJobRunDetailResponse,
@@ -222,6 +223,7 @@ class AnalysisDashboardService:
     async def freight_overview(self, date_from: date | None, date_to: date | None) -> FreightAnalysisOverviewResponse:
         start, end = await self._date_range(date_from, date_to)
         totals = await self._freight_totals(start, end)
+        raw_quality = await self._freight_raw_quality()
         return FreightAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
@@ -230,6 +232,7 @@ class AnalysisDashboardService:
                 _metric("confirmed_count", "确认货源", totals["confirmed_count"], "条"),
                 _metric("total_tonnage", "总吨位", totals["total_tonnage"], "吨"),
                 _metric("avg_unit_price", "平均运价", totals["avg_unit_price"], "元/吨"),
+                _metric("raw_level_count", "待清洗货源", raw_quality["raw_level_count"], "条", "原文级装卸地或货品仍需清洗提升"),
             ],
             trend=await self.freight_trend(start, end),
             node_ranking=await self.freight_node_ranking(start, end, 12),
@@ -237,6 +240,25 @@ class AnalysisDashboardService:
             price_distribution=await self.freight_price_distribution(start, end),
             hot_routes=await self.freight_hot_routes(start, end, 8),
         )
+
+    async def _freight_raw_quality(self) -> dict[str, int]:
+        raw_level_count = int(
+            await self.db.scalar(
+                select(func.count(Freight.id)).where(
+                    Freight.deleted_at.is_(None),
+                    or_(
+                        Freight.origin_match_level_code == "RAW",
+                        Freight.destination_match_level_code == "RAW",
+                        Freight.commodity_match_level_code == "RAW",
+                        Freight.origin_city_code.is_(None),
+                        Freight.destination_city_code.is_(None),
+                        Freight.commodity_standard_id.is_(None),
+                    ),
+                )
+            )
+            or 0
+        )
+        return {"raw_level_count": raw_level_count}
 
     async def freight_trend(self, start: date, end: date) -> list[ChartPoint]:
         rows = (
