@@ -16,7 +16,7 @@ from threading import Thread
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import settings
 from app.core.exceptions import InternalError, ValidationError
@@ -55,6 +55,25 @@ class FreightClueSplitItemSchema(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     needs_strong_review: bool = False
 
+    @field_validator("confidence_score", mode="before")
+    @classmethod
+    def _default_confidence(cls, value: Any) -> Any:
+        return 0.5 if value in (None, "") else value
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _default_evidence(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
+
+    @field_validator("needs_strong_review", mode="before")
+    @classmethod
+    def _default_review_flag(cls, value: Any) -> bool:
+        return bool(value) if value is not None else False
+
 
 class FreightClueSplitPayloadSchema(BaseModel):
     clues: list[FreightClueSplitItemSchema]
@@ -89,6 +108,31 @@ class FreightSegmentSchema(BaseModel):
     confidence_score: float = 0.5
     evidence: list[str] = Field(default_factory=list)
     needs_strong_review: bool = False
+
+    @field_validator("availability_status_code", mode="before")
+    @classmethod
+    def _normalize_availability(cls, value: Any) -> str:
+        code = str(value or "UNKNOWN").strip().upper()
+        return code if code in {"READY", "DEFERRED", "FULL", "UNKNOWN"} else "UNKNOWN"
+
+    @field_validator("confidence_score", mode="before")
+    @classmethod
+    def _default_confidence(cls, value: Any) -> Any:
+        return 0.5 if value in (None, "") else value
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _default_evidence(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
+
+    @field_validator("needs_strong_review", mode="before")
+    @classmethod
+    def _default_review_flag(cls, value: Any) -> bool:
+        return bool(value) if value is not None else False
 
 
 class FreightParsePayloadSchema(BaseModel):

@@ -14,6 +14,7 @@ from sqlalchemy.types import BigInteger
 
 import app.models  # noqa: F401
 from app.core.exceptions import ValidationError
+from app.integrations.ai.dashscope_qwen_client import FreightParsePayloadSchema
 from app.models.address import AdminRegion, Region, RegionCityRelation, TransportNode
 from app.models.base import Base
 from app.models.commodity import CommodityCategory, CommodityStandard, CommodityType
@@ -187,6 +188,32 @@ def _segment(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def test_ai_parse_schema_normalizes_null_availability_status() -> None:
+    payload = FreightParsePayloadSchema.model_validate(
+        {
+            "segments": [
+                {
+                    "raw_text": "建德—平湖：塘渣",
+                    "cargo_title": "建德至平湖塘渣",
+                    "commodity_name": "塘渣",
+                    "origin_text": "建德",
+                    "destination_text": "平湖",
+                    "availability_status_code": None,
+                    "confidence_score": None,
+                    "evidence": None,
+                    "needs_strong_review": None,
+                }
+            ]
+        }
+    )
+
+    segment = payload.segments[0]
+    assert segment.availability_status_code == "UNKNOWN"
+    assert segment.confidence_score == 0.5
+    assert segment.evidence == []
+    assert segment.needs_strong_review is False
 
 
 @pytest.mark.asyncio
