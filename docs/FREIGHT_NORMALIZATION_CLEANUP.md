@@ -20,8 +20,17 @@
 
 ## 建议表
 
+`freight_normalization_task` 保存每次清洗任务：
+
+- `task_no`：清洗任务号。
+- `celery_task_id`：Celery 后台任务 ID，便于在 worker 日志中追踪。
+- `status_code`：`QUEUED`、`RUNNING`、`SUCCESS`、`PARTIAL_SUCCESS`、`FAILED`。
+- `stage_code`、`stage_name`、`stage_message`、`progress_percent`：前端展示真实进度。
+- `scanned_count`、`suggestion_count`、`auto_applied_count`、`pending_count`、`failed_count`：任务结果统计。
+
 `freight_normalization_suggestion` 保存每条建议：
 
+- `clean_task_id`：来源清洗任务。
 - `suggestion_type_code`：`ORIGIN`、`DESTINATION`、`COMMODITY`。
 - `raw_text`：待清洗原文。
 - `suggested_level_code`：建议提升到 `NODE`、`CITY` 或 `STANDARD`。
@@ -31,10 +40,25 @@
 
 ## 执行方式
 
-接口执行：
+清洗通过 Celery 异步执行。启动 worker：
+
+```bash
+celery -A app.tasks.celery_app:celery_app worker -Q freight_ai,analysis -l info
+```
+
+接口提交任务：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/freight/normalization/clean
+```
+
+响应会包含 `task_id`、`task_no` 和 `celery_task_id`。如果 worker 正常消费，终端会看到 `freight.clean_normalization` 任务。
+
+查询任务：
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/freight/normalization/tasks?page=1&page_size=5"
+curl http://127.0.0.1:8000/api/v1/freight/normalization/tasks/{task_id}
 ```
 
 查询质量统计：
@@ -49,7 +73,17 @@ curl http://127.0.0.1:8000/api/v1/freight/normalization/quality
 curl "http://127.0.0.1:8000/api/v1/freight/normalization-suggestions?status_code=PENDING"
 ```
 
+批量应用建议：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/freight/normalization-suggestions/bulk-apply \
+  -H "Content-Type: application/json" \
+  -d '{"suggestion_ids":[1,2,3]}'
+```
+
 前端入口：`货源采集 -> 数据清洗`。
+
+页面会展示最近任务、进度条、失败原因、货源详情悬浮预览，并支持“勾选批量应用”和“应用当前筛选全部待确认建议”。
 
 ## 自动与人工策略
 
@@ -57,6 +91,7 @@ curl "http://127.0.0.1:8000/api/v1/freight/normalization-suggestions?status_code
 - 高置信货品建议自动回填：默认阈值 `0.82`。
 - 低置信建议保留为 `PENDING`，由业务人员在数据清洗页应用或拒绝。
 - 拒绝建议不会修改正式货源。
+- 重复清洗不会重复生成同一正式货源、同一类型的待处理建议。
 
 ## 分析重算
 

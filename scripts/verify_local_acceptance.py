@@ -32,7 +32,7 @@ from app.models.analysis import (
 )
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
-from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightNormalizationSuggestion, FreightTmsInbound
+from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightNormalizationSuggestion, FreightNormalizationTask, FreightTmsInbound
 from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
 from app.models.ship import ShipProfile
 from app.models.system import SysMenu, SystemConfig
@@ -104,10 +104,13 @@ REQUIRED_ROUTE_PATHS = {
     "/api/v1/freight/candidates/{candidate_id}/confirm",
     "/api/v1/freight/candidates/{candidate_id}/reject",
     "/api/v1/freight/normalization-suggestions",
+    "/api/v1/freight/normalization-suggestions/bulk-apply",
     "/api/v1/freight/normalization-suggestions/{suggestion_id}/apply",
     "/api/v1/freight/normalization-suggestions/{suggestion_id}/reject",
     "/api/v1/freight/normalization/clean",
     "/api/v1/freight/normalization/quality",
+    "/api/v1/freight/normalization/tasks",
+    "/api/v1/freight/normalization/tasks/{task_id}",
     "/api/v1/analysis/freight/node-ranking",
 }
 
@@ -222,6 +225,7 @@ async def verify() -> list[CheckResult]:
             ("wechat batch tasks", await _count(session, FreightBatchTask), 25),
             ("tms inbounds", await _count(session, FreightTmsInbound), 10),
             ("freight candidates", await _count(session, FreightCandidate), 40),
+            ("freight normalization tasks", await _count(session, FreightNormalizationTask), 1),
             ("freight normalization suggestions", await _count(session, FreightNormalizationSuggestion), 5),
             ("freight daily facts", await _count(session, FactFreightDaily), 90),
             ("freight city facts", await _count(session, FactFreightCityDaily), 60),
@@ -324,6 +328,10 @@ async def verify() -> list[CheckResult]:
                     FactFreightFlowDaily.stat_date,
                     FactFreightFlowDaily.origin_node_id,
                     FactFreightFlowDaily.destination_node_id,
+                    FactFreightFlowDaily.origin_region_id,
+                    FactFreightFlowDaily.destination_region_id,
+                    FactFreightFlowDaily.origin_city_code,
+                    FactFreightFlowDaily.destination_city_code,
                     FactFreightFlowDaily.commodity_standard_id,
                     FactFreightFlowDaily.data_version,
                 )

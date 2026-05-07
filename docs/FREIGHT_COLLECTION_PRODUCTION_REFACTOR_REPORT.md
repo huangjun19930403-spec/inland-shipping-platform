@@ -28,8 +28,10 @@
 ## AI 与匹配链路
 
 - 微信采集使用 DashScope SDK 流式调用，快模型读取完整原文并由 AI 切分线索，低置信候选交给强模型复核。
-- 微信提示词版本升级为 `freight_wechat_dashscope_stream_v7`。AI 第一阶段输出拆为 `route_clues`、`context_notes` 和 `ignored_notes`；公告、联系人、价格、结算、装卸备注、吨位等上下文只允许进入 `context_notes`，不能单独生成候选。
-- v7 采用召回优先策略：只要有装货地和卸货地，就保留为路线线索；缺货品时生成“需补充”候选，不能一键确认，但业务人员可以在编辑确认中补齐货品后入库。
+- 微信提示词版本升级为 `freight_wechat_dashscope_stream_v8`。AI 第一阶段输出拆为 `route_clues`、`context_blocks`、`context_notes` 和 `ignored_notes`；公告、联系人、价格、结算、装卸备注、吨位等上下文只允许进入上下文结构，不能单独生成候选。
+- `context_blocks` 显式记录公共上下文覆盖的 `route_clue_ids`、联系人、电话、公共吨位/价格、装卸备注、证据和继承原因。后端只依据 AI 输出的结构化 block 做字段传播，不对微信群原文做规则拆分。
+- 强模型复核输入扩展为完整原文、线索、上下文块和候选结果，用于检查“末尾电话只继承到一条候选”、上下文-only 误入候选、召回不足和吨位误入价格。
+- v8 采用召回优先策略：只要有装货地和卸货地，就保留为路线线索；缺货品时生成“需补充”候选，不能一键确认，但业务人员可以在编辑确认中补齐货品后入库。
 - AI 在切分和抽取阶段输出装卸地粒度建议：`NODE`、`CITY`、`RAW`。只有明确港口、码头、闸口、厂矿、装卸点等具体设施才建议节点级；只有城市名或简称时建议城市级。
 - `freight_candidate` 与 `freight` 新增 `raw_tonnage_text`，保留 `1500-2000内`、`2000左右`、`2-3500吨` 等微信群原始吨位表达；单点吨位写入 `estimated_tonnage`，范围吨位写入 `min_tonnage`、`max_tonnage`。
 - v6 提示词和强模型复核补充吨位归类约束：没有“元/运费/价格”等价格语义时，路线货品附近数字优先按吨位解析；`2-3500吨` 这类微信群简写由 AI 复核为 `2000-3500吨`，无法确认时只保留原文吨位并要求人工判断。
@@ -55,13 +57,18 @@
 ## 清洗任务
 
 - 新增 `freight_normalization_suggestion`，记录原文级装卸地/货品的匹配建议、置信度、应用状态和应用前后快照。
+- 新增 `freight_normalization_task`，记录清洗任务号、Celery task id、状态、阶段、进度、扫描数、建议数、自动应用数、失败原因和耗时。
 - 新增接口：
   - `GET /freight/normalization-suggestions`
+  - `POST /freight/normalization-suggestions/bulk-apply`
   - `POST /freight/normalization-suggestions/{id}/apply`
   - `POST /freight/normalization-suggestions/{id}/reject`
+  - `GET /freight/normalization/tasks`
+  - `GET /freight/normalization/tasks/{id}`
   - `GET /freight/normalization/quality`
   - `POST /freight/normalization/clean`
-- 清洗服务扫描正式货源中 `RAW` 或缺标准维度的数据。高置信建议自动回填，低置信建议保留为待人工确认。
+- `POST /freight/normalization/clean` 改为投递 Celery `freight.clean_normalization` 后台任务并立即返回任务信息；前端通过任务列表和质量接口查看进度。
+- 清洗服务扫描正式货源中 `RAW` 或缺标准维度的数据。高置信建议自动回填，低置信建议保留为待人工确认，并支持勾选批量应用和当前筛选全部应用。
 - 清洗回填后会触发受影响日期范围内的货源流向、城市、节点、货品事实重算。
 
 ## 分析口径
@@ -73,9 +80,9 @@
 
 ## Seed 与验收
 
-- 新增 Alembic 迁移：`0012_freight_raw_level_normalization`、`0013_freight_raw_tonnage_text`、`0014_freight_batch_review_flow`。
+- 新增 Alembic 迁移：`0012_freight_raw_level_normalization`、`0013_freight_raw_tonnage_text`、`0014_freight_batch_review_flow`、`0015_freight_normalization_task`。
 - 更新 `seed_system_base`，菜单增加“数据清洗”，货源菜单为：微信采集、采集批次、待确认货源、手工录入、正式货源、数据清洗、TMS 入站。
-- 更新 `seed_freight_samples`，保留节点级、城市级、原文级正式货源样例，并写入清洗建议样例和原文吨位字段。
+- 更新 `seed_freight_samples`，保留节点级、城市级、原文级正式货源样例，并写入清洗任务、清洗建议样例和原文吨位字段。
 - 更新 `verify_local_acceptance`，校验新 API、清洗建议、原文级正式货源 seed、原文吨位 seed 和旧入口删除。
 
 ## 验证结果

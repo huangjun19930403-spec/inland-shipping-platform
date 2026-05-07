@@ -251,6 +251,9 @@ class FreightNormalizationSuggestion(Base, TimestampMixin):
     __tablename__ = "freight_normalization_suggestion"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    clean_task_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("freight_normalization_task.id"), nullable=True, index=True
+    )
     freight_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("freight.id"), nullable=False, index=True)
     suggestion_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     raw_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
@@ -276,6 +279,30 @@ class FreightNormalizationSuggestion(Base, TimestampMixin):
     applied_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     rejected_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class FreightNormalizationTask(Base, TimestampMixin):
+    __tablename__ = "freight_normalization_task"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_no: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    celery_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    stage_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    stage_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    stage_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    scanned_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    suggestion_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    auto_applied_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    requested_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class FreightContact(Base, TimestampMixin):

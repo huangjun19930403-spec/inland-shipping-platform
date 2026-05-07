@@ -15,12 +15,12 @@ from sqlalchemy.types import BigInteger
 
 import app.models  # noqa: F401
 from app.core.exceptions import ValidationError
-from app.integrations.ai.dashscope_qwen_client import FreightClueSplitPayloadSchema, FreightParsePayloadSchema, _clue_schema_hint, _json_schema_hint
+from app.integrations.ai.dashscope_qwen_client import FreightClueSplitPayloadSchema, FreightParsePayloadSchema, _apply_context_blocks_to_segments, _clue_schema_hint, _json_schema_hint
 from app.models.address import AdminRegion, Region, RegionCityRelation, TransportNode
 from app.models.base import Base
 from app.models.commodity import CommodityCategory, CommodityStandard, CommodityType
 from app.models.common import CodeSequence
-from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightNormalizationSuggestion
+from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightNormalizationSuggestion, FreightNormalizationTask
 from app.modules.freight import service as freight_service_module
 from app.modules.freight.schemas import (
     FreightBatchCreateRequest,
@@ -93,6 +93,7 @@ async def _seed_foundation(session: AsyncSession) -> None:
         ("FREIGHT_CLUE_NO", "FCU", "freight_clue", "clue_no"),
         ("FREIGHT_CANDIDATE_NO", "FCA", "freight_candidate", "candidate_no"),
         ("FREIGHT_NO", "FR", "freight", "freight_no"),
+        ("FREIGHT_NORMALIZATION_TASK_NO", "FNT", "freight_normalization_task", "task_no"),
     ):
         session.add(
             CodeSequence(
@@ -249,12 +250,47 @@ def test_wechat_split_schema_separates_freight_clues_and_context_notes() -> None
                     "evidence": ["跟随上一组路线"],
                 }
             ],
+            "context_blocks": [
+                {
+                    "context_block_id": "B1",
+                    "route_clue_ids": [1],
+                    "shared_contact_name": "王经理",
+                    "shared_contact_phone": "13900000000",
+                    "evidence": ["公共联系人"],
+                    "scope_reason": "联系人位于同一连续公告块",
+                }
+            ],
         }
     )
 
     assert len(payload.freight_clues) == 1
+    assert len(payload.context_blocks) == 1
     assert len(payload.context_notes) == 1
     assert payload.context_notes[0].context_type_code == "CONTACT"
+
+
+def test_context_blocks_inherit_trailing_contact_to_all_segments() -> None:
+    segments, warnings = _apply_context_blocks_to_segments(
+        [
+            {"segment_index": 1, "context_block_id": "B1", "raw_text": "泰州姜堰一一盐城阜宁1200吨左右", "origin_text": "泰州姜堰", "destination_text": "盐城阜宁", "commodity_name": "货源"},
+            {"segment_index": 2, "context_block_id": "B1", "raw_text": "马鞍山——灌南，石子，1500吨左右", "origin_text": "马鞍山", "destination_text": "灌南", "commodity_name": "石子"},
+        ],
+        [
+            {
+                "context_block_id": "B1",
+                "route_clue_ids": [1, 2],
+                "shared_contact_name": "小王",
+                "shared_contact_phone": "18205543462",
+                "evidence": ["电话☎️ 18205543462小王"],
+                "scope_reason": "末尾联系人覆盖同一连续公告块",
+            }
+        ],
+    )
+
+    assert warnings
+    assert {item["contact_phone"] for item in segments} == {"18205543462"}
+    assert {item["contact_name"] for item in segments} == {"小王"}
+    assert all(item["inherited_context"]["contact"] == "小王 18205543462" for item in segments)
 
 
 def test_wechat_split_schema_accepts_route_clues_missing_commodity() -> None:
@@ -858,11 +894,31 @@ async def test_normalization_clean_auto_applies_high_confidence_raw_freight(sess
     session.add(freight)
     await session.commit()
 
-    result = await FreightNormalizationSuggestionService(session).clean(operator_id=2)
+    service = FreightNormalizationSuggestionService(session)
+    task = await service.task_repo.create(
+        {
+            "task_no": "FNT-TEST-0001",
+            "status_code": "QUEUED",
+            "stage_code": "QUEUED",
+            "stage_name": "排队中",
+            "stage_message": "测试任务",
+            "progress_percent": 0,
+            "requested_by": 2,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+    )
+    await session.commit()
+    result = await service.run_clean_now(task.id, operator_id=2)
     stored = await session.scalar(select(Freight).where(Freight.id == freight.id))
     suggestions = (await session.execute(select(FreightNormalizationSuggestion))).scalars().all()
+    stored_task = await session.scalar(select(FreightNormalizationTask).where(FreightNormalizationTask.id == task.id))
 
+    assert result.task_id == task.id
+    assert result.status_code == "SUCCESS"
     assert result.auto_applied_count >= 3
+    assert stored_task is not None
+    assert stored_task.status_code == "SUCCESS"
     assert stored is not None
     assert stored.commodity_standard_id is not None
     assert stored.origin_city_code == "320100"

@@ -20,6 +20,7 @@ from app.models.freight import (
     FreightClue,
     FreightContact,
     FreightNormalizationSuggestion,
+    FreightNormalizationTask,
     FreightTagRelation,
     FreightTmsInbound,
 )
@@ -101,6 +102,9 @@ async def _clear_sample_data(session) -> None:
     sample_freight_ids = (
         await session.execute(select(Freight.id).where(Freight.freight_no.like("FR-LOCAL-%")))
     ).scalars().all()
+    sample_task_ids = (
+        await session.execute(select(FreightNormalizationTask.id).where(FreightNormalizationTask.task_no.like("FNT-LOCAL-%")))
+    ).scalars().all()
     if sample_freight_ids:
         await session.execute(
             delete(FreightNormalizationSuggestion).where(FreightNormalizationSuggestion.freight_id.in_(sample_freight_ids))
@@ -120,6 +124,8 @@ async def _clear_sample_data(session) -> None:
         await session.execute(delete(FreightBatchTask).where(FreightBatchTask.id.in_(sample_batch_ids)))
     if sample_tms_ids:
         await session.execute(delete(FreightTmsInbound).where(FreightTmsInbound.id.in_(sample_tms_ids)))
+    if sample_task_ids:
+        await session.execute(delete(FreightNormalizationTask).where(FreightNormalizationTask.id.in_(sample_task_ids)))
 
 
 async def seed_freight_samples() -> None:
@@ -137,6 +143,30 @@ async def seed_freight_samples() -> None:
             if node.id not in node_region_cache:
                 node_region_cache[node.id] = await _business_region_id(session, node)
             return node_region_cache[node.id]
+
+        normalization_task = FreightNormalizationTask(
+            task_no="FNT-LOCAL-0001",
+            celery_task_id="seed-local-normalization",
+            status_code="SUCCESS",
+            stage_code="DONE",
+            stage_name="清洗完成",
+            stage_message="本地 seed 样例清洗任务已完成",
+            progress_percent=100,
+            scanned_count=12,
+            suggestion_count=7,
+            auto_applied_count=2,
+            pending_count=5,
+            failed_count=0,
+            requested_by=None,
+            started_at=now - timedelta(hours=3),
+            finished_at=now - timedelta(hours=2, minutes=55),
+            heartbeat_at=now - timedelta(hours=2, minutes=55),
+            result_json={"seed": True},
+            created_at=now - timedelta(hours=3),
+            updated_at=now - timedelta(hours=2, minutes=55),
+        )
+        session.add(normalization_task)
+        await session.flush()
 
         freight_rows: list[Freight] = []
         for idx in range(1, 241):
@@ -204,6 +234,7 @@ async def seed_freight_samples() -> None:
                 session.add(
                     FreightNormalizationSuggestion(
                         freight_id=freight.id,
+                        clean_task_id=normalization_task.id,
                         suggestion_type_code="DESTINATION",
                         raw_text=destination.name,
                         current_level_code="RAW",
@@ -226,6 +257,7 @@ async def seed_freight_samples() -> None:
                 session.add(
                     FreightNormalizationSuggestion(
                         freight_id=freight.id,
+                        clean_task_id=normalization_task.id,
                         suggestion_type_code="COMMODITY",
                         raw_text=commodity.name,
                         current_level_code="RAW",

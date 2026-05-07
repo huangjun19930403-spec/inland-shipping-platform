@@ -16,6 +16,7 @@ from app.models.freight import (
     FreightClue,
     FreightContact,
     FreightNormalizationSuggestion,
+    FreightNormalizationTask,
     FreightSourceAttachment,
     FreightTagRelation,
     FreightTmsInbound,
@@ -454,6 +455,32 @@ class FreightNormalizationSuggestionRepository:
         ).scalars().all()
         return list(rows), total
 
+    async def list_pending_for_bulk(
+        self,
+        *,
+        suggestion_ids: list[int] | None = None,
+        keyword: str | None = None,
+        suggestion_type_code: str | None = None,
+    ) -> list[FreightNormalizationSuggestion]:
+        stmt = select(FreightNormalizationSuggestion).join(Freight, Freight.id == FreightNormalizationSuggestion.freight_id).where(
+            FreightNormalizationSuggestion.status_code == "PENDING"
+        )
+        if suggestion_ids:
+            stmt = stmt.where(FreightNormalizationSuggestion.id.in_(suggestion_ids))
+        if keyword:
+            like_value = f"%{keyword.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Freight.freight_no.ilike(like_value),
+                    Freight.cargo_title.ilike(like_value),
+                    FreightNormalizationSuggestion.raw_text.ilike(like_value),
+                )
+            )
+        if suggestion_type_code:
+            stmt = stmt.where(FreightNormalizationSuggestion.suggestion_type_code == suggestion_type_code)
+        rows = (await self.db.execute(stmt.order_by(FreightNormalizationSuggestion.id.asc()))).scalars().all()
+        return list(rows)
+
     async def create(self, data: dict[str, Any]) -> FreightNormalizationSuggestion:
         row = FreightNormalizationSuggestion(**data)
         self.db.add(row)
@@ -470,6 +497,44 @@ class FreightNormalizationSuggestionRepository:
         await self.db.flush()
         await self.db.refresh(row)
         return row
+
+
+class FreightNormalizationTaskRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def create(self, data: dict[str, Any]) -> FreightNormalizationTask:
+        row = FreightNormalizationTask(**data)
+        self.db.add(row)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
+
+    async def get_by_id(self, task_id: int) -> FreightNormalizationTask | None:
+        return await self.db.scalar(select(FreightNormalizationTask).where(FreightNormalizationTask.id == task_id))
+
+    async def update(self, task_id: int, data: dict[str, Any]) -> FreightNormalizationTask | None:
+        row = await self.get_by_id(task_id)
+        if row is None:
+            return None
+        for key, value in data.items():
+            setattr(row, key, value)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
+
+    async def list_items(self, *, page: int, page_size: int) -> tuple[list[FreightNormalizationTask], int]:
+        stmt = select(FreightNormalizationTask)
+        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
+        rows = (
+            await self.db.execute(
+                stmt.order_by(FreightNormalizationTask.id.desc()).offset((page - 1) * page_size).limit(page_size)
+            )
+        ).scalars().all()
+        return list(rows), total
+
+    async def latest(self) -> FreightNormalizationTask | None:
+        return await self.db.scalar(select(FreightNormalizationTask).order_by(FreightNormalizationTask.id.desc()).limit(1))
 
 
 class FreightContactRepository:

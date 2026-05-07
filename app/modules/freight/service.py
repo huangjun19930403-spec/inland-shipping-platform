@@ -17,7 +17,7 @@ from app.integrations.ai import DashScopeQwenFreightParserClient
 from app.models.address import AdminRegion, NodeAlias, Region, RegionCityRelation, TransportNode
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.dictionary import StdDict, StdDictItem
-from app.models.freight import Freight, FreightCandidate, FreightNormalizationSuggestion
+from app.models.freight import Freight, FreightCandidate, FreightContact, FreightNormalizationSuggestion, FreightNormalizationTask
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.freight.repository import (
     FreightAttachmentRepository,
@@ -27,6 +27,7 @@ from app.modules.freight.repository import (
     FreightClueRepository,
     FreightContactRepository,
     FreightNormalizationSuggestionRepository,
+    FreightNormalizationTaskRepository,
     FreightRepository,
     FreightTagRelationRepository,
     FreightTmsInboundRepository,
@@ -43,6 +44,8 @@ from app.modules.freight.schemas import (
     FreightContactResponse,
     FreightDetailResponse,
     FreightNormalizationCleanResponse,
+    FreightNormalizationBulkApplyResponse,
+    FreightNormalizationTaskResponse,
     FreightNormalizationQualityResponse,
     FreightNormalizationSuggestionResponse,
     FreightResponse,
@@ -256,10 +259,22 @@ async def _load_display_context(
     region_ids.update(item.suggested_region_id for item in suggestions if getattr(item, "suggested_region_id", None) is not None)
 
     freight_ids = {item.freight_id for item in suggestions if getattr(item, "freight_id", None) is not None}
+    freight_ids.update(item.id for item in freights if getattr(item, "id", None) is not None)
     freights_by_id: dict[int, Freight] = {}
     if freight_ids:
         rows = (await db.execute(select(Freight).where(Freight.id.in_(freight_ids)))).scalars().all()
         freights_by_id = {int(row.id): row for row in rows}
+    contacts_by_freight_id: dict[int, list[FreightContact]] = {}
+    if freight_ids:
+        contact_rows = (
+            await db.execute(
+                select(FreightContact)
+                .where(FreightContact.freight_id.in_(freight_ids))
+                .order_by(FreightContact.is_primary.desc(), FreightContact.id.asc())
+            )
+        ).scalars().all()
+        for contact in contact_rows:
+            contacts_by_freight_id.setdefault(int(contact.freight_id), []).append(contact)
     regions: dict[int, Region] = {}
     if region_ids:
         rows = (await db.execute(select(Region).where(Region.id.in_(region_ids)))).scalars().all()
@@ -276,6 +291,7 @@ async def _load_display_context(
         "clues": clues,
         "feedback": feedback,
         "freights_by_id": freights_by_id,
+        "contacts_by_freight_id": contacts_by_freight_id,
     }
 
 
@@ -310,6 +326,92 @@ def _region_name(ctx: dict[str, Any], region_id: int | None) -> str | None:
         return None
     region = ctx.get("regions", {}).get(int(region_id))
     return region.name if region is not None else None
+
+
+def _location_summary(entity: Any, ctx: dict[str, Any], prefix: str) -> str:
+    node_name = _node_name(ctx, getattr(entity, f"{prefix}_node_id", None))
+    city_name = _city_name(ctx, getattr(entity, f"{prefix}_city_code", None))
+    raw_text = getattr(entity, f"raw_{prefix}_text", None)
+    if node_name:
+        return node_name
+    if city_name:
+        return city_name
+    return str(raw_text or "-")
+
+
+def _tonnage_summary(entity: Any) -> str | None:
+    raw = getattr(entity, "raw_tonnage_text", None)
+    minimum = getattr(entity, "min_tonnage", None)
+    maximum = getattr(entity, "max_tonnage", None)
+    estimated = getattr(entity, "estimated_tonnage", None)
+    if minimum is not None and maximum is not None:
+        return f"{minimum}-{maximum} 吨"
+    if estimated is not None:
+        return f"{estimated} 吨"
+    return raw
+
+
+def _price_summary(entity: Any) -> str | None:
+    unit_price = getattr(entity, "unit_price", None)
+    total_price = getattr(entity, "total_price", None)
+    price_unit = getattr(entity, "price_unit", None) or "元/吨"
+    if unit_price is not None:
+        return f"{unit_price} {price_unit}"
+    if total_price is not None:
+        return f"总价 {total_price}"
+    return None
+
+
+def _freight_preview(entity: Freight, ctx: dict[str, Any]) -> dict[str, Any]:
+    contacts = ctx.get("contacts_by_freight_id", {}).get(int(entity.id), [])
+    contact_summary = "、".join(
+        f"{item.contact_name}{f' {item.mobile_phone}' if item.mobile_phone else ''}".strip()
+        for item in contacts[:2]
+    ) or None
+    commodity = _commodity(ctx, entity.commodity_standard_id)
+    commodity_summary = commodity.name if commodity is not None else (entity.raw_commodity_name or entity.cargo_title)
+    origin = _location_summary(entity, ctx, "origin")
+    destination = _location_summary(entity, ctx, "destination")
+    return {
+        "freight_no": entity.freight_no,
+        "route_summary": f"{origin} 至 {destination}",
+        "commodity_summary": commodity_summary,
+        "tonnage_summary": _tonnage_summary(entity),
+        "price_summary": _price_summary(entity),
+        "contact_summary": contact_summary,
+        "source_summary": _label(ctx, "SOURCE_TYPE", entity.source_type_code) or entity.source_type_code,
+        "match_summary": f"装货{entity.origin_match_level_code or '-'} / 卸货{entity.destination_match_level_code or '-'} / 货品{entity.commodity_match_level_code or '-'}",
+        "cargo_title": entity.cargo_title,
+        "raw_origin_text": entity.raw_origin_text,
+        "raw_destination_text": entity.raw_destination_text,
+        "raw_commodity_name": entity.raw_commodity_name,
+    }
+
+
+def _to_normalization_task_response(entity: FreightNormalizationTask) -> FreightNormalizationTaskResponse:
+    return FreightNormalizationTaskResponse(
+        id=entity.id,
+        task_no=entity.task_no,
+        celery_task_id=entity.celery_task_id,
+        status_code=entity.status_code,
+        stage_code=entity.stage_code,
+        stage_name=entity.stage_name,
+        stage_message=entity.stage_message,
+        progress_percent=entity.progress_percent,
+        scanned_count=entity.scanned_count,
+        suggestion_count=entity.suggestion_count,
+        auto_applied_count=entity.auto_applied_count,
+        pending_count=entity.pending_count,
+        failed_count=entity.failed_count,
+        requested_by=entity.requested_by,
+        started_at=entity.started_at,
+        finished_at=entity.finished_at,
+        heartbeat_at=entity.heartbeat_at,
+        error_message=entity.error_message,
+        result_json=entity.result_json,
+        created_at=entity.created_at,
+        updated_at=entity.updated_at,
+    )
 
 
 def _to_freight_response(entity, ctx: dict[str, Any] | None = None) -> FreightResponse:
@@ -627,11 +729,21 @@ def _to_normalization_suggestion_response(
     ctx = ctx or {}
     freight = ctx.get("freights_by_id", {}).get(int(entity.freight_id))
     commodity = _commodity(ctx, entity.suggested_commodity_standard_id)
+    preview = _freight_preview(freight, ctx) if freight is not None else {}
     return FreightNormalizationSuggestionResponse(
         id=entity.id,
+        clean_task_id=entity.clean_task_id,
         freight_id=entity.freight_id,
         freight_no=freight.freight_no if freight is not None else None,
         cargo_title=freight.cargo_title if freight is not None else None,
+        freight_route_summary=preview.get("route_summary"),
+        freight_commodity_summary=preview.get("commodity_summary"),
+        freight_tonnage_summary=preview.get("tonnage_summary"),
+        freight_price_summary=preview.get("price_summary"),
+        freight_contact_summary=preview.get("contact_summary"),
+        freight_source_summary=preview.get("source_summary"),
+        freight_match_summary=preview.get("match_summary"),
+        freight_detail_preview=preview or None,
         suggestion_type_code=entity.suggestion_type_code,
         raw_text=entity.raw_text,
         current_level_code=entity.current_level_code,
@@ -2051,8 +2163,24 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = FreightNormalizationSuggestionRepository(db)
+        self.task_repo = FreightNormalizationTaskRepository(db)
         self.freight_repo = FreightRepository(db)
         self.sequence_service = CodeSequenceService(db)
+
+    async def list_tasks(self, *, page: int, page_size: int) -> PageResponse[FreightNormalizationTaskResponse]:
+        rows, total = await self.task_repo.list_items(page=page, page_size=page_size)
+        return PageResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            items=[_to_normalization_task_response(item) for item in rows],
+        )
+
+    async def get_task(self, task_id: int) -> FreightNormalizationTaskResponse:
+        row = await self.task_repo.get_by_id(task_id)
+        if row is None:
+            raise NotFoundError("FreightNormalizationTask", task_id)
+        return _to_normalization_task_response(row)
 
     async def list_items(
         self,
@@ -2126,6 +2254,21 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
             )
             or 0
         )
+        running_tasks = int(
+            await self.db.scalar(
+                select(func.count(FreightNormalizationTask.id)).where(
+                    FreightNormalizationTask.status_code.in_(["QUEUED", "RUNNING"])
+                )
+            )
+            or 0
+        )
+        failed_tasks = int(
+            await self.db.scalar(
+                select(func.count(FreightNormalizationTask.id)).where(FreightNormalizationTask.status_code == "FAILED")
+            )
+            or 0
+        )
+        latest = await self.task_repo.latest()
         return FreightNormalizationQualityResponse(
             freight_count=freight_count,
             raw_origin_count=raw_origin_count,
@@ -2133,9 +2276,121 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
             raw_commodity_count=raw_commodity_count,
             pending_suggestion_count=pending,
             auto_applied_suggestion_count=auto_applied,
+            running_task_count=running_tasks,
+            failed_task_count=failed_tasks,
+            latest_task_id=latest.id if latest is not None else None,
+            latest_task_no=latest.task_no if latest is not None else None,
+            latest_task_status_code=latest.status_code if latest is not None else None,
+            latest_task_stage_name=latest.stage_name if latest is not None else None,
+            latest_task_finished_at=latest.finished_at if latest is not None else None,
         )
 
     async def clean(self, operator_id: int | None = None) -> FreightNormalizationCleanResponse:
+        now = datetime.utcnow()
+        task = await self.task_repo.create(
+            {
+                "task_no": await self.sequence_service.next_code("FREIGHT_NORMALIZATION_TASK_NO"),
+                "celery_task_id": None,
+                "status_code": "QUEUED",
+                "stage_code": "QUEUED",
+                "stage_name": "排队中",
+                "stage_message": "清洗任务已提交，等待 Celery worker 消费",
+                "progress_percent": 5,
+                "requested_by": operator_id,
+                "heartbeat_at": now,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+        await self.db.commit()
+        celery_task_id: str | None = None
+        try:
+            from app.tasks.freight_ai_tasks import clean_freight_normalization_task
+
+            async_result = clean_freight_normalization_task.delay(task.id, operator_id)
+            celery_task_id = str(async_result.id)
+            task = await self.task_repo.update(task.id, {"celery_task_id": celery_task_id}) or task
+            await self.db.commit()
+        except Exception as exc:  # noqa: BLE001
+            task = await self.task_repo.update(
+                task.id,
+                {
+                    "status_code": "FAILED",
+                    "stage_code": "FAILED",
+                    "stage_name": "投递失败",
+                    "stage_message": f"清洗任务投递失败：{exc}",
+                    "error_message": f"清洗任务投递失败：{exc}",
+                    "progress_percent": 100,
+                    "finished_at": datetime.utcnow(),
+                    "heartbeat_at": datetime.utcnow(),
+                },
+            ) or task
+            await self.db.commit()
+            raise ValidationError(f"清洗任务投递失败：{exc}") from exc
+        return self._clean_response_from_task(task, message="清洗任务已提交，正在后台执行")
+
+    def _clean_response_from_task(self, task: FreightNormalizationTask, *, message: str | None = None) -> FreightNormalizationCleanResponse:
+        result_json = task.result_json or {}
+        affected_from = result_json.get("affected_date_from")
+        affected_to = result_json.get("affected_date_to")
+        if isinstance(affected_from, str):
+            affected_from = datetime.fromisoformat(affected_from) if affected_from else None
+        if isinstance(affected_to, str):
+            affected_to = datetime.fromisoformat(affected_to) if affected_to else None
+        return FreightNormalizationCleanResponse(
+            task_id=task.id,
+            task_no=task.task_no,
+            celery_task_id=task.celery_task_id,
+            status_code=task.status_code,
+            stage_name=task.stage_name,
+            message=message or task.stage_message,
+            scanned_count=task.scanned_count,
+            suggestion_count=task.suggestion_count,
+            auto_applied_count=task.auto_applied_count,
+            pending_count=task.pending_count,
+            affected_date_from=affected_from,
+            affected_date_to=affected_to,
+        )
+
+    async def _update_clean_task(
+        self,
+        task_id: int,
+        *,
+        status_code: str | None = None,
+        stage_code: str,
+        stage_name: str,
+        stage_message: str,
+        progress_percent: int,
+        **extra: Any,
+    ) -> None:
+        updates: dict[str, Any] = {
+            "stage_code": stage_code,
+            "stage_name": stage_name,
+            "stage_message": stage_message,
+            "progress_percent": max(0, min(int(progress_percent), 100)),
+            "heartbeat_at": datetime.utcnow(),
+            **extra,
+        }
+        if status_code is not None:
+            updates["status_code"] = status_code
+        await self.task_repo.update(task_id, updates)
+        await self.db.commit()
+
+    async def run_clean_now(self, task_id: int, operator_id: int | None = None) -> FreightNormalizationCleanResponse:
+        task = await self.task_repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundError("FreightNormalizationTask", task_id)
+        started = datetime.utcnow()
+        await self._update_clean_task(
+            task_id,
+            status_code="RUNNING",
+            stage_code="SCANNING",
+            stage_name="扫描正式货源",
+            stage_message="正在扫描原文级、缺城市、缺节点和缺标准货品的正式货源",
+            progress_percent=12,
+            started_at=started,
+            error_message=None,
+        )
         rows = (
             await self.db.execute(
                 select(Freight)
@@ -2153,34 +2408,90 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
                 .order_by(Freight.id.asc())
             )
         ).scalars().all()
+        await self._update_clean_task(
+            task_id,
+            status_code="RUNNING",
+            stage_code="MATCHING",
+            stage_name="AI 清洗匹配",
+            stage_message=f"已扫描 {len(rows)} 条正式货源，正在生成标准化建议",
+            progress_percent=30,
+            scanned_count=len(rows),
+        )
         suggestion_count = 0
         auto_applied_count = 0
         pending_count = 0
+        failed_count = 0
         affected_dates: list[datetime] = []
-        for freight in rows:
+        total = max(len(rows), 1)
+        for index, freight in enumerate(rows, start=1):
             for suggestion_type in ("ORIGIN", "DESTINATION", "COMMODITY"):
-                suggestion = await self._suggest_for_freight(freight, suggestion_type)
-                if suggestion is None:
+                try:
+                    suggestion = await self._suggest_for_freight(freight, suggestion_type, clean_task_id=task_id)
+                    if suggestion is None:
+                        continue
+                    suggestion_count += 1
+                    if suggestion.auto_apply_flag:
+                        await self._apply_suggestion(suggestion, operator_id=operator_id, auto=True)
+                        auto_applied_count += 1
+                        affected_date = freight.published_at or freight.confirmed_at or freight.created_at
+                        if affected_date is not None:
+                            affected_dates.append(affected_date)
+                    else:
+                        pending_count += 1
+                except Exception:  # noqa: BLE001
+                    failed_count += 1
                     continue
-                suggestion_count += 1
-                if suggestion.auto_apply_flag:
-                    await self._apply_suggestion(suggestion, operator_id=operator_id, auto=True)
-                    auto_applied_count += 1
-                    affected_date = freight.published_at or freight.confirmed_at or freight.created_at
-                    if affected_date is not None:
-                        affected_dates.append(affected_date)
-                else:
-                    pending_count += 1
+            if index == len(rows) or index % 10 == 0:
+                await self._update_clean_task(
+                    task_id,
+                    status_code="RUNNING",
+                    stage_code="MATCHING",
+                    stage_name="AI 清洗匹配",
+                    stage_message=f"正在清洗正式货源 {index}/{len(rows)}",
+                    progress_percent=30 + int(index / total * 45),
+                    scanned_count=len(rows),
+                    suggestion_count=suggestion_count,
+                    auto_applied_count=auto_applied_count,
+                    pending_count=pending_count,
+                    failed_count=failed_count,
+                )
         await self.db.commit()
         if affected_dates:
+            await self._update_clean_task(
+                task_id,
+                status_code="RUNNING",
+                stage_code="REBUILD_ANALYSIS",
+                stage_name="重算分析事实",
+                stage_message="自动提升已回填，正在重算受影响的货源分析事实",
+                progress_percent=86,
+            )
             await self._rebuild_affected_analysis(min(affected_dates), max(affected_dates))
-        return FreightNormalizationCleanResponse(
-            scanned_count=len(rows),
-            suggestion_count=suggestion_count,
-            auto_applied_count=auto_applied_count,
-            pending_count=pending_count,
-            affected_date_from=min(affected_dates) if affected_dates else None,
-            affected_date_to=max(affected_dates) if affected_dates else None,
+        finished = datetime.utcnow()
+        task = await self.task_repo.update(
+            task_id,
+            {
+                "status_code": "SUCCESS" if failed_count == 0 else "PARTIAL_SUCCESS",
+                "stage_code": "DONE",
+                "stage_name": "清洗完成",
+                "stage_message": "正式货源清洗任务已完成",
+                "progress_percent": 100,
+                "scanned_count": len(rows),
+                "suggestion_count": suggestion_count,
+                "auto_applied_count": auto_applied_count,
+                "pending_count": pending_count,
+                "failed_count": failed_count,
+                "finished_at": finished,
+                "heartbeat_at": finished,
+                "result_json": {
+                    "affected_date_from": min(affected_dates).isoformat() if affected_dates else None,
+                    "affected_date_to": max(affected_dates).isoformat() if affected_dates else None,
+                },
+            },
+        ) or task
+        await self.db.commit()
+        return self._clean_response_from_task(
+            task,
+            message=f"已扫描 {len(rows)} 条，自动提升 {auto_applied_count} 条，待确认 {pending_count} 条",
         )
 
     async def apply(self, suggestion_id: int, operator_id: int | None = None) -> FreightNormalizationSuggestionResponse:
@@ -2208,7 +2519,41 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
         ctx = await _load_display_context(self.db, suggestions=[row])
         return _to_normalization_suggestion_response(row, ctx)
 
-    async def _suggest_for_freight(self, freight: Freight, suggestion_type: str) -> FreightNormalizationSuggestion | None:
+    async def bulk_apply(self, payload, operator_id: int | None = None) -> FreightNormalizationBulkApplyResponse:
+        suggestion_ids = [int(item) for item in (payload.suggestion_ids or []) if int(item) > 0]
+        if not payload.apply_all_filtered and not suggestion_ids:
+            raise ValidationError("请选择要批量应用的清洗建议")
+        rows = await self.repo.list_pending_for_bulk(
+            suggestion_ids=None if payload.apply_all_filtered else suggestion_ids,
+            keyword=(payload.keyword or "").strip() or None,
+            suggestion_type_code=(payload.suggestion_type_code or "").strip() or None,
+        )
+        applied_count = 0
+        skipped: list[dict[str, Any]] = []
+        affected_dates: list[datetime] = []
+        for row in rows:
+            try:
+                freight = await self.freight_repo.get_freight_by_id(row.freight_id)
+                await self._apply_suggestion(row, operator_id=operator_id, auto=False)
+                applied_count += 1
+                if freight is not None:
+                    affected_date = freight.published_at or freight.confirmed_at or freight.created_at
+                    if affected_date is not None:
+                        affected_dates.append(affected_date)
+            except Exception as exc:  # noqa: BLE001
+                skipped.append({"suggestion_id": row.id, "reason": str(exc)})
+        await self.db.commit()
+        if affected_dates:
+            await self._rebuild_affected_analysis(min(affected_dates), max(affected_dates))
+        return FreightNormalizationBulkApplyResponse(
+            applied_count=applied_count,
+            skipped_count=len(skipped),
+            skipped=skipped,
+        )
+
+    async def _suggest_for_freight(
+        self, freight: Freight, suggestion_type: str, *, clean_task_id: int | None = None
+    ) -> FreightNormalizationSuggestion | None:
         current = await self.repo.find_open(freight.id, suggestion_type)
         if current is not None:
             return None
@@ -2217,13 +2562,13 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
                 return None
             raw_text = freight.raw_origin_text
             normalized, options, basis = await self._match_location(raw_text or "")
-            return await self._create_location_suggestion(freight, suggestion_type, raw_text, freight.origin_match_level_code, normalized, options, basis)
+            return await self._create_location_suggestion(freight, suggestion_type, raw_text, freight.origin_match_level_code, normalized, options, basis, clean_task_id=clean_task_id)
         if suggestion_type == "DESTINATION":
             if freight.destination_match_level_code != "RAW" and freight.destination_city_code:
                 return None
             raw_text = freight.raw_destination_text
             normalized, options, basis = await self._match_location(raw_text or "")
-            return await self._create_location_suggestion(freight, suggestion_type, raw_text, freight.destination_match_level_code, normalized, options, basis)
+            return await self._create_location_suggestion(freight, suggestion_type, raw_text, freight.destination_match_level_code, normalized, options, basis, clean_task_id=clean_task_id)
         if freight.commodity_match_level_code != "RAW" and freight.commodity_standard_id is not None:
             return None
         raw_text = freight.raw_commodity_name or freight.cargo_title
@@ -2232,6 +2577,7 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
             return None
         return await self._create_suggestion(
             freight=freight,
+            clean_task_id=clean_task_id,
             suggestion_type_code="COMMODITY",
             raw_text=raw_text,
             current_level_code=freight.commodity_match_level_code,
@@ -2251,6 +2597,7 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
         normalized: dict[str, Any],
         options: list[dict[str, Any]],
         basis: dict[str, Any],
+        clean_task_id: int | None = None,
     ) -> FreightNormalizationSuggestion | None:
         level = normalized.get("match_level_code")
         if level not in {"NODE", "CITY"}:
@@ -2258,6 +2605,7 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
         score = _to_decimal_or_none(normalized.get("match_score")) or Decimal("0")
         return await self._create_suggestion(
             freight=freight,
+            clean_task_id=clean_task_id,
             suggestion_type_code=suggestion_type,
             raw_text=raw_text,
             current_level_code=current_level,

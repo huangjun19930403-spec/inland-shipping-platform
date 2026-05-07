@@ -26,10 +26,13 @@ from app.modules.freight.schemas import (
     FreightDetailResponse,
     FreightListQuery,
     FreightManualCreateRequest,
+    FreightNormalizationBulkApplyRequest,
+    FreightNormalizationBulkApplyResponse,
     FreightNormalizationCleanResponse,
     FreightNormalizationQualityResponse,
     FreightNormalizationSuggestionListQuery,
     FreightNormalizationSuggestionResponse,
+    FreightNormalizationTaskResponse,
     FreightResponse,
     FreightStatusChangeRequest,
     FreightTagRelationResponse,
@@ -243,6 +246,39 @@ async def list_normalization_suggestions(
         page=query.page,
         page_size=query.page_size,
     )
+
+
+@router.post("/normalization-suggestions/bulk-apply", response_model=FreightNormalizationBulkApplyResponse)
+async def bulk_apply_normalization_suggestions(
+    body: FreightNormalizationBulkApplyRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = FreightNormalizationSuggestionService(db)
+    return await service.bulk_apply(body, operator_id=getattr(current_user, "id", None))
+
+
+@router.get("/normalization/tasks", response_model=PageResponse[FreightNormalizationTaskResponse])
+async def list_normalization_tasks(
+    page: int = 1,
+    page_size: int = 20,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = FreightNormalizationSuggestionService(db)
+    return await service.list_tasks(page=page, page_size=page_size)
+
+
+@router.get("/normalization/tasks/{task_id}", response_model=FreightNormalizationTaskResponse)
+async def get_normalization_task(
+    task_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = FreightNormalizationSuggestionService(db)
+    return await service.get_task(task_id)
 
 
 @router.get("/normalization/quality", response_model=FreightNormalizationQualityResponse)

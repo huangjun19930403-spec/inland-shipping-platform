@@ -37,6 +37,7 @@ celery_app.conf.update(
         "analysis.run_job": {"queue": "analysis"},
         "freight.parse_wechat_batch": {"queue": "freight_ai"},
         "freight.parse_tms_inbound": {"queue": "freight_ai"},
+        "freight.clean_normalization": {"queue": "freight_ai"},
     },
 )
 

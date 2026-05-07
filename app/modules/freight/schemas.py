@@ -564,9 +564,18 @@ class FreightNormalizationSuggestionListQuery(BaseModel):
 
 class FreightNormalizationSuggestionResponse(BaseModel):
     id: int
+    clean_task_id: int | None = None
     freight_id: int
     freight_no: str | None = None
     cargo_title: str | None = None
+    freight_route_summary: str | None = None
+    freight_commodity_summary: str | None = None
+    freight_tonnage_summary: str | None = None
+    freight_price_summary: str | None = None
+    freight_contact_summary: str | None = None
+    freight_source_summary: str | None = None
+    freight_match_summary: str | None = None
+    freight_detail_preview: dict[str, Any] | None = None
     suggestion_type_code: str
     raw_text: str | None
     current_level_code: str | None
@@ -596,6 +605,12 @@ class FreightNormalizationSuggestionResponse(BaseModel):
 
 
 class FreightNormalizationCleanResponse(BaseModel):
+    task_id: int
+    task_no: str
+    celery_task_id: str | None = None
+    status_code: str
+    stage_name: str | None = None
+    message: str | None = None
     scanned_count: int
     suggestion_count: int
     auto_applied_count: int
@@ -611,3 +626,47 @@ class FreightNormalizationQualityResponse(BaseModel):
     raw_commodity_count: int
     pending_suggestion_count: int
     auto_applied_suggestion_count: int
+    running_task_count: int = 0
+    failed_task_count: int = 0
+    latest_task_id: int | None = None
+    latest_task_no: str | None = None
+    latest_task_status_code: str | None = None
+    latest_task_stage_name: str | None = None
+    latest_task_finished_at: datetime | None = None
+
+
+class FreightNormalizationTaskResponse(BaseModel):
+    id: int
+    task_no: str
+    celery_task_id: str | None = None
+    status_code: str
+    stage_code: str | None = None
+    stage_name: str | None = None
+    stage_message: str | None = None
+    progress_percent: int
+    scanned_count: int
+    suggestion_count: int
+    auto_applied_count: int
+    pending_count: int
+    failed_count: int
+    requested_by: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    error_message: str | None = None
+    result_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FreightNormalizationBulkApplyRequest(BaseModel):
+    suggestion_ids: list[int] = Field(default_factory=list)
+    keyword: str | None = None
+    suggestion_type_code: str | None = None
+    apply_all_filtered: bool = False
+
+
+class FreightNormalizationBulkApplyResponse(BaseModel):
+    applied_count: int
+    skipped_count: int
+    skipped: list[dict[str, Any]] = Field(default_factory=list)
