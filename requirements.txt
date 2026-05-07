@@ -16,5 +16,7 @@ bcrypt==5.0.0
 
 httpx==0.28.1
 dashscope>=1.23.0,<2.0.0
+python-multipart==0.0.20
+cos-python-sdk-v5==1.9.37
 
 celery[redis]==5.6.3

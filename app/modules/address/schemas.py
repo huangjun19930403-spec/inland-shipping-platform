@@ -235,9 +235,62 @@ class TransportNodeProfileUpsertRequest(BaseModel):
     berth_count: int | None = None
     annual_throughput_ton: Decimal | None = None
     open_hours_desc: str | None = Field(default=None, max_length=128)
-    contact_person: str | None = Field(default=None, max_length=64)
-    contact_phone: str | None = Field(default=None, max_length=32)
     ext_json: dict | None = None
+
+
+class TransportNodeContactItem(BaseModel):
+    contact_name: str = Field(min_length=1, max_length=64)
+    contact_type_code: str = Field(min_length=1, max_length=64)
+    mobile_phone: str | None = Field(default=None, max_length=32)
+    wechat: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=128)
+    is_primary: bool = False
+    remark: str | None = Field(default=None, max_length=512)
+
+
+class TransportNodeContactReplaceRequest(BaseModel):
+    contacts: list[TransportNodeContactItem] = Field(default_factory=list)
+
+
+class TransportNodeContactResponse(BaseModel):
+    id: int
+    node_id: int
+    contact_name: str
+    contact_type_code: str
+    contact_type_name: str | None
+    mobile_phone: str | None
+    wechat: str | None
+    email: str | None
+    is_primary: bool
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TransportNodePhotoUpdateRequest(BaseModel):
+    photo_type_code: str | None = Field(default=None, min_length=1, max_length=64)
+    photo_name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=512)
+    is_primary: bool | None = None
+    sort_order: int | None = None
+
+
+class TransportNodePhotoResponse(BaseModel):
+    id: int
+    node_id: int
+    file_id: int
+    photo_type_code: str
+    photo_type_name: str | None
+    photo_name: str
+    description: str | None
+    is_primary: bool
+    sort_order: int
+    content_url: str
+    original_file_name: str
+    content_type: str
+    file_size: int
+    created_at: datetime
+    updated_at: datetime
 
 
 class NodeAliasReplaceRequest(BaseModel):
@@ -286,8 +339,6 @@ class TransportNodeProfileResponse(BaseModel):
     berth_count: int | None
     annual_throughput_ton: Decimal | None
     open_hours_desc: str | None
-    contact_person: str | None
-    contact_phone: str | None
     ext_json: dict | None
     updated_at: datetime
 
@@ -303,6 +354,8 @@ class NodeAliasResponse(BaseModel):
 class TransportNodeDetailResponse(BaseModel):
     node: TransportNodeResponse
     profile: TransportNodeProfileResponse | None
+    contacts: list[TransportNodeContactResponse] = Field(default_factory=list)
+    photos: list[TransportNodePhotoResponse] = Field(default_factory=list)
     aliases: list[str]
     aliases_meta: list[NodeAliasResponse] = Field(default_factory=list)
     business_category_codes: list[str]

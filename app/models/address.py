@@ -150,10 +150,41 @@ class TransportNodeProfile(Base):
     berth_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     annual_throughput_ton: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     open_hours_desc: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    contact_person: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ext_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+
+
+class TransportNodeContact(Base, TimestampMixin):
+    __tablename__ = "transport_node_contact"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transport_node.id"), nullable=False, index=True
+    )
+    contact_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    contact_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    mobile_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    wechat: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class TransportNodePhoto(Base, TimestampMixin):
+    __tablename__ = "transport_node_photo"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transport_node.id"), nullable=False, index=True
+    )
+    file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("storage_file.id"), nullable=False, index=True
+    )
+    photo_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    photo_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class NodeAlias(Base, TimestampMixin):

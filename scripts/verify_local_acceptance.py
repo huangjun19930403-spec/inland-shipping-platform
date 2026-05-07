@@ -14,12 +14,20 @@ from app.integrations.config_keys import (
     AMAP_JS_API_KEY,
     AMAP_ROUTE_WEB_API_KEY,
     AMAP_SECURITY_JS_CODE,
+    COS_ACCESS_KEY,
+    COS_BUCKET_NAME,
+    COS_ENABLED,
+    COS_ENDPOINT,
+    COS_IMAGE_MAX_SIZE_MB,
+    COS_PATH_STYLE_ACCESS,
+    COS_REGION,
+    COS_SECRET_KEY,
     DASHSCOPE_API_KEY,
     HIFLEET_ENABLED,
     HIFLEET_PASSWORD,
     HIFLEET_USERNAME,
 )
-from app.models.address import NavigationConstraintPoint, NodeAlias, Region, TransportNode
+from app.models.address import NavigationConstraintPoint, NodeAlias, Region, TransportNode, TransportNodeContact
 from app.models.analysis import (
     AnalysisJobDefinition,
     AnalysisJobRun,
@@ -112,6 +120,9 @@ REQUIRED_ROUTE_PATHS = {
     "/api/v1/freight/normalization/tasks",
     "/api/v1/freight/normalization/tasks/{task_id}",
     "/api/v1/analysis/freight/node-ranking",
+    "/api/v1/address/nodes/{node_id}/contacts",
+    "/api/v1/address/nodes/{node_id}/photos",
+    "/api/v1/files/{file_id}/content",
 }
 
 LEGACY_MENU_CODES = {
@@ -141,6 +152,14 @@ REQUIRED_INTEGRATION_CONFIG_KEYS = {
     HIFLEET_ENABLED,
     HIFLEET_USERNAME,
     HIFLEET_PASSWORD,
+    COS_ENABLED,
+    COS_BUCKET_NAME,
+    COS_REGION,
+    COS_ENDPOINT,
+    COS_ACCESS_KEY,
+    COS_SECRET_KEY,
+    COS_PATH_STYLE_ACCESS,
+    COS_IMAGE_MAX_SIZE_MB,
 }
 
 ROUTE_TRACK_STATUSES = {"NOT_GENERATED", "READY", "PARTIAL", "FAILED"}
@@ -218,6 +237,7 @@ async def verify() -> list[CheckResult]:
             ("business regions", await _count(session, Region, Region.code.not_like("E2E%")), 8),
             ("transport nodes", await _count(session, TransportNode, TransportNode.code.not_like("E2E%")), 30),
             ("node aliases", await _count(session, NodeAlias), 60),
+            ("node contacts", await _count(session, TransportNodeContact), 60),
             ("commodity standards", await _count(session, CommodityStandard), 30),
             ("commodity aliases", await _count(session, CommodityAlias), 80),
             ("ships", await _count(session, ShipProfile), 80),

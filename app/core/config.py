@@ -79,5 +79,15 @@ class Settings(BaseSettings):
     DASHSCOPE_STRONG_REVIEW_ENABLED: bool = True
     FREIGHT_AI_STALE_HEARTBEAT_SECONDS: int = 180
 
+    # 腾讯云 COS / 对象存储
+    COS_ENABLED: bool = False
+    COS_BUCKET_NAME: str = ""
+    COS_REGION: str = "ap-nanjing"
+    COS_ENDPOINT: str = "cos.ap-nanjing.myqcloud.com"
+    COS_ACCESS_KEY: str = ""
+    COS_SECRET_KEY: str = ""
+    COS_PATH_STYLE_ACCESS: bool = False
+    COS_IMAGE_MAX_SIZE_MB: int = 10
+
 
 settings = Settings()

@@ -16,10 +16,13 @@ from app.models.address import (
     RegionCityRelation,
     TransportNode,
     TransportNodeBusinessCategory,
+    TransportNodeContact,
     TransportNodeHandlingMode,
     TransportNodePackagingForm,
+    TransportNodePhoto,
     TransportNodeProfile,
 )
+from app.models.storage import StorageFile
 from app.models.route import (
     ShippingRoute,
     ShippingRouteLine,
@@ -77,6 +80,19 @@ async def purge_legacy_e2e_data() -> None:
             .all()
         )
         if e2e_nodes:
+            photo_file_ids = (
+                (
+                    await session.execute(
+                        select(TransportNodePhoto.file_id).where(TransportNodePhoto.node_id.in_(e2e_nodes))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            await session.execute(delete(TransportNodePhoto).where(TransportNodePhoto.node_id.in_(e2e_nodes)))
+            if photo_file_ids:
+                await session.execute(delete(StorageFile).where(StorageFile.id.in_(photo_file_ids)))
+            await session.execute(delete(TransportNodeContact).where(TransportNodeContact.node_id.in_(e2e_nodes)))
             await session.execute(delete(NodeAlias).where(NodeAlias.node_id.in_(e2e_nodes)))
             await session.execute(delete(TransportNodeProfile).where(TransportNodeProfile.node_id.in_(e2e_nodes)))
             await session.execute(delete(TransportNodeBusinessCategory).where(TransportNodeBusinessCategory.node_id.in_(e2e_nodes)))

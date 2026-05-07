@@ -14,7 +14,15 @@ from sqlalchemy import func, select
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import get_current_user
 from app.integrations.amap import GeocodeCandidate
-from app.models.address import AdminRegion, AdminRegionBoundary, NavigationConstraintPoint, Region, RegionBoundaryVersion, TransportNode
+from app.models.address import (
+    AdminRegion,
+    AdminRegionBoundary,
+    NavigationConstraintPoint,
+    Region,
+    RegionBoundaryVersion,
+    TransportNode,
+    TransportNodeContact,
+)
 from app.models.commodity import CommodityStandard
 from app.models.common import CodeSequence
 from app.models.dictionary import StdDict, StdDictItem
@@ -110,6 +118,14 @@ async def verify() -> list[CheckResult]:
             "commodity main unit column renamed",
             "main_unit_code" in columns and "main_unit" not in columns,
             ", ".join(sorted(columns)),
+        )
+    )
+    profile_columns = await _table_columns("transport_node_profile")
+    results.append(
+        _result(
+            "node profile contact fields split out",
+            "contact_person" not in profile_columns and "contact_phone" not in profile_columns,
+            ", ".join(sorted(profile_columns)),
         )
     )
 
@@ -235,6 +251,8 @@ async def verify() -> list[CheckResult]:
                             "TRANSPORT_MODE_ELEMENT",
                             "SHIP_TYPE",
                             "NODE_TYPE",
+                            "NODE_CONTACT_TYPE",
+                            "NODE_PHOTO_TYPE",
                             "HANDLING_MODE",
                             "VALUE_TYPE",
                         ]
@@ -257,6 +275,8 @@ async def verify() -> list[CheckResult]:
                         ("TRANSPORT_MODE_ELEMENT", "WATER"),
                         ("SHIP_TYPE", "BULK_CARRIER"),
                         ("NODE_TYPE", "PORT"),
+                        ("NODE_CONTACT_TYPE", "OPERATIONS"),
+                        ("NODE_PHOTO_TYPE", "OVERVIEW"),
                         ("HANDLING_MODE", "GRAB"),
                         ("VALUE_TYPE", "STRING"),
                     ]
@@ -399,6 +419,7 @@ async def verify() -> list[CheckResult]:
         counts = {
             "regions": await session.scalar(select(func.count()).select_from(Region)),
             "nodes": await session.scalar(select(func.count()).select_from(TransportNode)),
+            "node_contacts": await session.scalar(select(func.count()).select_from(TransportNodeContact)),
             "constraints": await session.scalar(select(func.count()).select_from(NavigationConstraintPoint)),
             "standards": await session.scalar(select(func.count()).select_from(CommodityStandard)),
         }

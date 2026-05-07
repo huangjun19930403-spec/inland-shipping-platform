@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import UploadFile
 from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.integrations.amap import AmapGeocodeClient
@@ -38,8 +39,12 @@ from app.modules.address.schemas import (
     RegionBoundaryVersionResponse,
     RegionCityRelationResponse,
     NodeAliasResponse,
+    TransportNodeContactResponse,
+    TransportNodeContactReplaceRequest,
     TransportNodeCreateRequest,
     TransportNodeDetailResponse,
+    TransportNodePhotoResponse,
+    TransportNodePhotoUpdateRequest,
     TransportNodeProfileResponse,
     TransportNodeProfileUpsertRequest,
     TransportNodeResponse,
@@ -56,6 +61,7 @@ from app.modules.dictionary.labels import (
     status_name,
 )
 from app.modules.system.runtime_config import RuntimeConfigService
+from app.modules.storage.service import FileStorageService
 
 
 logger = logging.getLogger(__name__)
@@ -188,6 +194,60 @@ def _to_node_response(
         is_hot_node=row.is_hot_node,
         audit_status=row.audit_status,
         audit_status_name=dict_label(dict_labels, "AUDIT_STATUS", row.audit_status),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_node_profile_response(row) -> TransportNodeProfileResponse:
+    return TransportNodeProfileResponse(
+        id=row.id,
+        node_id=row.node_id,
+        business_nature_code=row.business_nature_code,
+        channel_depth_m=row.channel_depth_m,
+        max_draft_m=row.max_draft_m,
+        berth_count=row.berth_count,
+        annual_throughput_ton=row.annual_throughput_ton,
+        open_hours_desc=row.open_hours_desc,
+        ext_json=row.ext_json,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_node_contact_response(row, labels: DictLabelMap | None = None) -> TransportNodeContactResponse:
+    labels = labels or {}
+    return TransportNodeContactResponse(
+        id=row.id,
+        node_id=row.node_id,
+        contact_name=row.contact_name,
+        contact_type_code=row.contact_type_code,
+        contact_type_name=dict_label(labels, "NODE_CONTACT_TYPE", row.contact_type_code),
+        mobile_phone=row.mobile_phone,
+        wechat=row.wechat,
+        email=row.email,
+        is_primary=row.is_primary,
+        remark=row.remark,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_node_photo_response(row, storage_file, labels: DictLabelMap | None = None) -> TransportNodePhotoResponse:
+    labels = labels or {}
+    return TransportNodePhotoResponse(
+        id=row.id,
+        node_id=row.node_id,
+        file_id=row.file_id,
+        photo_type_code=row.photo_type_code,
+        photo_type_name=dict_label(labels, "NODE_PHOTO_TYPE", row.photo_type_code),
+        photo_name=row.photo_name,
+        description=row.description,
+        is_primary=row.is_primary,
+        sort_order=row.sort_order,
+        content_url=f"/api/v1/files/{row.file_id}/content",
+        original_file_name=storage_file.original_file_name,
+        content_type=storage_file.content_type,
+        file_size=storage_file.file_size,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -516,7 +576,16 @@ class TransportNodeService:
         return int(city.id)
 
     async def _node_label_context(self, rows: list) -> tuple[DictLabelMap, RegionLabelMap]:
-        dict_labels = await load_dict_label_map(self.db, ["NODE_TYPE", "PROFILE_STATUS", "AUDIT_STATUS"])
+        dict_labels = await load_dict_label_map(
+            self.db,
+            [
+                "NODE_TYPE",
+                "PROFILE_STATUS",
+                "AUDIT_STATUS",
+                "NODE_CONTACT_TYPE",
+                "NODE_PHOTO_TYPE",
+            ],
+        )
         region_codes: list[str | None] = []
         for row in rows:
             region_codes.extend([row.province_code, row.city_code, row.district_code])
@@ -575,28 +644,15 @@ class TransportNodeService:
         business_codes = await self.repo.list_node_business_categories(node_id)
         packaging_codes = await self.repo.list_node_packaging_forms(node_id)
         handling_codes = await self.repo.list_node_handling_modes(node_id)
+        contacts = await self.repo.list_node_contacts(node_id)
+        photos = await self.repo.list_node_photos(node_id)
         dict_labels, region_labels = await self._node_label_context([node])
-
-        profile_payload = None
-        if profile is not None:
-            profile_payload = TransportNodeProfileResponse(
-                id=profile.id,
-                node_id=profile.node_id,
-                business_nature_code=profile.business_nature_code,
-                channel_depth_m=profile.channel_depth_m,
-                max_draft_m=profile.max_draft_m,
-                berth_count=profile.berth_count,
-                annual_throughput_ton=profile.annual_throughput_ton,
-                open_hours_desc=profile.open_hours_desc,
-                contact_person=profile.contact_person,
-                contact_phone=profile.contact_phone,
-                ext_json=profile.ext_json,
-                updated_at=profile.updated_at,
-            )
 
         return TransportNodeDetailResponse(
             node=_to_node_response(node, dict_labels, region_labels),
-            profile=profile_payload,
+            profile=_to_node_profile_response(profile) if profile is not None else None,
+            contacts=[_to_node_contact_response(row, dict_labels) for row in contacts],
+            photos=[_to_node_photo_response(photo, storage_file, dict_labels) for photo, storage_file in photos],
             aliases=[row.alias_name for row in aliases],
             aliases_meta=[
                 NodeAliasResponse(
@@ -619,20 +675,144 @@ class TransportNodeService:
             raise NotFoundError("TransportNode", node_id)
         profile = await self.repo.upsert_node_profile(node_id, payload.model_dump())
         await self.db.commit()
-        return TransportNodeProfileResponse(
-            id=profile.id,
-            node_id=profile.node_id,
-            business_nature_code=profile.business_nature_code,
-            channel_depth_m=profile.channel_depth_m,
-            max_draft_m=profile.max_draft_m,
-            berth_count=profile.berth_count,
-            annual_throughput_ton=profile.annual_throughput_ton,
-            open_hours_desc=profile.open_hours_desc,
-            contact_person=profile.contact_person,
-            contact_phone=profile.contact_phone,
-            ext_json=profile.ext_json,
-            updated_at=profile.updated_at,
+        return _to_node_profile_response(profile)
+
+    async def list_node_contacts(self, node_id: int) -> list[TransportNodeContactResponse]:
+        node = await self.repo.get_node(node_id)
+        if node is None:
+            raise NotFoundError("TransportNode", node_id)
+        labels = await load_dict_label_map(self.db, ["NODE_CONTACT_TYPE"])
+        contacts = await self.repo.list_node_contacts(node_id)
+        return [_to_node_contact_response(row, labels) for row in contacts]
+
+    async def replace_node_contacts(
+        self,
+        node_id: int,
+        payload: TransportNodeContactReplaceRequest,
+    ) -> list[TransportNodeContactResponse]:
+        node = await self.repo.get_node(node_id)
+        if node is None:
+            raise NotFoundError("TransportNode", node_id)
+
+        rows_data = []
+        primary_seen = False
+        for item in payload.contacts:
+            data = item.model_dump()
+            data["contact_name"] = data["contact_name"].strip()
+            data["contact_type_code"] = data["contact_type_code"].strip()
+            for key in ("mobile_phone", "wechat", "email", "remark"):
+                if isinstance(data.get(key), str):
+                    data[key] = data[key].strip() or None
+            if not data["contact_name"] or not data["contact_type_code"]:
+                raise ValidationError("联系人名称和类型不能为空")
+            if data["is_primary"] and primary_seen:
+                data["is_primary"] = False
+            primary_seen = primary_seen or data["is_primary"]
+            rows_data.append(data)
+
+        if rows_data and not primary_seen:
+            rows_data[0]["is_primary"] = True
+
+        contacts = await self.repo.replace_node_contacts(node_id, rows_data)
+        await self.db.commit()
+        labels = await load_dict_label_map(self.db, ["NODE_CONTACT_TYPE"])
+        return [_to_node_contact_response(row, labels) for row in contacts]
+
+    async def list_node_photos(self, node_id: int) -> list[TransportNodePhotoResponse]:
+        node = await self.repo.get_node(node_id)
+        if node is None:
+            raise NotFoundError("TransportNode", node_id)
+        labels = await load_dict_label_map(self.db, ["NODE_PHOTO_TYPE"])
+        rows = await self.repo.list_node_photos(node_id)
+        return [_to_node_photo_response(photo, storage_file, labels) for photo, storage_file in rows]
+
+    async def create_node_photo(
+        self,
+        node_id: int,
+        *,
+        file: UploadFile,
+        photo_type_code: str,
+        photo_name: str | None,
+        description: str | None,
+        is_primary: bool,
+        sort_order: int,
+        uploaded_by: int | None,
+    ) -> TransportNodePhotoResponse:
+        node = await self.repo.get_node(node_id)
+        if node is None:
+            raise NotFoundError("TransportNode", node_id)
+
+        existing_photos = await self.repo.list_node_photos(node_id)
+        photo_type = photo_type_code.strip()
+        if not photo_type:
+            raise ValidationError("照片类型不能为空")
+        storage_file = await FileStorageService(self.db).upload_image(
+            file=file,
+            object_prefix=f"transport-nodes/{node_id}/photos",
+            uploaded_by=uploaded_by,
         )
+        primary = is_primary or not existing_photos
+        if primary:
+            await self.repo.clear_primary_node_photos(node_id)
+        display_name = (photo_name or "").strip() or storage_file.original_file_name
+        photo = await self.repo.create_node_photo(
+            {
+                "node_id": node_id,
+                "file_id": storage_file.id,
+                "photo_type_code": photo_type,
+                "photo_name": display_name[:128],
+                "description": (description or "").strip() or None,
+                "is_primary": primary,
+                "sort_order": sort_order,
+            }
+        )
+        await self.db.commit()
+        labels = await load_dict_label_map(self.db, ["NODE_PHOTO_TYPE"])
+        return _to_node_photo_response(photo, storage_file, labels)
+
+    async def update_node_photo(
+        self,
+        node_id: int,
+        photo_id: int,
+        payload: TransportNodePhotoUpdateRequest,
+    ) -> TransportNodePhotoResponse:
+        row = await self.repo.get_node_photo_with_file(photo_id)
+        if row is None:
+            raise NotFoundError("TransportNodePhoto", photo_id)
+        photo, storage_file = row
+        if photo.node_id != node_id:
+            raise NotFoundError("TransportNodePhoto", photo_id)
+
+        updates = payload.model_dump(exclude_unset=True)
+        for key in ("photo_type_code", "photo_name", "description"):
+            if isinstance(updates.get(key), str):
+                updates[key] = updates[key].strip() or None
+        if "photo_type_code" in updates and not updates["photo_type_code"]:
+            raise ValidationError("照片类型不能为空")
+        if "photo_name" in updates and not updates["photo_name"]:
+            raise ValidationError("照片名称不能为空")
+        if not updates:
+            raise ValidationError("no update fields provided")
+        if updates.get("is_primary") is True:
+            await self.repo.clear_primary_node_photos(node_id, except_photo_id=photo_id)
+
+        updated = await self.repo.update_node_photo(photo_id, updates)
+        if updated is None:
+            raise NotFoundError("TransportNodePhoto", photo_id)
+        await self.db.commit()
+        labels = await load_dict_label_map(self.db, ["NODE_PHOTO_TYPE"])
+        return _to_node_photo_response(updated, storage_file, labels)
+
+    async def delete_node_photo(self, node_id: int, photo_id: int) -> None:
+        row = await self.repo.get_node_photo_with_file(photo_id)
+        if row is None:
+            raise NotFoundError("TransportNodePhoto", photo_id)
+        photo, storage_file = row
+        if photo.node_id != node_id:
+            raise NotFoundError("TransportNodePhoto", photo_id)
+        await self.repo.delete_node_photo(photo_id)
+        await FileStorageService(self.db).delete_file_entity(storage_file)
+        await self.db.commit()
 
     async def replace_node_aliases(self, node_id: int, aliases: list[str]) -> None:
         node = await self.repo.get_node(node_id)

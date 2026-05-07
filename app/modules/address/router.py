@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.system import SysUser
 from app.modules.address.schemas import (
     AdminRegionBoundaryResponse,
     AdminRegionQuery,
@@ -33,9 +34,13 @@ from app.modules.address.schemas import (
     RegionBoundaryVersionCreateRequest,
     RegionBoundaryVersionResponse,
     RegionCityRelationReplaceRequest,
+    TransportNodeContactReplaceRequest,
+    TransportNodeContactResponse,
     TransportNodeCreateRequest,
     TransportNodeDetailResponse,
     TransportNodeListQuery,
+    TransportNodePhotoResponse,
+    TransportNodePhotoUpdateRequest,
     TransportNodeProfileResponse,
     TransportNodeProfileUpsertRequest,
     TransportNodeResponse,
@@ -269,6 +274,81 @@ async def update_node_profile(
 ):
     service = TransportNodeService(db)
     return await service.update_node_profile(node_id, body)
+
+
+@router.get("/nodes/{node_id}/contacts", response_model=list[TransportNodeContactResponse])
+async def list_node_contacts(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TransportNodeService(db)
+    return await service.list_node_contacts(node_id)
+
+
+@router.put("/nodes/{node_id}/contacts", response_model=list[TransportNodeContactResponse])
+async def replace_node_contacts(
+    node_id: int,
+    body: TransportNodeContactReplaceRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TransportNodeService(db)
+    return await service.replace_node_contacts(node_id, body)
+
+
+@router.get("/nodes/{node_id}/photos", response_model=list[TransportNodePhotoResponse])
+async def list_node_photos(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TransportNodeService(db)
+    return await service.list_node_photos(node_id)
+
+
+@router.post("/nodes/{node_id}/photos", response_model=TransportNodePhotoResponse)
+async def create_node_photo(
+    node_id: int,
+    photo_type_code: str = Form(...),
+    photo_name: str | None = Form(default=None),
+    description: str | None = Form(default=None),
+    is_primary: bool = Form(default=False),
+    sort_order: int = Form(default=0),
+    file: UploadFile = File(...),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = TransportNodeService(db)
+    return await service.create_node_photo(
+        node_id,
+        file=file,
+        photo_type_code=photo_type_code,
+        photo_name=photo_name,
+        description=description,
+        is_primary=is_primary,
+        sort_order=sort_order,
+        uploaded_by=current_user.id,
+    )
+
+
+@router.put("/nodes/{node_id}/photos/{photo_id}", response_model=TransportNodePhotoResponse)
+async def update_node_photo(
+    node_id: int,
+    photo_id: int,
+    body: TransportNodePhotoUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TransportNodeService(db)
+    return await service.update_node_photo(node_id, photo_id, body)
+
+
+@router.delete("/nodes/{node_id}/photos/{photo_id}")
+async def delete_node_photo(
+    node_id: int,
+    photo_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = TransportNodeService(db)
+    await service.delete_node_photo(node_id, photo_id)
+    return {"ok": True}
 
 
 @router.put("/nodes/{node_id}/aliases")

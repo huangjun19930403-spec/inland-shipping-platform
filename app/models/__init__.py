@@ -8,6 +8,8 @@ from app.models.address import (
     RegionBoundaryVersion,
     RegionCityRelation,
     TransportNode,
+    TransportNodeContact,
+    TransportNodePhoto,
     TransportNodeProfile,
     NodeAlias,
     TransportNodeBusinessCategory,
@@ -16,6 +18,7 @@ from app.models.address import (
     NavigationConstraintPoint,
     NavigationConstraintProfile,
 )
+from app.models.storage import StorageFile
 from app.models.route import (
     ShippingRoute,
     ShippingRoutePlan,
@@ -105,6 +108,8 @@ __all__ = [
     "RegionBoundaryVersion",
     "RegionCityRelation",
     "TransportNode",
+    "TransportNodeContact",
+    "TransportNodePhoto",
     "TransportNodeProfile",
     "NodeAlias",
     "TransportNodeBusinessCategory",
@@ -179,4 +184,5 @@ __all__ = [
     "SysUserStatusLog",
     "SysLoginLog",
     "SystemConfig",
+    "StorageFile",
 ]

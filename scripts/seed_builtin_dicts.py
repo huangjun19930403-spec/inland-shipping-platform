@@ -41,6 +41,8 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "NODE_TYPE", "dict_name": "节点类型", "items": _items(("PORT", "港口"), ("TERMINAL", "码头"), ("ANCHORAGE", "锚地"), ("LOCK", "船闸"), ("LOGISTICS_PARK", "物流园"), ("RAIL_STATION", "铁路货站"), ("HIGHWAY_PORT", "公路港"), ("INTERMODAL_HUB", "多式联运枢纽"), ("OTHER", "其他节点"))},
     {"dict_code": "BUSINESS_CATEGORY", "dict_name": "业务类别", "items": _items(("LOADING", "装货"), ("UNLOADING", "卸货"), ("TRANSFER", "中转"), ("TRANSSHIPMENT", "换装"), ("STORAGE", "仓储"), ("PASSAGE", "通行"), ("COMPREHENSIVE", "综合服务"))},
     {"dict_code": "PACKAGING_FORM", "dict_name": "包装形式", "items": _items(("BULK", "散装"), ("TON_BAG", "吨袋"), ("BAGGED", "袋装"), ("BOXED", "箱装"), ("CONTAINER", "集装箱"), ("GENERAL_CARGO", "件杂货"))},
+    {"dict_code": "NODE_CONTACT_TYPE", "dict_name": "节点联系人类型", "items": _items(("OPERATIONS", "运营联系人"), ("DISPATCH", "调度联系人"), ("BUSINESS", "商务联系人"), ("SETTLEMENT", "结算联系人"), ("SAFETY", "安全联系人"), ("EMERGENCY", "应急联系人"))},
+    {"dict_code": "NODE_PHOTO_TYPE", "dict_name": "节点实况照片类型", "items": _items(("OVERVIEW", "全景"), ("WORK_AREA", "码头作业区"), ("YARD", "堆场"), ("BERTH", "泊位"), ("ENTRANCE", "入口"), ("OTHER", "其他"))},
     {"dict_code": "COMMODITY_UNIT", "dict_name": "货品主单位", "items": [_item("TON", "吨", is_default=True), _item("CUBIC_METER", "立方米"), _item("PIECE", "件"), _item("BOX", "箱"), _item("TRUCK", "车"), _item("VOYAGE", "船次"), _item("OTHER", "其他")]},
     {"dict_code": "DANGEROUS_GOODS_LEVEL", "dict_name": "危险货物等级", "items": [_item("NON_DANGEROUS", "非危险品", is_default=True), _item("CLASS_1", "第1类 爆炸品"), _item("CLASS_2", "第2类 气体"), _item("CLASS_3", "第3类 易燃液体"), _item("CLASS_4", "第4类 易燃固体"), _item("CLASS_5", "第5类 氧化性物质"), _item("CLASS_6", "第6类 毒性和感染性物质"), _item("CLASS_7", "第7类 放射性物质"), _item("CLASS_8", "第8类 腐蚀性物质"), _item("CLASS_9", "第9类 杂项危险物质")]},
     {"dict_code": "HANDLING_MODE", "dict_name": "装卸方式", "items": _items(("GRAB", "抓斗"), ("PIPELINE", "管输"), ("CONVEYOR", "皮带机"), ("CRANE", "吊装"), ("MANUAL", "人工/叉车"), ("SELF_UNLOADING", "自卸"), ("OTHER", "其他"))},
@@ -90,7 +92,7 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "PROFILE_STATUS", "dict_name": "档案状态", "items": [_item("ACTIVE", "启用", color="success"), _item("INACTIVE", "停用", color="info"), _item("ARCHIVED", "归档", color="warning")]},
     {"dict_code": "STAT_JOB_STATUS", "dict_name": "统计任务状态", "items": [_item("QUEUED", "排队中", color="info"), _item("RUNNING", "运行中", color="warning"), _item("SUCCESS", "成功", color="success"), _item("PARTIAL_SUCCESS", "部分成功", color="warning"), _item("FAILED", "失败", color="danger")]},
     {"dict_code": "VALUE_TYPE", "dict_name": "值类型", "items": _items(("STRING", "字符串"), ("NUMBER", "数值"), ("BOOLEAN", "布尔值"), ("JSON", "JSON"), ("DATE", "日期"), ("DATETIME", "日期时间"))},
-    {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items(("SYSTEM", "系统"), ("INTEGRATION", "外部集成"), ("AI", "AI 配置"), ("MAP", "地图"), ("FREIGHT", "货源"), ("SHIP", "船舶"), ("ANALYSIS", "分析"))},
+    {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items(("SYSTEM", "系统"), ("INTEGRATION", "外部集成"), ("AI", "AI 配置"), ("MAP", "地图"), ("FREIGHT", "货源"), ("SHIP", "船舶"), ("ANALYSIS", "分析"), ("FILE_STORAGE", "文件存储"))},
 ]
 
 

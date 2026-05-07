@@ -16,6 +16,8 @@ from app.integrations.config_keys import (
     DASHSCOPE_API_KEY,
     ES_PASSWORD,
     ES_R_PASSWORD,
+    COS_ACCESS_KEY,
+    COS_SECRET_KEY,
     HIFLEET_PASSWORD,
     HIFLEET_USERNAME,
 )
@@ -30,6 +32,8 @@ SENSITIVE_RUNTIME_CONFIG_KEYS = {
     HIFLEET_PASSWORD,
     ES_PASSWORD,
     ES_R_PASSWORD,
+    COS_ACCESS_KEY,
+    COS_SECRET_KEY,
 }
 
 

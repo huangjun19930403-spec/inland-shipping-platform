@@ -19,10 +19,13 @@ from app.models.address import (
     RegionCityRelation,
     TransportNode,
     TransportNodeBusinessCategory,
+    TransportNodeContact,
     TransportNodeHandlingMode,
     TransportNodePackagingForm,
+    TransportNodePhoto,
     TransportNodeProfile,
 )
+from app.models.storage import StorageFile
 
 
 class AdminRegionRepository:
@@ -492,6 +495,92 @@ class TransportNodeRepository:
             )
         ).all()
         return [row[0] for row in rows]
+
+    async def list_node_contacts(self, node_id: int) -> list[TransportNodeContact]:
+        return list(
+            (
+                await self.db.execute(
+                    select(TransportNodeContact)
+                    .where(TransportNodeContact.node_id == node_id)
+                    .order_by(TransportNodeContact.is_primary.desc(), TransportNodeContact.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def replace_node_contacts(
+        self,
+        node_id: int,
+        contacts: list[dict[str, Any]],
+    ) -> list[TransportNodeContact]:
+        await self.db.execute(delete(TransportNodeContact).where(TransportNodeContact.node_id == node_id))
+        rows: list[TransportNodeContact] = []
+        for item in contacts:
+            row = TransportNodeContact(node_id=node_id, **item)
+            self.db.add(row)
+            rows.append(row)
+        await self.db.flush()
+        return rows
+
+    async def list_node_photos(self, node_id: int) -> list[tuple[TransportNodePhoto, StorageFile]]:
+        rows = (
+            await self.db.execute(
+                select(TransportNodePhoto, StorageFile)
+                .join(StorageFile, StorageFile.id == TransportNodePhoto.file_id)
+                .where(TransportNodePhoto.node_id == node_id)
+                .order_by(TransportNodePhoto.is_primary.desc(), TransportNodePhoto.sort_order.asc(), TransportNodePhoto.id.asc())
+            )
+        ).all()
+        return [(photo, storage_file) for photo, storage_file in rows]
+
+    async def create_node_photo(self, data: dict[str, Any]) -> TransportNodePhoto:
+        row = TransportNodePhoto(**data)
+        self.db.add(row)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
+
+    async def get_node_photo_with_file(self, photo_id: int) -> tuple[TransportNodePhoto, StorageFile] | None:
+        row = (
+            await self.db.execute(
+                select(TransportNodePhoto, StorageFile)
+                .join(StorageFile, StorageFile.id == TransportNodePhoto.file_id)
+                .where(TransportNodePhoto.id == photo_id)
+            )
+        ).first()
+        if row is None:
+            return None
+        photo, storage_file = row
+        return photo, storage_file
+
+    async def update_node_photo(self, photo_id: int, data: dict[str, Any]) -> TransportNodePhoto | None:
+        row = await self.db.scalar(select(TransportNodePhoto).where(TransportNodePhoto.id == photo_id))
+        if row is None:
+            return None
+        for key, value in data.items():
+            setattr(row, key, value)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
+
+    async def clear_primary_node_photos(self, node_id: int, except_photo_id: int | None = None) -> None:
+        photos = (
+            await self.db.execute(select(TransportNodePhoto).where(TransportNodePhoto.node_id == node_id))
+        ).scalars().all()
+        for photo in photos:
+            if except_photo_id is not None and photo.id == except_photo_id:
+                continue
+            photo.is_primary = False
+        await self.db.flush()
+
+    async def delete_node_photo(self, photo_id: int) -> bool:
+        row = await self.db.scalar(select(TransportNodePhoto).where(TransportNodePhoto.id == photo_id))
+        if row is None:
+            return False
+        await self.db.delete(row)
+        await self.db.flush()
+        return True
 
 
 class NavigationConstraintPointRepository:

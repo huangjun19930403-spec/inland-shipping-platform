@@ -10,6 +10,7 @@ from app.modules.dictionary.router import router as dictionary_router
 from app.modules.freight.router import router as freight_router
 from app.modules.route.router import router as route_router
 from app.modules.ship.router import router as ship_router
+from app.modules.storage.router import router as storage_router
 from app.modules.system.router import router as system_router
 
 api_router = APIRouter()
@@ -21,4 +22,5 @@ api_router.include_router(freight_router, prefix="/freight", tags=["freight"])
 api_router.include_router(route_router, prefix="/route", tags=["route"])
 api_router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
+api_router.include_router(storage_router, prefix="/files", tags=["files"])
 api_router.include_router(system_router)

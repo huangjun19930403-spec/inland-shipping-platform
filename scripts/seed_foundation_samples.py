@@ -22,6 +22,7 @@ from app.models.address import (
     RegionCityRelation,
     TransportNode,
     TransportNodeBusinessCategory,
+    TransportNodeContact,
     TransportNodeHandlingMode,
     TransportNodePackagingForm,
     TransportNodeProfile,
@@ -356,8 +357,6 @@ async def _upsert_node(session, seed: dict[str, Any], cities: dict[str, AdminReg
         "berth_count": int(seed.get("berths", 6)),
         "annual_throughput_ton": _decimal(seed.get("berths", 6)) * _decimal("450000"),
         "open_hours_desc": "全天候作业，夜间靠泊需提前预约",
-        "contact_person": "港航调度",
-        "contact_phone": "025-88000000",
         "ext_json": {"seed_note": "本地验证样例", "supported_commodities": ["砂石", "煤炭", "钢材", "粮食"]},
         "updated_at": datetime.utcnow(),
     }
@@ -378,6 +377,33 @@ async def _upsert_node(session, seed: dict[str, Any], cities: dict[str, AdminReg
                 is_primary=index == 0,
             )
         )
+
+    await session.execute(delete(TransportNodeContact).where(TransportNodeContact.node_id == row.id))
+    contact_suffix = f"{sort_order:08d}"[-8:]
+    session.add_all(
+        [
+            TransportNodeContact(
+                node_id=row.id,
+                contact_name="港航调度",
+                contact_type_code="OPERATIONS",
+                mobile_phone="025-88000000",
+                wechat=None,
+                email=None,
+                is_primary=True,
+                remark="本地验证样例主联系人",
+            ),
+            TransportNodeContact(
+                node_id=row.id,
+                contact_name="商务值班",
+                contact_type_code="BUSINESS",
+                mobile_phone=f"13{sort_order % 10}{contact_suffix}"[:11],
+                wechat=None,
+                email=None,
+                is_primary=False,
+                remark="本地验证样例商务联系人",
+            ),
+        ]
+    )
     await _replace_node_codes(session, row, seed)
 
 
