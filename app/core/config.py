@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD: float = 0.80
     FREIGHT_AI_WARN_RAW_CHARS: int = 20000
     FREIGHT_AI_STALE_HEARTBEAT_SECONDS: int = 180
+    VESSEL_IMAGE_AI_PROVIDER: str = "DASHSCOPE_QWEN"
+    VESSEL_IMAGE_AI_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    VESSEL_IMAGE_AI_API_KEY: str = ""
+    VESSEL_IMAGE_AI_MODEL: str = "qwen-vl-ocr-latest"
+    VESSEL_IMAGE_AI_TIMEOUT_SECONDS: float = 60.0
 
     # 腾讯云 COS / 对象存储
     COS_ENABLED: bool = False

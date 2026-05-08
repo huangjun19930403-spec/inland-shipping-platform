@@ -20,6 +20,7 @@ from app.integrations.config_keys import (
     COS_SECRET_KEY,
     HIFLEET_PASSWORD,
     HIFLEET_USERNAME,
+    VESSEL_IMAGE_AI_API_KEY,
 )
 from app.modules.system.repository import SystemConfigRepository
 
@@ -34,6 +35,7 @@ SENSITIVE_RUNTIME_CONFIG_KEYS = {
     ES_R_PASSWORD,
     COS_ACCESS_KEY,
     COS_SECRET_KEY,
+    VESSEL_IMAGE_AI_API_KEY,
 }
 
 

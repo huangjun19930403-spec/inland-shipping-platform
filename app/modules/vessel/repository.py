@@ -15,6 +15,7 @@ from app.models.vessel import (
     VesselCargoCapability,
     VesselCertificate,
     VesselCertificateFile,
+    VesselCertificateImageRecognition,
     VesselContact,
     VesselCrewAssignment,
     VesselIdentifierHistory,
@@ -161,6 +162,30 @@ class VesselRepository:
         await self.db.flush()
         await self.db.refresh(entity)
         return entity
+
+    async def get_certificate_file_by_storage_file(
+        self,
+        certificate_id: int,
+        storage_file_id: int,
+    ) -> VesselCertificateFile | None:
+        return await self.db.scalar(
+            select(VesselCertificateFile).where(
+                VesselCertificateFile.vessel_certificate_id == certificate_id,
+                VesselCertificateFile.storage_file_id == storage_file_id,
+            )
+        )
+
+    async def create_image_recognition(self, data: dict[str, Any]) -> VesselCertificateImageRecognition:
+        entity = VesselCertificateImageRecognition(**data)
+        self.db.add(entity)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def get_image_recognition(self, recognition_id: int) -> VesselCertificateImageRecognition | None:
+        return await self.db.scalar(
+            select(VesselCertificateImageRecognition).where(VesselCertificateImageRecognition.id == recognition_id)
+        )
 
 
 SINGLETON_MODELS = (

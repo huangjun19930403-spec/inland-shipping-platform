@@ -19,6 +19,9 @@ from app.modules.vessel.schemas import (
     VesselCargoCapabilityUpsertRequest,
     VesselCertificateCreateRequest,
     VesselCertificateFileResponse,
+    VesselCertificateImageRecognitionConfirmRequest,
+    VesselCertificateImageRecognitionCreateRequest,
+    VesselCertificateImageRecognitionResponse,
     VesselCertificateResponse,
     VesselCertificateUpdateRequest,
     VesselChangeEventResponse,
@@ -426,6 +429,46 @@ async def upload_vessel_certificate_file(
         vessel_id,
         certificate_id,
         file,
+        operator_id=_operator_id(current_user),
+    )
+
+
+@router.post(
+    "/{vessel_id}/certificates/{certificate_id}/image-recognitions",
+    response_model=VesselCertificateImageRecognitionResponse,
+)
+async def create_vessel_certificate_image_recognition(
+    vessel_id: int,
+    certificate_id: int,
+    body: VesselCertificateImageRecognitionCreateRequest,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).create_certificate_image_recognition(
+        vessel_id,
+        certificate_id,
+        body,
+        operator_id=_operator_id(current_user),
+    )
+
+
+@router.post(
+    "/{vessel_id}/certificates/{certificate_id}/image-recognitions/{recognition_id}/confirm",
+    response_model=VesselCertificateResponse,
+)
+async def confirm_vessel_certificate_image_recognition(
+    vessel_id: int,
+    certificate_id: int,
+    recognition_id: int,
+    body: VesselCertificateImageRecognitionConfirmRequest,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).confirm_certificate_image_recognition(
+        vessel_id,
+        certificate_id,
+        recognition_id,
+        body,
         operator_id=_operator_id(current_user),
     )
 
