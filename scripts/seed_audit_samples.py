@@ -13,15 +13,15 @@ from app.models.address import Region, TransportNode
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityStandard
 from app.models.freight import Freight
-from app.models.ship import ShipProfile
 from app.models.system import SysUser
+from app.models.vessel import VesselProfile
 
 
 OBJECT_SPECS = [
     ("TRANSPORT_NODE", "ADDRESS", TransportNode, "code", "name", "节点名称"),
     ("REGION", "REGION", Region, "code", "name", "区域名称"),
     ("COMMODITY_STANDARD", "COMMODITY", CommodityStandard, "code", "name", "标准货品名称"),
-    ("SHIP_PROFILE", "SHIP", ShipProfile, "ais_id", "ship_name", "船名"),
+    ("VESSEL_PROFILE", "VESSEL", VesselProfile, "vessel_profile_code", "ship_name", "船名"),
     ("FREIGHT", "FREIGHT", Freight, "freight_no", "cargo_title", "货源标题"),
 ]
 

@@ -19,7 +19,7 @@ python -m scripts.verify_local_acceptance
 5. `seed_commodity_standards`
 6. `seed_foundation_samples`
 7. `purge_legacy_e2e_data`
-8. `seed_ship_samples`
+8. `seed_vessel_samples`
 9. `seed_freight_samples`
 10. `seed_analysis_samples`
 11. `seed_system_base`

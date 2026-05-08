@@ -35,6 +35,12 @@ IMAGE_CONTENT_TYPES = {
     "image/bmp": ".bmp",
 }
 
+DOCUMENT_CONTENT_TYPES = {
+    "application/pdf": ".pdf",
+}
+
+DEFAULT_FILE_CONTENT_TYPES = IMAGE_CONTENT_TYPES | DOCUMENT_CONTENT_TYPES
+
 
 @dataclass(frozen=True)
 class ObjectStorageSettings:
@@ -43,7 +49,7 @@ class ObjectStorageSettings:
     endpoint: str | None
     access_key: str
     secret_key: str
-    max_image_size_bytes: int
+    max_file_size_bytes: int
 
 
 def _safe_original_name(filename: str | None) -> str:
@@ -61,8 +67,8 @@ def _clean_content_type(value: str | None, filename: str | None) -> str:
 
 def _object_key(prefix: str, filename: str, content_type: str) -> str:
     ext = Path(filename).suffix.lower()
-    if ext not in IMAGE_CONTENT_TYPES.values():
-        ext = IMAGE_CONTENT_TYPES.get(content_type, ".bin")
+    if ext not in DEFAULT_FILE_CONTENT_TYPES.values():
+        ext = DEFAULT_FILE_CONTENT_TYPES.get(content_type, ".bin")
     prefix_clean = re.sub(r"[^0-9A-Za-z/_-]+", "-", prefix.strip("/"))
     return posixpath.join(prefix_clean, f"{uuid.uuid4().hex}{ext}")
 
@@ -104,7 +110,7 @@ class FileStorageService:
             endpoint=endpoint,
             access_key=access_key,
             secret_key=secret_key,
-            max_image_size_bytes=max(1, max_mb) * 1024 * 1024,
+            max_file_size_bytes=max(1, max_mb) * 1024 * 1024,
         )
 
     def _client(self, settings: ObjectStorageSettings) -> ObjectStorageClient:
@@ -124,17 +130,35 @@ class FileStorageService:
         object_prefix: str,
         uploaded_by: int | None = None,
     ) -> StorageFile:
+        return await self.upload_file(
+            file=file,
+            object_prefix=object_prefix,
+            uploaded_by=uploaded_by,
+            allowed_content_types=set(IMAGE_CONTENT_TYPES),
+            unsupported_message="仅支持 jpg、png、gif、webp、bmp 图片",
+        )
+
+    async def upload_file(
+        self,
+        *,
+        file: UploadFile,
+        object_prefix: str,
+        uploaded_by: int | None = None,
+        allowed_content_types: set[str] | None = None,
+        unsupported_message: str = "仅支持图片或 PDF 文件",
+    ) -> StorageFile:
         settings = await self._settings()
         original_name = _safe_original_name(file.filename)
         content_type = _clean_content_type(file.content_type, original_name)
-        if content_type not in IMAGE_CONTENT_TYPES:
-            raise ValidationError("仅支持 jpg、png、gif、webp、bmp 图片")
+        allowed = allowed_content_types or set(DEFAULT_FILE_CONTENT_TYPES)
+        if content_type not in allowed:
+            raise ValidationError(unsupported_message)
 
         content = await file.read()
         if not content:
             raise ValidationError("上传文件不能为空")
-        if len(content) > settings.max_image_size_bytes:
-            raise ValidationError("图片大小超过限制")
+        if len(content) > settings.max_file_size_bytes:
+            raise ValidationError("文件大小超过限制")
 
         key = _object_key(object_prefix, original_name, content_type)
         await self._client(settings).put_object(

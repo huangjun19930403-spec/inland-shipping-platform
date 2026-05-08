@@ -222,6 +222,21 @@ SEQUENCE_DEFINITIONS: list[dict[str, Any]] = [
         "is_enabled": True,
         "remark": "审核任务号",
     },
+    {
+        "biz_code": "VESSEL_PROFILE_CODE",
+        "biz_name": "船舶档案编码",
+        "target_table": "vessel_profile",
+        "target_column": "vessel_profile_code",
+        "prefix": "VP",
+        "date_format": None,
+        "separator": None,
+        "current_value": 0,
+        "value_length": 6,
+        "step": 1,
+        "reset_rule": "NONE",
+        "is_enabled": True,
+        "remark": "船舶主数据档案编码",
+    },
 ]
 
 

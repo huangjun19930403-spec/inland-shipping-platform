@@ -104,29 +104,34 @@ Base URL: `/api/v1`
 
 规则维护接口同步接收结构化 `items`。包装形式、运输方式使用 `{ code, is_default }`；船型、节点类型、作业方式使用 `{ code, allow_flag, rule_desc }`。
 
-## Ship
+## Vessel
 
-- `GET /ship`
-- `POST /ship`
-- `GET /ship/{ship_id}`
-- `PUT /ship/{ship_id}`
-- `PUT /ship/{ship_id}/status`
-- `GET /ship/statistics/overview`
-- `GET /ship/{ship_id}/capacity`
-- `PUT /ship/{ship_id}/capacity`
-- `GET /ship/{ship_id}/operation`
-- `PUT /ship/{ship_id}/operation`
-- `PUT /ship/{ship_id}/owners`
-- `PUT /ship/{ship_id}/contacts`
-- `GET /ship/{ship_id}/certificates`
-- `POST /ship/{ship_id}/certificates`
-- `PUT /ship/certificates/{certificate_id}`
-- `DELETE /ship/certificates/{certificate_id}`
-- `PUT /ship/certificates/{certificate_id}/files`
-- `GET /ship/{ship_id}/name-history`
-- `POST /ship/{ship_id}/name-history`
-- `GET /ship/{ship_id}/mmsi-history`
-- `POST /ship/{ship_id}/mmsi-history`
+- `GET /vessels/dashboard`
+- `GET /vessels`
+- `GET /vessels/position-monitor`
+- `GET /vessels/governance/summary`
+- `GET /vessels/governance/tasks`
+- `POST /vessels`
+- `GET /vessels/{vessel_id}`
+- `PUT /vessels/{vessel_id}/profile`
+- `PUT /vessels/{vessel_id}/registration`
+- `PUT /vessels/{vessel_id}/capacity`
+- `PUT /vessels/{vessel_id}/build-info`
+- `PUT /vessels/{vessel_id}/cargo-capability`
+- `PUT /vessels/{vessel_id}/manual-preference`
+- `GET|PUT /vessels/{vessel_id}/owners`
+- `GET|PUT /vessels/{vessel_id}/operators`
+- `GET|PUT /vessels/{vessel_id}/contacts`
+- `GET|PUT /vessels/{vessel_id}/crew`
+- `GET|POST /vessels/{vessel_id}/certificates`
+- `PUT /vessels/{vessel_id}/certificates/{certificate_id}`
+- `POST /vessels/{vessel_id}/certificates/{certificate_id}/files`
+- `POST /vessels/{vessel_id}/owner-transfer`
+- `GET /vessel-quality-issues`
+- `POST /vessel-quality-issues`
+- `PUT /vessel-quality-issues/{issue_id}`
+- `GET /vessel-identity-candidates`
+- `POST /vessel-identity-candidates/{candidate_id}`
 
 ## Freight
 

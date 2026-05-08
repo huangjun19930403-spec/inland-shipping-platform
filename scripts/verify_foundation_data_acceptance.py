@@ -280,7 +280,7 @@ async def verify() -> list[CheckResult]:
                     for dict_code, item_code in [
                         ("PACKAGING_FORM", "BULK"),
                         ("TRANSPORT_MODE_ELEMENT", "WATER"),
-                        ("SHIP_TYPE", "BULK_CARRIER"),
+                        ("SHIP_TYPE", "DRY_BULK"),
                         ("NODE_TYPE", "PORT"),
                         ("NODE_CONTACT_TYPE", "OPERATIONS"),
                         ("NODE_PHOTO_TYPE", "OVERVIEW"),

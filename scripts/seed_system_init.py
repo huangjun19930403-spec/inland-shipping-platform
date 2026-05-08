@@ -16,8 +16,8 @@ from scripts.seed_local_private_config import seed_local_private_config
 from scripts.seed_audit_samples import seed_audit_samples
 from scripts.seed_navigation_constraints import seed_navigation_constraints
 from scripts.seed_route_samples import seed_route_samples
-from scripts.seed_ship_samples import seed_ship_samples
 from scripts.seed_system_base import seed_system_base
+from scripts.seed_vessel_samples import seed_vessel_samples
 from scripts.purge_legacy_e2e_data import purge_legacy_e2e_data
 
 
@@ -29,7 +29,7 @@ async def seed_system_init() -> None:
     await seed_commodity_standards()
     await seed_foundation_samples()
     await purge_legacy_e2e_data()
-    await seed_ship_samples()
+    await seed_vessel_samples()
     await seed_freight_samples()
     await seed_analysis_samples()
     await seed_system_base()

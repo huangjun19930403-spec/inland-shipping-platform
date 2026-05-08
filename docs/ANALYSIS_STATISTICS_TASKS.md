@@ -76,7 +76,7 @@
 ### ANALYSIS_SHIP_DAILY
 
 - 模块：船舶分析。
-- 源表：`ship_profile`、`ship_capacity`、`ship_operation`。
+- 源表：`vessel_profile`、`vessel_capacity_dimension`、`vessel_operator_period`。
 - 目标表：`fact_ship_daily`。
 - 日期字段：统计日使用任务日期范围内每一天。
 - 过滤条件：已 seed 或导入的船舶主档；活跃口径来自本地运营样例。
@@ -176,4 +176,4 @@ Docker Compose 中应同时启动 API、Redis、`analysis-worker` 和 `analysis-
 
 ## Seed 与本地样例
 
-`scripts.seed_analysis_samples` 先 seed `analysis_job_definition`、指标和分桶，再从已 seed 的 `freight`、`ship_profile` 等真实业务样例聚合生成事实表。船舶城市热力和船舶流向在未接入 ES 的本地环境使用确定性样例源，结果标记 `LOCAL_SAMPLE`，保证本地调试和验收可重复。
+`scripts.seed_analysis_samples` 先 seed `analysis_job_definition`、指标和分桶，再从已 seed 的 `freight`、`vessel_profile` 等真实业务样例聚合生成事实表。船舶城市热力和船舶流向在未接入 ES 的本地环境使用确定性样例源，结果标记 `LOCAL_SAMPLE`，保证本地调试和验收可重复。

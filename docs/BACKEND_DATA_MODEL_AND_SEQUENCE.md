@@ -49,16 +49,28 @@
 
 ### 船舶
 
-- `ship_profile`
-- `ship_capacity`
-- `ship_operation`
-- `ship_owner`
-- `ship_contact`
-- `ship_certificate`
-- `ship_certificate_file`
-- `ship_name_history`
-- `ship_mmsi_history`
-- `ship_dynamic`
+- `vessel_identity`
+- `vessel_identity_link`
+- `vessel_profile`
+- `vessel_identifier_history`
+- `vessel_name_history`
+- `vessel_registration_info`
+- `vessel_capacity_dimension`
+- `vessel_build_info`
+- `vessel_cargo_capability`
+- `vessel_owner_period`
+- `vessel_operator_period`
+- `vessel_contact`
+- `vessel_crew_assignment`
+- `vessel_person_certificate`
+- `vessel_certificate`
+- `vessel_certificate_file`
+- `vessel_manual_preference`
+- `vessel_behavior_profile`
+- `vessel_quality_snapshot`
+- `vessel_quality_issue`
+- `vessel_identity_candidate`
+- `vessel_change_event`
 
 船舶导入批次表已删除。后续如重新需要导入能力，应按轻量技术日志重新设计，不作为核心产品对象。
 

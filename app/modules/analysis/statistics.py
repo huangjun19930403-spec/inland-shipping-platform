@@ -27,7 +27,7 @@ from app.models.analysis import (
 )
 from app.models.commodity import CommodityStandard, CommodityType
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightTmsInbound
-from app.models.ship import ShipCapacity, ShipOperation, ShipProfile
+from app.models.vessel import VesselCapacityDimension, VesselOperatorPeriod, VesselProfile
 from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
 
 
@@ -501,14 +501,30 @@ class AnalysisStatisticsService:
         await self.db.flush()
         return AggregationResult("ANALYSIS_FREIGHT_NODE_DAILY", len(freights), len(acc), len(acc), ["fact_freight_node_daily"])
 
-    async def _ship_context(self) -> tuple[list[ShipProfile], dict[int, ShipCapacity], dict[int, ShipOperation], dict[str, AdminRegion], dict[str, int | None]]:
+    async def _ship_context(
+        self,
+    ) -> tuple[
+        list[VesselProfile],
+        dict[int, VesselCapacityDimension],
+        dict[int, VesselOperatorPeriod],
+        dict[str, AdminRegion],
+        dict[str, int | None],
+    ]:
         ships = (
-            await self.db.execute(select(ShipProfile).where(ShipProfile.deleted_at.is_(None)).order_by(ShipProfile.id.asc()))
+            await self.db.execute(select(VesselProfile).where(VesselProfile.deleted_at.is_(None)).order_by(VesselProfile.id.asc()))
         ).scalars().all()
-        capacities = (await self.db.execute(select(ShipCapacity))).scalars().all()
-        operations = (await self.db.execute(select(ShipOperation))).scalars().all()
+        capacities = (await self.db.execute(select(VesselCapacityDimension))).scalars().all()
+        operations = (
+            await self.db.execute(select(VesselOperatorPeriod).where(VesselOperatorPeriod.is_current.is_(True)))
+        ).scalars().all()
         city_by_code, primary_region = await self._city_context()
-        return list(ships), {row.ship_id: row for row in capacities}, {row.ship_id: row for row in operations}, city_by_code, primary_region
+        return (
+            list(ships),
+            {row.vessel_profile_id: row for row in capacities},
+            {row.vessel_profile_id: row for row in operations},
+            city_by_code,
+            primary_region,
+        )
 
     async def run_ship_daily(self, start: date, end: date, *, force_rebuild: bool = True) -> AggregationResult:
         if force_rebuild:
@@ -528,7 +544,8 @@ class AnalysisStatisticsService:
                 key = (ship.ship_type_code, ship.registry_city_code, ship.business_region_id, status_code, age_code, dwt_code)
                 item = acc[key]
                 item["count"] = int(item["count"]) + 1
-                item["active"] = int(item["active"]) + (0 if ship.profile_status_code == "INACTIVE" or status_code == "SUSPENDED" else 1)
+                inactive_profile = ship.profile_status_code in {"INACTIVE", "TRANSFERRED", "ARCHIVED", "DECOMMISSIONED"}
+                item["active"] = int(item["active"]) + (0 if inactive_profile or status_code == "SUSPENDED" else 1)
                 item["dwt"] = item["dwt"] + deadweight
                 item["age_name"] = age_name
                 item["dwt_name"] = dwt_name
@@ -572,7 +589,8 @@ class AnalysisStatisticsService:
                 capacity = capacities.get(ship.id)
                 deadweight = _money(capacity.deadweight_ton) if capacity and capacity.deadweight_ton is not None else Decimal("0")
                 item = acc[city_code]
-                active = 0 if ship.profile_status_code == "INACTIVE" or (day_idx + ship.id) % 17 == 0 else 1
+                inactive_profile = ship.profile_status_code in {"INACTIVE", "TRANSFERRED", "ARCHIVED", "DECOMMISSIONED"}
+                active = 0 if inactive_profile or (day_idx + ship.id) % 17 == 0 else 1
                 item["count"] = int(item["count"]) + 1
                 item["active"] = int(item["active"]) + active
                 item["dwt"] = item["dwt"] + deadweight

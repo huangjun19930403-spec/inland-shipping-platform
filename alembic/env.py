@@ -25,7 +25,7 @@ from app.models import (  # noqa: F401
     dictionary,
     freight,
     route,
-    ship,
+    vessel,
     system,
 )
 

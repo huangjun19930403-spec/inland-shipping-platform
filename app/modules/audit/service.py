@@ -11,7 +11,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.models.address import Region, TransportNode
 from app.models.commodity import CommodityStandard
 from app.models.freight import Freight
-from app.models.ship import ShipProfile
+from app.models.vessel import VesselProfile
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.audit.repository import (
     AuditRecordRepository,
@@ -41,7 +41,7 @@ _OBJECT_TYPE_META = {
     "TRANSPORT_NODE": ("运输节点", "primary"),
     "REGION": ("业务区域", "success"),
     "COMMODITY_STANDARD": ("标准货品", "warning"),
-    "SHIP_PROFILE": ("船舶主档", "info"),
+    "VESSEL_PROFILE": ("船舶档案", "info"),
     "FREIGHT": ("正式货源", "danger"),
 }
 _CHANGE_TYPE_META = {
@@ -62,14 +62,14 @@ _SOURCE_MODULE_META = {
     "ADDRESS": ("地址节点", "primary"),
     "REGION": ("业务区域", "success"),
     "COMMODITY": ("货品", "warning"),
-    "SHIP": ("船舶", "info"),
+    "VESSEL": ("船舶", "info"),
     "FREIGHT": ("货源", "danger"),
 }
 _AUDIT_TARGET_MODELS = {
     "TRANSPORT_NODE": TransportNode,
     "REGION": Region,
     "COMMODITY_STANDARD": CommodityStandard,
-    "SHIP_PROFILE": ShipProfile,
+    "VESSEL_PROFILE": VesselProfile,
     "FREIGHT": Freight,
 }
 

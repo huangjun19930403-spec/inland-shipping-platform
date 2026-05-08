@@ -42,8 +42,31 @@ from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightNormalizationSuggestion, FreightNormalizationTask, FreightTmsInbound
 from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
-from app.models.ship import ShipProfile
 from app.models.system import SysMenu, SystemConfig
+from app.models.vessel import (
+    VesselBehaviorProfile,
+    VesselBuildInfo,
+    VesselCapacityDimension,
+    VesselCargoCapability,
+    VesselCertificate,
+    VesselCertificateFile,
+    VesselChangeEvent,
+    VesselContact,
+    VesselCrewAssignment,
+    VesselIdentifierHistory,
+    VesselIdentity,
+    VesselIdentityCandidate,
+    VesselIdentityLink,
+    VesselManualPreference,
+    VesselNameHistory,
+    VesselOperatorPeriod,
+    VesselOwnerPeriod,
+    VesselPersonCertificate,
+    VesselProfile,
+    VesselQualityIssue,
+    VesselQualitySnapshot,
+    VesselRegistrationInfo,
+)
 from app.modules.analysis.service import AnalysisDashboardService
 from scripts.seed_local_private_config import (
     CONFIG_METADATA_BY_KEY,
@@ -78,11 +101,45 @@ LEGACY_TABLES = {
     "freight_candidate_feedback",
 }
 
+VESSEL_TABLES = {
+    "vessel_behavior_profile",
+    "vessel_build_info",
+    "vessel_capacity_dimension",
+    "vessel_cargo_capability",
+    "vessel_certificate",
+    "vessel_certificate_file",
+    "vessel_change_event",
+    "vessel_contact",
+    "vessel_crew_assignment",
+    "vessel_identifier_history",
+    "vessel_identity",
+    "vessel_identity_candidate",
+    "vessel_identity_link",
+    "vessel_manual_preference",
+    "vessel_name_history",
+    "vessel_operator_period",
+    "vessel_owner_period",
+    "vessel_person_certificate",
+    "vessel_profile",
+    "vessel_quality_issue",
+    "vessel_quality_snapshot",
+    "vessel_registration_info",
+}
+
 LEGACY_ROUTE_PATHS = {
+    "/api/v1/ship",
+    "/api/v1/ship/{ship_id}",
+    "/api/v1/ship/statistics/overview",
+    "/api/v1/ship/{ship_id}/capacity",
+    "/api/v1/ship/{ship_id}/operation",
+    "/api/v1/ship/{ship_id}/owners",
+    "/api/v1/ship/{ship_id}/contacts",
+    "/api/v1/ship/{ship_id}/certificates",
     "/api/v1/ship/import/batches",
     "/api/v1/ship/import/batches/{batch_id}",
     "/api/v1/ship/import/batches/{batch_id}/raw-records",
     "/api/v1/ship/import/batches/{batch_id}/records",
+    "/api/v1/vessels/operation-search",
     "/api/v1/analysis/cargo/daily",
     "/api/v1/analysis/cargo/cities",
     "/api/v1/analysis/cargo/flows",
@@ -102,6 +159,16 @@ LEGACY_ROUTE_PATHS = {
 }
 
 REQUIRED_ROUTE_PATHS = {
+    "/api/v1/vessels/dashboard",
+    "/api/v1/vessels",
+    "/api/v1/vessels/position-monitor",
+    "/api/v1/vessels/governance/summary",
+    "/api/v1/vessels/governance/tasks",
+    "/api/v1/vessels/{vessel_id}",
+    "/api/v1/vessels/{vessel_id}/profile",
+    "/api/v1/vessels/{vessel_id}/certificates/{certificate_id}/files",
+    "/api/v1/vessel-quality-issues",
+    "/api/v1/vessel-identity-candidates",
     "/api/v1/freight/manual",
     "/api/v1/freight/batches/wechat",
     "/api/v1/freight/batches/{batch_id}/parse",
@@ -135,12 +202,21 @@ LEGACY_MENU_CODES = {
     "ANALYSIS_CARGO",
     "FREIGHT_AI_PARSE_RECORDS",
     "FREIGHT_SOURCE_INBOUNDS",
+    "VESSEL_OPERATION_SEARCH",
+    "VESSEL_QUALITY_ISSUES",
+    "VESSEL_IDENTITY_CANDIDATES",
+    "VESSEL_IMPORT",
 }
 
 LEGACY_MENU_PATHS = {
     "/commodity/categories",
     "/commodity/types",
     "/ship/import/batches",
+    "/ship/list",
+    "/vessels/operation-search",
+    "/vessels/quality-issues",
+    "/vessels/identity-candidates",
+    "/vessels/import",
     "/route/plans",
     "/analysis/cargo",
 }
@@ -215,6 +291,15 @@ async def verify() -> list[CheckResult]:
         )
     )
 
+    missing_vessel_tables = sorted(VESSEL_TABLES - tables)
+    results.append(
+        _result(
+            "vessel tables present",
+            not missing_vessel_tables,
+            "all present" if not missing_vessel_tables else ", ".join(missing_vessel_tables),
+        )
+    )
+
     route_paths = {getattr(route, "path", "") for route in app.routes}
     legacy_routes_left = sorted(path for path in LEGACY_ROUTE_PATHS if path in route_paths)
     results.append(
@@ -241,7 +326,26 @@ async def verify() -> list[CheckResult]:
             ("node contacts", await _count(session, TransportNodeContact), 60),
             ("commodity standards", await _count(session, CommodityStandard), 30),
             ("commodity aliases", await _count(session, CommodityAlias), 80),
-            ("ships", await _count(session, ShipProfile), 80),
+            ("vessel profiles", await _count(session, VesselProfile), 120),
+            ("vessel identities", await _count(session, VesselIdentity), 120),
+            ("vessel identity links", await _count(session, VesselIdentityLink), 120),
+            ("vessel registrations", await _count(session, VesselRegistrationInfo), 100),
+            ("vessel capacity dimensions", await _count(session, VesselCapacityDimension), 100),
+            ("vessel build info", await _count(session, VesselBuildInfo), 100),
+            ("vessel cargo capabilities", await _count(session, VesselCargoCapability), 100),
+            ("vessel owner periods", await _count(session, VesselOwnerPeriod), 100),
+            ("vessel operator periods", await _count(session, VesselOperatorPeriod), 100),
+            ("vessel contacts", await _count(session, VesselContact), 100),
+            ("vessel certificates", await _count(session, VesselCertificate), 80),
+            ("vessel manual preferences", await _count(session, VesselManualPreference), 100),
+            ("vessel behavior profiles", await _count(session, VesselBehaviorProfile), 100),
+            ("vessel quality snapshots", await _count(session, VesselQualitySnapshot), 100),
+            ("vessel quality issues", await _count(session, VesselQualityIssue), 20),
+            ("vessel identity candidates", await _count(session, VesselIdentityCandidate), 10),
+            ("vessel change events", await _count(session, VesselChangeEvent), 100),
+            ("vessel crew assignments table empty-ok", await _count(session, VesselCrewAssignment), 0),
+            ("vessel person certificates table empty-ok", await _count(session, VesselPersonCertificate), 0),
+            ("vessel certificate files table empty-ok", await _count(session, VesselCertificateFile), 0),
             ("freights", await _count(session, Freight), 200),
             ("wechat batch tasks", await _count(session, FreightBatchTask), 25),
             ("tms inbounds", await _count(session, FreightTmsInbound), 10),
@@ -264,6 +368,16 @@ async def verify() -> list[CheckResult]:
         ]
         for name, actual, expected in count_checks:
             results.append(_result(name, actual >= expected, f"{actual} >= {expected}"))
+
+        historical_name_count = await _count(session, VesselNameHistory, VesselNameHistory.end_date.is_not(None))
+        historical_identifier_count = await _count(session, VesselIdentifierHistory, VesselIdentifierHistory.end_date.is_not(None))
+        results.append(
+            _result(
+                "vessel historical names and mmsi seeded",
+                historical_name_count >= 20 and historical_identifier_count >= 20,
+                f"name {historical_name_count} >= 20, identifier {historical_identifier_count} >= 20",
+            )
+        )
 
         raw_freight_count = int(
             await session.scalar(
@@ -419,6 +533,21 @@ async def verify() -> list[CheckResult]:
             .all()
         )
         results.append(_result("legacy menu entries removed", not menu_left, str(menu_left or "none")))
+        required_vessel_paths = {"/vessels/dashboard", "/vessels/position-monitor", "/vessels/list", "/vessels/governance"}
+        vessel_paths = {
+            row[0]
+            for row in (
+                await session.execute(select(SysMenu.route_path).where(SysMenu.route_path.in_(required_vessel_paths)))
+            ).all()
+        }
+        missing_vessel_paths = sorted(required_vessel_paths - vessel_paths)
+        results.append(
+            _result(
+                "business vessel menus present",
+                not missing_vessel_paths,
+                "all present" if not missing_vessel_paths else ", ".join(missing_vessel_paths),
+            )
+        )
 
         configs = (
             (

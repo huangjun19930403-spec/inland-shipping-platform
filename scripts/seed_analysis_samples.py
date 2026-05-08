@@ -31,7 +31,7 @@ from app.models.analysis import (
 )
 from app.models.commodity import CommodityStandard
 from app.models.freight import Freight
-from app.models.ship import ShipProfile
+from app.models.vessel import VesselProfile
 from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
 from app.modules.analysis.statistics import AnalysisStatisticsService, seed_analysis_job_definitions
 
@@ -193,7 +193,7 @@ async def _record_run(session, service: AnalysisStatisticsService, job_code: str
 async def seed_analysis_samples() -> None:
     async with AsyncSessionLocal() as session:
         freight_count = int(await session.scalar(select(Freight.id).limit(1)) is not None)
-        ship_count = int(await session.scalar(select(ShipProfile.id).limit(1)) is not None)
+        ship_count = int(await session.scalar(select(VesselProfile.id).limit(1)) is not None)
         node_count = int(await session.scalar(select(TransportNode.id).limit(1)) is not None)
         commodity_count = int(await session.scalar(select(CommodityStandard.id).limit(1)) is not None)
         if not all((freight_count, ship_count, node_count, commodity_count)):
