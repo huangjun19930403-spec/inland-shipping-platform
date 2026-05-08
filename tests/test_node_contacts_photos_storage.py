@@ -33,6 +33,7 @@ from app.models.base import Base
 from app.models.system import SystemConfig
 from app.modules.address.schemas import TransportNodeContactItem, TransportNodeContactReplaceRequest
 from app.modules.address.service import TransportNodeService
+from app.modules.storage.router import _content_disposition_header
 from app.modules.storage.service import FileStorageService
 
 
@@ -141,6 +142,15 @@ def _image_upload(filename: str = "node.jpg", content_type: str = "image/jpeg") 
         filename=filename,
         headers=Headers({"content-type": content_type}),
     )
+
+
+def test_file_content_disposition_supports_chinese_filename() -> None:
+    header = _content_disposition_header("船舶证件资料.pdf")
+
+    assert "船舶证件资料" not in header
+    assert 'filename="download.pdf"' in header
+    assert "filename*=UTF-8''%E8%88%B9%E8%88%B6%E8%AF%81%E4%BB%B6%E8%B5%84%E6%96%99.pdf" in header
+    header.encode("latin-1")
 
 
 @pytest.mark.asyncio
