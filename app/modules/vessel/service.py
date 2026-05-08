@@ -1543,11 +1543,60 @@ class VesselService:
             if text_value.isdigit():
                 terms.append(int(text_value))
         terms = list(dict.fromkeys(terms))
-        mmsi_fields = ["mmsi", "mmsi.keyword", "ship_mmsi", "ship_mmsi.keyword", "MMSI", "ais", "ship_ais"]
-        time_fields = ["@timestamp", "timestamp", "location_time", "update_time", "position_time", "time"]
+        mmsi_fields = [
+            "shipMmsi",
+            "shipMmsi.keyword",
+            "mmsi",
+            "mmsi.keyword",
+            "ship_mmsi",
+            "ship_mmsi.keyword",
+            "MMSI",
+            "ais",
+            "ship_ais",
+        ]
+        time_fields = ["posTime", "updateTime", "timestamp", "location_time", "update_time", "position_time", "time", "@timestamp"]
+        source_fields = [
+            "shipMmsi",
+            "mmsi",
+            "ship_mmsi",
+            "MMSI",
+            "ais",
+            "ship_ais",
+            "lon",
+            "lng",
+            "longitude",
+            "longitude_gcj02",
+            "lat",
+            "latitude",
+            "latitude_gcj02",
+            "speed",
+            "sog",
+            "speed_kn",
+            "cog",
+            "course",
+            "course_deg",
+            "head",
+            "heading",
+            "hdg",
+            "heading_deg",
+            "posTime",
+            "updateTime",
+            "timestamp",
+            "location_time",
+            "update_time",
+            "position_time",
+            "time",
+            "@timestamp",
+            "location_text",
+            "address",
+            "area_name",
+            "city_name",
+            "shipEnName",
+        ]
         query_body = {
             "size": min(max_hits, 1000),
             "track_total_hits": False,
+            "_source": source_fields,
             "sort": [
                 {field: {"order": "desc", "unmapped_type": "date", "missing": "_last"}}
                 for field in time_fields
@@ -1579,7 +1628,7 @@ class VesselService:
             source = hit.get("_source") if isinstance(hit, dict) else None
             if not isinstance(source, dict):
                 continue
-            mmsi_raw = _first_value(source, ["mmsi", "ship_mmsi", "MMSI", "ais", "ship_ais"])
+            mmsi_raw = _first_value(source, ["shipMmsi", "mmsi", "ship_mmsi", "MMSI", "ais", "ship_ais"])
             if mmsi_raw is None:
                 continue
             mmsi = str(mmsi_raw).strip()
@@ -1590,7 +1639,7 @@ class VesselService:
             if not (Decimal("-180") <= longitude <= Decimal("180") and Decimal("-90") <= latitude <= Decimal("90")):
                 continue
             position_time = _parse_position_time(
-                _first_value(source, ["timestamp", "location_time", "update_time", "position_time", "time", "@timestamp"])
+                _first_value(source, ["posTime", "updateTime", "timestamp", "location_time", "update_time", "position_time", "time", "@timestamp"])
             )
             existing = result.get(mmsi)
             if existing and existing.get("position_time") and position_time and existing["position_time"] >= position_time:
@@ -1601,7 +1650,7 @@ class VesselService:
                 "latitude": latitude,
                 "speed_kn": _first_value(source, ["speed", "sog", "speed_kn"]),
                 "course_deg": _first_value(source, ["course", "cog", "course_deg"]),
-                "heading_deg": _first_value(source, ["heading", "hdg", "heading_deg"]),
+                "heading_deg": _first_value(source, ["heading", "head", "hdg", "heading_deg"]),
                 "position_time": position_time,
                 "location_text": _first_value(source, ["location_text", "address", "area_name", "city_name"]),
             }
