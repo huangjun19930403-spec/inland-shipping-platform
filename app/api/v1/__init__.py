@@ -11,8 +11,6 @@ from app.modules.freight.router import router as freight_router
 from app.modules.route.router import router as route_router
 from app.modules.storage.router import router as storage_router
 from app.modules.system.router import router as system_router
-from app.modules.vessel.router import identity_router as vessel_identity_router
-from app.modules.vessel.router import quality_router as vessel_quality_router
 from app.modules.vessel.router import router as vessel_router
 
 api_router = APIRouter()
@@ -20,8 +18,6 @@ api_router.include_router(dictionary_router, prefix="/dictionary", tags=["dictio
 api_router.include_router(address_router, prefix="/address", tags=["address"])
 api_router.include_router(commodity_router, prefix="/commodity", tags=["commodity"])
 api_router.include_router(vessel_router, prefix="/vessels", tags=["vessels"])
-api_router.include_router(vessel_quality_router, prefix="/vessel-quality-issues", tags=["vessel-quality-issues"])
-api_router.include_router(vessel_identity_router, prefix="/vessel-identity-candidates", tags=["vessel-identity-candidates"])
 api_router.include_router(freight_router, prefix="/freight", tags=["freight"])
 api_router.include_router(route_router, prefix="/route", tags=["route"])
 api_router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])

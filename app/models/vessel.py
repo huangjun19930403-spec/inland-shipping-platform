@@ -29,20 +29,15 @@ class VesselProfile(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     vessel_identity_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("vessel_identity.id"), nullable=True, index=True
     )
-    ais_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     ship_name: Mapped[str] = mapped_column(String(128), nullable=False)
     ship_name_en: Mapped[str | None] = mapped_column(String(256), nullable=True)
     current_mmsi: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     ship_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    navigation_power_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    profile_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="NEED_GOVERNANCE")
+    profile_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="ACTIVE")
     identity_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNLINKED")
-    quality_level_code: Mapped[str] = mapped_column(String(64), nullable=False, default="LOW")
     operation_status_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     home_port_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
     home_port_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    owner_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    building_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     registry_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
     business_region_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="MANUAL")
@@ -152,24 +147,6 @@ class VesselBuildInfo(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
-class VesselCargoCapability(Base):
-    __tablename__ = "vessel_cargo_capability"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    vessel_profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("vessel_profile.id"), unique=True, nullable=False
-    )
-    capability_tags_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    commodity_type_codes_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    preferred_cargo_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    has_self_unloading: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    has_container_fittings: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    can_carry_dangerous: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    temperature_control: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    cargo_handling_notes: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-
 class VesselOwnerPeriod(Base, TimestampMixin):
     __tablename__ = "vessel_owner_period"
 
@@ -179,7 +156,6 @@ class VesselOwnerPeriod(Base, TimestampMixin):
     )
     party_name: Mapped[str] = mapped_column(String(128), nullable=False)
     party_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN")
-    party_relation_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="OWNER")
     certificate_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
     mobile_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     landline_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -199,19 +175,11 @@ class VesselOperatorPeriod(Base, TimestampMixin):
     )
     operator_name: Mapped[str] = mapped_column(String(128), nullable=False)
     party_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN")
-    operator_role_code: Mapped[str] = mapped_column(String(64), nullable=False, default="OPERATOR")
-    manager_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    main_navigation_area_desc: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    usual_route_desc: Mapped[str | None] = mapped_column(String(256), nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    dispatch_contact_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    dispatch_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    risk_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    last_active_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class VesselContact(Base, TimestampMixin):
@@ -332,89 +300,6 @@ class VesselCertificateImageRecognition(Base, TimestampMixin):
     created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     confirmed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-class VesselManualPreference(Base):
-    __tablename__ = "vessel_manual_preference"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    vessel_profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("vessel_profile.id"), unique=True, nullable=False
-    )
-    preferred_cargo_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    avoided_cargo_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    preferred_route_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    unavailable_period_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    freight_preference_text: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    risk_note: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-
-class VesselBehaviorProfile(Base):
-    __tablename__ = "vessel_behavior_profile"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    vessel_profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("vessel_profile.id"), unique=True, nullable=False
-    )
-    active_city_codes_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    usual_route_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    cargo_preference_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    contactability_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    activity_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_active_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="LOCAL_SAMPLE")
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-
-class VesselQualitySnapshot(Base):
-    __tablename__ = "vessel_quality_snapshot"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    vessel_profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("vessel_profile.id"), unique=True, nullable=False
-    )
-    quality_level_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    completeness_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    contact_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    certificate_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    identity_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    issue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-
-class VesselQualityIssue(Base, TimestampMixin):
-    __tablename__ = "vessel_quality_issue"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    vessel_profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True
-    )
-    issue_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    severity_code: Mapped[str] = mapped_column(String(64), nullable=False, default="MEDIUM")
-    issue_title: Mapped[str] = mapped_column(String(128), nullable=False)
-    issue_desc: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="OPEN", index=True)
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-class VesselIdentityCandidate(Base, TimestampMixin):
-    __tablename__ = "vessel_identity_candidate"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    source_profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True
-    )
-    target_profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True
-    )
-    candidate_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PENDING", index=True)
-    reviewed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class VesselChangeEvent(Base):

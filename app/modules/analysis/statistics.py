@@ -27,7 +27,7 @@ from app.models.analysis import (
 )
 from app.models.commodity import CommodityStandard, CommodityType
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightTmsInbound
-from app.models.vessel import VesselCapacityDimension, VesselOperatorPeriod, VesselProfile
+from app.models.vessel import VesselBuildInfo, VesselCapacityDimension, VesselOperatorPeriod, VesselProfile
 from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
 
 
@@ -506,6 +506,7 @@ class AnalysisStatisticsService:
     ) -> tuple[
         list[VesselProfile],
         dict[int, VesselCapacityDimension],
+        dict[int, VesselBuildInfo],
         dict[int, VesselOperatorPeriod],
         dict[str, AdminRegion],
         dict[str, int | None],
@@ -514,6 +515,7 @@ class AnalysisStatisticsService:
             await self.db.execute(select(VesselProfile).where(VesselProfile.deleted_at.is_(None)).order_by(VesselProfile.id.asc()))
         ).scalars().all()
         capacities = (await self.db.execute(select(VesselCapacityDimension))).scalars().all()
+        builds = (await self.db.execute(select(VesselBuildInfo))).scalars().all()
         operations = (
             await self.db.execute(select(VesselOperatorPeriod).where(VesselOperatorPeriod.is_current.is_(True)))
         ).scalars().all()
@@ -521,6 +523,7 @@ class AnalysisStatisticsService:
         return (
             list(ships),
             {row.vessel_profile_id: row for row in capacities},
+            {row.vessel_profile_id: row for row in builds},
             {row.vessel_profile_id: row for row in operations},
             city_by_code,
             primary_region,
@@ -529,7 +532,7 @@ class AnalysisStatisticsService:
     async def run_ship_daily(self, start: date, end: date, *, force_rebuild: bool = True) -> AggregationResult:
         if force_rebuild:
             await self._clear(FactShipDaily, start, end)
-        ships, capacities, operations, _, _ = await self._ship_context()
+        ships, capacities, builds, operations, _, _ = await self._ship_context()
         output = 0
         now = datetime.utcnow()
         for stat_date in _dates(start, end):
@@ -538,7 +541,7 @@ class AnalysisStatisticsService:
                 capacity = capacities.get(ship.id)
                 operation = operations.get(ship.id)
                 deadweight = _money(capacity.deadweight_ton) if capacity and capacity.deadweight_ton is not None else Decimal("0")
-                age_code, age_name = _age_bucket(ship.building_year, stat_date)
+                age_code, age_name = _age_bucket(getattr(builds.get(ship.id), "building_year", None), stat_date)
                 dwt_code, dwt_name = _dwt_bucket(deadweight)
                 status_code = ship.operation_status_code or getattr(operation, "dynamic_status_code", None) or "UNKNOWN"
                 key = (ship.ship_type_code, ship.registry_city_code, ship.business_region_id, status_code, age_code, dwt_code)
@@ -575,7 +578,7 @@ class AnalysisStatisticsService:
     async def run_ship_city_daily(self, start: date, end: date, *, force_rebuild: bool = True) -> AggregationResult:
         if force_rebuild:
             await self._clear(FactShipCityDaily, start, end)
-        ships, capacities, _, city_by_code, primary_region = await self._ship_context()
+        ships, capacities, _, _, city_by_code, primary_region = await self._ship_context()
         city_codes = sorted(city_by_code)
         output = 0
         now = datetime.utcnow()
@@ -616,7 +619,7 @@ class AnalysisStatisticsService:
     async def run_ship_flow_daily(self, start: date, end: date, *, force_rebuild: bool = True) -> AggregationResult:
         if force_rebuild:
             await self._clear(FactShipFlowDaily, start, end)
-        ships, capacities, _, _, primary_region = await self._ship_context()
+        ships, capacities, _, _, _, primary_region = await self._ship_context()
         nodes = list((await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None), TransportNode.status == 1).order_by(TransportNode.id.asc()))).scalars().all())
         if len(nodes) < 2:
             return AggregationResult("ANALYSIS_SHIP_FLOW_DAILY", len(ships), 0, 0, ["fact_ship_flow_daily"], {"source_mode": "LOCAL_SAMPLE"})

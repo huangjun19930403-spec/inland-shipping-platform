@@ -9,23 +9,19 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.vessel import (
-    VesselBehaviorProfile,
     VesselBuildInfo,
     VesselCapacityDimension,
-    VesselCargoCapability,
     VesselCertificate,
     VesselCertificateFile,
     VesselCertificateImageRecognition,
     VesselContact,
     VesselCrewAssignment,
     VesselIdentifierHistory,
-    VesselManualPreference,
     VesselNameHistory,
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
     VesselProfile,
-    VesselQualitySnapshot,
     VesselRegistrationInfo,
 )
 
@@ -192,10 +188,6 @@ SINGLETON_MODELS = (
     VesselRegistrationInfo,
     VesselCapacityDimension,
     VesselBuildInfo,
-    VesselCargoCapability,
-    VesselManualPreference,
-    VesselBehaviorProfile,
-    VesselQualitySnapshot,
 )
 
 LIST_MODELS = (

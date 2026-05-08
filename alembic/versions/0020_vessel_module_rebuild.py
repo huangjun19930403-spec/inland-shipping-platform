@@ -20,10 +20,8 @@ from sqlalchemy.types import BigInteger
 
 from app.models.storage import StorageFile  # noqa: F401
 from app.models.vessel import (
-    VesselBehaviorProfile,
     VesselBuildInfo,
     VesselCapacityDimension,
-    VesselCargoCapability,
     VesselCertificate,
     VesselCertificateFile,
     VesselChangeEvent,
@@ -31,16 +29,12 @@ from app.models.vessel import (
     VesselCrewAssignment,
     VesselIdentifierHistory,
     VesselIdentity,
-    VesselIdentityCandidate,
     VesselIdentityLink,
-    VesselManualPreference,
     VesselNameHistory,
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
     VesselProfile,
-    VesselQualityIssue,
-    VesselQualitySnapshot,
     VesselRegistrationInfo,
 )
 
@@ -65,7 +59,6 @@ VESSEL_TABLES = [
     VesselRegistrationInfo.__table__,
     VesselCapacityDimension.__table__,
     VesselBuildInfo.__table__,
-    VesselCargoCapability.__table__,
     VesselOwnerPeriod.__table__,
     VesselOperatorPeriod.__table__,
     VesselContact.__table__,
@@ -73,11 +66,6 @@ VESSEL_TABLES = [
     VesselPersonCertificate.__table__,
     VesselCertificate.__table__,
     VesselCertificateFile.__table__,
-    VesselManualPreference.__table__,
-    VesselBehaviorProfile.__table__,
-    VesselQualitySnapshot.__table__,
-    VesselQualityIssue.__table__,
-    VesselIdentityCandidate.__table__,
     VesselChangeEvent.__table__,
 ]
 
@@ -152,7 +140,7 @@ def _backfill_from_ship_tables() -> None:
         vessel_id = int(row["id"])
         mmsi = _mmsi(row.get("current_mmsi"), vessel_id)
         ship_type = SHIP_TYPE_MAP.get(row.get("ship_type_code"), row.get("ship_type_code"))
-        identity_status = "LINKED" if row.get("ais_id") else "UNLINKED"
+        identity_status = "UNLINKED"
         _insert(
             "vessel_identity",
             {
@@ -175,20 +163,15 @@ def _backfill_from_ship_tables() -> None:
                 "id": vessel_id,
                 "vessel_profile_code": f"VP{vessel_id:06d}",
                 "vessel_identity_id": vessel_id,
-                "ais_id": row.get("ais_id"),
                 "ship_name": row.get("ship_name"),
                 "ship_name_en": row.get("ship_name_en"),
                 "current_mmsi": mmsi,
                 "ship_type_code": ship_type,
-                "navigation_power_type_code": row.get("navigation_power_type_code"),
-                "profile_status_code": row.get("profile_status_code") or "NEED_GOVERNANCE",
+                "profile_status_code": row.get("profile_status_code") or "ACTIVE",
                 "identity_status_code": identity_status,
-                "quality_level_code": "MEDIUM",
                 "operation_status_code": row.get("operation_status_code"),
                 "home_port_code": row.get("home_port_code"),
                 "home_port_name": row.get("home_port_name"),
-                "owner_name": row.get("owner_name"),
-                "building_year": row.get("building_year"),
                 "registry_city_code": row.get("registry_city_code"),
                 "business_region_id": row.get("business_region_id"),
                 "source_type_code": row.get("source_type_code") or "LEGACY_SHIP",
@@ -239,25 +222,12 @@ def _backfill_from_ship_tables() -> None:
                 "created_at": row.get("created_at") or now,
             },
         )
-        if row.get("ais_id"):
-            _insert(
-                "vessel_identifier_history",
-                {
-                    "vessel_profile_id": vessel_id,
-                    "identifier_type_code": "AIS",
-                    "identifier_value": row.get("ais_id"),
-                    "start_date": None,
-                    "end_date": None,
-                    "source_type_code": row.get("source_type_code") or "LEGACY_SHIP",
-                    "created_at": row.get("created_at") or now,
-                },
-            )
         _insert(
             "vessel_registration_info",
             {
                 "vessel_profile_id": vessel_id,
                 "registry_city_code": row.get("registry_city_code"),
-                "ship_registry_no": row.get("ais_id"),
+                "ship_registry_no": None,
                 "home_port_code": row.get("home_port_code"),
                 "home_port_name": row.get("home_port_name"),
                 "flag_code": "CN",
@@ -312,50 +282,28 @@ def _backfill_from_ship_tables() -> None:
                     {
                         "vessel_profile_id": row.get("ship_id"),
                         "operator_name": row.get("operator_name") or row.get("manager_name") or "未知运营方",
-                        "operator_role_code": "OPERATOR",
-                        "manager_name": row.get("manager_name"),
-                        "main_navigation_area_desc": row.get("main_navigation_area_desc"),
-                        "usual_route_desc": row.get("usual_route_desc"),
+                        "party_type_code": "UNKNOWN",
                         "contact_phone": row.get("contact_phone"),
-                        "dispatch_contact_name": row.get("dispatch_contact_name"),
-                        "dispatch_contact_phone": row.get("dispatch_contact_phone"),
-                        "risk_level_code": row.get("risk_level_code"),
                         "start_date": None,
                         "end_date": None,
                         "is_current": True,
                         "is_primary": True,
-                        "last_active_at": row.get("last_active_at"),
                         "created_at": now,
                         "updated_at": row.get("updated_at") or now,
                     },
                 )
-            _insert(
-                "vessel_behavior_profile",
-                {
-                    "vessel_profile_id": row.get("ship_id"),
-                    "active_city_codes_json": None,
-                    "usual_route_json": [{"text": row.get("usual_route_desc")}] if row.get("usual_route_desc") else None,
-                    "cargo_preference_json": None,
-                    "contactability_score": 80 if row.get("contact_phone") or row.get("dispatch_contact_phone") else 30,
-                    "activity_score": 80 if row.get("last_active_at") else 40,
-                    "last_active_at": row.get("last_active_at"),
-                    "generated_at": now,
-                    "source_type_code": "LEGACY_SHIP",
-                    "updated_at": row.get("updated_at") or now,
-                },
-            )
 
     if _has_table("ship_owner"):
         for row in bind.execute(sa.text("select * from ship_owner")).mappings().all():
             _insert(
                 "vessel_owner_period",
-                {
-                    "vessel_profile_id": row.get("ship_id"),
-                    "party_name": row.get("party_name"),
-                    "party_relation_type_code": row.get("party_relation_type_code") or "OWNER",
-                    "certificate_no": row.get("certificate_no"),
-                    "mobile_phone": row.get("mobile_phone"),
-                    "landline_phone": row.get("landline_phone"),
+                    {
+                        "vessel_profile_id": row.get("ship_id"),
+                        "party_name": row.get("party_name"),
+                        "party_type_code": "UNKNOWN",
+                        "certificate_no": row.get("certificate_no"),
+                        "mobile_phone": row.get("mobile_phone"),
+                        "landline_phone": row.get("landline_phone"),
                     "address": row.get("address"),
                     "start_date": None,
                     "end_date": None,
@@ -436,37 +384,6 @@ def _backfill_from_ship_tables() -> None:
                     "created_at": row.get("created_at") or now,
                 },
             )
-
-    for row in profiles:
-        vessel_id = int(row["id"])
-        _insert(
-            "vessel_quality_snapshot",
-            {
-                "vessel_profile_id": vessel_id,
-                "quality_level_code": "MEDIUM",
-                "completeness_score": 70,
-                "contact_score": 70,
-                "certificate_score": 70,
-                "identity_score": 80,
-                "issue_count": 0,
-                "generated_at": now,
-            },
-        )
-        _insert(
-            "vessel_cargo_capability",
-            {
-                "vessel_profile_id": vessel_id,
-                "capability_tags_json": None,
-                "commodity_type_codes_json": None,
-                "preferred_cargo_json": None,
-                "has_self_unloading": row.get("ship_type_code") == "SELF_UNLOADING_BULK",
-                "has_container_fittings": row.get("ship_type_code") == "CONTAINER_SHIP",
-                "can_carry_dangerous": row.get("ship_type_code") in {"CHEMICAL_TANKER", "OIL_TANKER"},
-                "temperature_control": False,
-                "cargo_handling_notes": None,
-                "updated_at": row.get("updated_at") or now,
-            },
-        )
 
     bind.execute(
         sa.text(
