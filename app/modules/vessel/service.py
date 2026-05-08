@@ -794,6 +794,8 @@ class VesselService:
 
     async def replace_crew(self, vessel_id: int, payload, *, operator_id: int | None = None) -> list[VesselCrewResponse]:
         await self._require_profile(vessel_id)
+        existing_rows = await self.repo.list_by_profile(VesselCrewAssignment, vessel_id)
+        existing_by_id = {int(row.id): row for row in existing_rows}
         person_certs = list(
             (
                 await self.db.execute(
@@ -807,22 +809,58 @@ class VesselService:
             .all()
         )
         incoming_rows = [item.model_dump(exclude_none=True) for item in payload.crew]
+        incoming_ids = {int(item["id"]) for item in incoming_rows if item.get("id") is not None}
+        unknown_ids = sorted(incoming_ids - set(existing_by_id))
+        if unknown_ids:
+            raise ValidationError(f"船员任职记录不存在或不属于当前船舶：{', '.join(str(item) for item in unknown_ids)}")
         if person_certs:
+            removed_bound_names = sorted(
+                {
+                    cert.holder_name
+                    for cert in person_certs
+                    if cert.crew_assignment_id is not None and int(cert.crew_assignment_id) not in incoming_ids
+                }
+            )
+            if removed_bound_names:
+                raise ValidationError(f"船员适任证仍绑定这些持有人，不能直接从任职中移除：{', '.join(removed_bound_names)}")
             incoming_names = {str(item.get("crew_name") or "").strip() for item in incoming_rows if item.get("crew_name")}
-            missing_names = sorted({cert.holder_name for cert in person_certs if cert.holder_name not in incoming_names})
-            if missing_names:
-                raise ValidationError(f"船员适任证仍绑定这些持有人，不能直接从任职中移除：{', '.join(missing_names)}")
-        rows = await self.repo.replace_many_by_profile(
-            VesselCrewAssignment,
-            vessel_id,
-            incoming_rows,
-        )
+            missing_orphan_names = sorted(
+                {
+                    cert.holder_name
+                    for cert in person_certs
+                    if cert.crew_assignment_id is None and cert.holder_name not in incoming_names
+                }
+            )
+            if missing_orphan_names:
+                raise ValidationError(f"船员适任证仍绑定这些持有人，不能直接从任职中移除：{', '.join(missing_orphan_names)}")
+
+        rows: list[VesselCrewAssignment] = []
+        now = datetime.utcnow()
+        for item in incoming_rows:
+            item_id = item.pop("id", None)
+            if item_id is not None:
+                row = existing_by_id[int(item_id)]
+                for key, value in item.items():
+                    setattr(row, key, value)
+                row.updated_at = now
+            else:
+                row = VesselCrewAssignment(vessel_profile_id=vessel_id, **item)
+                self.db.add(row)
+            rows.append(row)
+        for row_id, row in existing_by_id.items():
+            if row_id not in incoming_ids:
+                await self.db.delete(row)
+        await self.db.flush()
         if person_certs:
+            crew_by_id = {int(row.id): row for row in rows if row.id is not None}
             crew_by_name = {row.crew_name: row for row in rows}
             for cert in person_certs:
-                matched_crew = crew_by_name.get(cert.holder_name)
+                matched_crew = crew_by_id.get(int(cert.crew_assignment_id)) if cert.crew_assignment_id is not None else None
+                if matched_crew is None:
+                    matched_crew = crew_by_name.get(cert.holder_name)
                 if matched_crew is not None:
                     cert.crew_assignment_id = matched_crew.id
+                    cert.holder_name = matched_crew.crew_name
         await self._add_change_event(vessel_id, "REPLACE_CREW", "维护船员任职", None, {"count": len(rows)}, operator_id)
         await self.db.commit()
         label_map = await _load_label_map(self.db)

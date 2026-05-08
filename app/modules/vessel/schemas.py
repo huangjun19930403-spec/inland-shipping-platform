@@ -187,6 +187,7 @@ class VesselContactReplaceRequest(StrictBaseModel):
 
 
 class VesselCrewItem(StrictBaseModel):
+    id: int | None = None
     crew_name: str = Field(min_length=1, max_length=64)
     crew_role_code: str = Field(min_length=1, max_length=64)
     start_date: date | None = None
