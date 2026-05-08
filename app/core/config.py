@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://127.0.0.1:6379/1"
     ANALYSIS_CELERY_EAGER: bool = False
     ANALYSIS_DEFAULT_DAILY_CRON: str = "20 2 * * *"
+    VESSEL_CITY_SITUATION_CACHE_BACKEND: str = "memory"  # memory / redis
+    VESSEL_CITY_SITUATION_CACHE_TTL_SECONDS: int = 60
+    VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS: int = 300
+    VESSEL_CITY_SITUATION_PRECOMPUTE_SECONDS: int = 60
 
     # 认证
     SECRET_KEY: str = "inland-shipping-platform-secret-key"

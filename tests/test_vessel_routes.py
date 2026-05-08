@@ -11,6 +11,8 @@ from app.modules.vessel.service import (
     UNKNOWN_CITY_NAME,
     VesselService,
     _CityBoundary,
+    _boundary_paths_for_precision,
+    _build_city_boundary_grid,
 )
 
 
@@ -201,3 +203,37 @@ def test_vessel_city_resolution_unknown_and_invalid() -> None:
     assert invalid.current_city_source == CURRENT_CITY_SOURCE_INVALID_POSITION
     assert unknown.city_name == UNKNOWN_CITY_NAME
     assert unknown.current_city_source == CURRENT_CITY_SOURCE_UNKNOWN
+
+
+def test_vessel_city_boundary_paths_are_simplified_for_situation_payload() -> None:
+    points = [(float(index) / 100, 0.0) for index in range(100)]
+    ring = points + [(1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]
+    paths = _boundary_paths_for_precision([[ring]], "low")
+
+    assert paths
+    assert len(paths[0]) < len(ring)
+    assert paths[0][0] == paths[0][-1]
+
+
+def test_vessel_city_resolution_uses_grid_candidates_when_available() -> None:
+    service = object.__new__(VesselService)
+    city = _CityBoundary(
+        code="320500",
+        name="网格市",
+        center_longitude=Decimal("120.00"),
+        center_latitude=Decimal("31.00"),
+        area_km2=Decimal("100"),
+        bbox=(120.0, 31.0, 121.0, 32.0),
+        bbox_area=1.0,
+        polygons=[[[ (120.0, 31.0), (121.0, 31.0), (121.0, 32.0), (120.0, 32.0), (120.0, 31.0) ]]],
+    )
+
+    resolved = service._resolve_current_city_from_boundaries(
+        Decimal("120.5"),
+        Decimal("31.5"),
+        [city],
+        _build_city_boundary_grid([city]),
+    )
+
+    assert resolved.city_code == "320500"
+    assert resolved.current_city_source == CURRENT_CITY_SOURCE_ADMIN_BOUNDARY

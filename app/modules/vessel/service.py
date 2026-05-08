@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import asyncio
+import hashlib
+import json
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -85,6 +88,11 @@ from app.modules.vessel.schemas import (
     VesselRegistrationResponse,
 )
 
+try:  # Redis is optional for local development; memory cache remains the fallback.
+    from redis.asyncio import Redis
+except Exception:  # pragma: no cover - optional dependency guard
+    Redis = None  # type: ignore[assignment]
+
 
 LABEL_DICTS = [
     "SHIP_TYPE",
@@ -141,7 +149,14 @@ CURRENT_CITY_SOURCE_ADMIN_BOUNDARY = "ADMIN_BOUNDARY"
 CURRENT_CITY_SOURCE_UNKNOWN = "UNKNOWN"
 CURRENT_CITY_SOURCE_INVALID_POSITION = "INVALID_POSITION"
 CITY_BOUNDARY_CACHE_TTL_SECONDS = 1800
-CITY_SITUATION_SNAPSHOT_TTL_SECONDS = 300
+CITY_GRID_CELL_SIZE_DEGREES = 1.0
+CITY_BOUNDARY_SIMPLIFY_TOLERANCE = {
+    "low": 0.02,
+    "medium": 0.006,
+}
+CITY_SITUATION_CACHE_KEY_PREFIX = "vessel:city_situation:response:"
+CITY_SITUATION_SNAPSHOT_KEY_PREFIX = "vessel:city_situation:snapshot:"
+CITY_SITUATION_SNAPSHOT_TTL_SECONDS = settings.VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS
 CITY_SITUATION_SNAPSHOT_MAX_SIZE = 20
 logger = logging.getLogger(__name__)
 
@@ -156,6 +171,7 @@ class _CityBoundary:
     bbox: tuple[float, float, float, float]
     bbox_area: float
     polygons: list[list[list[tuple[float, float]]]]
+    boundary_paths_by_precision: dict[str, list[list[tuple[float, float]]]] | None = None
 
 
 @dataclass(slots=True)
@@ -173,6 +189,7 @@ class _PositionBuildResult:
     items: list[VesselPositionMonitorItemResponse]
     partial: bool
     error_message: str | None
+    failed_batch_count: int
     queried_mmsi_count: int
     matched_position_count: int
     unpositioned_count: int
@@ -190,8 +207,16 @@ class _CitySituationSnapshot:
     generated_at: datetime
 
 
-_CITY_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": []}
+@dataclass(slots=True)
+class _CitySituationResponseCacheEntry:
+    expires_at: datetime
+    response: VesselPositionCitySituationResponse
+
+
+_CITY_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
 _CITY_SITUATION_SNAPSHOTS: dict[str, _CitySituationSnapshot] = {}
+_CITY_SITUATION_RESPONSE_CACHE: dict[str, _CitySituationResponseCacheEntry] = {}
+_CITY_SITUATION_REDIS_CLIENT: Any | None = None
 
 
 def _dispatch_certificate_recognition_task(recognition_id: int) -> None:
@@ -226,6 +251,25 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [_jsonable(item) for item in value]
     return value
+
+
+def _city_situation_cache_ttl() -> int:
+    return max(5, int(settings.VESSEL_CITY_SITUATION_CACHE_TTL_SECONDS or 60))
+
+
+def _city_snapshot_ttl() -> int:
+    return max(30, int(settings.VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS or CITY_SITUATION_SNAPSHOT_TTL_SECONDS))
+
+
+def _city_cache_backend_setting() -> str:
+    return (settings.VESSEL_CITY_SITUATION_CACHE_BACKEND or "memory").strip().lower()
+
+
+def _city_situation_query_cache_key(query: Any) -> str:
+    payload = query.model_dump(mode="json") if hasattr(query, "model_dump") else dict(query)
+    payload.pop("force_refresh", None)
+    normalized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
 
 
 def _money(value: Any) -> Decimal | None:
@@ -447,6 +491,92 @@ def _point_in_ring(longitude: float, latitude: float, ring: list[tuple[float, fl
     return inside
 
 
+def _perpendicular_distance(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> float:
+    x, y = point
+    x1, y1 = start
+    x2, y2 = end
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return ((x - x1) ** 2 + (y - y1) ** 2) ** 0.5
+    return abs(dy * x - dx * y + x2 * y1 - y2 * x1) / ((dx * dx + dy * dy) ** 0.5)
+
+
+def _rdp_simplify(points: list[tuple[float, float]], tolerance: float) -> list[tuple[float, float]]:
+    if len(points) <= 3:
+        return points
+    first = points[0]
+    last = points[-1]
+    max_distance = -1.0
+    index = 0
+    for idx in range(1, len(points) - 1):
+        distance = _perpendicular_distance(points[idx], first, last)
+        if distance > max_distance:
+            max_distance = distance
+            index = idx
+    if max_distance > tolerance:
+        left = _rdp_simplify(points[: index + 1], tolerance)
+        right = _rdp_simplify(points[index:], tolerance)
+        return left[:-1] + right
+    return [first, last]
+
+
+def _simplify_ring(ring: list[tuple[float, float]], precision: str) -> list[tuple[float, float]]:
+    tolerance = CITY_BOUNDARY_SIMPLIFY_TOLERANCE.get(precision, CITY_BOUNDARY_SIMPLIFY_TOLERANCE["low"])
+    if len(ring) < 4:
+        return ring
+    closed = ring[0] == ring[-1]
+    source = ring[:-1] if closed else ring
+    simplified = _rdp_simplify(source, tolerance)
+    if len(simplified) < 3:
+        simplified = source[:3]
+    if simplified[0] != simplified[-1]:
+        simplified.append(simplified[0])
+    return simplified
+
+
+def _boundary_paths_for_precision(
+    polygons: list[list[list[tuple[float, float]]]],
+    precision: str,
+) -> list[list[tuple[float, float]]]:
+    paths: list[list[tuple[float, float]]] = []
+    for polygon in polygons:
+        if not polygon:
+            continue
+        exterior = polygon[0]
+        simplified = _simplify_ring(exterior, precision)
+        if len(simplified) >= 4:
+            paths.append(simplified)
+    return paths
+
+
+def _grid_range(min_value: float, max_value: float) -> range:
+    import math
+
+    start = math.floor(min_value / CITY_GRID_CELL_SIZE_DEGREES)
+    end = math.floor(max_value / CITY_GRID_CELL_SIZE_DEGREES)
+    return range(start, end + 1)
+
+
+def _grid_key(longitude: float, latitude: float) -> tuple[int, int]:
+    import math
+
+    return (
+        math.floor(longitude / CITY_GRID_CELL_SIZE_DEGREES),
+        math.floor(latitude / CITY_GRID_CELL_SIZE_DEGREES),
+    )
+
+
+def _build_city_boundary_grid(boundaries: list[_CityBoundary]) -> dict[tuple[int, int], list[_CityBoundary]]:
+    grid: dict[tuple[int, int], list[_CityBoundary]] = defaultdict(list)
+    for boundary in boundaries:
+        min_x, min_y, max_x, max_y = boundary.bbox
+        for x_index in _grid_range(min_x, max_x):
+            for y_index in _grid_range(min_y, max_y):
+                grid[(x_index, y_index)].append(boundary)
+    return dict(grid)
+
+
 def _profile_response(
     row: VesselProfile,
     *,
@@ -483,6 +613,65 @@ class VesselService:
             profile_code=ES_REALTIME_CONFIG_PROFILE,
         )
         return (value or "").strip()
+
+    async def _city_cache_backend(self) -> str:
+        if _city_cache_backend_setting() == "redis" and Redis is not None:
+            return "redis"
+        return "memory"
+
+    async def _city_redis(self) -> Any | None:
+        global _CITY_SITUATION_REDIS_CLIENT
+        if await self._city_cache_backend() != "redis":
+            return None
+        if _CITY_SITUATION_REDIS_CLIENT is None:
+            _CITY_SITUATION_REDIS_CLIENT = Redis.from_url(
+                settings.CELERY_BROKER_URL,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=0.25,
+                socket_timeout=0.8,
+            )
+        return _CITY_SITUATION_REDIS_CLIENT
+
+    async def _get_city_situation_response_cache(
+        self,
+        cache_key: str,
+    ) -> tuple[VesselPositionCitySituationResponse, str] | None:
+        now = datetime.utcnow()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                payload = await redis_client.get(CITY_SITUATION_CACHE_KEY_PREFIX + cache_key) if redis_client else None
+                if payload:
+                    return VesselPositionCitySituationResponse.model_validate_json(payload), "redis"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("city situation redis cache read failed: %s", exc)
+        cached = _CITY_SITUATION_RESPONSE_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        if cached.expires_at <= now:
+            _CITY_SITUATION_RESPONSE_CACHE.pop(cache_key, None)
+            return None
+        return cached.response.model_copy(deep=True), "memory"
+
+    async def _store_city_situation_response_cache(
+        self,
+        cache_key: str,
+        response: VesselPositionCitySituationResponse,
+    ) -> None:
+        ttl = _city_situation_cache_ttl()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                if redis_client is not None:
+                    await redis_client.setex(CITY_SITUATION_CACHE_KEY_PREFIX + cache_key, ttl, response.model_dump_json())
+                    return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("city situation redis cache write failed: %s", exc)
+        _CITY_SITUATION_RESPONSE_CACHE[cache_key] = _CitySituationResponseCacheEntry(
+            expires_at=datetime.utcnow() + timedelta(seconds=ttl),
+            response=response.model_copy(deep=True),
+        )
 
     async def list_vessels(self, query) -> PageResponse[VesselListItemResponse]:
         stmt = (
@@ -600,6 +789,7 @@ class VesselService:
             generated_at=generated_at,
             reported_within_minutes=query.reported_within_minutes or 1440,
             es_batch_size=200,
+            es_max_concurrency=1,
             include_stale=True,
         )
         if not result.items and not result.partial:
@@ -624,6 +814,21 @@ class VesselService:
 
     async def position_city_situation(self, query) -> VesselPositionCitySituationResponse:
         generated_at = datetime.utcnow()
+        cache_key = _city_situation_query_cache_key(query)
+        cache_backend = await self._city_cache_backend()
+        if not query.force_refresh:
+            cached = await self._get_city_situation_response_cache(cache_key)
+            if cached is not None:
+                cached_response, cache_backend = cached
+                return cached_response.model_copy(
+                    update={
+                        "cache_status": "HIT",
+                        "cache_generated_at": cached_response.generated_at,
+                        "is_stale_cache": False,
+                        "snapshot_backend": cache_backend,
+                    },
+                    deep=True,
+                )
         profile_limit = query.profile_limit or query.max_profiles
         total_profile_count = await self._position_monitor_profile_count(query) if profile_limit is not None else None
         profiles = await self._position_monitor_profiles(query, limit=profile_limit)
@@ -634,6 +839,10 @@ class VesselService:
                 source_status_name=_source_status_name("EMPTY"),
                 generated_at=generated_at,
                 message="未匹配到符合条件的船舶档案",
+                cache_status="MISS",
+                cache_generated_at=generated_at,
+                is_stale_cache=False,
+                snapshot_backend=cache_backend,
                 summary=VesselPositionCitySituationSummary(
                     matched_profile_count=0,
                     scanned_profile_count=0,
@@ -658,6 +867,10 @@ class VesselService:
                 source_status_name=_source_status_name("UNCONFIGURED"),
                 generated_at=generated_at,
                 message="实时 ES 未配置，暂无城市态势",
+                cache_status="MISS",
+                cache_generated_at=generated_at,
+                is_stale_cache=False,
+                snapshot_backend=cache_backend,
                 summary=VesselPositionCitySituationSummary(
                     matched_profile_count=total_profile_count or len(profiles),
                     scanned_profile_count=len(profiles),
@@ -681,6 +894,7 @@ class VesselService:
             generated_at=generated_at,
             reported_within_minutes=query.reported_within_minutes or 1440,
             es_batch_size=query.es_batch_size,
+            es_max_concurrency=query.es_max_concurrency,
             include_stale=True,
         )
         partial = result.partial
@@ -690,6 +904,8 @@ class VesselService:
             error_parts = [part for part in [error_message, f"当前按 profile_limit={profile_limit} 做部分统计"] if part]
             error_message = "；".join(error_parts) or None
         risk_by_profile = await self._compliance_risk_by_profile([item.id for item in result.items])
+        boundaries = await self._city_boundaries()
+        boundary_paths_by_code = self._city_boundary_paths_by_code(boundaries, query.boundary_precision) if query.include_boundary else {}
         cities = self._city_situation_items(
             result.items,
             risk_by_profile,
@@ -702,19 +918,24 @@ class VesselService:
             result.unknown_city_count,
             partial,
             error_message,
+            boundary_paths_by_code,
         )
-        snapshot_id = self._store_city_situation_snapshot(
+        snapshot_id = await self._store_city_situation_snapshot(
             result.items,
             generated_at=generated_at,
             partial=partial,
             error_message=error_message,
         )
         positioned_items = [item for item in result.items if not self._is_stale_position(item, generated_at, query.reported_within_minutes or 1440)]
-        return VesselPositionCitySituationResponse(
+        response = VesselPositionCitySituationResponse(
             source_status="ERROR" if partial and not cities else ("AVAILABLE" if cities else "EMPTY"),
             source_status_name=_source_status_name("ERROR" if partial and not cities else ("AVAILABLE" if cities else "EMPTY")),
             generated_at=generated_at,
             message=error_message if partial else (None if cities else "实时 ES 暂无符合筛选条件的城市态势"),
+            cache_status="MISS",
+            cache_generated_at=generated_at,
+            is_stale_cache=False,
+            snapshot_backend=cache_backend,
             summary=VesselPositionCitySituationSummary(
                 matched_profile_count=total_profile_count or len(profiles),
                 scanned_profile_count=len(profiles),
@@ -730,15 +951,18 @@ class VesselService:
                 certificate_risk_count=sum(1 for item in positioned_items if risk_by_profile.get(item.id)),
                 city_count=sum(1 for city in cities if city.city_code),
                 query_snapshot_id=snapshot_id,
+                failed_batch_count=result.failed_batch_count,
                 is_partial=partial,
                 error_message=error_message,
             ),
             cities=cities,
         )
+        await self._store_city_situation_response_cache(cache_key, response)
+        return response
 
     async def position_city_vessels(self, query) -> VesselPositionCityVesselsResponse:
         generated_at = datetime.utcnow()
-        snapshot = self._get_city_situation_snapshot(query.query_snapshot_id)
+        snapshot = await self._get_city_situation_snapshot(query.query_snapshot_id)
         snapshot_hit = snapshot is not None
         if snapshot:
             items = [
@@ -758,12 +982,13 @@ class VesselService:
                 generated_at=generated_at,
                 reported_within_minutes=query.reported_within_minutes or 1440,
                 es_batch_size=query.es_batch_size,
+                es_max_concurrency=query.es_max_concurrency,
                 include_stale=False,
             )
             items = result.items
             partial = result.partial or profile_limit is not None
             error_message = result.error_message
-            snapshot_id = self._store_city_situation_snapshot(items, generated_at=generated_at, partial=partial, error_message=error_message)
+            snapshot_id = await self._store_city_situation_snapshot(items, generated_at=generated_at, partial=partial, error_message=error_message)
         filtered = [
             item for item in items
             if self._city_matches(item, city_code=query.city_code, city_name=query.city_name)
@@ -790,6 +1015,7 @@ class VesselService:
                 generated_at=generated_at,
                 reported_within_minutes=43200,
                 es_batch_size=50,
+                es_max_concurrency=1,
                 include_stale=True,
             )
             items = result.items
@@ -2738,17 +2964,27 @@ class VesselService:
         mmsi_values: list[str],
         *,
         batch_size: int,
-    ) -> tuple[dict[str, dict[str, Any]], bool, str | None]:
+        max_concurrency: int,
+    ) -> tuple[dict[str, dict[str, Any]], bool, str | None, int]:
         positions: dict[str, dict[str, Any]] = {}
         errors: list[str] = []
         unique_values = [value for value in dict.fromkeys(mmsi_values) if value]
-        for start in range(0, len(unique_values), batch_size):
-            batch = unique_values[start:start + batch_size]
-            try:
-                positions.update(await self._search_realtime_positions(batch, max_hits=max(len(batch) * 3, 200)))
-            except Exception as exc:  # noqa: BLE001
-                errors.append(str(exc))
-        return positions, bool(errors), "；".join(errors[:3]) if errors else None
+        batches = [unique_values[start:start + batch_size] for start in range(0, len(unique_values), batch_size)]
+        semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+        async def run_batch(batch: list[str]) -> tuple[dict[str, dict[str, Any]], str | None]:
+            async with semaphore:
+                try:
+                    return await self._search_realtime_positions(batch, max_hits=max(len(batch) * 3, 200)), None
+                except Exception as exc:  # noqa: BLE001
+                    return {}, str(exc)
+
+        for batch_positions, error in await asyncio.gather(*(run_batch(batch) for batch in batches)):
+            if batch_positions:
+                positions.update(batch_positions)
+            if error:
+                errors.append(error)
+        return positions, bool(errors), "；".join(errors[:3]) if errors else None, len(errors)
 
     async def _position_monitor_items_for_profiles(
         self,
@@ -2757,17 +2993,20 @@ class VesselService:
         generated_at: datetime,
         reported_within_minutes: int,
         es_batch_size: int,
+        es_max_concurrency: int,
         include_stale: bool,
     ) -> _PositionBuildResult:
         mmsi_by_profile = await self._mmsi_values_by_profile([row.id for row in profiles])
         mmsi_values = sorted({item for values in mmsi_by_profile.values() for item in values if item})
         if not mmsi_values:
-            return _PositionBuildResult([], False, None, 0, 0, 0, 0, 0)
-        positions, partial, error_message = await self._search_realtime_positions_batched(
+            return _PositionBuildResult([], False, None, 0, 0, 0, 0, 0, 0)
+        positions, partial, error_message, failed_batch_count = await self._search_realtime_positions_batched(
             mmsi_values,
             batch_size=es_batch_size,
+            max_concurrency=es_max_concurrency,
         )
         boundaries = await self._city_boundaries()
+        boundary_grid = _CITY_BOUNDARY_CACHE.get("grid_index") or {}
         profile_by_mmsi: dict[str, VesselProfile] = {}
         for profile in profiles:
             for mmsi in mmsi_by_profile.get(profile.id, [profile.current_mmsi]):
@@ -2796,7 +3035,7 @@ class VesselService:
             if longitude is None or latitude is None or not self._valid_longitude_latitude(longitude, latitude):
                 invalid_position_count += 1
                 continue
-            resolved_city = self._resolve_current_city_from_boundaries(longitude, latitude, boundaries)
+            resolved_city = self._resolve_current_city_from_boundaries(longitude, latitude, boundaries, boundary_grid)
             if resolved_city.current_city_source != CURRENT_CITY_SOURCE_ADMIN_BOUNDARY:
                 unknown_city_count += 1
             position_time = position.get("position_time")
@@ -2828,6 +3067,7 @@ class VesselService:
             items=items,
             partial=partial,
             error_message=error_message,
+            failed_batch_count=failed_batch_count,
             queried_mmsi_count=len(mmsi_values),
             matched_position_count=matched_position_count,
             unpositioned_count=max(0, len(mmsi_values) - matched_position_count - invalid_position_count),
@@ -2872,7 +3112,9 @@ class VesselService:
         unknown_city_count: int,
         partial: bool,
         error_message: str | None,
+        boundary_paths_by_code: dict[str, list[list[tuple[float, float]]]] | None = None,
     ) -> list[VesselPositionCitySituationItemResponse]:
+        boundary_paths_by_code = boundary_paths_by_code or {}
         grouped: dict[str, list[VesselPositionMonitorItemResponse]] = defaultdict(list)
         for item in items:
             grouped[self._position_city_code(item)].append(item)
@@ -2906,6 +3148,7 @@ class VesselService:
                     city_center_latitude=None if is_unknown_city else getattr(first_item, "city_center_latitude", None),
                     heat_center_longitude=heat_longitude,
                     heat_center_latitude=heat_latitude,
+                    boundary_paths=None if is_unknown_city else self._serialize_boundary_paths(boundary_paths_by_code.get(city_code)),
                     positioned_count=len(fresh_items),
                     contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
                     average_ship_age=(sum(ages, Decimal("0")) / Decimal(len(ages))).quantize(Decimal("0.1")) if ages else None,
@@ -2989,6 +3232,10 @@ class VesselService:
             if bbox is None:
                 continue
             min_x, min_y, max_x, max_y = bbox
+            boundary_paths_by_precision = {
+                precision: _boundary_paths_for_precision(polygons, precision)
+                for precision in CITY_BOUNDARY_SIMPLIFY_TOLERANCE
+            }
             boundaries.append(
                 _CityBoundary(
                     code=region.code,
@@ -2999,24 +3246,48 @@ class VesselService:
                     bbox=bbox,
                     bbox_area=max(0.0, (max_x - min_x) * (max_y - min_y)),
                     polygons=polygons,
+                    boundary_paths_by_precision=boundary_paths_by_precision,
                 )
             )
         _CITY_BOUNDARY_CACHE["loaded_at"] = now
         _CITY_BOUNDARY_CACHE["boundaries"] = boundaries
+        _CITY_BOUNDARY_CACHE["grid_index"] = _build_city_boundary_grid(boundaries)
         return boundaries
+
+    def _city_boundary_paths_by_code(
+        self,
+        boundaries: list[_CityBoundary],
+        precision: str,
+    ) -> dict[str, list[list[tuple[float, float]]]]:
+        result: dict[str, list[list[tuple[float, float]]]] = {}
+        for boundary in boundaries:
+            paths = (boundary.boundary_paths_by_precision or {}).get(precision)
+            if paths is None:
+                paths = _boundary_paths_for_precision(boundary.polygons, precision)
+            if paths:
+                result[boundary.code] = paths
+        return result
+
+    @staticmethod
+    def _serialize_boundary_paths(paths: list[list[tuple[float, float]]] | None) -> list[list[list[float]]] | None:
+        if not paths:
+            return None
+        return [[[float(lng), float(lat)] for lng, lat in ring] for ring in paths if len(ring) >= 4] or None
 
     def _resolve_current_city_from_boundaries(
         self,
         longitude: Decimal | None,
         latitude: Decimal | None,
         boundaries: list[_CityBoundary],
+        grid_index: dict[tuple[int, int], list[_CityBoundary]] | None = None,
     ) -> _ResolvedCity:
         if not self._valid_longitude_latitude(longitude, latitude):
             return _ResolvedCity(None, UNKNOWN_CITY_NAME, CURRENT_CITY_SOURCE_INVALID_POSITION)
         lon = float(longitude)
         lat = float(latitude)
+        candidates = grid_index.get(_grid_key(lon, lat), boundaries) if grid_index else boundaries
         matches = [
-            boundary for boundary in boundaries
+            boundary for boundary in candidates
             if _bbox_contains(boundary.bbox, lon, lat)
             and any(_point_in_polygon_with_holes(lon, lat, polygon) for polygon in boundary.polygons)
         ]
@@ -3051,7 +3322,7 @@ class VesselService:
             candidates,
         )
 
-    def _store_city_situation_snapshot(
+    async def _store_city_situation_snapshot(
         self,
         items: list[VesselPositionMonitorItemResponse],
         *,
@@ -3060,6 +3331,7 @@ class VesselService:
         error_message: str | None,
     ) -> str:
         now = datetime.utcnow()
+        ttl_seconds = _city_snapshot_ttl()
         expired = [key for key, value in _CITY_SITUATION_SNAPSHOTS.items() if value.expires_at <= now]
         for key in expired:
             _CITY_SITUATION_SNAPSHOTS.pop(key, None)
@@ -3067,26 +3339,65 @@ class VesselService:
             oldest_key = min(_CITY_SITUATION_SNAPSHOTS, key=lambda key: _CITY_SITUATION_SNAPSHOTS[key].expires_at)
             _CITY_SITUATION_SNAPSHOTS.pop(oldest_key, None)
         snapshot_id = uuid.uuid4().hex
-        _CITY_SITUATION_SNAPSHOTS[snapshot_id] = _CitySituationSnapshot(
+        snapshot = _CitySituationSnapshot(
             snapshot_id=snapshot_id,
-            expires_at=now + timedelta(seconds=CITY_SITUATION_SNAPSHOT_TTL_SECONDS),
+            expires_at=now + timedelta(seconds=ttl_seconds),
             items=list(items),
             partial=partial,
             error_message=error_message,
             generated_at=generated_at,
         )
+        _CITY_SITUATION_SNAPSHOTS[snapshot_id] = snapshot
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                if redis_client is not None:
+                    payload = json.dumps(
+                        {
+                            "snapshot_id": snapshot.snapshot_id,
+                            "expires_at": snapshot.expires_at.isoformat(),
+                            "items": [item.model_dump(mode="json") for item in snapshot.items],
+                            "partial": snapshot.partial,
+                            "error_message": snapshot.error_message,
+                            "generated_at": snapshot.generated_at.isoformat(),
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    await redis_client.setex(CITY_SITUATION_SNAPSHOT_KEY_PREFIX + snapshot_id, ttl_seconds, payload)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("city situation redis snapshot write failed: %s", exc)
         return snapshot_id
 
-    def _get_city_situation_snapshot(self, snapshot_id: str | None) -> _CitySituationSnapshot | None:
+    async def _get_city_situation_snapshot(self, snapshot_id: str | None) -> _CitySituationSnapshot | None:
         if not snapshot_id:
             return None
         snapshot = _CITY_SITUATION_SNAPSHOTS.get(snapshot_id)
-        if snapshot is None:
-            return None
-        if snapshot.expires_at <= datetime.utcnow():
-            _CITY_SITUATION_SNAPSHOTS.pop(snapshot_id, None)
-            return None
-        return snapshot
+        if snapshot is not None:
+            if snapshot.expires_at <= datetime.utcnow():
+                _CITY_SITUATION_SNAPSHOTS.pop(snapshot_id, None)
+            else:
+                return snapshot
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                payload = await redis_client.get(CITY_SITUATION_SNAPSHOT_KEY_PREFIX + snapshot_id) if redis_client else None
+                if payload:
+                    data = json.loads(payload)
+                    restored = _CitySituationSnapshot(
+                        snapshot_id=str(data["snapshot_id"]),
+                        expires_at=datetime.fromisoformat(str(data["expires_at"])),
+                        items=[VesselPositionMonitorItemResponse.model_validate(item) for item in data.get("items") or []],
+                        partial=bool(data.get("partial")),
+                        error_message=data.get("error_message"),
+                        generated_at=datetime.fromisoformat(str(data["generated_at"])),
+                    )
+                    if restored.expires_at > datetime.utcnow():
+                        _CITY_SITUATION_SNAPSHOTS[snapshot_id] = restored
+                        return restored
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("city situation redis snapshot read failed: %s", exc)
+        return None
 
     def _empty_position_response(
         self,

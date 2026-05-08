@@ -19,7 +19,12 @@ celery_app = Celery(
     "inland_shipping_analysis",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.analysis_tasks", "app.tasks.freight_ai_tasks", "app.tasks.vessel_ai_tasks"],
+    include=[
+        "app.tasks.analysis_tasks",
+        "app.tasks.freight_ai_tasks",
+        "app.tasks.vessel_ai_tasks",
+        "app.tasks.vessel_position_tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -41,6 +46,7 @@ celery_app.conf.update(
         "vessel.recognize_certificate_image": {"queue": "vessel_ai"},
         "vessel.recognize_person_certificate_image": {"queue": "vessel_ai"},
         "vessel.recognize_owner_document_image": {"queue": "vessel_ai"},
+        "vessel.precompute_city_situation": {"queue": "analysis"},
     },
 )
 
@@ -49,5 +55,9 @@ celery_app.conf.beat_schedule = {
         "task": "analysis.run_job",
         "schedule": _daily_crontab(),
         "args": ("ANALYSIS_ALL_DAILY", None, None, True, {"triggered_by": "celery_beat"}),
-    }
+    },
+    "vessel-city-situation-precompute": {
+        "task": "vessel.precompute_city_situation",
+        "schedule": max(30, int(settings.VESSEL_CITY_SITUATION_PRECOMPUTE_SECONDS or 60)),
+    },
 }

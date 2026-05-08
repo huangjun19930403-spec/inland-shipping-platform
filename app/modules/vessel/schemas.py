@@ -80,7 +80,11 @@ class VesselPositionCitySituationQuery(BaseModel):
     reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
     profile_limit: int | None = Field(default=None, ge=1, le=20000)
     max_profiles: int | None = Field(default=None, ge=1, le=20000)
-    es_batch_size: int = Field(default=200, ge=20, le=500)
+    es_batch_size: int = Field(default=500, ge=100, le=1000)
+    es_max_concurrency: int = Field(default=4, ge=1, le=8)
+    include_boundary: bool = True
+    boundary_precision: str = Field(default="low", pattern="^(low|medium)$")
+    force_refresh: bool = False
 
 
 class VesselPositionCityVesselsQuery(VesselPositionCitySituationQuery):
@@ -727,6 +731,7 @@ class VesselPositionCitySituationItemResponse(BaseModel):
     city_center_latitude: Decimal | None = None
     heat_center_longitude: Decimal | None = None
     heat_center_latitude: Decimal | None = None
+    boundary_paths: list[list[list[float]]] | None = None
     positioned_count: int
     contactable_position_count: int
     average_ship_age: Decimal | None = None
@@ -757,6 +762,7 @@ class VesselPositionCitySituationSummary(BaseModel):
     certificate_risk_count: int
     city_count: int
     query_snapshot_id: str | None = None
+    failed_batch_count: int = 0
     is_partial: bool = False
     error_message: str | None = None
 
@@ -766,6 +772,10 @@ class VesselPositionCitySituationResponse(BaseModel):
     source_status_name: str
     generated_at: datetime
     message: str | None = None
+    cache_status: str = "MISS"
+    cache_generated_at: datetime | None = None
+    is_stale_cache: bool = False
+    snapshot_backend: str = "memory"
     summary: VesselPositionCitySituationSummary
     cities: list[VesselPositionCitySituationItemResponse] = Field(default_factory=list)
 
