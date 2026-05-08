@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -50,6 +50,7 @@ from app.modules.vessel.schemas import (
     VesselCapacityResponse,
     VesselCertificateFileResponse,
     VesselCertificateImageRecognitionResponse,
+    VesselCertificateLedgerItemResponse,
     VesselCertificateResponse,
     VesselChangeEventResponse,
     VesselContactResponse,
@@ -85,6 +86,8 @@ LABEL_DICTS = [
     "VESSEL_CREW_ROLE",
     "PARTY_SUBJECT_TYPE",
     "CERTIFICATE_TYPE",
+    "VESSEL_CERTIFICATE_TYPE",
+    "CREW_CERTIFICATE_TYPE",
     "OWNER_DOCUMENT_TYPE",
     "CERTIFICATE_VERIFY_STATUS",
     "VESSEL_CERTIFICATE_IMAGE_RECOGNITION_STATUS",
@@ -93,6 +96,17 @@ LABEL_DICTS = [
 ]
 
 
+REQUIRED_VESSEL_CERTIFICATE_TYPES = [
+    "VESSEL_OWNERSHIP_CERT",
+    "VESSEL_NATIONALITY_CERT",
+    "VESSEL_OPERATION_CERT",
+    "VESSEL_INSPECTION_BOOK",
+    "VESSEL_SEAWORTHINESS_CERT",
+    "VESSEL_AIS_CERT",
+]
+VALID_VESSEL_CERTIFICATE_TYPES = set(REQUIRED_VESSEL_CERTIFICATE_TYPES) | {"UNKNOWN", "OTHER"}
+CREW_CERTIFICATE_TYPE = "CREW_COMPETENCY_CERT"
+ACTIVE_RECOGNITION_STATUSES = {"QUEUED", "PROCESSING"}
 IMAGE_RECOGNIZABLE_OWNER_DOCUMENT_TYPES = {"PERSON_ID_FRONT", "PERSON_ID_BACK", "BUSINESS_LICENSE"}
 
 
@@ -667,6 +681,28 @@ class VesselService:
         latest = await self._latest_owner_document_recognition(row.id)
         return self._owner_document_response(row, label_map, latest_recognition=latest)
 
+    async def void_owner_document(
+        self,
+        vessel_id: int,
+        owner_id: int,
+        owner_document_id: int,
+        *,
+        reason: str | None = None,
+        operator_id: int | None = None,
+    ) -> None:
+        owner = await self.db.get(VesselOwnerPeriod, owner_id)
+        if owner is None or owner.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselOwnerPeriod", owner_id)
+        document = await self.repo.get_owner_document(owner_document_id)
+        if document is None or document.vessel_owner_period_id != owner_id or document.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselOwnerDocument", owner_document_id)
+        before = _row_dict(document)
+        document.voided_at = datetime.utcnow()
+        document.voided_by = operator_id
+        document.void_reason = reason or "所有方证照作废"
+        await self._add_change_event(vessel_id, "VOID_OWNER_DOCUMENT", "作废所有方证照", before, _row_dict(document), operator_id)
+        await self.db.commit()
+
     async def confirm_owner_document_image_recognition(
         self,
         vessel_id: int,
@@ -693,12 +729,20 @@ class VesselService:
             raise NotFoundError("VesselOwnerDocumentImageRecognition", recognition_id)
         accepted = self._normalize_recognition_payload(payload.accepted_payload_json or recognition.candidate_payload_json or {})
         updates: dict[str, Any] = {}
+        owner_name_conflict: dict[str, Any] | None = None
         if payload.apply_to_owner:
             party_name = accepted.get("holder_name") or accepted.get("company_name") or accepted.get("party_name")
             certificate_no = accepted.get("certificate_no") or accepted.get("document_no") or accepted.get("license_no")
             address = accepted.get("address")
             if party_name:
-                updates["party_name"] = str(party_name).strip()
+                recognized_name = str(party_name).strip()
+                if recognized_name and recognized_name != owner.party_name:
+                    owner_name_conflict = {
+                        "current_party_name": owner.party_name,
+                        "recognized_party_name": recognized_name,
+                        "message": "识别名称与当前所有方不一致，请通过所有方变更流程处理",
+                    }
+                    accepted["owner_name_conflict"] = owner_name_conflict
             if certificate_no:
                 updates["certificate_no"] = str(certificate_no).strip()
             if address:
@@ -714,7 +758,7 @@ class VesselService:
             "CONFIRM_OWNER_DOCUMENT_IMAGE_RECOGNITION",
             "确认所有方证照识别",
             None,
-            {"recognition_id": recognition.id, "owner_updates": updates},
+            {"recognition_id": recognition.id, "owner_updates": updates, "owner_name_conflict": owner_name_conflict},
             operator_id,
         )
         await self.db.commit()
@@ -750,11 +794,35 @@ class VesselService:
 
     async def replace_crew(self, vessel_id: int, payload, *, operator_id: int | None = None) -> list[VesselCrewResponse]:
         await self._require_profile(vessel_id)
+        person_certs = list(
+            (
+                await self.db.execute(
+                    select(VesselPersonCertificate).where(
+                        VesselPersonCertificate.vessel_profile_id == vessel_id,
+                        VesselPersonCertificate.voided_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        incoming_rows = [item.model_dump(exclude_none=True) for item in payload.crew]
+        if person_certs:
+            incoming_names = {str(item.get("crew_name") or "").strip() for item in incoming_rows if item.get("crew_name")}
+            missing_names = sorted({cert.holder_name for cert in person_certs if cert.holder_name not in incoming_names})
+            if missing_names:
+                raise ValidationError(f"船员适任证仍绑定这些持有人，不能直接从任职中移除：{', '.join(missing_names)}")
         rows = await self.repo.replace_many_by_profile(
             VesselCrewAssignment,
             vessel_id,
-            [item.model_dump(exclude_none=True) for item in payload.crew],
+            incoming_rows,
         )
+        if person_certs:
+            crew_by_name = {row.crew_name: row for row in rows}
+            for cert in person_certs:
+                matched_crew = crew_by_name.get(cert.holder_name)
+                if matched_crew is not None:
+                    cert.crew_assignment_id = matched_crew.id
         await self._add_change_event(vessel_id, "REPLACE_CREW", "维护船员任职", None, {"count": len(rows)}, operator_id)
         await self.db.commit()
         label_map = await _load_label_map(self.db)
@@ -762,36 +830,16 @@ class VesselService:
 
     async def replace_person_certificates(self, vessel_id: int, payload, *, operator_id: int | None = None) -> list[VesselPersonCertificateResponse]:
         await self._require_profile(vessel_id)
-        existing_ids = (
-            await self.db.execute(
-                select(VesselPersonCertificate.id).where(VesselPersonCertificate.vessel_profile_id == vessel_id)
-            )
-        ).scalars().all()
-        if existing_ids:
-            await self.db.execute(
-                delete(VesselPersonCertificateImageRecognition).where(
-                    VesselPersonCertificateImageRecognition.vessel_person_certificate_id.in_(existing_ids)
-                )
-            )
-            await self.db.execute(
-                delete(VesselPersonCertificateFile).where(
-                    VesselPersonCertificateFile.vessel_person_certificate_id.in_(existing_ids)
-                )
-            )
-        rows = await self.repo.replace_many_by_profile(
-            VesselPersonCertificate,
-            vessel_id,
-            [item.model_dump(exclude_none=True) for item in payload.person_certificates],
-        )
-        await self._add_change_event(vessel_id, "REPLACE_PERSON_CERTIFICATES", "维护人员证书", None, {"count": len(rows)}, operator_id)
-        await self.db.commit()
-        return await self._person_certificates_with_files(vessel_id)
+        _ = payload, operator_id
+        raise ValidationError("人员适任证不能整体替换保存，请按船员任职逐本新增、补充附件或作废")
 
     async def create_person_certificate(self, vessel_id: int, payload, *, operator_id: int | None = None) -> VesselPersonCertificateResponse:
         await self._require_profile(vessel_id)
         data = payload.model_dump(exclude_none=True)
-        data.setdefault("holder_name", "待补录")
-        data.setdefault("certificate_type_code", "CREW_COMPETENCY_CERT")
+        crew = await self._require_crew_assignment(vessel_id, data.get("crew_assignment_id"))
+        data["crew_assignment_id"] = crew.id
+        data["holder_name"] = data.get("holder_name") or crew.crew_name
+        data["certificate_type_code"] = CREW_CERTIFICATE_TYPE
         data.setdefault("verify_status_code", "PENDING")
         row = await self.repo.create_person_certificate(vessel_id, data)
         await self._add_change_event(vessel_id, "CREATE_PERSON_CERTIFICATE", "新增人员证件", None, _row_dict(row), operator_id)
@@ -813,6 +861,13 @@ class VesselService:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             raise ValidationError("no update fields provided")
+        if "crew_assignment_id" in updates:
+            crew = await self._require_crew_assignment(vessel_id, updates["crew_assignment_id"])
+            updates["holder_name"] = updates.get("holder_name") or crew.crew_name
+        elif cert.crew_assignment_id is None:
+            raise ValidationError("人员适任证必须绑定当前船员任职")
+        if "certificate_type_code" in updates:
+            updates["certificate_type_code"] = CREW_CERTIFICATE_TYPE
         row = await self.repo.update_person_certificate(person_certificate_id, updates)
         assert row is not None
         await self._add_change_event(vessel_id, "UPDATE_PERSON_CERTIFICATE", "更新人员证件", before, _row_dict(row), operator_id)
@@ -824,24 +879,19 @@ class VesselService:
         vessel_id: int,
         person_certificate_id: int,
         *,
+        reason: str | None = None,
         operator_id: int | None = None,
     ) -> None:
         cert = await self.repo.get_person_certificate(person_certificate_id)
         if cert is None or cert.vessel_profile_id != vessel_id:
             raise NotFoundError("VesselPersonCertificate", person_certificate_id)
         before = _row_dict(cert)
-        await self.db.execute(
-            delete(VesselPersonCertificateImageRecognition).where(
-                VesselPersonCertificateImageRecognition.vessel_person_certificate_id == person_certificate_id
-            )
-        )
-        await self.db.execute(
-            delete(VesselPersonCertificateFile).where(
-                VesselPersonCertificateFile.vessel_person_certificate_id == person_certificate_id
-            )
-        )
-        await self.repo.delete_person_certificate(person_certificate_id)
-        await self._add_change_event(vessel_id, "DELETE_PERSON_CERTIFICATE", "删除人员证件", before, None, operator_id)
+        now = datetime.utcnow()
+        cert.voided_at = now
+        cert.voided_by = operator_id
+        cert.void_reason = reason or "人员适任证作废"
+        cert.verify_status_code = "VOIDED"
+        await self._add_change_event(vessel_id, "VOID_PERSON_CERTIFICATE", "作废人员适任证", before, _row_dict(cert), operator_id)
         await self.db.commit()
 
     async def upload_person_certificate_file_first(
@@ -849,18 +899,20 @@ class VesselService:
         vessel_id: int,
         file: UploadFile,
         *,
+        crew_assignment_id: int,
         certificate_type_code: str = "CREW_COMPETENCY_CERT",
-        holder_name: str = "待补录",
         operator_id: int | None = None,
     ) -> VesselPersonCertificateResponse:
         await self._require_profile(vessel_id)
+        crew = await self._require_crew_assignment(vessel_id, crew_assignment_id)
         cert = await self.repo.create_person_certificate(
             vessel_id,
             {
-                "holder_name": holder_name.strip() or "待补录",
-                "certificate_type_code": certificate_type_code or "CREW_COMPETENCY_CERT",
+                "crew_assignment_id": crew.id,
+                "holder_name": crew.crew_name,
+                "certificate_type_code": CREW_CERTIFICATE_TYPE,
                 "verify_status_code": "PENDING",
-                "remark": "由人员证件附件上传创建，待识别或人工补录",
+                "remark": "由船员适任证附件上传创建，待识别或人工补录",
             },
         )
         file_row = await self._store_person_certificate_file(vessel_id, cert.id, file, operator_id=operator_id)
@@ -873,7 +925,7 @@ class VesselService:
                 file_row.storage_file_id,
                 operator_id=operator_id,
             )
-        await self._add_change_event(vessel_id, "CREATE_PERSON_CERTIFICATE", "上传附件创建人员证件草稿", None, _row_dict(cert), operator_id)
+        await self._add_change_event(vessel_id, "CREATE_PERSON_CERTIFICATE", "上传附件创建船员适任证草稿", None, _row_dict(cert), operator_id)
         await self.db.commit()
         if recognition is not None:
             await self._dispatch_person_recognition_or_fail(recognition)
@@ -904,6 +956,33 @@ class VesselService:
             await self.db.commit()
             await self._dispatch_person_recognition_or_fail(recognition)
         return self._person_file_response(row)
+
+    async def void_person_certificate_file(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        file_id: int,
+        *,
+        reason: str | None = None,
+        operator_id: int | None = None,
+    ) -> None:
+        cert = await self.repo.get_person_certificate(person_certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselPersonCertificate", person_certificate_id)
+        row = await self.db.scalar(
+            select(VesselPersonCertificateFile).where(
+                VesselPersonCertificateFile.id == file_id,
+                VesselPersonCertificateFile.vessel_person_certificate_id == person_certificate_id,
+            )
+        )
+        if row is None:
+            raise NotFoundError("VesselPersonCertificateFile", file_id)
+        before = _row_dict(row)
+        row.voided_at = datetime.utcnow()
+        row.voided_by = operator_id
+        row.void_reason = reason or "船员适任证附件作废"
+        await self._add_change_event(vessel_id, "VOID_PERSON_CERTIFICATE_FILE", "作废船员适任证附件", before, _row_dict(row), operator_id)
+        await self.db.commit()
 
     async def create_person_certificate_image_recognition(
         self,
@@ -989,9 +1068,30 @@ class VesselService:
         await self._require_profile(vessel_id)
         return await self._certificates_with_files(vessel_id)
 
+    async def get_certificate_ledger(self, vessel_id: int) -> list[VesselCertificateLedgerItemResponse]:
+        await self._require_profile(vessel_id)
+        label_map = await _load_label_map(self.db)
+        certs = await self._certificates_with_files(vessel_id, label_map=label_map)
+        by_type: dict[str, VesselCertificateResponse] = {}
+        for cert in certs:
+            by_type.setdefault(cert.certificate_type_code, cert)
+        return [
+            VesselCertificateLedgerItemResponse(
+                certificate_type_code=code,
+                certificate_type_name=label_map.get("VESSEL_CERTIFICATE_TYPE", {}).get(code),
+                required=True,
+                status_code=self._certificate_ledger_status(by_type.get(code)),
+                status_name=self._certificate_ledger_status_name(self._certificate_ledger_status(by_type.get(code))),
+                certificate=by_type.get(code),
+            )
+            for code in REQUIRED_VESSEL_CERTIFICATE_TYPES
+        ]
+
     async def create_certificate(self, vessel_id: int, payload, *, operator_id: int | None = None) -> VesselCertificateResponse:
         await self._require_profile(vessel_id)
-        row = await self.repo.create_certificate(vessel_id, payload.model_dump(exclude_none=True))
+        data = payload.model_dump(exclude_none=True)
+        self._validate_vessel_certificate_type(data.get("certificate_type_code"))
+        row = await self.repo.create_certificate(vessel_id, data)
         await self._add_change_event(vessel_id, "CREATE_CERTIFICATE", "新增船舶证件", None, _row_dict(row), operator_id)
         await self.db.commit()
         return (await self._certificates_with_files(vessel_id, certificate_id=row.id))[0]
@@ -1004,11 +1104,32 @@ class VesselService:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             raise ValidationError("no update fields provided")
+        if "certificate_type_code" in updates:
+            self._validate_vessel_certificate_type(updates.get("certificate_type_code"))
         row = await self.repo.update_certificate(certificate_id, updates)
         assert row is not None
         await self._add_change_event(row.vessel_profile_id, "UPDATE_CERTIFICATE", "更新船舶证件", before, _row_dict(row), operator_id)
         await self.db.commit()
         return (await self._certificates_with_files(row.vessel_profile_id, certificate_id=row.id))[0]
+
+    async def void_certificate(
+        self,
+        vessel_id: int,
+        certificate_id: int,
+        *,
+        reason: str | None = None,
+        operator_id: int | None = None,
+    ) -> None:
+        cert = await self.repo.get_certificate(certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselCertificate", certificate_id)
+        before = _row_dict(cert)
+        cert.voided_at = datetime.utcnow()
+        cert.voided_by = operator_id
+        cert.void_reason = reason or "船舶证书作废"
+        cert.verify_status_code = "VOIDED"
+        await self._add_change_event(vessel_id, "VOID_CERTIFICATE", "作废船舶证书", before, _row_dict(cert), operator_id)
+        await self.db.commit()
 
     async def upload_certificate_file_first(
         self,
@@ -1019,6 +1140,7 @@ class VesselService:
         operator_id: int | None = None,
     ) -> VesselCertificateResponse:
         await self._require_profile(vessel_id)
+        self._validate_vessel_certificate_type(certificate_type_code)
         cert = await self.repo.create_certificate(
             vessel_id,
             {
@@ -1068,6 +1190,33 @@ class VesselService:
             await self.db.commit()
             await self._dispatch_certificate_recognition_or_fail(recognition)
         return self._file_response(row)
+
+    async def void_certificate_file(
+        self,
+        vessel_id: int,
+        certificate_id: int,
+        file_id: int,
+        *,
+        reason: str | None = None,
+        operator_id: int | None = None,
+    ) -> None:
+        cert = await self.repo.get_certificate(certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselCertificate", certificate_id)
+        row = await self.db.scalar(
+            select(VesselCertificateFile).where(
+                VesselCertificateFile.id == file_id,
+                VesselCertificateFile.vessel_certificate_id == certificate_id,
+            )
+        )
+        if row is None:
+            raise NotFoundError("VesselCertificateFile", file_id)
+        before = _row_dict(row)
+        row.voided_at = datetime.utcnow()
+        row.voided_by = operator_id
+        row.void_reason = reason or "船舶证书附件作废"
+        await self._add_change_event(vessel_id, "VOID_CERTIFICATE_FILE", "作废船舶证书附件", before, _row_dict(row), operator_id)
+        await self.db.commit()
 
     async def create_certificate_image_recognition(
         self,
@@ -1362,7 +1511,7 @@ class VesselService:
                 "vessel_owner_period_id": owner_id,
                 "owner_document_id": owner_document_id,
                 "storage_file_id": storage_file_id,
-                "status_code": "PROCESSING",
+                "status_code": "QUEUED",
                 "created_by": operator_id,
             }
         )
@@ -1382,7 +1531,7 @@ class VesselService:
                 "vessel_certificate_id": certificate_id,
                 "certificate_file_id": certificate_file_id,
                 "storage_file_id": storage_file_id,
-                "status_code": "PROCESSING",
+                "status_code": "QUEUED",
                 "created_by": operator_id,
             }
         )
@@ -1402,7 +1551,7 @@ class VesselService:
                 "vessel_person_certificate_id": person_certificate_id,
                 "person_certificate_file_id": person_certificate_file_id,
                 "storage_file_id": storage_file_id,
-                "status_code": "PROCESSING",
+                "status_code": "QUEUED",
                 "created_by": operator_id,
             }
         )
@@ -1460,11 +1609,14 @@ class VesselService:
         if recognition is None:
             raise NotFoundError("VesselCertificateImageRecognition", recognition_id)
         try:
+            recognition.status_code = "PROCESSING"
+            await self.db.flush()
             storage_file, file_result = await FileStorageService(self.db).download_file(recognition.storage_file_id)
             result = await VesselCertificateImageAssistant(self.runtime_config).recognize(
                 content=file_result.content,
                 content_type=file_result.content_type or storage_file.content_type,
                 file_name=storage_file.original_file_name,
+                scenario="vessel_certificate",
             )
             recognition.status_code = "NEED_CONFIRM"
             recognition.provider_code = result.provider
@@ -1501,11 +1653,14 @@ class VesselService:
         if recognition is None:
             raise NotFoundError("VesselPersonCertificateImageRecognition", recognition_id)
         try:
+            recognition.status_code = "PROCESSING"
+            await self.db.flush()
             storage_file, file_result = await FileStorageService(self.db).download_file(recognition.storage_file_id)
             result = await VesselCertificateImageAssistant(self.runtime_config).recognize(
                 content=file_result.content,
                 content_type=file_result.content_type or storage_file.content_type,
                 file_name=storage_file.original_file_name,
+                scenario="crew_competency_certificate",
             )
             recognition.status_code = "NEED_CONFIRM"
             recognition.provider_code = result.provider
@@ -1542,11 +1697,14 @@ class VesselService:
         if recognition is None:
             raise NotFoundError("VesselOwnerDocumentImageRecognition", recognition_id)
         try:
+            recognition.status_code = "PROCESSING"
+            await self.db.flush()
             storage_file, file_result = await FileStorageService(self.db).download_file(recognition.storage_file_id)
             result = await VesselCertificateImageAssistant(self.runtime_config).recognize(
                 content=file_result.content,
                 content_type=file_result.content_type or storage_file.content_type,
                 file_name=storage_file.original_file_name,
+                scenario="owner_document",
             )
             recognition.status_code = "NEED_CONFIRM"
             recognition.provider_code = result.provider
@@ -1733,11 +1891,67 @@ class VesselService:
                     capacity_updates[target_key] = value
         return profile_updates, capacity_updates
 
+    def _validate_vessel_certificate_type(self, certificate_type_code: str | None) -> None:
+        code = certificate_type_code or "UNKNOWN"
+        if code not in VALID_VESSEL_CERTIFICATE_TYPES:
+            raise ValidationError("船舶证书类型必须从船舶证书目录中选择")
+
+    def _certificate_ledger_status(self, cert: VesselCertificateResponse | None) -> str:
+        if cert is None:
+            return "MISSING"
+        if cert.voided_at is not None:
+            return "VOIDED"
+        latest = cert.latest_image_recognition
+        if latest is not None and latest.status_code in ACTIVE_RECOGNITION_STATUSES:
+            return latest.status_code
+        if latest is not None and latest.status_code == "FAILED":
+            return "RECOGNITION_FAILED"
+        if latest is not None and latest.status_code == "NEED_CONFIRM":
+            return "NEED_CONFIRM"
+        if cert.verify_status_code == "VERIFIED":
+            if cert.is_long_term_valid:
+                return "VERIFIED"
+            if cert.valid_to is not None:
+                today = date.today()
+                if cert.valid_to < today:
+                    return "EXPIRED"
+                if cert.valid_to <= today + timedelta(days=30):
+                    return "EXPIRING"
+            return "VERIFIED"
+        if cert.files:
+            return "ARCHIVED"
+        return "DRAFT"
+
+    def _certificate_ledger_status_name(self, status_code: str) -> str:
+        return {
+            "MISSING": "缺失",
+            "DRAFT": "草稿",
+            "ARCHIVED": "已归档",
+            "QUEUED": "排队识别",
+            "PROCESSING": "识别中",
+            "NEED_CONFIRM": "待确认",
+            "RECOGNITION_FAILED": "识别失败",
+            "VERIFIED": "已核验",
+            "EXPIRING": "即将到期",
+            "EXPIRED": "已过期",
+            "VOIDED": "已作废",
+        }.get(status_code, status_code)
+
     async def _require_profile(self, vessel_id: int) -> VesselProfile:
         profile = await self.repo.get_profile(vessel_id)
         if profile is None:
             raise NotFoundError("VesselProfile", vessel_id)
         return profile
+
+    async def _require_crew_assignment(self, vessel_id: int, crew_assignment_id: int | None) -> VesselCrewAssignment:
+        if crew_assignment_id is None:
+            raise ValidationError("船员适任证必须绑定当前船员任职")
+        crew = await self.db.get(VesselCrewAssignment, crew_assignment_id)
+        if crew is None or crew.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselCrewAssignment", crew_assignment_id)
+        if not crew.is_current:
+            raise ValidationError("船员适任证只能绑定当前任职船员")
+        return crew
 
     async def _map_by_profile(self, model, ids: list[int]) -> dict[int, Any]:
         rows = (await self.db.execute(select(model).where(model.vessel_profile_id.in_(ids)))).scalars().all()
@@ -1995,7 +2209,10 @@ class VesselService:
         label_map: dict[str, dict[str, str]] | None = None,
     ) -> list[VesselCertificateResponse]:
         label_map = label_map or await _load_label_map(self.db)
-        stmt = select(VesselCertificate).where(VesselCertificate.vessel_profile_id == vessel_id)
+        stmt = select(VesselCertificate).where(
+            VesselCertificate.vessel_profile_id == vessel_id,
+            VesselCertificate.voided_at.is_(None),
+        )
         if certificate_id:
             stmt = stmt.where(VesselCertificate.id == certificate_id)
         certs = (await self.db.execute(stmt.order_by(VesselCertificate.id.desc()))).scalars().all()
@@ -2004,7 +2221,8 @@ class VesselService:
         files = (
             await self.db.execute(
                 select(VesselCertificateFile).where(
-                    VesselCertificateFile.vessel_certificate_id.in_([row.id for row in certs])
+                    VesselCertificateFile.vessel_certificate_id.in_([row.id for row in certs]),
+                    VesselCertificateFile.voided_at.is_(None),
                 )
             )
         ).scalars().all()
@@ -2042,7 +2260,10 @@ class VesselService:
         label_map: dict[str, dict[str, str]] | None = None,
     ) -> list[VesselPersonCertificateResponse]:
         label_map = label_map or await _load_label_map(self.db)
-        stmt = select(VesselPersonCertificate).where(VesselPersonCertificate.vessel_profile_id == vessel_id)
+        stmt = select(VesselPersonCertificate).where(
+            VesselPersonCertificate.vessel_profile_id == vessel_id,
+            VesselPersonCertificate.voided_at.is_(None),
+        )
         if person_certificate_id:
             stmt = stmt.where(VesselPersonCertificate.id == person_certificate_id)
         certs = (await self.db.execute(stmt.order_by(VesselPersonCertificate.id.desc()))).scalars().all()
@@ -2051,7 +2272,8 @@ class VesselService:
         files = (
             await self.db.execute(
                 select(VesselPersonCertificateFile).where(
-                    VesselPersonCertificateFile.vessel_person_certificate_id.in_([row.id for row in certs])
+                    VesselPersonCertificateFile.vessel_person_certificate_id.in_([row.id for row in certs]),
+                    VesselPersonCertificateFile.voided_at.is_(None),
                 )
             )
         ).scalars().all()
@@ -2100,7 +2322,7 @@ class VesselService:
         vessel_id: int,
         label_map: dict[str, dict[str, str]],
     ) -> dict[int, list[VesselOwnerDocumentResponse]]:
-        docs = await self.repo.list_owner_documents(vessel_id)
+        docs = [row for row in await self.repo.list_owner_documents(vessel_id) if row.voided_at is None]
         if not docs:
             return {}
         recognition_rows = (
@@ -2190,7 +2412,8 @@ class VesselService:
     ) -> VesselPersonCertificateResponse:
         return VesselPersonCertificateResponse(
             **_row_dict(row),
-            certificate_type_name=label_map.get("CERTIFICATE_TYPE", {}).get(row.certificate_type_code),
+            certificate_type_name=label_map.get("CREW_CERTIFICATE_TYPE", {}).get(row.certificate_type_code)
+            or label_map.get("CERTIFICATE_TYPE", {}).get(row.certificate_type_code),
             verify_status_name=label_map.get("CERTIFICATE_VERIFY_STATUS", {}).get(row.verify_status_code),
             files=files or [],
             latest_image_recognition=(
@@ -2232,7 +2455,8 @@ class VesselService:
         confirmation_status = "CONFIRMED" if recognition_status == "CONFIRMED" else "UNCONFIRMED"
         return VesselCertificateResponse(
             **_row_dict(row),
-            certificate_type_name=label_map.get("CERTIFICATE_TYPE", {}).get(row.certificate_type_code),
+            certificate_type_name=label_map.get("VESSEL_CERTIFICATE_TYPE", {}).get(row.certificate_type_code)
+            or label_map.get("CERTIFICATE_TYPE", {}).get(row.certificate_type_code),
             verify_status_name=label_map.get("CERTIFICATE_VERIFY_STATUS", {}).get(row.verify_status_code),
             recognition_status_code=recognition_status,
             recognition_status_name=label_map.get("VESSEL_CERTIFICATE_IMAGE_RECOGNITION_STATUS", {}).get(recognition_status),

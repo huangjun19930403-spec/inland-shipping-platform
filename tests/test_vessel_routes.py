@@ -21,7 +21,13 @@ def test_vessel_dashboard_routes_removed() -> None:
 def test_vessel_person_certificate_upload_first_routes_exist() -> None:
     paths = app.openapi()["paths"]
 
+    upload_operation = paths["/api/v1/vessels/{vessel_id}/person-certificate-files"]["post"]
     assert "post" in paths["/api/v1/vessels/{vessel_id}/person-certificate-files"]
+    request_body = upload_operation.get("requestBody", {}).get("content", {}).get("multipart/form-data", {})
+    schema_ref = request_body.get("schema", {}).get("$ref", "")
+    schema_name = schema_ref.rsplit("/", 1)[-1]
+    schema = app.openapi()["components"]["schemas"].get(schema_name, {})
+    assert "crew_assignment_id" in schema.get("required", [])
     assert "post" in paths[
         "/api/v1/vessels/{vessel_id}/person-certificates/{person_certificate_id}/image-recognitions"
     ]
@@ -34,8 +40,20 @@ def test_vessel_owner_document_routes_exist() -> None:
     paths = app.openapi()["paths"]
 
     assert "post" in paths["/api/v1/vessels/{vessel_id}/owners/{owner_id}/documents"]
+    assert "delete" in paths["/api/v1/vessels/{vessel_id}/owners/{owner_id}/documents/{owner_document_id}"]
     assert "post" in paths[
         "/api/v1/vessels/{vessel_id}/owners/{owner_id}/documents/{owner_document_id}/image-recognitions/{recognition_id}/confirm"
+    ]
+
+
+def test_vessel_certificate_ledger_and_void_routes_exist() -> None:
+    paths = app.openapi()["paths"]
+
+    assert "get" in paths["/api/v1/vessels/{vessel_id}/certificates/ledger"]
+    assert "delete" in paths["/api/v1/vessels/{vessel_id}/certificates/{certificate_id}"]
+    assert "delete" in paths["/api/v1/vessels/{vessel_id}/certificates/{certificate_id}/files/{file_id}"]
+    assert "delete" in paths[
+        "/api/v1/vessels/{vessel_id}/person-certificates/{person_certificate_id}/files/{file_id}"
     ]
 
 

@@ -184,6 +184,9 @@ class VesselOwnerDocument(Base):
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class VesselOwnerDocumentImageRecognition(Base, TimestampMixin):
@@ -293,6 +296,9 @@ class VesselPersonCertificate(Base, TimestampMixin):
     verify_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PENDING")
     structured_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class VesselPersonCertificateFile(Base):
@@ -311,6 +317,9 @@ class VesselPersonCertificateFile(Base):
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class VesselPersonCertificateImageRecognition(Base, TimestampMixin):
@@ -360,6 +369,9 @@ class VesselCertificate(Base, TimestampMixin):
     verify_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PENDING")
     structured_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class VesselCertificateFile(Base):
@@ -378,6 +390,9 @@ class VesselCertificateFile(Base):
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class VesselCertificateImageRecognition(Base, TimestampMixin):

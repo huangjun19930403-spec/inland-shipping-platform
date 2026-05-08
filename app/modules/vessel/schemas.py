@@ -274,6 +274,10 @@ class VesselCertificateImageRecognitionConfirmRequest(StrictBaseModel):
     adopt_to_profile_fields: list[str] = Field(default_factory=list)
 
 
+class VesselVoidRequest(StrictBaseModel):
+    reason: str | None = Field(default=None, max_length=256)
+
+
 class VesselOwnerTransferRequest(StrictBaseModel):
     new_owner_name: str = Field(min_length=1, max_length=128)
     party_type_code: str = Field(default="UNKNOWN", min_length=1, max_length=64)
@@ -394,6 +398,9 @@ class VesselOwnerDocumentResponse(BaseModel):
     uploaded_by: int | None
     uploaded_at: datetime
     created_at: datetime
+    voided_at: datetime | None = None
+    voided_by: int | None = None
+    void_reason: str | None = None
     download_url: str | None = None
     latest_image_recognition: VesselOwnerDocumentImageRecognitionResponse | None = None
 
@@ -442,6 +449,9 @@ class VesselCertificateFileResponse(BaseModel):
     uploaded_by: int | None
     uploaded_at: datetime
     created_at: datetime
+    voided_at: datetime | None = None
+    voided_by: int | None = None
+    void_reason: str | None = None
     download_url: str | None = None
 
 
@@ -455,6 +465,9 @@ class VesselPersonCertificateFileResponse(BaseModel):
     uploaded_by: int | None
     uploaded_at: datetime
     created_at: datetime
+    voided_at: datetime | None = None
+    voided_by: int | None = None
+    void_reason: str | None = None
     download_url: str | None = None
 
 
@@ -513,6 +526,9 @@ class VesselPersonCertificateResponse(VesselPersonCertificateItem):
     latest_image_recognition: VesselPersonCertificateImageRecognitionResponse | None = None
     created_at: datetime
     updated_at: datetime
+    voided_at: datetime | None = None
+    voided_by: int | None = None
+    void_reason: str | None = None
 
 
 class VesselCertificateResponse(BaseModel):
@@ -538,6 +554,18 @@ class VesselCertificateResponse(BaseModel):
     latest_image_recognition: VesselCertificateImageRecognitionResponse | None = None
     created_at: datetime
     updated_at: datetime
+    voided_at: datetime | None = None
+    voided_by: int | None = None
+    void_reason: str | None = None
+
+
+class VesselCertificateLedgerItemResponse(BaseModel):
+    certificate_type_code: str
+    certificate_type_name: str | None = None
+    required: bool = True
+    status_code: str
+    status_name: str
+    certificate: VesselCertificateResponse | None = None
 
 
 class VesselNameHistoryResponse(BaseModel):

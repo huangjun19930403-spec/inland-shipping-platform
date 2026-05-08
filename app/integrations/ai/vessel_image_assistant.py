@@ -89,6 +89,7 @@ class VesselCertificateImageAssistant:
         content: bytes,
         content_type: str,
         file_name: str | None = None,
+        scenario: str = "vessel_certificate",
     ) -> VesselCertificateImageAssistantResult:
         if not content:
             raise ValidationError("证件图片内容为空")
@@ -116,15 +117,7 @@ class VesselCertificateImageAssistant:
 
         image_data = base64.b64encode(content).decode("ascii")
         data_url = f"data:{content_type};base64,{image_data}"
-        prompt = (
-            "你是船舶和船员证件图片识别助手，只处理单张内河航运业务证件图片。"
-            "请从图片中提取候选字段，必须只返回 JSON 对象。字段包括："
-            "certificate_type_code, certificate_type_text, certificate_no, holder_name, ship_name, mmsi, "
-            "ship_registry_no, issuing_authority, valid_from, valid_to, is_long_term_valid, "
-            "validity_text_raw, deadweight_ton, total_tonnage, net_tonnage, length_m, width_m, "
-            "depth_m, design_draft_m, confidence_score, raw_text, warnings。"
-            "日期使用 YYYY-MM-DD；无法识别的字段返回 null；不要编造。"
-        )
+        prompt = self._prompt_for_scenario(scenario)
         payload = {
             "model": model,
             "temperature": 0,
@@ -163,4 +156,32 @@ class VesselCertificateImageAssistant:
             raw_text=str(raw_text) if raw_text not in (None, "") else None,
             raw_response=raw_response,
             confidence_score=_confidence(candidate.get("confidence_score")),
+        )
+
+    @staticmethod
+    def _prompt_for_scenario(scenario: str) -> str:
+        common = "必须只返回 JSON 对象；日期使用 YYYY-MM-DD；无法识别的字段返回 null；不要编造。"
+        if scenario == "crew_competency_certificate":
+            return (
+                "你是内河船员适任证图片识别助手，只处理单张船员适任证图片。"
+                "提取字段：certificate_type_code 固定 CREW_COMPETENCY_CERT, certificate_type_text, "
+                "certificate_no, holder_name, gender, competency_level, duty_qualification, issuing_authority, "
+                "valid_from, valid_to, is_long_term_valid, validity_text_raw, confidence_score, raw_text, warnings。"
+                f"{common}"
+            )
+        if scenario == "owner_document":
+            return (
+                "你是船舶所有方证照图片识别助手，只处理身份证或营业执照图片。"
+                "提取字段：document_type_code, document_type_text, holder_name, company_name, party_name, "
+                "certificate_no, document_no, license_no, legal_representative, address, valid_from, valid_to, "
+                "is_long_term_valid, validity_text_raw, confidence_score, raw_text, warnings。"
+                f"{common}"
+            )
+        return (
+            "你是内河船舶证书图片识别助手，只处理单张船舶业务证书图片。"
+            "提取字段：certificate_type_code, certificate_type_text, certificate_no, ship_name, mmsi, "
+            "ship_registry_no, ship_inspection_no, issuing_authority, valid_from, valid_to, is_long_term_valid, "
+            "validity_text_raw, deadweight_ton, total_tonnage, net_tonnage, length_m, width_m, "
+            "depth_m, design_draft_m, confidence_score, raw_text, warnings。"
+            f"{common}"
         )
