@@ -231,8 +231,59 @@ class VesselPersonCertificate(Base, TimestampMixin):
     certificate_no: Mapped[str | None] = mapped_column(String(128), nullable=True)
     valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_long_term_valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    validity_text_raw: Mapped[str | None] = mapped_column(String(256), nullable=True)
     verify_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PENDING")
+    structured_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class VesselPersonCertificateFile(Base):
+    __tablename__ = "vessel_person_certificate_file"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    vessel_person_certificate_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_person_certificate.id"), nullable=False, index=True
+    )
+    storage_file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("storage_file.id"), nullable=False, index=True
+    )
+    file_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    uploaded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class VesselPersonCertificateImageRecognition(Base, TimestampMixin):
+    __tablename__ = "vessel_person_certificate_image_recognition"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    vessel_profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True
+    )
+    vessel_person_certificate_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_person_certificate.id"), nullable=False, index=True
+    )
+    person_certificate_file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_person_certificate_file.id"), nullable=False, index=True
+    )
+    storage_file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("storage_file.id"), nullable=False, index=True
+    )
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PENDING")
+    provider_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    candidate_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confirmed_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    confirmed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class VesselCertificate(Base, TimestampMixin):

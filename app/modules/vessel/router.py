@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -27,7 +27,6 @@ from app.modules.vessel.schemas import (
     VesselCreateRequest,
     VesselCrewReplaceRequest,
     VesselCrewResponse,
-    VesselDashboardResponse,
     VesselDetailResponse,
     VesselListItemResponse,
     VesselListQuery,
@@ -36,8 +35,13 @@ from app.modules.vessel.schemas import (
     VesselOwnerReplaceRequest,
     VesselOwnerResponse,
     VesselOwnerTransferRequest,
+    VesselPersonCertificateFileResponse,
+    VesselPersonCertificateImageRecognitionConfirmRequest,
+    VesselPersonCertificateImageRecognitionCreateRequest,
+    VesselPersonCertificateImageRecognitionResponse,
     VesselPersonCertificateReplaceRequest,
     VesselPersonCertificateResponse,
+    VesselPersonCertificateUpdateRequest,
     VesselPositionMonitorQuery,
     VesselPositionMonitorResponse,
     VesselProfileResponse,
@@ -52,24 +56,6 @@ router = APIRouter()
 
 def _operator_id(current_user: SysUser) -> int | None:
     return int(current_user.id) if current_user is not None else None
-
-
-@router.get("/dashboard", response_model=VesselDashboardResponse)
-async def get_vessel_dashboard(
-    current_user: SysUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    return await VesselService(db).dashboard()
-
-
-@router.get("/statistics/overview", response_model=VesselDashboardResponse)
-async def get_vessel_statistics_overview(
-    current_user: SysUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    return await VesselService(db).dashboard()
 
 
 @router.get("/position-monitor", response_model=VesselPositionMonitorResponse)
@@ -249,6 +235,124 @@ async def replace_vessel_person_certificates(
     db: AsyncSession = Depends(get_db),
 ):
     return await VesselService(db).replace_person_certificates(vessel_id, body, operator_id=_operator_id(current_user))
+
+
+@router.post("/{vessel_id}/person-certificates", response_model=VesselPersonCertificateResponse)
+async def create_vessel_person_certificate(
+    vessel_id: int,
+    body: VesselPersonCertificateUpdateRequest,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).create_person_certificate(vessel_id, body, operator_id=_operator_id(current_user))
+
+
+@router.put("/{vessel_id}/person-certificates/{person_certificate_id}", response_model=VesselPersonCertificateResponse)
+async def update_vessel_person_certificate(
+    vessel_id: int,
+    person_certificate_id: int,
+    body: VesselPersonCertificateUpdateRequest,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).update_person_certificate(
+        vessel_id,
+        person_certificate_id,
+        body,
+        operator_id=_operator_id(current_user),
+    )
+
+
+@router.delete("/{vessel_id}/person-certificates/{person_certificate_id}", status_code=204)
+async def delete_vessel_person_certificate(
+    vessel_id: int,
+    person_certificate_id: int,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await VesselService(db).delete_person_certificate(
+        vessel_id,
+        person_certificate_id,
+        operator_id=_operator_id(current_user),
+    )
+    return Response(status_code=204)
+
+
+@router.post("/{vessel_id}/person-certificate-files", response_model=VesselPersonCertificateResponse)
+async def upload_vessel_person_certificate_file_first(
+    vessel_id: int,
+    certificate_type_code: str = Form(default="CREW_LICENSE"),
+    holder_name: str = Form(default="待补录"),
+    file: UploadFile = File(...),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).upload_person_certificate_file_first(
+        vessel_id,
+        file,
+        certificate_type_code=certificate_type_code or "CREW_LICENSE",
+        holder_name=holder_name or "待补录",
+        operator_id=_operator_id(current_user),
+    )
+
+
+@router.post(
+    "/{vessel_id}/person-certificates/{person_certificate_id}/files",
+    response_model=VesselPersonCertificateFileResponse,
+)
+async def upload_vessel_person_certificate_file(
+    vessel_id: int,
+    person_certificate_id: int,
+    file: UploadFile = File(...),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).upload_person_certificate_file(
+        vessel_id,
+        person_certificate_id,
+        file,
+        operator_id=_operator_id(current_user),
+    )
+
+
+@router.post(
+    "/{vessel_id}/person-certificates/{person_certificate_id}/image-recognitions",
+    response_model=VesselPersonCertificateImageRecognitionResponse,
+)
+async def create_vessel_person_certificate_image_recognition(
+    vessel_id: int,
+    person_certificate_id: int,
+    body: VesselPersonCertificateImageRecognitionCreateRequest,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).create_person_certificate_image_recognition(
+        vessel_id,
+        person_certificate_id,
+        body,
+        operator_id=_operator_id(current_user),
+    )
+
+
+@router.post(
+    "/{vessel_id}/person-certificates/{person_certificate_id}/image-recognitions/{recognition_id}/confirm",
+    response_model=VesselPersonCertificateResponse,
+)
+async def confirm_vessel_person_certificate_image_recognition(
+    vessel_id: int,
+    person_certificate_id: int,
+    recognition_id: int,
+    body: VesselPersonCertificateImageRecognitionConfirmRequest,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).confirm_person_certificate_image_recognition(
+        vessel_id,
+        person_certificate_id,
+        recognition_id,
+        body,
+        operator_id=_operator_id(current_user),
+    )
 
 
 @router.get("/{vessel_id}/certificates", response_model=list[VesselCertificateResponse])

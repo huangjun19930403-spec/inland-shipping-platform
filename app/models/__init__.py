@@ -57,6 +57,8 @@ from app.models.vessel import (
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
+    VesselPersonCertificateFile,
+    VesselPersonCertificateImageRecognition,
     VesselProfile,
     VesselRegistrationInfo,
 )
@@ -157,6 +159,8 @@ __all__ = [
     "VesselContact",
     "VesselCrewAssignment",
     "VesselPersonCertificate",
+    "VesselPersonCertificateFile",
+    "VesselPersonCertificateImageRecognition",
     "VesselCertificate",
     "VesselCertificateFile",
     "VesselCertificateImageRecognition",

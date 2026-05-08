@@ -117,9 +117,9 @@ class VesselCertificateImageAssistant:
         image_data = base64.b64encode(content).decode("ascii")
         data_url = f"data:{content_type};base64,{image_data}"
         prompt = (
-            "你是船舶证件图片识别助手，只处理单张内河船舶证件图片。"
+            "你是船舶和船员证件图片识别助手，只处理单张内河航运业务证件图片。"
             "请从图片中提取候选字段，必须只返回 JSON 对象。字段包括："
-            "certificate_type_code, certificate_type_text, certificate_no, ship_name, mmsi, "
+            "certificate_type_code, certificate_type_text, certificate_no, holder_name, ship_name, mmsi, "
             "ship_registry_no, issuing_authority, valid_from, valid_to, is_long_term_valid, "
             "validity_text_raw, deadweight_ton, total_tonnage, net_tonnage, length_m, width_m, "
             "depth_m, design_draft_m, confidence_score, raw_text, warnings。"

@@ -21,6 +21,8 @@ from app.models.vessel import (
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
+    VesselPersonCertificateFile,
+    VesselPersonCertificateImageRecognition,
     VesselProfile,
     VesselRegistrationInfo,
 )
@@ -181,6 +183,76 @@ class VesselRepository:
     async def get_image_recognition(self, recognition_id: int) -> VesselCertificateImageRecognition | None:
         return await self.db.scalar(
             select(VesselCertificateImageRecognition).where(VesselCertificateImageRecognition.id == recognition_id)
+        )
+
+    async def get_person_certificate(self, person_certificate_id: int) -> VesselPersonCertificate | None:
+        return await self.db.scalar(
+            select(VesselPersonCertificate).where(VesselPersonCertificate.id == person_certificate_id)
+        )
+
+    async def create_person_certificate(self, vessel_id: int, data: dict[str, Any]) -> VesselPersonCertificate:
+        entity = VesselPersonCertificate(vessel_profile_id=vessel_id, **data)
+        self.db.add(entity)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def update_person_certificate(
+        self,
+        person_certificate_id: int,
+        data: dict[str, Any],
+    ) -> VesselPersonCertificate | None:
+        entity = await self.get_person_certificate(person_certificate_id)
+        if entity is None:
+            return None
+        for key, value in data.items():
+            setattr(entity, key, value)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def delete_person_certificate(self, person_certificate_id: int) -> None:
+        await self.db.execute(
+            delete(VesselPersonCertificate).where(VesselPersonCertificate.id == person_certificate_id)
+        )
+
+    async def create_person_certificate_file(self, data: dict[str, Any]) -> VesselPersonCertificateFile:
+        entity = VesselPersonCertificateFile(**data)
+        self.db.add(entity)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def get_person_certificate_file_by_storage_file(
+        self,
+        person_certificate_id: int,
+        storage_file_id: int,
+    ) -> VesselPersonCertificateFile | None:
+        return await self.db.scalar(
+            select(VesselPersonCertificateFile).where(
+                VesselPersonCertificateFile.vessel_person_certificate_id == person_certificate_id,
+                VesselPersonCertificateFile.storage_file_id == storage_file_id,
+            )
+        )
+
+    async def create_person_image_recognition(
+        self,
+        data: dict[str, Any],
+    ) -> VesselPersonCertificateImageRecognition:
+        entity = VesselPersonCertificateImageRecognition(**data)
+        self.db.add(entity)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def get_person_image_recognition(
+        self,
+        recognition_id: int,
+    ) -> VesselPersonCertificateImageRecognition | None:
+        return await self.db.scalar(
+            select(VesselPersonCertificateImageRecognition).where(
+                VesselPersonCertificateImageRecognition.id == recognition_id
+            )
         )
 
 

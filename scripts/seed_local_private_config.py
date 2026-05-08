@@ -48,6 +48,12 @@ from app.integrations.config_keys import (
     VESSEL_IMAGE_AI_MODEL,
     VESSEL_IMAGE_AI_PROVIDER,
     VESSEL_IMAGE_AI_TIMEOUT_SECONDS,
+    ES_R_HOST,
+    ES_R_INDEX,
+    ES_R_PASSWORD,
+    ES_R_PORT,
+    ES_R_SCHEME,
+    ES_R_USER,
     HIFLEET_ENABLED,
     HIFLEET_PASSWORD,
     HIFLEET_USERNAME,
@@ -83,6 +89,12 @@ LOCAL_PRIVATE_CONFIG_KEYS = {
     VESSEL_IMAGE_AI_MODEL,
     VESSEL_IMAGE_AI_API_KEY,
     VESSEL_IMAGE_AI_TIMEOUT_SECONDS,
+    ES_R_SCHEME,
+    ES_R_HOST,
+    ES_R_PORT,
+    ES_R_USER,
+    ES_R_PASSWORD,
+    ES_R_INDEX,
     HIFLEET_ENABLED,
     HIFLEET_USERNAME,
     HIFLEET_PASSWORD,
@@ -110,6 +122,11 @@ def _merged_local_values() -> dict[str, str]:
         env_value = os.getenv(key)
         if env_value is not None:
             values[key] = env_value
+    if "ES_R_PWD" in values and ES_R_PASSWORD not in values:
+        values[ES_R_PASSWORD] = values["ES_R_PWD"]
+    env_es_password_alias = os.getenv("ES_R_PWD")
+    if env_es_password_alias is not None and ES_R_PASSWORD not in values:
+        values[ES_R_PASSWORD] = env_es_password_alias
     return values
 
 

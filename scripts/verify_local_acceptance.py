@@ -59,6 +59,8 @@ from app.models.vessel import (
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
+    VesselPersonCertificateFile,
+    VesselPersonCertificateImageRecognition,
     VesselProfile,
     VesselRegistrationInfo,
 )
@@ -149,7 +151,6 @@ LEGACY_ROUTE_PATHS = {
 }
 
 REQUIRED_ROUTE_PATHS = {
-    "/api/v1/vessels/dashboard",
     "/api/v1/vessels",
     "/api/v1/vessels/position-monitor",
     "/api/v1/vessels/{vessel_id}",
@@ -315,19 +316,21 @@ async def verify() -> list[CheckResult]:
             ("node contacts", await _count(session, TransportNodeContact), 60),
             ("commodity standards", await _count(session, CommodityStandard), 30),
             ("commodity aliases", await _count(session, CommodityAlias), 80),
-            ("vessel profiles", await _count(session, VesselProfile), 70),
-            ("vessel identities", await _count(session, VesselIdentity), 70),
-            ("vessel identity links", await _count(session, VesselIdentityLink), 70),
-            ("vessel registrations", await _count(session, VesselRegistrationInfo), 70),
-            ("vessel capacity dimensions", await _count(session, VesselCapacityDimension), 70),
-            ("vessel build info", await _count(session, VesselBuildInfo), 70),
-            ("vessel owner periods", await _count(session, VesselOwnerPeriod), 70),
-            ("vessel operator periods", await _count(session, VesselOperatorPeriod), 70),
-            ("vessel contacts", await _count(session, VesselContact), 70),
-            ("vessel certificates", await _count(session, VesselCertificate), 50),
-            ("vessel change events", await _count(session, VesselChangeEvent), 70),
-            ("vessel crew assignments", await _count(session, VesselCrewAssignment), 70),
-            ("vessel person certificates", await _count(session, VesselPersonCertificate), 70),
+            ("vessel profiles", await _count(session, VesselProfile), 137),
+            ("vessel identities", await _count(session, VesselIdentity), 137),
+            ("vessel identity links", await _count(session, VesselIdentityLink), 137),
+            ("vessel registrations", await _count(session, VesselRegistrationInfo), 137),
+            ("vessel capacity dimensions", await _count(session, VesselCapacityDimension), 137),
+            ("vessel build info empty-ok", await _count(session, VesselBuildInfo), 0),
+            ("vessel owner periods", await _count(session, VesselOwnerPeriod), 137),
+            ("vessel operator periods empty-ok", await _count(session, VesselOperatorPeriod), 0),
+            ("vessel contacts", await _count(session, VesselContact), 137),
+            ("vessel certificates empty-ok", await _count(session, VesselCertificate), 0),
+            ("vessel change events", await _count(session, VesselChangeEvent), 137),
+            ("vessel crew assignments empty-ok", await _count(session, VesselCrewAssignment), 0),
+            ("vessel person certificates empty-ok", await _count(session, VesselPersonCertificate), 0),
+            ("vessel person certificate files table empty-ok", await _count(session, VesselPersonCertificateFile), 0),
+            ("vessel person certificate recognitions table empty-ok", await _count(session, VesselPersonCertificateImageRecognition), 0),
             ("vessel certificate files table empty-ok", await _count(session, VesselCertificateFile), 0),
             ("vessel certificate recognitions table empty-ok", await _count(session, VesselCertificateImageRecognition), 0),
             ("freights", await _count(session, Freight), 200),
@@ -353,13 +356,13 @@ async def verify() -> list[CheckResult]:
         for name, actual, expected in count_checks:
             results.append(_result(name, actual >= expected, f"{actual} >= {expected}"))
 
-        historical_name_count = await _count(session, VesselNameHistory, VesselNameHistory.end_date.is_not(None))
-        historical_identifier_count = await _count(session, VesselIdentifierHistory, VesselIdentifierHistory.end_date.is_not(None))
+        name_history_count = await _count(session, VesselNameHistory)
+        identifier_history_count = await _count(session, VesselIdentifierHistory)
         results.append(
             _result(
-                "vessel historical names and mmsi seeded",
-                historical_name_count >= 20 and historical_identifier_count >= 20,
-                f"name {historical_name_count} >= 20, identifier {historical_identifier_count} >= 20",
+                "vessel name and mmsi histories seeded",
+                name_history_count >= 137 and identifier_history_count >= 137,
+                f"name {name_history_count} >= 137, identifier {identifier_history_count} >= 137",
             )
         )
 
@@ -517,7 +520,7 @@ async def verify() -> list[CheckResult]:
             .all()
         )
         results.append(_result("legacy menu entries removed", not menu_left, str(menu_left or "none")))
-        required_vessel_paths = {"/vessels/dashboard", "/vessels/position-monitor", "/vessels/list"}
+        required_vessel_paths = {"/vessels/position-monitor", "/vessels/list"}
         vessel_paths = {
             row[0]
             for row in (

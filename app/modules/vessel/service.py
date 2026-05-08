@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -33,6 +33,8 @@ from app.models.vessel import (
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
+    VesselPersonCertificateFile,
+    VesselPersonCertificateImageRecognition,
     VesselProfile,
     VesselRegistrationInfo,
 )
@@ -50,20 +52,19 @@ from app.modules.vessel.schemas import (
     VesselChangeEventResponse,
     VesselContactResponse,
     VesselCrewResponse,
-    VesselDashboardResponse,
     VesselDetailResponse,
     VesselIdentifierHistoryResponse,
     VesselListItemResponse,
-    VesselMetricResponse,
     VesselNameHistoryResponse,
     VesselOperatorResponse,
     VesselOwnerResponse,
+    VesselPersonCertificateFileResponse,
+    VesselPersonCertificateImageRecognitionResponse,
     VesselPersonCertificateResponse,
     VesselPositionMonitorItemResponse,
     VesselPositionMonitorResponse,
     VesselPositionMonitorSummary,
     VesselProfileResponse,
-    VesselRealtimeSourceStatus,
     VesselRegistrationResponse,
 )
 
@@ -212,6 +213,24 @@ def _first_value(payload: dict[str, Any], keys: list[str]) -> Any:
     return None
 
 
+def _looks_long_term(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in ["长期", "永久", "long-term", "long term", "permanent", "forever"])
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "on", "长期", "长期有效", "永久", "permanent", "forever"}
+
+
 def _to_date(value: Any) -> date | None:
     if value in (None, ""):
         return None
@@ -293,70 +312,6 @@ class VesselService:
             profile_code=ES_REALTIME_CONFIG_PROFILE,
         )
         return (value or "").strip()
-
-    async def dashboard(self) -> VesselDashboardResponse:
-        profiles = (
-            await self.db.execute(select(VesselProfile).where(VesselProfile.deleted_at.is_(None)))
-        ).scalars().all()
-        capacities = (await self.db.execute(select(VesselCapacityDimension))).scalars().all()
-        contact_count = int(
-            await self.db.scalar(
-                select(func.count()).select_from(VesselContact).where(VesselContact.is_available.is_(True))
-            )
-            or 0
-        )
-        total_deadweight = sum((_money(row.deadweight_ton) or Decimal("0")) for row in capacities)
-        certs = await self._certificates_by_profile([row.id for row in profiles])
-        status_counts: dict[str, int] = defaultdict(int)
-        cert_counts: dict[str, int] = defaultdict(int)
-        for row in profiles:
-            status_counts[row.profile_status_code] += 1
-            cert_counts[_certificate_risk(certs.get(row.id, []))] += 1
-        label_map = await _load_label_map(self.db, ["VESSEL_PROFILE_STATUS", "VESSEL_CERTIFICATE_RISK"])
-        return VesselDashboardResponse(
-            metrics=[
-                VesselMetricResponse(code="total_count", name="船舶档案", value=len(profiles), unit="艘"),
-                VesselMetricResponse(code="contactable_count", name="可联系船舶", value=contact_count, unit="艘"),
-                VesselMetricResponse(code="certificate_missing_count", name="缺证船舶", value=cert_counts.get("MISSING", 0), unit="艘"),
-                VesselMetricResponse(code="total_deadweight_ton", name="总载重吨", value=total_deadweight, unit="吨"),
-            ],
-            status_distribution=[
-                VesselMetricResponse(
-                    code=code,
-                    name=label_map.get("VESSEL_PROFILE_STATUS", {}).get(code, code),
-                    value=count,
-                    unit="艘",
-                )
-                for code, count in sorted(status_counts.items())
-            ],
-            certificate_distribution=[
-                VesselMetricResponse(
-                    code=code,
-                    name=label_map.get("VESSEL_CERTIFICATE_RISK", {}).get(code, _certificate_risk_name(code)),
-                    value=count,
-                    unit="艘",
-                )
-                for code, count in sorted(cert_counts.items())
-            ],
-            generated_at=datetime.utcnow(),
-            position_status=await self._position_source_status(),
-        )
-
-    async def _position_source_status(self) -> VesselRealtimeSourceStatus:
-        now = datetime.utcnow()
-        if not await self._realtime_es_host():
-            return VesselRealtimeSourceStatus(
-                source_status="UNCONFIGURED",
-                source_status_name=_source_status_name("UNCONFIGURED"),
-                message="实时 ES 未配置，船位监控将显示空态",
-                generated_at=now,
-            )
-        return VesselRealtimeSourceStatus(
-            source_status="AVAILABLE",
-            source_status_name=_source_status_name("AVAILABLE"),
-            message=None,
-            generated_at=now,
-        )
 
     async def list_vessels(self, query) -> PageResponse[VesselListItemResponse]:
         stmt = (
@@ -606,10 +561,7 @@ class VesselService:
             operators=[self._operator_response(row, label_map) for row in await self.repo.list_by_profile(VesselOperatorPeriod, vessel_id)],
             contacts=[self._contact_response(row, label_map) for row in await self.repo.list_by_profile(VesselContact, vessel_id)],
             crew=[self._crew_response(row, label_map) for row in await self.repo.list_by_profile(VesselCrewAssignment, vessel_id)],
-            person_certificates=[
-                self._person_certificate_response(row, label_map)
-                for row in await self.repo.list_by_profile(VesselPersonCertificate, vessel_id)
-            ],
+            person_certificates=await self._person_certificates_with_files(vessel_id, label_map=label_map),
             certificates=await self._certificates_with_files(vessel_id, label_map=label_map),
             name_history=[
                 VesselNameHistoryResponse(
@@ -717,6 +669,22 @@ class VesselService:
 
     async def replace_person_certificates(self, vessel_id: int, payload, *, operator_id: int | None = None) -> list[VesselPersonCertificateResponse]:
         await self._require_profile(vessel_id)
+        existing_ids = (
+            await self.db.execute(
+                select(VesselPersonCertificate.id).where(VesselPersonCertificate.vessel_profile_id == vessel_id)
+            )
+        ).scalars().all()
+        if existing_ids:
+            await self.db.execute(
+                delete(VesselPersonCertificateImageRecognition).where(
+                    VesselPersonCertificateImageRecognition.vessel_person_certificate_id.in_(existing_ids)
+                )
+            )
+            await self.db.execute(
+                delete(VesselPersonCertificateFile).where(
+                    VesselPersonCertificateFile.vessel_person_certificate_id.in_(existing_ids)
+                )
+            )
         rows = await self.repo.replace_many_by_profile(
             VesselPersonCertificate,
             vessel_id,
@@ -724,8 +692,220 @@ class VesselService:
         )
         await self._add_change_event(vessel_id, "REPLACE_PERSON_CERTIFICATES", "维护人员证书", None, {"count": len(rows)}, operator_id)
         await self.db.commit()
+        return await self._person_certificates_with_files(vessel_id)
+
+    async def create_person_certificate(self, vessel_id: int, payload, *, operator_id: int | None = None) -> VesselPersonCertificateResponse:
+        await self._require_profile(vessel_id)
+        data = payload.model_dump(exclude_none=True)
+        data.setdefault("holder_name", "待补录")
+        data.setdefault("certificate_type_code", "CREW_LICENSE")
+        data.setdefault("verify_status_code", "PENDING")
+        row = await self.repo.create_person_certificate(vessel_id, data)
+        await self._add_change_event(vessel_id, "CREATE_PERSON_CERTIFICATE", "新增人员证件", None, _row_dict(row), operator_id)
+        await self.db.commit()
+        return (await self._person_certificates_with_files(vessel_id, person_certificate_id=row.id))[0]
+
+    async def update_person_certificate(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        payload,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselPersonCertificateResponse:
+        cert = await self.repo.get_person_certificate(person_certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselPersonCertificate", person_certificate_id)
+        before = _row_dict(cert)
+        updates = payload.model_dump(exclude_none=True)
+        if not updates:
+            raise ValidationError("no update fields provided")
+        row = await self.repo.update_person_certificate(person_certificate_id, updates)
+        assert row is not None
+        await self._add_change_event(vessel_id, "UPDATE_PERSON_CERTIFICATE", "更新人员证件", before, _row_dict(row), operator_id)
+        await self.db.commit()
+        return (await self._person_certificates_with_files(vessel_id, person_certificate_id=row.id))[0]
+
+    async def delete_person_certificate(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        *,
+        operator_id: int | None = None,
+    ) -> None:
+        cert = await self.repo.get_person_certificate(person_certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselPersonCertificate", person_certificate_id)
+        before = _row_dict(cert)
+        await self.db.execute(
+            delete(VesselPersonCertificateImageRecognition).where(
+                VesselPersonCertificateImageRecognition.vessel_person_certificate_id == person_certificate_id
+            )
+        )
+        await self.db.execute(
+            delete(VesselPersonCertificateFile).where(
+                VesselPersonCertificateFile.vessel_person_certificate_id == person_certificate_id
+            )
+        )
+        await self.repo.delete_person_certificate(person_certificate_id)
+        await self._add_change_event(vessel_id, "DELETE_PERSON_CERTIFICATE", "删除人员证件", before, None, operator_id)
+        await self.db.commit()
+
+    async def upload_person_certificate_file_first(
+        self,
+        vessel_id: int,
+        file: UploadFile,
+        *,
+        certificate_type_code: str = "CREW_LICENSE",
+        holder_name: str = "待补录",
+        operator_id: int | None = None,
+    ) -> VesselPersonCertificateResponse:
+        await self._require_profile(vessel_id)
+        cert = await self.repo.create_person_certificate(
+            vessel_id,
+            {
+                "holder_name": holder_name.strip() or "待补录",
+                "certificate_type_code": certificate_type_code or "CREW_LICENSE",
+                "verify_status_code": "PENDING",
+                "remark": "由人员证件附件上传创建，待识别或人工补录",
+            },
+        )
+        await self._store_person_certificate_file(vessel_id, cert.id, file, operator_id=operator_id)
+        await self._add_change_event(vessel_id, "CREATE_PERSON_CERTIFICATE", "上传附件创建人员证件草稿", None, _row_dict(cert), operator_id)
+        await self.db.commit()
+        return (await self._person_certificates_with_files(vessel_id, person_certificate_id=cert.id))[0]
+
+    async def upload_person_certificate_file(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        file: UploadFile,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselPersonCertificateFileResponse:
+        await self._require_profile(vessel_id)
+        cert = await self.repo.get_person_certificate(person_certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselPersonCertificate", person_certificate_id)
+        row = await self._store_person_certificate_file(vessel_id, person_certificate_id, file, operator_id=operator_id)
+        await self.db.commit()
+        return self._person_file_response(row)
+
+    async def create_person_certificate_image_recognition(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        payload,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselPersonCertificateImageRecognitionResponse:
+        await self._require_profile(vessel_id)
+        cert = await self.repo.get_person_certificate(person_certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselPersonCertificate", person_certificate_id)
+        cert_file = await self.repo.get_person_certificate_file_by_storage_file(person_certificate_id, payload.file_id)
+        if cert_file is None:
+            raise NotFoundError("VesselPersonCertificateFile", payload.file_id)
+        if not (cert_file.content_type or "").lower().startswith("image/"):
+            raise ValidationError("图片识别助手仅支持图片附件，PDF 可归档预览但不能识别")
+
+        recognition = await self.repo.create_person_image_recognition(
+            {
+                "vessel_profile_id": vessel_id,
+                "vessel_person_certificate_id": person_certificate_id,
+                "person_certificate_file_id": cert_file.id,
+                "storage_file_id": payload.file_id,
+                "status_code": "PROCESSING",
+                "created_by": operator_id,
+            }
+        )
+        try:
+            storage_file, file_result = await FileStorageService(self.db).download_file(payload.file_id)
+            result = await VesselCertificateImageAssistant(self.runtime_config).recognize(
+                content=file_result.content,
+                content_type=file_result.content_type or storage_file.content_type,
+                file_name=storage_file.original_file_name,
+            )
+            recognition.status_code = "NEED_CONFIRM"
+            recognition.provider_code = result.provider
+            recognition.model_name = result.model
+            recognition.candidate_payload_json = self._normalize_recognition_payload(result.candidate_payload)
+            recognition.raw_text = result.raw_text
+            recognition.raw_response_json = result.raw_response
+            recognition.confidence_score = result.confidence_score
+            recognition.error_message = None
+            await self._add_change_event(
+                vessel_id,
+                "IMAGE_RECOGNIZE_PERSON_CERTIFICATE",
+                "识别人员证件图片",
+                None,
+                {"recognition_id": recognition.id, "status_code": recognition.status_code},
+                operator_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            recognition.status_code = "FAILED"
+            recognition.error_message = str(exc)[:512]
+            await self._add_change_event(
+                vessel_id,
+                "IMAGE_RECOGNIZE_PERSON_CERTIFICATE_FAILED",
+                "人员证件图片识别失败",
+                None,
+                {"recognition_id": recognition.id, "error_message": recognition.error_message},
+                operator_id,
+            )
+        await self.db.flush()
+        await self.db.refresh(recognition)
+        await self.db.commit()
         label_map = await _load_label_map(self.db)
-        return [self._person_certificate_response(row, label_map) for row in rows]
+        return self._person_image_recognition_response(recognition, label_map)
+
+    async def confirm_person_certificate_image_recognition(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        recognition_id: int,
+        payload,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselPersonCertificateResponse:
+        await self._require_profile(vessel_id)
+        cert = await self.repo.get_person_certificate(person_certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselPersonCertificate", person_certificate_id)
+        recognition = await self.repo.get_person_image_recognition(recognition_id)
+        if (
+            recognition is None
+            or recognition.vessel_profile_id != vessel_id
+            or recognition.vessel_person_certificate_id != person_certificate_id
+        ):
+            raise NotFoundError("VesselPersonCertificateImageRecognition", recognition_id)
+        accepted = self._normalize_recognition_payload(
+            payload.accepted_payload_json or recognition.candidate_payload_json or {}
+        )
+        if not accepted:
+            raise ValidationError("没有可确认的识别结果")
+
+        before = _row_dict(cert)
+        updates = self._person_certificate_updates_from_recognition(accepted)
+        if updates:
+            updates["structured_payload_json"] = accepted
+            updates["verify_status_code"] = "VERIFIED"
+            await self.repo.update_person_certificate(person_certificate_id, updates)
+        recognition.status_code = "CONFIRMED"
+        recognition.confirmed_payload_json = accepted
+        recognition.confirmed_by = operator_id
+        recognition.confirmed_at = datetime.utcnow()
+        await self._add_change_event(
+            vessel_id,
+            "CONFIRM_PERSON_CERTIFICATE_IMAGE_RECOGNITION",
+            "确认人员证件图片识别结果",
+            before,
+            {"recognition_id": recognition.id, "certificate_updates": updates},
+            operator_id,
+        )
+        await self.db.flush()
+        await self.db.commit()
+        return (await self._person_certificates_with_files(vessel_id, person_certificate_id=person_certificate_id))[0]
 
     async def list_certificates(self, vessel_id: int) -> list[VesselCertificateResponse]:
         await self._require_profile(vessel_id)
@@ -828,7 +1008,7 @@ class VesselService:
             recognition.status_code = "NEED_CONFIRM"
             recognition.provider_code = result.provider
             recognition.model_name = result.model
-            recognition.candidate_payload_json = result.candidate_payload
+            recognition.candidate_payload_json = self._normalize_recognition_payload(result.candidate_payload)
             recognition.raw_text = result.raw_text
             recognition.raw_response_json = result.raw_response
             recognition.confidence_score = result.confidence_score
@@ -878,7 +1058,7 @@ class VesselService:
             or recognition.vessel_certificate_id != certificate_id
         ):
             raise NotFoundError("VesselCertificateImageRecognition", recognition_id)
-        accepted = payload.accepted_payload_json or recognition.candidate_payload_json or {}
+        accepted = self._normalize_recognition_payload(payload.accepted_payload_json or recognition.candidate_payload_json or {})
         if not isinstance(accepted, dict) or not accepted:
             raise ValidationError("没有可确认的识别结果")
 
@@ -1024,6 +1204,36 @@ class VesselService:
         await self._add_change_event(vessel_id, "UPLOAD_CERTIFICATE_FILE", "上传证件附件", None, _row_dict(row), operator_id)
         return row
 
+    async def _store_person_certificate_file(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        file: UploadFile,
+        *,
+        operator_id: int | None,
+    ) -> VesselPersonCertificateFile:
+        storage_file = await FileStorageService(self.db).upload_file(
+            file=file,
+            object_prefix=f"vessels/{vessel_id}/person-certificates/{person_certificate_id}",
+            uploaded_by=operator_id,
+            allowed_content_types={"application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"},
+        )
+        now = datetime.utcnow()
+        row = await self.repo.create_person_certificate_file(
+            {
+                "vessel_person_certificate_id": person_certificate_id,
+                "storage_file_id": storage_file.id,
+                "file_name": storage_file.original_file_name,
+                "content_type": storage_file.content_type,
+                "file_size": storage_file.file_size,
+                "uploaded_by": operator_id,
+                "uploaded_at": now,
+                "created_at": now,
+            }
+        )
+        await self._add_change_event(vessel_id, "UPLOAD_PERSON_CERTIFICATE_FILE", "上传人员证件附件", None, _row_dict(row), operator_id)
+        return row
+
     async def _build_profile_response(self, vessel_id: int) -> VesselProfileResponse:
         profile = await self._require_profile(vessel_id)
         label_map = await _load_label_map(self.db)
@@ -1072,7 +1282,37 @@ class VesselService:
             )
         return items
 
+    def _normalize_recognition_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        normalized: dict[str, Any] = {key: _jsonable(value) for key, value in payload.items()}
+        alias_groups = {
+            "certificate_type_code": ["certificate_type_code", "certificate_type", "cert_type_code"],
+            "certificate_no": ["certificate_no", "cert_no", "license_no", "document_no", "证件号"],
+            "issuing_authority": ["issuing_authority", "issue_authority", "issuer", "发证机关"],
+            "holder_name": ["holder_name", "person_name", "crew_name", "name", "姓名"],
+            "valid_from": ["valid_from", "valid_start", "validity_start", "start_date", "issue_date", "签发日期"],
+            "valid_to": ["valid_to", "valid_end", "validity_end", "expiry_date", "expire_date", "end_date", "有效期至"],
+            "validity_text_raw": ["validity_text_raw", "validity_text", "valid_period", "validity", "有效期"],
+            "is_long_term_valid": ["is_long_term_valid", "long_term_valid", "permanent", "valid_forever"],
+        }
+        for target_key, keys in alias_groups.items():
+            value = _first_value(payload, keys)
+            if value not in (None, "") and normalized.get(target_key) in (None, ""):
+                normalized[target_key] = _jsonable(value)
+
+        valid_to_raw = normalized.get("valid_to")
+        validity_text = normalized.get("validity_text_raw")
+        long_term_raw = normalized.get("is_long_term_valid")
+        if _truthy(long_term_raw) or _looks_long_term(valid_to_raw) or _looks_long_term(validity_text):
+            normalized["is_long_term_valid"] = True
+            normalized["valid_to"] = None
+        elif "is_long_term_valid" in normalized:
+            normalized["is_long_term_valid"] = _truthy(normalized.get("is_long_term_valid"))
+        return normalized
+
     def _certificate_updates_from_recognition(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = self._normalize_recognition_payload(payload)
         updates: dict[str, Any] = {}
         for source_key, target_key in {
             "certificate_type_code": "certificate_type_code",
@@ -1087,7 +1327,35 @@ class VesselService:
         valid_to = _to_date(payload.get("valid_to"))
         if valid_from:
             updates["valid_from"] = valid_from
-        if valid_to:
+        if payload.get("is_long_term_valid") is True:
+            updates["is_long_term_valid"] = True
+            updates["valid_to"] = None
+        elif valid_to:
+            updates["valid_to"] = valid_to
+        if "is_long_term_valid" in payload:
+            updates["is_long_term_valid"] = bool(payload.get("is_long_term_valid"))
+        return updates
+
+    def _person_certificate_updates_from_recognition(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = self._normalize_recognition_payload(payload)
+        updates: dict[str, Any] = {}
+        for source_key, target_key in {
+            "holder_name": "holder_name",
+            "certificate_type_code": "certificate_type_code",
+            "certificate_no": "certificate_no",
+            "validity_text_raw": "validity_text_raw",
+        }.items():
+            value = payload.get(source_key)
+            if value not in (None, ""):
+                updates[target_key] = value
+        valid_from = _to_date(payload.get("valid_from"))
+        valid_to = _to_date(payload.get("valid_to"))
+        if valid_from:
+            updates["valid_from"] = valid_from
+        if payload.get("is_long_term_valid") is True:
+            updates["is_long_term_valid"] = True
+            updates["valid_to"] = None
+        elif valid_to:
             updates["valid_to"] = valid_to
         if "is_long_term_valid" in payload:
             updates["is_long_term_valid"] = bool(payload.get("is_long_term_valid"))
@@ -1268,17 +1536,25 @@ class VesselService:
     async def _search_realtime_positions(self, mmsi_values: list[str], *, max_hits: int) -> dict[str, dict[str, Any]]:
         terms: list[Any] = []
         for value in mmsi_values:
-            terms.append(value)
-            if value.isdigit():
-                terms.append(int(value))
+            text_value = str(value).strip()
+            if not text_value:
+                continue
+            terms.append(text_value)
+            if text_value.isdigit():
+                terms.append(int(text_value))
+        terms = list(dict.fromkeys(terms))
+        mmsi_fields = ["mmsi", "mmsi.keyword", "ship_mmsi", "ship_mmsi.keyword", "MMSI", "ais", "ship_ais"]
+        time_fields = ["@timestamp", "timestamp", "location_time", "update_time", "position_time", "time"]
         query_body = {
             "size": min(max_hits, 1000),
+            "track_total_hits": False,
+            "sort": [
+                {field: {"order": "desc", "unmapped_type": "date", "missing": "_last"}}
+                for field in time_fields
+            ],
             "query": {
                 "bool": {
-                    "should": [
-                        {"terms": {"mmsi": terms}},
-                        {"terms": {"ship_mmsi": terms}},
-                    ],
+                    "should": [{"terms": {field: terms}} for field in mmsi_fields],
                     "minimum_should_match": 1,
                 }
             },
@@ -1292,19 +1568,23 @@ class VesselService:
             )
             or "ship_positions"
         ).strip()
-        payload = await client.search(index, query_body)
+        try:
+            payload = await client.search(index, query_body)
+        except Exception:
+            query_body.pop("sort", None)
+            payload = await client.search(index, query_body)
         hits = ((payload.get("hits") or {}).get("hits") or []) if isinstance(payload, dict) else []
         result: dict[str, dict[str, Any]] = {}
         for hit in hits:
             source = hit.get("_source") if isinstance(hit, dict) else None
             if not isinstance(source, dict):
                 continue
-            mmsi_raw = _first_value(source, ["mmsi", "ship_mmsi", "MMSI"])
+            mmsi_raw = _first_value(source, ["mmsi", "ship_mmsi", "MMSI", "ais", "ship_ais"])
             if mmsi_raw is None:
                 continue
             mmsi = str(mmsi_raw).strip()
-            longitude = _to_decimal(_first_value(source, ["lon", "lng", "longitude", "x"]))
-            latitude = _to_decimal(_first_value(source, ["lat", "latitude", "y"]))
+            longitude = _to_decimal(_first_value(source, ["lon", "lng", "longitude", "x", "longitude_gcj02"]))
+            latitude = _to_decimal(_first_value(source, ["lat", "latitude", "y", "latitude_gcj02"]))
             if longitude is None or latitude is None:
                 continue
             if not (Decimal("-180") <= longitude <= Decimal("180") and Decimal("-90") <= latitude <= Decimal("90")):
@@ -1406,6 +1686,60 @@ class VesselService:
     def _file_response(self, row: VesselCertificateFile) -> VesselCertificateFileResponse:
         return VesselCertificateFileResponse(**_row_dict(row), download_url=f"/api/v1/files/{row.storage_file_id}/content")
 
+    async def _person_certificates_with_files(
+        self,
+        vessel_id: int,
+        *,
+        person_certificate_id: int | None = None,
+        label_map: dict[str, dict[str, str]] | None = None,
+    ) -> list[VesselPersonCertificateResponse]:
+        label_map = label_map or await _load_label_map(self.db)
+        stmt = select(VesselPersonCertificate).where(VesselPersonCertificate.vessel_profile_id == vessel_id)
+        if person_certificate_id:
+            stmt = stmt.where(VesselPersonCertificate.id == person_certificate_id)
+        certs = (await self.db.execute(stmt.order_by(VesselPersonCertificate.id.desc()))).scalars().all()
+        if not certs:
+            return []
+        files = (
+            await self.db.execute(
+                select(VesselPersonCertificateFile).where(
+                    VesselPersonCertificateFile.vessel_person_certificate_id.in_([row.id for row in certs])
+                )
+            )
+        ).scalars().all()
+        file_map: dict[int, list[VesselPersonCertificateFileResponse]] = defaultdict(list)
+        for item in files:
+            file_map[item.vessel_person_certificate_id].append(self._person_file_response(item))
+        recognition_rows = (
+            await self.db.execute(
+                select(VesselPersonCertificateImageRecognition)
+                .where(
+                    VesselPersonCertificateImageRecognition.vessel_person_certificate_id.in_(
+                        [row.id for row in certs]
+                    )
+                )
+                .order_by(VesselPersonCertificateImageRecognition.id.desc())
+            )
+        ).scalars().all()
+        latest_recognition_map: dict[int, VesselPersonCertificateImageRecognition] = {}
+        for row in recognition_rows:
+            latest_recognition_map.setdefault(row.vessel_person_certificate_id, row)
+        return [
+            self._person_certificate_response(
+                cert,
+                label_map,
+                files=file_map.get(cert.id, []),
+                latest_recognition=latest_recognition_map.get(cert.id),
+            )
+            for cert in certs
+        ]
+
+    def _person_file_response(self, row: VesselPersonCertificateFile) -> VesselPersonCertificateFileResponse:
+        return VesselPersonCertificateFileResponse(
+            **_row_dict(row),
+            download_url=f"/api/v1/files/{row.storage_file_id}/content",
+        )
+
     def _owner_response(self, row: VesselOwnerPeriod, label_map: dict[str, dict[str, str]]) -> VesselOwnerResponse:
         return VesselOwnerResponse(
             **_row_dict(row),
@@ -1434,11 +1768,20 @@ class VesselService:
         self,
         row: VesselPersonCertificate,
         label_map: dict[str, dict[str, str]],
+        *,
+        files: list[VesselPersonCertificateFileResponse] | None = None,
+        latest_recognition: VesselPersonCertificateImageRecognition | None = None,
     ) -> VesselPersonCertificateResponse:
         return VesselPersonCertificateResponse(
             **_row_dict(row),
             certificate_type_name=label_map.get("CERTIFICATE_TYPE", {}).get(row.certificate_type_code),
             verify_status_name=label_map.get("CERTIFICATE_VERIFY_STATUS", {}).get(row.verify_status_code),
+            files=files or [],
+            latest_image_recognition=(
+                self._person_image_recognition_response(latest_recognition, label_map)
+                if latest_recognition is not None
+                else None
+            ),
         )
 
     def _image_recognition_response(
@@ -1447,6 +1790,16 @@ class VesselService:
         label_map: dict[str, dict[str, str]],
     ) -> VesselCertificateImageRecognitionResponse:
         return VesselCertificateImageRecognitionResponse(
+            **_row_dict(row),
+            status_name=label_map.get("VESSEL_CERTIFICATE_IMAGE_RECOGNITION_STATUS", {}).get(row.status_code),
+        )
+
+    def _person_image_recognition_response(
+        self,
+        row: VesselPersonCertificateImageRecognition,
+        label_map: dict[str, dict[str, str]],
+    ) -> VesselPersonCertificateImageRecognitionResponse:
+        return VesselPersonCertificateImageRecognitionResponse(
             **_row_dict(row),
             status_name=label_map.get("VESSEL_CERTIFICATE_IMAGE_RECOGNITION_STATUS", {}).get(row.status_code),
         )

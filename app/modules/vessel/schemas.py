@@ -203,17 +203,34 @@ class VesselCrewReplaceRequest(StrictBaseModel):
 
 class VesselPersonCertificateItem(StrictBaseModel):
     crew_assignment_id: int | None = None
-    holder_name: str = Field(min_length=1, max_length=64)
-    certificate_type_code: str = Field(min_length=1, max_length=64)
+    holder_name: str = Field(default="待补录", min_length=1, max_length=64)
+    certificate_type_code: str = Field(default="CREW_LICENSE", min_length=1, max_length=64)
     certificate_no: str | None = Field(default=None, max_length=128)
     valid_from: date | None = None
     valid_to: date | None = None
+    is_long_term_valid: bool = False
+    validity_text_raw: str | None = Field(default=None, max_length=256)
     verify_status_code: str = Field(default="PENDING", min_length=1, max_length=64)
+    structured_payload_json: dict[str, Any] | None = None
     remark: str | None = Field(default=None, max_length=512)
 
 
 class VesselPersonCertificateReplaceRequest(StrictBaseModel):
     person_certificates: list[VesselPersonCertificateItem] = Field(default_factory=list)
+
+
+class VesselPersonCertificateUpdateRequest(VesselPersonCertificateItem):
+    holder_name: str | None = Field(default=None, min_length=1, max_length=64)
+    certificate_type_code: str | None = Field(default=None, min_length=1, max_length=64)
+    verify_status_code: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class VesselPersonCertificateImageRecognitionCreateRequest(StrictBaseModel):
+    file_id: int = Field(gt=0)
+
+
+class VesselPersonCertificateImageRecognitionConfirmRequest(StrictBaseModel):
+    accepted_payload_json: dict[str, Any] | None = None
 
 
 class VesselCertificateCreateRequest(StrictBaseModel):
@@ -263,28 +280,6 @@ class VesselOwnerTransferRequest(StrictBaseModel):
     mobile_phone: str | None = Field(default=None, max_length=32)
     address: str | None = Field(default=None, max_length=256)
     remark: str | None = Field(default=None, max_length=512)
-
-
-class VesselMetricResponse(BaseModel):
-    code: str
-    name: str
-    value: int | Decimal
-    unit: str | None = None
-
-
-class VesselRealtimeSourceStatus(BaseModel):
-    source_status: str
-    source_status_name: str
-    message: str | None = None
-    generated_at: datetime
-
-
-class VesselDashboardResponse(BaseModel):
-    generated_at: datetime
-    metrics: list[VesselMetricResponse]
-    status_distribution: list[VesselMetricResponse] = Field(default_factory=list)
-    certificate_distribution: list[VesselMetricResponse] = Field(default_factory=list)
-    position_status: VesselRealtimeSourceStatus | None = None
 
 
 class VesselProfileResponse(BaseModel):
@@ -394,18 +389,22 @@ class VesselCrewResponse(VesselCrewItem):
     updated_at: datetime
 
 
-class VesselPersonCertificateResponse(VesselPersonCertificateItem):
-    id: int
-    vessel_profile_id: int
-    certificate_type_name: str | None = None
-    verify_status_name: str | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
 class VesselCertificateFileResponse(BaseModel):
     id: int
     vessel_certificate_id: int
+    storage_file_id: int
+    file_name: str
+    content_type: str
+    file_size: int
+    uploaded_by: int | None
+    uploaded_at: datetime
+    created_at: datetime
+    download_url: str | None = None
+
+
+class VesselPersonCertificateFileResponse(BaseModel):
+    id: int
+    vessel_person_certificate_id: int
     storage_file_id: int
     file_name: str
     content_type: str
@@ -435,6 +434,40 @@ class VesselCertificateImageRecognitionResponse(BaseModel):
     created_by: int | None
     confirmed_by: int | None
     confirmed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VesselPersonCertificateImageRecognitionResponse(BaseModel):
+    id: int
+    vessel_profile_id: int
+    vessel_person_certificate_id: int
+    person_certificate_file_id: int
+    storage_file_id: int
+    status_code: str
+    status_name: str | None = None
+    provider_code: str | None
+    model_name: str | None
+    candidate_payload_json: dict[str, Any] | None
+    confirmed_payload_json: dict[str, Any] | None
+    raw_text: str | None
+    raw_response_json: dict[str, Any] | None
+    confidence_score: int | None
+    error_message: str | None
+    created_by: int | None
+    confirmed_by: int | None
+    confirmed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VesselPersonCertificateResponse(VesselPersonCertificateItem):
+    id: int
+    vessel_profile_id: int
+    certificate_type_name: str | None = None
+    verify_status_name: str | None = None
+    files: list[VesselPersonCertificateFileResponse] = Field(default_factory=list)
+    latest_image_recognition: VesselPersonCertificateImageRecognitionResponse | None = None
     created_at: datetime
     updated_at: datetime
 
