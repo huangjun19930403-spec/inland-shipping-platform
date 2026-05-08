@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from main import app
 from app.modules.vessel.service import VesselService
 
@@ -34,6 +36,9 @@ def test_vessel_person_certificate_upload_first_routes_exist() -> None:
     assert "post" in paths[
         "/api/v1/vessels/{vessel_id}/person-certificates/{person_certificate_id}/image-recognitions/{recognition_id}/confirm"
     ]
+    assert "get" in paths[
+        "/api/v1/vessels/{vessel_id}/person-certificates/{person_certificate_id}/image-recognitions"
+    ]
 
 
 def test_vessel_owner_document_routes_exist() -> None:
@@ -44,12 +49,18 @@ def test_vessel_owner_document_routes_exist() -> None:
     assert "post" in paths[
         "/api/v1/vessels/{vessel_id}/owners/{owner_id}/documents/{owner_document_id}/image-recognitions/{recognition_id}/confirm"
     ]
+    assert "get" in paths[
+        "/api/v1/vessels/{vessel_id}/owners/{owner_id}/documents/{owner_document_id}/image-recognitions"
+    ]
 
 
 def test_vessel_certificate_ledger_and_void_routes_exist() -> None:
     paths = app.openapi()["paths"]
 
     assert "get" in paths["/api/v1/vessels/{vessel_id}/certificates/ledger"]
+    assert "get" in paths[
+        "/api/v1/vessels/{vessel_id}/certificates/{certificate_id}/image-recognitions"
+    ]
     assert "delete" in paths["/api/v1/vessels/{vessel_id}/certificates/{certificate_id}"]
     assert "delete" in paths["/api/v1/vessels/{vessel_id}/certificates/{certificate_id}/files/{file_id}"]
     assert "delete" in paths[
@@ -81,3 +92,34 @@ def test_vessel_recognition_long_term_validity_is_normalized() -> None:
     assert str(updates["valid_from"]) == "2026-01-01"
     assert person_updates["is_long_term_valid"] is True
     assert person_updates["valid_to"] is None
+
+
+def test_vessel_certificate_ledger_status_uses_current_task_not_history() -> None:
+    service = object.__new__(VesselService)
+    confirmed_history = SimpleNamespace(status_code="CONFIRMED")
+    failed_current = SimpleNamespace(status_code="FAILED")
+
+    verified_certificate = SimpleNamespace(
+        voided_at=None,
+        current_image_recognition=None,
+        latest_image_recognition=confirmed_history,
+        verify_status_code="VERIFIED",
+        certificate_no="CERT-1",
+        valid_to=None,
+        is_long_term_valid=True,
+        files=[object()],
+    )
+    failed_after_confirm = SimpleNamespace(
+        voided_at=None,
+        current_image_recognition=failed_current,
+        latest_image_recognition=failed_current,
+        latest_confirmed_image_recognition=confirmed_history,
+        verify_status_code="VERIFIED",
+        certificate_no="CERT-1",
+        valid_to=None,
+        is_long_term_valid=True,
+        files=[object()],
+    )
+
+    assert service._certificate_ledger_status(verified_certificate) == "VERIFIED"
+    assert service._certificate_ledger_status(failed_after_confirm) == "RECOGNITION_FAILED"

@@ -69,6 +69,11 @@ class VesselPositionMonitorQuery(BaseModel):
     max_items: int = Field(default=200, ge=1, le=500)
 
 
+class VesselRecognitionHistoryQuery(BaseModel):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
 class VesselCreateRequest(StrictBaseModel):
     mmsi: str = Field(validation_alias=AliasChoices("mmsi", "current_mmsi"), min_length=9, max_length=9)
     ship_name: str = Field(min_length=1, max_length=128)
@@ -404,6 +409,9 @@ class VesselOwnerDocumentResponse(BaseModel):
     void_reason: str | None = None
     download_url: str | None = None
     latest_image_recognition: VesselOwnerDocumentImageRecognitionResponse | None = None
+    current_image_recognition: VesselOwnerDocumentImageRecognitionResponse | None = None
+    latest_confirmed_image_recognition: VesselOwnerDocumentImageRecognitionResponse | None = None
+    has_recognition_history: bool = False
 
 
 class VesselOwnerResponse(VesselOwnerItem):
@@ -525,6 +533,9 @@ class VesselPersonCertificateResponse(VesselPersonCertificateItem):
     verify_status_name: str | None = None
     files: list[VesselPersonCertificateFileResponse] = Field(default_factory=list)
     latest_image_recognition: VesselPersonCertificateImageRecognitionResponse | None = None
+    current_image_recognition: VesselPersonCertificateImageRecognitionResponse | None = None
+    latest_confirmed_image_recognition: VesselPersonCertificateImageRecognitionResponse | None = None
+    has_recognition_history: bool = False
     created_at: datetime
     updated_at: datetime
     voided_at: datetime | None = None
@@ -553,6 +564,9 @@ class VesselCertificateResponse(BaseModel):
     remark: str | None
     files: list[VesselCertificateFileResponse] = Field(default_factory=list)
     latest_image_recognition: VesselCertificateImageRecognitionResponse | None = None
+    current_image_recognition: VesselCertificateImageRecognitionResponse | None = None
+    latest_confirmed_image_recognition: VesselCertificateImageRecognitionResponse | None = None
+    has_recognition_history: bool = False
     created_at: datetime
     updated_at: datetime
     voided_at: datetime | None = None

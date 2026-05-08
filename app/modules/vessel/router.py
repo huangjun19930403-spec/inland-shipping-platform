@@ -34,6 +34,7 @@ from app.modules.vessel.schemas import (
     VesselOperatorReplaceRequest,
     VesselOperatorResponse,
     VesselOwnerDocumentImageRecognitionConfirmRequest,
+    VesselOwnerDocumentImageRecognitionResponse,
     VesselOwnerDocumentResponse,
     VesselOwnerReplaceRequest,
     VesselOwnerResponse,
@@ -49,6 +50,7 @@ from app.modules.vessel.schemas import (
     VesselPositionMonitorResponse,
     VesselProfileResponse,
     VesselProfileUpdateRequest,
+    VesselRecognitionHistoryQuery,
     VesselRegistrationResponse,
     VesselRegistrationUpsertRequest,
     VesselVoidRequest,
@@ -400,6 +402,26 @@ async def create_vessel_person_certificate_image_recognition(
     )
 
 
+@router.get(
+    "/{vessel_id}/person-certificates/{person_certificate_id}/image-recognitions",
+    response_model=PageResponse[VesselPersonCertificateImageRecognitionResponse],
+)
+async def list_vessel_person_certificate_image_recognitions(
+    vessel_id: int,
+    person_certificate_id: int,
+    query: VesselRecognitionHistoryQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselService(db).list_person_certificate_image_recognitions(
+        vessel_id,
+        person_certificate_id,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
 @router.post(
     "/{vessel_id}/person-certificates/{person_certificate_id}/image-recognitions/{recognition_id}/confirm",
     response_model=VesselPersonCertificateResponse,
@@ -549,6 +571,26 @@ async def create_vessel_certificate_image_recognition(
     )
 
 
+@router.get(
+    "/{vessel_id}/certificates/{certificate_id}/image-recognitions",
+    response_model=PageResponse[VesselCertificateImageRecognitionResponse],
+)
+async def list_vessel_certificate_image_recognitions(
+    vessel_id: int,
+    certificate_id: int,
+    query: VesselRecognitionHistoryQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselService(db).list_certificate_image_recognitions(
+        vessel_id,
+        certificate_id,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
 @router.post(
     "/{vessel_id}/certificates/{certificate_id}/image-recognitions/{recognition_id}/confirm",
     response_model=VesselCertificateResponse,
@@ -587,6 +629,28 @@ async def void_vessel_owner_document(
         operator_id=_operator_id(current_user),
     )
     return Response(status_code=204)
+
+
+@router.get(
+    "/{vessel_id}/owners/{owner_id}/documents/{owner_document_id}/image-recognitions",
+    response_model=PageResponse[VesselOwnerDocumentImageRecognitionResponse],
+)
+async def list_vessel_owner_document_image_recognitions(
+    vessel_id: int,
+    owner_id: int,
+    owner_document_id: int,
+    query: VesselRecognitionHistoryQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselService(db).list_owner_document_image_recognitions(
+        vessel_id,
+        owner_id,
+        owner_document_id,
+        page=query.page,
+        page_size=query.page_size,
+    )
 
 
 @router.post("/{vessel_id}/owner-transfer", response_model=VesselProfileResponse)

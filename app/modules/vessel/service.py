@@ -107,6 +107,7 @@ REQUIRED_VESSEL_CERTIFICATE_TYPES = [
 VALID_VESSEL_CERTIFICATE_TYPES = set(REQUIRED_VESSEL_CERTIFICATE_TYPES) | {"UNKNOWN", "OTHER"}
 CREW_CERTIFICATE_TYPE = "CREW_COMPETENCY_CERT"
 ACTIVE_RECOGNITION_STATUSES = {"QUEUED", "PROCESSING"}
+CURRENT_RECOGNITION_STATUSES = {"QUEUED", "PROCESSING", "NEED_CONFIRM", "FAILED"}
 IMAGE_RECOGNIZABLE_OWNER_DOCUMENT_TYPES = {"PERSON_ID_FRONT", "PERSON_ID_BACK", "BUSINESS_LICENSE"}
 
 
@@ -679,7 +680,14 @@ class VesselService:
             await self._dispatch_owner_document_recognition_or_fail(recognition)
         label_map = await _load_label_map(self.db)
         latest = await self._latest_owner_document_recognition(row.id)
-        return self._owner_document_response(row, label_map, latest_recognition=latest)
+        return self._owner_document_response(
+            row,
+            label_map,
+            latest_recognition=latest,
+            current_recognition=latest if latest is not None and latest.status_code in CURRENT_RECOGNITION_STATUSES else None,
+            latest_confirmed_recognition=latest if latest is not None and latest.status_code == "CONFIRMED" else None,
+            has_recognition_history=latest is not None,
+        )
 
     async def void_owner_document(
         self,
@@ -1105,6 +1113,118 @@ class VesselService:
     async def list_certificates(self, vessel_id: int) -> list[VesselCertificateResponse]:
         await self._require_profile(vessel_id)
         return await self._certificates_with_files(vessel_id)
+
+    async def list_certificate_image_recognitions(
+        self,
+        vessel_id: int,
+        certificate_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> PageResponse[VesselCertificateImageRecognitionResponse]:
+        cert = await self.repo.get_certificate(certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselCertificate", certificate_id)
+        page_size = min(max(page_size, 1), 100)
+        page = max(page, 1)
+        filters = (
+            VesselCertificateImageRecognition.vessel_profile_id == vessel_id,
+            VesselCertificateImageRecognition.vessel_certificate_id == certificate_id,
+        )
+        total = int(await self.db.scalar(select(func.count()).select_from(VesselCertificateImageRecognition).where(*filters)) or 0)
+        rows = (
+            await self.db.execute(
+                select(VesselCertificateImageRecognition)
+                .where(*filters)
+                .order_by(VesselCertificateImageRecognition.created_at.desc(), VesselCertificateImageRecognition.id.desc())
+                .limit(page_size)
+                .offset((page - 1) * page_size)
+            )
+        ).scalars().all()
+        label_map = await _load_label_map(self.db)
+        return PageResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            items=[self._image_recognition_response(row, label_map) for row in rows],
+        )
+
+    async def list_person_certificate_image_recognitions(
+        self,
+        vessel_id: int,
+        person_certificate_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> PageResponse[VesselPersonCertificateImageRecognitionResponse]:
+        cert = await self.repo.get_person_certificate(person_certificate_id)
+        if cert is None or cert.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselPersonCertificate", person_certificate_id)
+        page_size = min(max(page_size, 1), 100)
+        page = max(page, 1)
+        filters = (
+            VesselPersonCertificateImageRecognition.vessel_profile_id == vessel_id,
+            VesselPersonCertificateImageRecognition.vessel_person_certificate_id == person_certificate_id,
+        )
+        total = int(await self.db.scalar(select(func.count()).select_from(VesselPersonCertificateImageRecognition).where(*filters)) or 0)
+        rows = (
+            await self.db.execute(
+                select(VesselPersonCertificateImageRecognition)
+                .where(*filters)
+                .order_by(VesselPersonCertificateImageRecognition.created_at.desc(), VesselPersonCertificateImageRecognition.id.desc())
+                .limit(page_size)
+                .offset((page - 1) * page_size)
+            )
+        ).scalars().all()
+        label_map = await _load_label_map(self.db)
+        return PageResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            items=[self._person_image_recognition_response(row, label_map) for row in rows],
+        )
+
+    async def list_owner_document_image_recognitions(
+        self,
+        vessel_id: int,
+        owner_id: int,
+        owner_document_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> PageResponse[VesselOwnerDocumentImageRecognitionResponse]:
+        owner = await self.db.scalar(
+            select(VesselOwnerPeriod).where(VesselOwnerPeriod.id == owner_id)
+        )
+        if owner is None or owner.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselOwnerPeriod", owner_id)
+        document = await self.repo.get_owner_document(owner_document_id)
+        if document is None or document.vessel_profile_id != vessel_id or document.vessel_owner_period_id != owner_id:
+            raise NotFoundError("VesselOwnerDocument", owner_document_id)
+        page_size = min(max(page_size, 1), 100)
+        page = max(page, 1)
+        filters = (
+            VesselOwnerDocumentImageRecognition.vessel_profile_id == vessel_id,
+            VesselOwnerDocumentImageRecognition.vessel_owner_period_id == owner_id,
+            VesselOwnerDocumentImageRecognition.owner_document_id == owner_document_id,
+        )
+        total = int(await self.db.scalar(select(func.count()).select_from(VesselOwnerDocumentImageRecognition).where(*filters)) or 0)
+        rows = (
+            await self.db.execute(
+                select(VesselOwnerDocumentImageRecognition)
+                .where(*filters)
+                .order_by(VesselOwnerDocumentImageRecognition.created_at.desc(), VesselOwnerDocumentImageRecognition.id.desc())
+                .limit(page_size)
+                .offset((page - 1) * page_size)
+            )
+        ).scalars().all()
+        label_map = await _load_label_map(self.db)
+        return PageResponse(
+            total=total,
+            page=page,
+            page_size=page_size,
+            items=[self._owner_document_image_recognition_response(row, label_map) for row in rows],
+        )
 
     async def get_certificate_ledger(self, vessel_id: int) -> list[VesselCertificateLedgerItemResponse]:
         await self._require_profile(vessel_id)
@@ -1939,13 +2059,18 @@ class VesselService:
             return "MISSING"
         if cert.voided_at is not None:
             return "VOIDED"
-        latest = cert.latest_image_recognition
-        if latest is not None and latest.status_code in ACTIVE_RECOGNITION_STATUSES:
-            return latest.status_code
-        if latest is not None and latest.status_code == "FAILED":
-            return "RECOGNITION_FAILED"
-        if latest is not None and latest.status_code == "NEED_CONFIRM":
+        current = cert.current_image_recognition
+        if current is not None and current.status_code == "NEED_CONFIRM":
             return "NEED_CONFIRM"
+        if current is not None and current.status_code in ACTIVE_RECOGNITION_STATUSES:
+            return current.status_code
+        if current is not None and current.status_code == "FAILED":
+            return "RECOGNITION_FAILED"
+        has_core_fields = bool(cert.certificate_no) and (cert.is_long_term_valid or cert.valid_to is not None)
+        if not cert.files and not has_core_fields:
+            return "DRAFT"
+        if cert.verify_status_code != "VERIFIED" or not has_core_fields:
+            return "ARCHIVED" if cert.files else "DRAFT"
         if cert.verify_status_code == "VERIFIED":
             if cert.is_long_term_valid:
                 return "VERIFIED"
@@ -1956,9 +2081,7 @@ class VesselService:
                 if cert.valid_to <= today + timedelta(days=30):
                     return "EXPIRING"
             return "VERIFIED"
-        if cert.files:
-            return "ARCHIVED"
-        return "DRAFT"
+        return "ARCHIVED"
 
     def _certificate_ledger_status_name(self, status_code: str) -> str:
         return {
@@ -2275,14 +2398,26 @@ class VesselService:
             )
         ).scalars().all()
         latest_recognition_map: dict[int, VesselCertificateImageRecognition] = {}
+        current_recognition_map: dict[int, VesselCertificateImageRecognition] = {}
+        latest_confirmed_recognition_map: dict[int, VesselCertificateImageRecognition] = {}
+        has_recognition_history: set[int] = set()
         for row in recognition_rows:
-            latest_recognition_map.setdefault(row.vessel_certificate_id, row)
+            has_recognition_history.add(row.vessel_certificate_id)
+            if row.vessel_certificate_id not in latest_recognition_map:
+                latest_recognition_map[row.vessel_certificate_id] = row
+                if row.status_code in CURRENT_RECOGNITION_STATUSES:
+                    current_recognition_map[row.vessel_certificate_id] = row
+            if row.status_code == "CONFIRMED":
+                latest_confirmed_recognition_map.setdefault(row.vessel_certificate_id, row)
         return [
             self._certificate_response(
                 cert,
                 files=file_map.get(cert.id, []),
                 label_map=label_map,
                 latest_recognition=latest_recognition_map.get(cert.id),
+                current_recognition=current_recognition_map.get(cert.id),
+                latest_confirmed_recognition=latest_confirmed_recognition_map.get(cert.id),
+                has_recognition_history=cert.id in has_recognition_history,
             )
             for cert in certs
         ]
@@ -2330,14 +2465,26 @@ class VesselService:
             )
         ).scalars().all()
         latest_recognition_map: dict[int, VesselPersonCertificateImageRecognition] = {}
+        current_recognition_map: dict[int, VesselPersonCertificateImageRecognition] = {}
+        latest_confirmed_recognition_map: dict[int, VesselPersonCertificateImageRecognition] = {}
+        has_recognition_history: set[int] = set()
         for row in recognition_rows:
-            latest_recognition_map.setdefault(row.vessel_person_certificate_id, row)
+            has_recognition_history.add(row.vessel_person_certificate_id)
+            if row.vessel_person_certificate_id not in latest_recognition_map:
+                latest_recognition_map[row.vessel_person_certificate_id] = row
+                if row.status_code in CURRENT_RECOGNITION_STATUSES:
+                    current_recognition_map[row.vessel_person_certificate_id] = row
+            if row.status_code == "CONFIRMED":
+                latest_confirmed_recognition_map.setdefault(row.vessel_person_certificate_id, row)
         return [
             self._person_certificate_response(
                 cert,
                 label_map,
                 files=file_map.get(cert.id, []),
                 latest_recognition=latest_recognition_map.get(cert.id),
+                current_recognition=current_recognition_map.get(cert.id),
+                latest_confirmed_recognition=latest_confirmed_recognition_map.get(cert.id),
+                has_recognition_history=cert.id in has_recognition_history,
             )
             for cert in certs
         ]
@@ -2371,12 +2518,28 @@ class VesselService:
             )
         ).scalars().all()
         latest_recognition_map: dict[int, VesselOwnerDocumentImageRecognition] = {}
+        current_recognition_map: dict[int, VesselOwnerDocumentImageRecognition] = {}
+        latest_confirmed_recognition_map: dict[int, VesselOwnerDocumentImageRecognition] = {}
+        has_recognition_history: set[int] = set()
         for row in recognition_rows:
-            latest_recognition_map.setdefault(row.owner_document_id, row)
+            has_recognition_history.add(row.owner_document_id)
+            if row.owner_document_id not in latest_recognition_map:
+                latest_recognition_map[row.owner_document_id] = row
+                if row.status_code in CURRENT_RECOGNITION_STATUSES:
+                    current_recognition_map[row.owner_document_id] = row
+            if row.status_code == "CONFIRMED":
+                latest_confirmed_recognition_map.setdefault(row.owner_document_id, row)
         result: dict[int, list[VesselOwnerDocumentResponse]] = defaultdict(list)
         for row in docs:
             result[row.vessel_owner_period_id].append(
-                self._owner_document_response(row, label_map, latest_recognition=latest_recognition_map.get(row.id))
+                self._owner_document_response(
+                    row,
+                    label_map,
+                    latest_recognition=latest_recognition_map.get(row.id),
+                    current_recognition=current_recognition_map.get(row.id),
+                    latest_confirmed_recognition=latest_confirmed_recognition_map.get(row.id),
+                    has_recognition_history=row.id in has_recognition_history,
+                )
             )
         return result
 
@@ -2386,6 +2549,9 @@ class VesselService:
         label_map: dict[str, dict[str, str]],
         *,
         latest_recognition: VesselOwnerDocumentImageRecognition | None = None,
+        current_recognition: VesselOwnerDocumentImageRecognition | None = None,
+        latest_confirmed_recognition: VesselOwnerDocumentImageRecognition | None = None,
+        has_recognition_history: bool = False,
     ) -> VesselOwnerDocumentResponse:
         return VesselOwnerDocumentResponse(
             **_row_dict(row),
@@ -2396,6 +2562,17 @@ class VesselService:
                 if latest_recognition is not None
                 else None
             ),
+            current_image_recognition=(
+                self._owner_document_image_recognition_response(current_recognition, label_map)
+                if current_recognition is not None
+                else None
+            ),
+            latest_confirmed_image_recognition=(
+                self._owner_document_image_recognition_response(latest_confirmed_recognition, label_map)
+                if latest_confirmed_recognition is not None
+                else None
+            ),
+            has_recognition_history=has_recognition_history,
         )
 
     def _owner_document_image_recognition_response(
@@ -2447,6 +2624,9 @@ class VesselService:
         *,
         files: list[VesselPersonCertificateFileResponse] | None = None,
         latest_recognition: VesselPersonCertificateImageRecognition | None = None,
+        current_recognition: VesselPersonCertificateImageRecognition | None = None,
+        latest_confirmed_recognition: VesselPersonCertificateImageRecognition | None = None,
+        has_recognition_history: bool = False,
     ) -> VesselPersonCertificateResponse:
         return VesselPersonCertificateResponse(
             **_row_dict(row),
@@ -2459,6 +2639,17 @@ class VesselService:
                 if latest_recognition is not None
                 else None
             ),
+            current_image_recognition=(
+                self._person_image_recognition_response(current_recognition, label_map)
+                if current_recognition is not None
+                else None
+            ),
+            latest_confirmed_image_recognition=(
+                self._person_image_recognition_response(latest_confirmed_recognition, label_map)
+                if latest_confirmed_recognition is not None
+                else None
+            ),
+            has_recognition_history=has_recognition_history,
         )
 
     def _image_recognition_response(
@@ -2488,9 +2679,12 @@ class VesselService:
         files: list[VesselCertificateFileResponse],
         label_map: dict[str, dict[str, str]],
         latest_recognition: VesselCertificateImageRecognition | None = None,
+        current_recognition: VesselCertificateImageRecognition | None = None,
+        latest_confirmed_recognition: VesselCertificateImageRecognition | None = None,
+        has_recognition_history: bool = False,
     ) -> VesselCertificateResponse:
-        recognition_status = latest_recognition.status_code if latest_recognition is not None else "NOT_STARTED"
-        confirmation_status = "CONFIRMED" if recognition_status == "CONFIRMED" else "UNCONFIRMED"
+        recognition_status = current_recognition.status_code if current_recognition is not None else "NOT_STARTED"
+        confirmation_status = "CONFIRMED" if latest_confirmed_recognition is not None else "UNCONFIRMED"
         return VesselCertificateResponse(
             **_row_dict(row),
             certificate_type_name=label_map.get("VESSEL_CERTIFICATE_TYPE", {}).get(row.certificate_type_code)
@@ -2504,6 +2698,15 @@ class VesselService:
             latest_image_recognition=(
                 self._image_recognition_response(latest_recognition, label_map) if latest_recognition is not None else None
             ),
+            current_image_recognition=(
+                self._image_recognition_response(current_recognition, label_map) if current_recognition is not None else None
+            ),
+            latest_confirmed_image_recognition=(
+                self._image_recognition_response(latest_confirmed_recognition, label_map)
+                if latest_confirmed_recognition is not None
+                else None
+            ),
+            has_recognition_history=has_recognition_history,
         )
 
     @staticmethod
