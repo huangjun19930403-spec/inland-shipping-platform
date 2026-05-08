@@ -20,6 +20,7 @@ from app.modules.vessel.schemas import (
     VesselCertificateImageRecognitionCreateRequest,
     VesselCertificateImageRecognitionResponse,
     VesselCertificateResponse,
+    VesselCertificateUpdateRequest,
     VesselChangeEventResponse,
     VesselContactReplaceRequest,
     VesselContactResponse,
