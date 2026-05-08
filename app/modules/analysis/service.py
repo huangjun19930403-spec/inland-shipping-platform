@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.exceptions import NotFoundError, ValidationError
-from app.models.address import AdminRegion, Region, TransportNode
+from app.models.address import AdminRegion, AdminRegionBoundary, Region, TransportNode
 from app.models.analysis import (
     AnalysisJobDefinition,
     AnalysisJobRun,
@@ -29,6 +29,11 @@ from app.models.analysis import (
 from app.models.commodity import CommodityStandard
 from app.models.freight import Freight
 from app.models.dictionary import StdDict, StdDictItem
+from app.modules.address.boundary_utils import (
+    boundary_paths_for_precision,
+    extract_geojson_polygons,
+    serialize_boundary_paths,
+)
 from app.modules.analysis.schemas import (
     AnalysisJobRunDetailResponse,
     AnalysisJobRunResponse,
@@ -36,6 +41,7 @@ from app.modules.analysis.schemas import (
     AnalysisTaskDetailResponse,
     AnalysisTaskResponse,
     AnalysisTaskTriggerRequest,
+    BoundaryHeatMapItem,
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowMapItem,
@@ -590,7 +596,14 @@ class AnalysisDashboardService:
             for row in rows
         ]
 
-    async def region_overview(self, date_from: date | None, date_to: date | None) -> RegionAnalysisOverviewResponse:
+    async def region_overview(
+        self,
+        date_from: date | None,
+        date_to: date | None,
+        *,
+        include_boundary: bool = False,
+        boundary_precision: str = "low",
+    ) -> RegionAnalysisOverviewResponse:
         start, end = await self._date_range(date_from, date_to)
         rows = (
             await self.db.execute(
@@ -603,14 +616,19 @@ class AnalysisDashboardService:
             )
         ).all()
         total_freight = sum(_num(row[1]) for row in rows)
-        heat = await self.region_heat_map(start, end)
+        heat = await self.region_heat_map(
+            start,
+            end,
+            include_boundary=include_boundary,
+            boundary_precision=boundary_precision,
+        )
         return RegionAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
             metrics=[
                 _metric("region_count", "活跃区域", len(rows), "个"),
                 _metric("freight_count", "区域货源", total_freight, "条"),
-                _metric("hot_node_count", "热力节点", len(heat), "个"),
+                _metric("heat_city_count", "热力城市", len(heat), "个"),
             ],
             region_ranking=[
                 ChartPoint(name=row[0], value=int(_num(row[1])), ratio=_ratio(_num(row[1]), total_freight), extra={"tonnage": _num(row[2])})
@@ -619,46 +637,105 @@ class AnalysisDashboardService:
             heat_map=heat,
         )
 
-    async def region_heat_map(self, start: date, end: date) -> list[HeatMapItem]:
+    async def region_heat_map(
+        self,
+        start: date,
+        end: date,
+        *,
+        include_boundary: bool = False,
+        boundary_precision: str = "low",
+    ) -> list[BoundaryHeatMapItem]:
         rows = (
             await self.db.execute(
                 select(
                     AdminRegion.id,
+                    FactFreightCityDaily.city_code,
+                    func.max(FactFreightCityDaily.city_name),
                     AdminRegion.name,
                     AdminRegion.longitude,
                     AdminRegion.latitude,
-                    FactFreightCityDaily.primary_region_id,
+                    func.max(FactFreightCityDaily.primary_region_id),
+                    AdminRegionBoundary.id,
+                    AdminRegionBoundary.center_longitude,
+                    AdminRegionBoundary.center_latitude,
                     func.sum(FactFreightCityDaily.heat_value),
                     func.sum(FactFreightCityDaily.freight_count),
                     func.sum(FactFreightCityDaily.inbound_count),
                     func.sum(FactFreightCityDaily.outbound_count),
                     func.sum(FactFreightCityDaily.total_tonnage),
+                    func.avg(FactFreightCityDaily.avg_unit_price),
                 )
-                .join(AdminRegion, AdminRegion.code == FactFreightCityDaily.city_code)
+                .outerjoin(AdminRegion, AdminRegion.code == FactFreightCityDaily.city_code)
+                .outerjoin(
+                    AdminRegionBoundary,
+                    (AdminRegionBoundary.admin_region_id == AdminRegion.id) & (AdminRegionBoundary.is_current.is_(True)),
+                )
                 .where(FactFreightCityDaily.stat_date >= start, FactFreightCityDaily.stat_date <= end)
-                .group_by(AdminRegion.id, AdminRegion.name, AdminRegion.longitude, AdminRegion.latitude, FactFreightCityDaily.primary_region_id)
+                .group_by(
+                    FactFreightCityDaily.city_code,
+                    AdminRegion.id,
+                    AdminRegion.name,
+                    AdminRegion.longitude,
+                    AdminRegion.latitude,
+                    AdminRegionBoundary.id,
+                    AdminRegionBoundary.center_longitude,
+                    AdminRegionBoundary.center_latitude,
+                )
                 .order_by(func.sum(FactFreightCityDaily.heat_value).desc())
-                .limit(80)
             )
         ).all()
-        values = [_num(row[5]) for row in rows]
+        boundary_geometry_by_admin_id: dict[int, dict] = {}
+        if include_boundary:
+            admin_region_ids = [int(row[0]) for row in rows if row[0] is not None and row[7] is not None]
+            if admin_region_ids:
+                boundary_rows = (
+                    await self.db.execute(
+                        select(AdminRegionBoundary.admin_region_id, AdminRegionBoundary.geometry_json)
+                        .where(
+                            AdminRegionBoundary.admin_region_id.in_(admin_region_ids),
+                            AdminRegionBoundary.is_current.is_(True),
+                        )
+                    )
+                ).all()
+                boundary_geometry_by_admin_id = {int(row[0]): row[1] for row in boundary_rows if row[1]}
+
+        values = [_num(row[10]) for row in rows]
         high = max(values) if values else 0
-        return [
-            HeatMapItem(
-                id=row[0],
-                region_id=row[4],
-                name=row[1],
-                longitude=_num(row[2]) if row[2] is not None else None,
-                latitude=_num(row[3]) if row[3] is not None else None,
-                value=round(_num(row[5]), 2),
-                level="HIGH" if high and _num(row[5]) >= high * 0.66 else "MEDIUM" if high and _num(row[5]) >= high * 0.33 else "LOW",
-                freight_count=int(_num(row[6])),
-                inbound_count=int(_num(row[7])),
-                outbound_count=int(_num(row[8])),
-                tonnage=round(_num(row[9]), 2),
+        items: list[BoundaryHeatMapItem] = []
+        for row in rows:
+            boundary_paths = None
+            if include_boundary and row[0] is not None:
+                polygons = extract_geojson_polygons(boundary_geometry_by_admin_id.get(int(row[0])) or {})
+                boundary_paths = serialize_boundary_paths(boundary_paths_for_precision(polygons, boundary_precision))
+
+            center_longitude = row[8] if row[8] is not None else row[4]
+            center_latitude = row[9] if row[9] is not None else row[5]
+            value = _num(row[10])
+            items.append(
+                BoundaryHeatMapItem(
+                    id=row[0],
+                    city_code=row[1],
+                    region_id=row[6],
+                    name=row[3] or row[2] or row[1] or "未知城市",
+                    value=round(value, 2),
+                    level="HIGH"
+                    if high and value >= high * 0.66
+                    else "MEDIUM"
+                    if high and value >= high * 0.33
+                    else "LOW",
+                    boundary_paths=boundary_paths,
+                    has_boundary=bool(boundary_paths) if include_boundary else bool(row[7]),
+                    boundary_precision=boundary_precision if boundary_paths else None,
+                    center_longitude=_num(center_longitude) if center_longitude is not None else None,
+                    center_latitude=_num(center_latitude) if center_latitude is not None else None,
+                    freight_count=int(_num(row[11])),
+                    inbound_count=int(_num(row[12])),
+                    outbound_count=int(_num(row[13])),
+                    tonnage=round(_num(row[14]), 2),
+                    avg_unit_price=round(_num(row[15]), 2) if row[15] is not None else None,
+                )
             )
-            for row in rows
-        ]
+        return items
 
     async def flow_overview(self, date_from: date | None, date_to: date | None) -> FlowAnalysisOverviewResponse:
         start, end = await self._date_range(date_from, date_to)

@@ -17,6 +17,7 @@ from app.modules.analysis.schemas import (
     AnalysisTaskQuery,
     AnalysisTaskResponse,
     AnalysisTaskTriggerRequest,
+    BoundaryHeatMapItem,
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowMapItem,
@@ -24,6 +25,7 @@ from app.modules.analysis.schemas import (
     HeatMapItem,
     PageResponse,
     PriceAnalysisOverviewResponse,
+    RegionAnalysisQuery,
     RegionAnalysisOverviewResponse,
     ShipAnalysisOverviewResponse,
 )
@@ -211,25 +213,35 @@ async def get_ship_flow_map(
 
 @router.get("/regions/overview", response_model=RegionAnalysisOverviewResponse)
 async def get_region_analysis_overview(
-    query: AnalysisDateRangeQuery = Depends(),
+    query: RegionAnalysisQuery = Depends(),
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
     service = AnalysisDashboardService(db)
-    return await service.region_overview(query.date_from, query.date_to)
+    return await service.region_overview(
+        query.date_from,
+        query.date_to,
+        include_boundary=query.include_boundary,
+        boundary_precision=query.boundary_precision,
+    )
 
 
-@router.get("/regions/heat-map", response_model=list[HeatMapItem])
+@router.get("/regions/heat-map", response_model=list[BoundaryHeatMapItem])
 async def get_region_heat_map(
-    query: AnalysisDateRangeQuery = Depends(),
+    query: RegionAnalysisQuery = Depends(),
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
     service = AnalysisDashboardService(db)
     start, end = await service._date_range(query.date_from, query.date_to)
-    return await service.region_heat_map(start, end)
+    return await service.region_heat_map(
+        start,
+        end,
+        include_boundary=query.include_boundary,
+        boundary_precision=query.boundary_precision,
+    )
 
 
 @router.get("/flows/overview", response_model=FlowAnalysisOverviewResponse)

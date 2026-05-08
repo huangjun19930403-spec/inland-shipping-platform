@@ -47,6 +47,15 @@ from app.models.vessel import (
     VesselRegistrationInfo,
 )
 from app.modules.dictionary.service import CodeSequenceService
+from app.modules.address.boundary_utils import (
+    BOUNDARY_SIMPLIFY_TOLERANCE as CITY_BOUNDARY_SIMPLIFY_TOLERANCE,
+    bbox_contains as _bbox_contains,
+    boundary_paths_for_precision as _boundary_paths_for_precision,
+    extract_geojson_polygons as _extract_geojson_polygons,
+    point_in_polygon_with_holes as _point_in_polygon_with_holes,
+    polygons_bbox as _polygons_bbox,
+    serialize_boundary_paths as _serialize_boundary_paths,
+)
 from app.modules.address.geometry import normalize_boundary_geometry
 from app.modules.storage.service import FileStorageService
 from app.modules.system.runtime_config import RuntimeConfigService
@@ -150,10 +159,6 @@ CURRENT_CITY_SOURCE_UNKNOWN = "UNKNOWN"
 CURRENT_CITY_SOURCE_INVALID_POSITION = "INVALID_POSITION"
 CITY_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_GRID_CELL_SIZE_DEGREES = 1.0
-CITY_BOUNDARY_SIMPLIFY_TOLERANCE = {
-    "low": 0.02,
-    "medium": 0.006,
-}
 CITY_SITUATION_CACHE_KEY_PREFIX = "vessel:city_situation:response:"
 CITY_SITUATION_SNAPSHOT_KEY_PREFIX = "vessel:city_situation:snapshot:"
 CITY_SITUATION_SNAPSHOT_TTL_SECONDS = settings.VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS
@@ -408,146 +413,6 @@ async def _load_region_map(db: AsyncSession, region_ids: list[int]) -> dict[int,
         return {}
     rows = (await db.execute(select(Region.id, Region.name).where(Region.id.in_(ids)))).all()
     return {region_id: name for region_id, name in rows}
-
-
-def _extract_geojson_polygons(geometry: dict[str, Any]) -> list[list[list[tuple[float, float]]]]:
-    geometry_type = str(geometry.get("type") or "").strip()
-    if geometry_type == "Feature":
-        return _extract_geojson_polygons(geometry.get("geometry") or {})
-    if geometry_type == "FeatureCollection":
-        polygons: list[list[list[tuple[float, float]]]] = []
-        for feature in geometry.get("features") or []:
-            if isinstance(feature, dict):
-                polygons.extend(_extract_geojson_polygons(feature))
-        return polygons
-    if geometry_type == "Polygon":
-        polygon = _normalize_polygon_coordinates(geometry.get("coordinates") or [])
-        return [polygon] if polygon else []
-    if geometry_type == "MultiPolygon":
-        polygons = []
-        for polygon_coordinates in geometry.get("coordinates") or []:
-            polygon = _normalize_polygon_coordinates(polygon_coordinates)
-            if polygon:
-                polygons.append(polygon)
-        return polygons
-    return []
-
-
-def _normalize_polygon_coordinates(value: Any) -> list[list[tuple[float, float]]]:
-    rings: list[list[tuple[float, float]]] = []
-    if not isinstance(value, list):
-        return rings
-    for raw_ring in value:
-        ring: list[tuple[float, float]] = []
-        if not isinstance(raw_ring, list):
-            continue
-        for raw_point in raw_ring:
-            if not isinstance(raw_point, (list, tuple)) or len(raw_point) < 2:
-                continue
-            try:
-                ring.append((float(raw_point[0]), float(raw_point[1])))
-            except (TypeError, ValueError):
-                continue
-        if len(ring) >= 3:
-            rings.append(ring)
-    return rings
-
-
-def _polygons_bbox(polygons: list[list[list[tuple[float, float]]]]) -> tuple[float, float, float, float] | None:
-    points = [point for polygon in polygons for ring in polygon for point in ring]
-    if not points:
-        return None
-    xs = [point[0] for point in points]
-    ys = [point[1] for point in points]
-    return min(xs), min(ys), max(xs), max(ys)
-
-
-def _bbox_contains(bbox: tuple[float, float, float, float], longitude: float, latitude: float) -> bool:
-    min_x, min_y, max_x, max_y = bbox
-    return min_x <= longitude <= max_x and min_y <= latitude <= max_y
-
-
-def _point_in_polygon_with_holes(longitude: float, latitude: float, polygon: list[list[tuple[float, float]]]) -> bool:
-    if not polygon or not _point_in_ring(longitude, latitude, polygon[0]):
-        return False
-    return not any(_point_in_ring(longitude, latitude, hole) for hole in polygon[1:])
-
-
-def _point_in_ring(longitude: float, latitude: float, ring: list[tuple[float, float]]) -> bool:
-    inside = False
-    count = len(ring)
-    if count < 3:
-        return False
-    j = count - 1
-    for i in range(count):
-        xi, yi = ring[i]
-        xj, yj = ring[j]
-        intersects = ((yi > latitude) != (yj > latitude)) and (
-            longitude < (xj - xi) * (latitude - yi) / ((yj - yi) or 1e-12) + xi
-        )
-        if intersects:
-            inside = not inside
-        j = i
-    return inside
-
-
-def _perpendicular_distance(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> float:
-    x, y = point
-    x1, y1 = start
-    x2, y2 = end
-    dx = x2 - x1
-    dy = y2 - y1
-    if dx == 0 and dy == 0:
-        return ((x - x1) ** 2 + (y - y1) ** 2) ** 0.5
-    return abs(dy * x - dx * y + x2 * y1 - y2 * x1) / ((dx * dx + dy * dy) ** 0.5)
-
-
-def _rdp_simplify(points: list[tuple[float, float]], tolerance: float) -> list[tuple[float, float]]:
-    if len(points) <= 3:
-        return points
-    first = points[0]
-    last = points[-1]
-    max_distance = -1.0
-    index = 0
-    for idx in range(1, len(points) - 1):
-        distance = _perpendicular_distance(points[idx], first, last)
-        if distance > max_distance:
-            max_distance = distance
-            index = idx
-    if max_distance > tolerance:
-        left = _rdp_simplify(points[: index + 1], tolerance)
-        right = _rdp_simplify(points[index:], tolerance)
-        return left[:-1] + right
-    return [first, last]
-
-
-def _simplify_ring(ring: list[tuple[float, float]], precision: str) -> list[tuple[float, float]]:
-    tolerance = CITY_BOUNDARY_SIMPLIFY_TOLERANCE.get(precision, CITY_BOUNDARY_SIMPLIFY_TOLERANCE["low"])
-    if len(ring) < 4:
-        return ring
-    closed = ring[0] == ring[-1]
-    source = ring[:-1] if closed else ring
-    simplified = _rdp_simplify(source, tolerance)
-    if len(simplified) < 3:
-        simplified = source[:3]
-    if simplified[0] != simplified[-1]:
-        simplified.append(simplified[0])
-    return simplified
-
-
-def _boundary_paths_for_precision(
-    polygons: list[list[list[tuple[float, float]]]],
-    precision: str,
-) -> list[list[tuple[float, float]]]:
-    paths: list[list[tuple[float, float]]] = []
-    for polygon in polygons:
-        if not polygon:
-            continue
-        exterior = polygon[0]
-        simplified = _simplify_ring(exterior, precision)
-        if len(simplified) >= 4:
-            paths.append(simplified)
-    return paths
 
 
 def _grid_range(min_value: float, max_value: float) -> range:
@@ -3156,7 +3021,7 @@ class VesselService:
             heat_longitude = (sum(longitudes, Decimal("0")) / Decimal(len(longitudes))).quantize(Decimal("0.000001")) if longitudes and not is_unknown_city else None
             heat_latitude = (sum(latitudes, Decimal("0")) / Decimal(len(latitudes))).quantize(Decimal("0.000001")) if latitudes and not is_unknown_city else None
             first_item = stats_items[0] if stats_items else None
-            serialized_boundary_paths = None if is_unknown_city else self._serialize_boundary_paths(boundary_paths_by_code.get(city_code))
+            serialized_boundary_paths = None if is_unknown_city else _serialize_boundary_paths(boundary_paths_by_code.get(city_code))
             has_boundary = False if is_unknown_city else city_code in boundary_codes
             result.append(
                 VesselPositionCitySituationItemResponse(
@@ -3289,12 +3154,6 @@ class VesselService:
             if paths:
                 result[boundary.code] = paths
         return result
-
-    @staticmethod
-    def _serialize_boundary_paths(paths: list[list[tuple[float, float]]] | None) -> list[list[list[float]]] | None:
-        if not paths:
-            return None
-        return [[[float(lng), float(lat)] for lng, lat in ring] for ring in paths if len(ring) >= 4] or None
 
     def _resolve_current_city_from_boundaries(
         self,

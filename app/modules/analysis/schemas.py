@@ -23,6 +23,11 @@ class AnalysisDateRangeQuery(BaseModel):
     date_to: date | None = None
 
 
+class RegionAnalysisQuery(AnalysisDateRangeQuery):
+    include_boundary: bool = False
+    boundary_precision: str = Field(default="low", pattern="^(low|medium)$")
+
+
 class MetricCard(BaseModel):
     code: str
     title: str
@@ -75,6 +80,25 @@ class HeatMapItem(BaseModel):
     outbound_count: int | None = None
 
 
+class BoundaryHeatMapItem(BaseModel):
+    id: int | None = None
+    city_code: str | None = None
+    name: str
+    region_id: int | None = None
+    value: float
+    level: str | None = None
+    boundary_paths: list[list[list[float]]] | None = None
+    has_boundary: bool = False
+    boundary_precision: str | None = None
+    center_longitude: float | None = None
+    center_latitude: float | None = None
+    freight_count: int | None = None
+    tonnage: float | None = None
+    inbound_count: int | None = None
+    outbound_count: int | None = None
+    avg_unit_price: float | None = None
+
+
 class AnalysisOverviewResponse(BaseModel):
     date_from: date
     date_to: date
@@ -108,7 +132,7 @@ class RegionAnalysisOverviewResponse(BaseModel):
     date_to: date
     metrics: list[MetricCard]
     region_ranking: list[ChartPoint]
-    heat_map: list[HeatMapItem]
+    heat_map: list[BoundaryHeatMapItem]
 
 
 class FlowAnalysisOverviewResponse(BaseModel):
