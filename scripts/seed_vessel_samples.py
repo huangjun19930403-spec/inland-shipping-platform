@@ -27,6 +27,8 @@ from app.models.vessel import (
     VesselIdentityLink,
     VesselNameHistory,
     VesselOperatorPeriod,
+    VesselOwnerDocument,
+    VesselOwnerDocumentImageRecognition,
     VesselOwnerPeriod,
     VesselPersonCertificate,
     VesselPersonCertificateFile,
@@ -65,6 +67,8 @@ def _status(row: dict[str, Any]) -> str:
 async def _clear_vessels(session) -> None:
     for model in (
         VesselChangeEvent,
+        VesselOwnerDocumentImageRecognition,
+        VesselOwnerDocument,
         VesselPersonCertificateImageRecognition,
         VesselPersonCertificateFile,
         VesselCertificateImageRecognition,
@@ -194,16 +198,32 @@ async def seed_vessel_samples() -> None:
                     vessel_profile_id=profile.id,
                     party_name="待补录船东",
                     party_type_code="UNKNOWN",
-                    mobile_phone=row.get("owner_phone"),
                     is_current=True,
                     is_primary=True,
                     created_at=created_at,
                     updated_at=updated_at,
                 )
             )
+            if row.get("owner_phone"):
+                session.add(
+                    VesselContact(
+                        vessel_profile_id=profile.id,
+                        contact_scope_code="OWNER",
+                        contact_name="船东联系人",
+                        contact_role_code="OWNER_CONTACT",
+                        mobile_phone=row.get("owner_phone"),
+                        is_primary=False,
+                        is_available=True,
+                        last_verified_at=updated_at,
+                        remark="由船舶台账船主联系电话生成",
+                        created_at=created_at,
+                        updated_at=updated_at,
+                    )
+                )
             session.add(
                 VesselContact(
                     vessel_profile_id=profile.id,
+                    contact_scope_code="GENERAL",
                     contact_name="台账联系人",
                     contact_role_code="BUSINESS_CONTACT",
                     mobile_phone=row.get("contact_phone"),

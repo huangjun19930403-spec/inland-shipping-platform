@@ -32,6 +32,8 @@ from app.modules.vessel.schemas import (
     VesselListQuery,
     VesselOperatorReplaceRequest,
     VesselOperatorResponse,
+    VesselOwnerDocumentImageRecognitionConfirmRequest,
+    VesselOwnerDocumentResponse,
     VesselOwnerReplaceRequest,
     VesselOwnerResponse,
     VesselOwnerTransferRequest,
@@ -155,6 +157,47 @@ async def replace_vessel_owners(
     db: AsyncSession = Depends(get_db),
 ):
     return await VesselService(db).replace_owners(vessel_id, body, operator_id=_operator_id(current_user))
+
+
+@router.post("/{vessel_id}/owners/{owner_id}/documents", response_model=VesselOwnerDocumentResponse)
+async def upload_vessel_owner_document(
+    vessel_id: int,
+    owner_id: int,
+    document_type_code: str = Form(default="OTHER"),
+    file: UploadFile = File(...),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).upload_owner_document(
+        vessel_id,
+        owner_id,
+        file,
+        document_type_code=document_type_code or "OTHER",
+        operator_id=_operator_id(current_user),
+    )
+
+
+@router.post(
+    "/{vessel_id}/owners/{owner_id}/documents/{owner_document_id}/image-recognitions/{recognition_id}/confirm",
+    response_model=VesselOwnerResponse,
+)
+async def confirm_vessel_owner_document_image_recognition(
+    vessel_id: int,
+    owner_id: int,
+    owner_document_id: int,
+    recognition_id: int,
+    body: VesselOwnerDocumentImageRecognitionConfirmRequest,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VesselService(db).confirm_owner_document_image_recognition(
+        vessel_id,
+        owner_id,
+        owner_document_id,
+        recognition_id,
+        body,
+        operator_id=_operator_id(current_user),
+    )
 
 
 @router.get("/{vessel_id}/operators", response_model=list[VesselOperatorResponse])
@@ -281,7 +324,7 @@ async def delete_vessel_person_certificate(
 @router.post("/{vessel_id}/person-certificate-files", response_model=VesselPersonCertificateResponse)
 async def upload_vessel_person_certificate_file_first(
     vessel_id: int,
-    certificate_type_code: str = Form(default="CREW_LICENSE"),
+    certificate_type_code: str = Form(default="CREW_COMPETENCY_CERT"),
     holder_name: str = Form(default="待补录"),
     file: UploadFile = File(...),
     current_user: SysUser = Depends(get_current_user),
@@ -290,7 +333,7 @@ async def upload_vessel_person_certificate_file_first(
     return await VesselService(db).upload_person_certificate_file_first(
         vessel_id,
         file,
-        certificate_type_code=certificate_type_code or "CREW_LICENSE",
+        certificate_type_code=certificate_type_code or "CREW_COMPETENCY_CERT",
         holder_name=holder_name or "待补录",
         operator_id=_operator_id(current_user),
     )

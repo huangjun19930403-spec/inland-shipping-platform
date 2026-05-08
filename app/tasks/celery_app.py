@@ -19,7 +19,7 @@ celery_app = Celery(
     "inland_shipping_analysis",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.analysis_tasks", "app.tasks.freight_ai_tasks"],
+    include=["app.tasks.analysis_tasks", "app.tasks.freight_ai_tasks", "app.tasks.vessel_ai_tasks"],
 )
 
 celery_app.conf.update(
@@ -38,6 +38,9 @@ celery_app.conf.update(
         "freight.parse_wechat_batch": {"queue": "freight_ai"},
         "freight.parse_tms_inbound": {"queue": "freight_ai"},
         "freight.clean_normalization": {"queue": "freight_ai"},
+        "vessel.recognize_certificate_image": {"queue": "vessel_ai"},
+        "vessel.recognize_person_certificate_image": {"queue": "vessel_ai"},
+        "vessel.recognize_owner_document_image": {"queue": "vessel_ai"},
     },
 )
 

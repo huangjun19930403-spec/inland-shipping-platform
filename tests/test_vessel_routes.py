@@ -30,6 +30,24 @@ def test_vessel_person_certificate_upload_first_routes_exist() -> None:
     ]
 
 
+def test_vessel_owner_document_routes_exist() -> None:
+    paths = app.openapi()["paths"]
+
+    assert "post" in paths["/api/v1/vessels/{vessel_id}/owners/{owner_id}/documents"]
+    assert "post" in paths[
+        "/api/v1/vessels/{vessel_id}/owners/{owner_id}/documents/{owner_document_id}/image-recognitions/{recognition_id}/confirm"
+    ]
+
+
+def test_vessel_certificate_risk_query_removed() -> None:
+    paths = app.openapi()["paths"]
+    list_parameters = paths["/api/v1/vessels"]["get"].get("parameters", [])
+    monitor_parameters = paths["/api/v1/vessels/position-monitor"]["get"].get("parameters", [])
+
+    assert all(item["name"] != "certificate_risk" for item in list_parameters)
+    assert all(item["name"] != "certificate_risk" for item in monitor_parameters)
+
+
 def test_vessel_recognition_long_term_validity_is_normalized() -> None:
     service = object.__new__(VesselService)
 

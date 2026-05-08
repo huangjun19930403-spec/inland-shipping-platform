@@ -50,7 +50,6 @@ class VesselListQuery(BaseModel):
     draft_max: Decimal | None = None
     owner_name: str | None = None
     operator_name: str | None = None
-    certificate_risk: str | None = None
     contact_available: bool | None = None
     updated_from: datetime | None = None
     updated_to: datetime | None = None
@@ -66,7 +65,6 @@ class VesselPositionMonitorQuery(BaseModel):
     draft_max: Decimal | None = None
     contact_available: bool | None = None
     profile_status_code: str | None = None
-    certificate_risk: str | None = None
     reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
     max_items: int = Field(default=200, ge=1, le=500)
 
@@ -144,8 +142,6 @@ class VesselOwnerItem(StrictBaseModel):
     party_name: str = Field(min_length=1, max_length=128)
     party_type_code: str = Field(default="UNKNOWN", min_length=1, max_length=64)
     certificate_no: str | None = Field(default=None, max_length=64)
-    mobile_phone: str | None = Field(default=None, max_length=32)
-    landline_phone: str | None = Field(default=None, max_length=32)
     address: str | None = Field(default=None, max_length=256)
     start_date: date | None = None
     end_date: date | None = None
@@ -160,7 +156,6 @@ class VesselOwnerReplaceRequest(StrictBaseModel):
 class VesselOperatorItem(StrictBaseModel):
     operator_name: str = Field(min_length=1, max_length=128)
     party_type_code: str = Field(default="UNKNOWN", min_length=1, max_length=64)
-    contact_phone: str | None = Field(default=None, max_length=32)
     start_date: date | None = None
     end_date: date | None = None
     is_current: bool = True
@@ -172,6 +167,10 @@ class VesselOperatorReplaceRequest(StrictBaseModel):
 
 
 class VesselContactItem(StrictBaseModel):
+    contact_scope_code: str = Field(default="GENERAL", min_length=1, max_length=64)
+    owner_period_id: int | None = None
+    operator_period_id: int | None = None
+    crew_assignment_id: int | None = None
     contact_name: str = Field(min_length=1, max_length=64)
     contact_role_code: str = Field(min_length=1, max_length=64)
     mobile_phone: str | None = Field(default=None, max_length=32)
@@ -190,8 +189,6 @@ class VesselContactReplaceRequest(StrictBaseModel):
 class VesselCrewItem(StrictBaseModel):
     crew_name: str = Field(min_length=1, max_length=64)
     crew_role_code: str = Field(min_length=1, max_length=64)
-    certificate_no: str | None = Field(default=None, max_length=64)
-    mobile_phone: str | None = Field(default=None, max_length=32)
     start_date: date | None = None
     end_date: date | None = None
     is_current: bool = True
@@ -204,7 +201,7 @@ class VesselCrewReplaceRequest(StrictBaseModel):
 class VesselPersonCertificateItem(StrictBaseModel):
     crew_assignment_id: int | None = None
     holder_name: str = Field(default="待补录", min_length=1, max_length=64)
-    certificate_type_code: str = Field(default="CREW_LICENSE", min_length=1, max_length=64)
+    certificate_type_code: str = Field(default="CREW_COMPETENCY_CERT", min_length=1, max_length=64)
     certificate_no: str | None = Field(default=None, max_length=128)
     valid_from: date | None = None
     valid_to: date | None = None
@@ -231,6 +228,11 @@ class VesselPersonCertificateImageRecognitionCreateRequest(StrictBaseModel):
 
 class VesselPersonCertificateImageRecognitionConfirmRequest(StrictBaseModel):
     accepted_payload_json: dict[str, Any] | None = None
+
+
+class VesselOwnerDocumentImageRecognitionConfirmRequest(StrictBaseModel):
+    accepted_payload_json: dict[str, Any] | None = None
+    apply_to_owner: bool = True
 
 
 class VesselCertificateCreateRequest(StrictBaseModel):
@@ -277,7 +279,6 @@ class VesselOwnerTransferRequest(StrictBaseModel):
     party_type_code: str = Field(default="UNKNOWN", min_length=1, max_length=64)
     transfer_date: date | None = None
     certificate_no: str | None = Field(default=None, max_length=64)
-    mobile_phone: str | None = Field(default=None, max_length=32)
     address: str | None = Field(default=None, max_length=256)
     remark: str | None = Field(default=None, max_length=512)
 
@@ -357,10 +358,51 @@ class VesselBuildInfoResponse(BaseModel):
     updated_at: datetime
 
 
+class VesselOwnerDocumentImageRecognitionResponse(BaseModel):
+    id: int
+    vessel_profile_id: int
+    vessel_owner_period_id: int
+    owner_document_id: int
+    storage_file_id: int
+    status_code: str
+    status_name: str | None = None
+    provider_code: str | None
+    model_name: str | None
+    candidate_payload_json: dict[str, Any] | None
+    confirmed_payload_json: dict[str, Any] | None
+    raw_text: str | None
+    raw_response_json: dict[str, Any] | None
+    confidence_score: int | None
+    error_message: str | None
+    created_by: int | None
+    confirmed_by: int | None
+    confirmed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VesselOwnerDocumentResponse(BaseModel):
+    id: int
+    vessel_profile_id: int
+    vessel_owner_period_id: int
+    document_type_code: str
+    document_type_name: str | None = None
+    storage_file_id: int
+    file_name: str
+    content_type: str
+    file_size: int
+    uploaded_by: int | None
+    uploaded_at: datetime
+    created_at: datetime
+    download_url: str | None = None
+    latest_image_recognition: VesselOwnerDocumentImageRecognitionResponse | None = None
+
+
 class VesselOwnerResponse(VesselOwnerItem):
     id: int
     vessel_profile_id: int
     party_type_name: str | None = None
+    documents: list[VesselOwnerDocumentResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -376,6 +418,7 @@ class VesselOperatorResponse(VesselOperatorItem):
 class VesselContactResponse(VesselContactItem):
     id: int
     vessel_profile_id: int
+    contact_scope_name: str | None = None
     contact_role_name: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -545,8 +588,6 @@ class VesselListItemResponse(VesselProfileResponse):
     primary_contact_name: str | None = None
     primary_contact_phone: str | None = None
     contact_available: bool | None = None
-    certificate_risk: str | None = None
-    certificate_risk_name: str | None = None
 
 
 class VesselPositionMonitorItemResponse(VesselListItemResponse):
@@ -567,7 +608,6 @@ class VesselPositionMonitorSummary(BaseModel):
     positioned_count: int
     stale_position_count: int
     contactable_position_count: int
-    risk_position_count: int
 
 
 class VesselPositionMonitorResponse(BaseModel):

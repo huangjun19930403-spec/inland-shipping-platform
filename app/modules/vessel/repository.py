@@ -19,6 +19,8 @@ from app.models.vessel import (
     VesselIdentifierHistory,
     VesselNameHistory,
     VesselOperatorPeriod,
+    VesselOwnerDocument,
+    VesselOwnerDocumentImageRecognition,
     VesselOwnerPeriod,
     VesselPersonCertificate,
     VesselPersonCertificateFile,
@@ -255,6 +257,59 @@ class VesselRepository:
             )
         )
 
+    async def create_owner_document(self, data: dict[str, Any]) -> VesselOwnerDocument:
+        entity = VesselOwnerDocument(**data)
+        self.db.add(entity)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def get_owner_document(self, owner_document_id: int) -> VesselOwnerDocument | None:
+        return await self.db.scalar(select(VesselOwnerDocument).where(VesselOwnerDocument.id == owner_document_id))
+
+    async def get_owner_document_by_storage_file(
+        self,
+        owner_id: int,
+        storage_file_id: int,
+    ) -> VesselOwnerDocument | None:
+        return await self.db.scalar(
+            select(VesselOwnerDocument).where(
+                VesselOwnerDocument.vessel_owner_period_id == owner_id,
+                VesselOwnerDocument.storage_file_id == storage_file_id,
+            )
+        )
+
+    async def list_owner_documents(
+        self,
+        vessel_id: int,
+        owner_id: int | None = None,
+    ) -> list[VesselOwnerDocument]:
+        stmt = select(VesselOwnerDocument).where(VesselOwnerDocument.vessel_profile_id == vessel_id)
+        if owner_id is not None:
+            stmt = stmt.where(VesselOwnerDocument.vessel_owner_period_id == owner_id)
+        stmt = stmt.order_by(VesselOwnerDocument.created_at.desc(), VesselOwnerDocument.id.desc())
+        return list((await self.db.execute(stmt)).scalars().all())
+
+    async def create_owner_document_image_recognition(
+        self,
+        data: dict[str, Any],
+    ) -> VesselOwnerDocumentImageRecognition:
+        entity = VesselOwnerDocumentImageRecognition(**data)
+        self.db.add(entity)
+        await self.db.flush()
+        await self.db.refresh(entity)
+        return entity
+
+    async def get_owner_document_image_recognition(
+        self,
+        recognition_id: int,
+    ) -> VesselOwnerDocumentImageRecognition | None:
+        return await self.db.scalar(
+            select(VesselOwnerDocumentImageRecognition).where(
+                VesselOwnerDocumentImageRecognition.id == recognition_id
+            )
+        )
+
 
 SINGLETON_MODELS = (
     VesselRegistrationInfo,
@@ -264,6 +319,7 @@ SINGLETON_MODELS = (
 
 LIST_MODELS = (
     VesselOwnerPeriod,
+    VesselOwnerDocument,
     VesselOperatorPeriod,
     VesselContact,
     VesselCrewAssignment,

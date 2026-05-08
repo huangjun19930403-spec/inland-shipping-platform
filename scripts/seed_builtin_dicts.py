@@ -56,16 +56,17 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "SHIP_TYPE", "dict_name": "船型", "items": _items(("DRY_BULK", "干散货船"), ("GENERAL_CARGO", "普通货船"), ("SELF_UNLOADING_SAND", "自卸砂石船"), ("BULK_CEMENT", "散装水泥船"), ("CONTAINER", "集装箱船"), ("BULK_CONTAINER", "散改集船"), ("MULTI_PURPOSE", "多用途船"), ("OIL_TANKER", "油船"), ("CHEMICAL_TANKER", "化学品船"), ("ENGINEERING", "工程船"), ("TUG", "拖轮"), ("OTHER", "其他船型"))},
     {"dict_code": "SHIP_OPERATION_STATUS", "dict_name": "船舶运营状态", "items": [_item("OPERATING", "运营中", color="success"), _item("IN_PORT", "在港待装", color="warning"), _item("MAINTENANCE", "检修中", color="info"), _item("SUSPENDED", "暂停运营", color="danger")]},
     {"dict_code": "PARTY_SUBJECT_TYPE", "dict_name": "主体类型", "items": [_item("COMPANY", "公司", color="primary"), _item("PERSON", "个人", color="success"), _item("OTHER", "其他", color="info"), _item("UNKNOWN", "未确认", color="warning", is_default=True)]},
-    {"dict_code": "CONTACT_ROLE", "dict_name": "船舶业务联系人角色", "items": _items(("BUSINESS_CONTACT", "业务联系人"), ("SETTLEMENT_CONTACT", "结算联系人"), ("SAFETY_CONTACT", "安全联系人"), ("EMERGENCY_CONTACT", "应急联系人"), ("OTHER", "其他联系人"))},
+    {"dict_code": "CONTACT_SCOPE", "dict_name": "船舶联系人归属", "items": _items(("GENERAL", "通用联系人"), ("OWNER", "所有方联系人"), ("OPERATOR", "运营方联系人"), ("CREW", "船员联系人"))},
+    {"dict_code": "CONTACT_ROLE", "dict_name": "船舶业务联系人角色", "items": _items(("BUSINESS_CONTACT", "业务联系人"), ("OWNER_CONTACT", "所有方联系人"), ("OPERATOR_CONTACT", "运营方联系人"), ("CREW_CONTACT", "船员联系人"), ("SETTLEMENT_CONTACT", "结算联系人"), ("SAFETY_CONTACT", "安全联系人"), ("EMERGENCY_CONTACT", "应急联系人"), ("OTHER", "其他联系人"))},
     {"dict_code": "VESSEL_CREW_ROLE", "dict_name": "船员角色", "items": _items(("CAPTAIN", "船长"), ("CHIEF_ENGINEER", "轮机长"), ("DECK_CREW", "甲板船员"), ("ENGINE_CREW", "轮机船员"), ("OTHER", "其他船员"))},
-    {"dict_code": "CERTIFICATE_TYPE", "dict_name": "证件类型", "items": _items(("UNKNOWN", "待识别"), ("TRANSPORT_LICENSE", "水路运输许可证"), ("OWNERSHIP_CERT", "船舶所有权证书"), ("INSPECTION_CERT", "检验证书"), ("SEAWORTHINESS_CERT", "适航证书"), ("CREW_LICENSE", "船员适任证书"), ("OTHER", "其他证照"))},
+    {"dict_code": "CERTIFICATE_TYPE", "dict_name": "证件类型", "items": _items(("UNKNOWN", "待识别"), ("VESSEL_OWNERSHIP_CERT", "船舶所有权证书"), ("VESSEL_NATIONALITY_CERT", "船舶国籍证书"), ("VESSEL_OPERATION_CERT", "船舶营业运输证"), ("VESSEL_INSPECTION_BOOK", "船检簿子"), ("VESSEL_SEAWORTHINESS_CERT", "适航证"), ("VESSEL_AIS_CERT", "船舶 AIS 证书"), ("CREW_COMPETENCY_CERT", "船员适任证"), ("OTHER", "其他证照"))},
+    {"dict_code": "OWNER_DOCUMENT_TYPE", "dict_name": "所有方证照类型", "items": _items(("PERSON_ID_FRONT", "身份证正面"), ("PERSON_ID_BACK", "身份证反面"), ("BUSINESS_LICENSE", "营业执照"), ("PERSON_VESSEL_PHOTO", "人船合影"), ("VESSEL_PHOTO", "船照"), ("OTHER", "其他证明"))},
     {"dict_code": "CERTIFICATE_VERIFY_STATUS", "dict_name": "证件核验状态", "items": [_item("PENDING", "待核验", color="warning", is_default=True), _item("VERIFIED", "已核验", color="success"), _item("CONFLICT", "存在冲突", color="danger"), _item("REJECTED", "已驳回", color="info")]},
     {"dict_code": "VESSEL_PROFILE_STATUS", "dict_name": "船舶档案状态", "items": [_item("ACTIVE", "可用", color="success", is_default=True), _item("INACTIVE", "停用", color="info"), _item("TRANSFERRED", "已转移", color="primary"), _item("ARCHIVED", "归档", color="info"), _item("DECOMMISSIONED", "退役", color="danger")]},
     {"dict_code": "VESSEL_IDENTITY_STATUS", "dict_name": "船舶身份状态", "items": [_item("UNLINKED", "未关联", color="warning", is_default=True), _item("CANDIDATE", "有候选", color="primary"), _item("LINKED", "已关联", color="success"), _item("CONFLICT", "冲突", color="danger")]},
     {"dict_code": "VESSEL_CERTIFICATE_IMAGE_RECOGNITION_STATUS", "dict_name": "船舶证件图片识别状态", "items": [_item("NOT_STARTED", "未识别", color="info"), _item("PROCESSING", "识别中", color="primary"), _item("NEED_CONFIRM", "待人工确认", color="warning"), _item("CONFIRMED", "已确认", color="success"), _item("UNCONFIRMED", "未确认", color="info"), _item("FAILED", "识别失败", color="danger")]},
-    {"dict_code": "VESSEL_CERTIFICATE_RISK", "dict_name": "船舶证件风险", "items": [_item("OK", "证件正常", color="success"), _item("EXPIRING", "即将到期", color="warning"), _item("EXPIRED", "证件过期", color="danger"), _item("MISSING", "证件缺失", color="danger"), _item("UNKNOWN", "需核验", color="info")]},
     {"dict_code": "VESSEL_POSITION_SOURCE_STATUS", "dict_name": "实时船位状态", "items": [_item("AVAILABLE", "实时船位可用", color="success"), _item("EMPTY", "暂无实时船位", color="info"), _item("UNCONFIGURED", "实时 ES 未配置", color="warning"), _item("ERROR", "实时船位异常", color="danger")]},
-    {"dict_code": "VESSEL_CHANGE_EVENT_TYPE", "dict_name": "船舶变更事件类型", "items": _items(("CREATE", "新增船舶档案"), ("UPDATE_PROFILE", "更新主档"), ("UPSERT_REGISTRATION", "维护登记信息"), ("UPSERT_CAPACITY", "维护容量尺度"), ("UPSERT_BUILD_INFO", "维护建造信息"), ("REPLACE_OWNERS", "维护所有人"), ("REPLACE_OPERATORS", "维护运营方"), ("REPLACE_CONTACTS", "维护联系人"), ("REPLACE_CREW", "维护船员任职"), ("REPLACE_PERSON_CERTIFICATES", "维护人员证书"), ("CREATE_PERSON_CERTIFICATE", "新增人员证件"), ("UPDATE_PERSON_CERTIFICATE", "更新人员证件"), ("DELETE_PERSON_CERTIFICATE", "删除人员证件"), ("UPLOAD_PERSON_CERTIFICATE_FILE", "上传人员证件附件"), ("IMAGE_RECOGNIZE_PERSON_CERTIFICATE", "识别人员证件图片"), ("IMAGE_RECOGNIZE_PERSON_CERTIFICATE_FAILED", "人员证件图片识别失败"), ("CONFIRM_PERSON_CERTIFICATE_IMAGE_RECOGNITION", "确认人员证件图片识别"), ("CREATE_CERTIFICATE", "新增证件"), ("UPDATE_CERTIFICATE", "更新证件"), ("UPLOAD_CERTIFICATE_FILE", "上传证件附件"), ("IMAGE_RECOGNIZE_CERTIFICATE", "识别证件图片"), ("IMAGE_RECOGNIZE_CERTIFICATE_FAILED", "证件图片识别失败"), ("CONFIRM_CERTIFICATE_IMAGE_RECOGNITION", "确认证件图片识别"), ("OWNER_TRANSFER_OUT", "所有人转移出"), ("OWNER_TRANSFER_IN", "所有人转移入"), ("SEED_CREATE", "样例生成"))},
+    {"dict_code": "VESSEL_CHANGE_EVENT_TYPE", "dict_name": "船舶变更事件类型", "items": _items(("CREATE", "新增船舶档案"), ("UPDATE_PROFILE", "更新主档"), ("UPSERT_REGISTRATION", "维护船籍信息"), ("UPSERT_CAPACITY", "维护船舶尺寸信息"), ("UPSERT_BUILD_INFO", "维护建造信息"), ("REPLACE_OWNERS", "维护所有方"), ("UPLOAD_OWNER_DOCUMENT", "上传所有方证照"), ("IMAGE_RECOGNIZE_OWNER_DOCUMENT", "识别所有方证照"), ("IMAGE_RECOGNIZE_OWNER_DOCUMENT_FAILED", "所有方证照识别失败"), ("CONFIRM_OWNER_DOCUMENT_IMAGE_RECOGNITION", "确认所有方证照识别"), ("REPLACE_OPERATORS", "维护运营方"), ("REPLACE_CONTACTS", "维护联系人"), ("REPLACE_CREW", "维护船员任职"), ("REPLACE_PERSON_CERTIFICATES", "维护人员证书"), ("CREATE_PERSON_CERTIFICATE", "新增人员证件"), ("UPDATE_PERSON_CERTIFICATE", "更新人员证件"), ("DELETE_PERSON_CERTIFICATE", "删除人员证件"), ("UPLOAD_PERSON_CERTIFICATE_FILE", "上传人员证件附件"), ("IMAGE_RECOGNIZE_PERSON_CERTIFICATE", "识别人员证件图片"), ("IMAGE_RECOGNIZE_PERSON_CERTIFICATE_FAILED", "人员证件图片识别失败"), ("CONFIRM_PERSON_CERTIFICATE_IMAGE_RECOGNITION", "确认人员证件图片识别"), ("CREATE_CERTIFICATE", "新增证件"), ("UPDATE_CERTIFICATE", "更新证件"), ("UPLOAD_CERTIFICATE_FILE", "上传证件附件"), ("IMAGE_RECOGNIZE_CERTIFICATE", "识别证件图片"), ("IMAGE_RECOGNIZE_CERTIFICATE_FAILED", "证件图片识别失败"), ("CONFIRM_CERTIFICATE_IMAGE_RECOGNITION", "确认证件图片识别"), ("OWNER_TRANSFER_OUT", "所有方转移出"), ("OWNER_TRANSFER_IN", "所有方转移入"), ("SEED_CREATE", "样例生成"))},
     {"dict_code": "BOUNDARY_SOURCE_TYPE", "dict_name": "边界来源类型", "items": _items(("OFFICIAL_GIS_SERVICE", "官方地理服务"), ("STANDARD_MAP_EXTRACTION", "标准地图提取"), ("PLATFORM_DEFINED", "平台定义"), ("THIRD_PARTY_AUTHORIZED", "授权三方数据"))},
     {"dict_code": "REGION_TYPE", "dict_name": "区域类型", "items": _items(("SHIPPING_ANALYSIS_REGION", "航运分析区"), ("OPERATION_REGION", "运营管理区"), ("MARKET_REGION", "市场片区"))},
     {"dict_code": "REGION_RELATION_TYPE", "dict_name": "区域关系类型", "items": _items(("INCLUDED", "包含"), ("PRIMARY", "主归属"), ("ASSIST", "辅助归属"))},
@@ -112,6 +113,14 @@ BUILTIN_DICTS: list[dict[str, Any]] = [
     {"dict_code": "CONFIG_GROUP", "dict_name": "配置分组", "items": _items(("SYSTEM", "系统"), ("INTEGRATION", "外部集成"), ("AI", "AI 配置"), ("MAP", "地图"), ("FREIGHT", "货源"), ("SHIP", "船舶"), ("ANALYSIS", "分析"), ("FILE_STORAGE", "文件存储"))},
 ]
 
+STRICT_ITEM_DICTS = {
+    "CERTIFICATE_TYPE",
+    "CONTACT_SCOPE",
+    "CONTACT_ROLE",
+    "OWNER_DOCUMENT_TYPE",
+    "VESSEL_CHANGE_EVENT_TYPE",
+}
+
 
 async def seed_builtin_dicts() -> None:
     async with AsyncSessionLocal() as session:
@@ -137,6 +146,15 @@ async def seed_builtin_dicts() -> None:
                 dictionary.is_system = True
                 dictionary.status = 1
                 dictionary.sort_order = dict_payload.get("sort_order", 0)
+
+            desired_item_codes = {item["item_code"] for item in dict_payload.get("items", [])}
+            if dict_code in STRICT_ITEM_DICTS and desired_item_codes:
+                existing_items = (
+                    await session.execute(select(StdDictItem).where(StdDictItem.dict_id == dictionary.id))
+                ).scalars().all()
+                for existing in existing_items:
+                    if existing.item_code not in desired_item_codes:
+                        existing.status = 0
 
             for item in dict_payload.get("items", []):
                 existed_item = await session.scalar(

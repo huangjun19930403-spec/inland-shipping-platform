@@ -157,13 +157,63 @@ class VesselOwnerPeriod(Base, TimestampMixin):
     party_name: Mapped[str] = mapped_column(String(128), nullable=False)
     party_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN")
     certificate_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    mobile_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    landline_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     address: Mapped[str | None] = mapped_column(String(256), nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VesselOwnerDocument(Base):
+    __tablename__ = "vessel_owner_document"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    vessel_profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True
+    )
+    vessel_owner_period_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_owner_period.id"), nullable=False, index=True
+    )
+    document_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("storage_file.id"), nullable=False, index=True
+    )
+    file_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    uploaded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class VesselOwnerDocumentImageRecognition(Base, TimestampMixin):
+    __tablename__ = "vessel_owner_document_image_recognition"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    vessel_profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True
+    )
+    vessel_owner_period_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_owner_period.id"), nullable=False, index=True
+    )
+    owner_document_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vessel_owner_document.id"), nullable=False, index=True
+    )
+    storage_file_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("storage_file.id"), nullable=False, index=True
+    )
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PENDING")
+    provider_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    candidate_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confirmed_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    confirmed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class VesselOperatorPeriod(Base, TimestampMixin):
@@ -175,7 +225,6 @@ class VesselOperatorPeriod(Base, TimestampMixin):
     )
     operator_name: Mapped[str] = mapped_column(String(128), nullable=False)
     party_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN")
-    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -188,6 +237,16 @@ class VesselContact(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     vessel_profile_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True
+    )
+    contact_scope_code: Mapped[str] = mapped_column(String(64), nullable=False, default="GENERAL")
+    owner_period_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("vessel_owner_period.id"), nullable=True, index=True
+    )
+    operator_period_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("vessel_operator_period.id"), nullable=True, index=True
+    )
+    crew_assignment_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("vessel_crew_assignment.id"), nullable=True, index=True
     )
     contact_name: Mapped[str] = mapped_column(String(64), nullable=False)
     contact_role_code: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -209,8 +268,6 @@ class VesselCrewAssignment(Base, TimestampMixin):
     )
     crew_name: Mapped[str] = mapped_column(String(64), nullable=False)
     crew_role_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    certificate_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    mobile_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
