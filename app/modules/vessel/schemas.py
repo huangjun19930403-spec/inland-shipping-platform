@@ -78,13 +78,15 @@ class VesselPositionCitySituationQuery(BaseModel):
     contact_available: bool | None = None
     profile_status_code: str | None = None
     reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
-    max_profiles: int = Field(default=5000, ge=1, le=20000)
+    profile_limit: int | None = Field(default=None, ge=1, le=20000)
+    max_profiles: int | None = Field(default=None, ge=1, le=20000)
     es_batch_size: int = Field(default=200, ge=20, le=500)
 
 
 class VesselPositionCityVesselsQuery(VesselPositionCitySituationQuery):
     city_code: str | None = None
     city_name: str | None = None
+    query_snapshot_id: str | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 
@@ -683,6 +685,12 @@ class VesselPositionMonitorItemResponse(VesselListItemResponse):
     position_age_minutes: int | None = None
     city_code: str | None = None
     city_name: str | None = None
+    current_city_code: str | None = None
+    current_city_name: str | None = None
+    current_city_source: str | None = None
+    city_center_longitude: Decimal | None = None
+    city_center_latitude: Decimal | None = None
+    matched_city_candidates: list[dict[str, Any]] | None = None
     location_text: str | None = None
     position_source_code: str = "ES_REALTIME"
     position_source_name: str | None = None
@@ -715,6 +723,10 @@ class VesselPositionCitySituationItemResponse(BaseModel):
     city_name: str
     longitude: Decimal | None = None
     latitude: Decimal | None = None
+    city_center_longitude: Decimal | None = None
+    city_center_latitude: Decimal | None = None
+    heat_center_longitude: Decimal | None = None
+    heat_center_latitude: Decimal | None = None
     positioned_count: int
     contactable_position_count: int
     average_ship_age: Decimal | None = None
@@ -732,14 +744,19 @@ class VesselPositionCitySituationItemResponse(BaseModel):
 
 class VesselPositionCitySituationSummary(BaseModel):
     matched_profile_count: int
+    scanned_profile_count: int = 0
+    unscanned_profile_count: int = 0
     queried_mmsi_count: int
     matched_position_count: int
     unpositioned_count: int
+    invalid_position_count: int = 0
+    unknown_city_count: int = 0
     positioned_count: int
     stale_position_count: int
     contactable_position_count: int
     certificate_risk_count: int
     city_count: int
+    query_snapshot_id: str | None = None
     is_partial: bool = False
     error_message: str | None = None
 
@@ -751,6 +768,13 @@ class VesselPositionCitySituationResponse(BaseModel):
     message: str | None = None
     summary: VesselPositionCitySituationSummary
     cities: list[VesselPositionCitySituationItemResponse] = Field(default_factory=list)
+
+
+class VesselPositionCityVesselsResponse(PageResponse[VesselPositionMonitorItemResponse]):
+    query_snapshot_id: str | None = None
+    snapshot_hit: bool = False
+    is_partial: bool = False
+    error_message: str | None = None
 
 
 class VesselBusinessSituationCardResponse(BaseModel):

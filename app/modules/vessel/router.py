@@ -50,6 +50,7 @@ from app.modules.vessel.schemas import (
     VesselPositionCitySituationQuery,
     VesselPositionCitySituationResponse,
     VesselPositionCityVesselsQuery,
+    VesselPositionCityVesselsResponse,
     VesselPositionMonitorItemResponse,
     VesselPositionMonitorQuery,
     VesselPositionMonitorResponse,
@@ -89,7 +90,7 @@ async def monitor_vessel_city_situation(
     return await VesselService(db).position_city_situation(query)
 
 
-@router.get("/position-monitor/city-vessels", response_model=PageResponse[VesselPositionMonitorItemResponse])
+@router.get("/position-monitor/city-vessels", response_model=VesselPositionCityVesselsResponse)
 async def monitor_vessel_city_vessels(
     query: VesselPositionCityVesselsQuery = Depends(),
     current_user: SysUser = Depends(get_current_user),

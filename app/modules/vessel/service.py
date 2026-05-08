@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -16,7 +19,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.integrations.ai.vessel_image_assistant import VesselCertificateImageAssistant
 from app.integrations.config_keys import ES_R_HOST, ES_R_INDEX, ES_REALTIME_CONFIG_PROFILE
 from app.integrations.es import RealtimeEsClient
-from app.models.address import AdminRegion, Region
+from app.models.address import AdminRegion, AdminRegionBoundary, Region
 from app.models.dictionary import StdDict, StdDictItem
 from app.models.vessel import (
     VesselBuildInfo,
@@ -41,6 +44,7 @@ from app.models.vessel import (
     VesselRegistrationInfo,
 )
 from app.modules.dictionary.service import CodeSequenceService
+from app.modules.address.geometry import normalize_boundary_geometry
 from app.modules.storage.service import FileStorageService
 from app.modules.system.runtime_config import RuntimeConfigService
 from app.modules.vessel.repository import VesselRepository
@@ -72,6 +76,7 @@ from app.modules.vessel.schemas import (
     VesselPositionCitySituationItemResponse,
     VesselPositionCitySituationResponse,
     VesselPositionCitySituationSummary,
+    VesselPositionCityVesselsResponse,
     VesselPositionMonitorItemResponse,
     VesselPositionMonitorResponse,
     VesselPositionMonitorSummary,
@@ -132,6 +137,61 @@ OWNER_REQUIRED_DOCUMENT_TYPES_BY_PARTY = {
 }
 UNKNOWN_CITY_CODE = "UNKNOWN"
 UNKNOWN_CITY_NAME = "未知城市"
+CURRENT_CITY_SOURCE_ADMIN_BOUNDARY = "ADMIN_BOUNDARY"
+CURRENT_CITY_SOURCE_UNKNOWN = "UNKNOWN"
+CURRENT_CITY_SOURCE_INVALID_POSITION = "INVALID_POSITION"
+CITY_BOUNDARY_CACHE_TTL_SECONDS = 1800
+CITY_SITUATION_SNAPSHOT_TTL_SECONDS = 300
+CITY_SITUATION_SNAPSHOT_MAX_SIZE = 20
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _CityBoundary:
+    code: str
+    name: str
+    center_longitude: Decimal | None
+    center_latitude: Decimal | None
+    area_km2: Decimal | None
+    bbox: tuple[float, float, float, float]
+    bbox_area: float
+    polygons: list[list[list[tuple[float, float]]]]
+
+
+@dataclass(slots=True)
+class _ResolvedCity:
+    city_code: str | None
+    city_name: str
+    current_city_source: str
+    city_center_longitude: Decimal | None = None
+    city_center_latitude: Decimal | None = None
+    matched_city_candidates: list[dict[str, Any]] | None = None
+
+
+@dataclass(slots=True)
+class _PositionBuildResult:
+    items: list[VesselPositionMonitorItemResponse]
+    partial: bool
+    error_message: str | None
+    queried_mmsi_count: int
+    matched_position_count: int
+    unpositioned_count: int
+    invalid_position_count: int
+    unknown_city_count: int
+
+
+@dataclass(slots=True)
+class _CitySituationSnapshot:
+    snapshot_id: str
+    expires_at: datetime
+    items: list[VesselPositionMonitorItemResponse]
+    partial: bool
+    error_message: str | None
+    generated_at: datetime
+
+
+_CITY_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": []}
+_CITY_SITUATION_SNAPSHOTS: dict[str, _CitySituationSnapshot] = {}
 
 
 def _dispatch_certificate_recognition_task(recognition_id: int) -> None:
@@ -306,6 +366,87 @@ async def _load_region_map(db: AsyncSession, region_ids: list[int]) -> dict[int,
     return {region_id: name for region_id, name in rows}
 
 
+def _extract_geojson_polygons(geometry: dict[str, Any]) -> list[list[list[tuple[float, float]]]]:
+    geometry_type = str(geometry.get("type") or "").strip()
+    if geometry_type == "Feature":
+        return _extract_geojson_polygons(geometry.get("geometry") or {})
+    if geometry_type == "FeatureCollection":
+        polygons: list[list[list[tuple[float, float]]]] = []
+        for feature in geometry.get("features") or []:
+            if isinstance(feature, dict):
+                polygons.extend(_extract_geojson_polygons(feature))
+        return polygons
+    if geometry_type == "Polygon":
+        polygon = _normalize_polygon_coordinates(geometry.get("coordinates") or [])
+        return [polygon] if polygon else []
+    if geometry_type == "MultiPolygon":
+        polygons = []
+        for polygon_coordinates in geometry.get("coordinates") or []:
+            polygon = _normalize_polygon_coordinates(polygon_coordinates)
+            if polygon:
+                polygons.append(polygon)
+        return polygons
+    return []
+
+
+def _normalize_polygon_coordinates(value: Any) -> list[list[tuple[float, float]]]:
+    rings: list[list[tuple[float, float]]] = []
+    if not isinstance(value, list):
+        return rings
+    for raw_ring in value:
+        ring: list[tuple[float, float]] = []
+        if not isinstance(raw_ring, list):
+            continue
+        for raw_point in raw_ring:
+            if not isinstance(raw_point, (list, tuple)) or len(raw_point) < 2:
+                continue
+            try:
+                ring.append((float(raw_point[0]), float(raw_point[1])))
+            except (TypeError, ValueError):
+                continue
+        if len(ring) >= 3:
+            rings.append(ring)
+    return rings
+
+
+def _polygons_bbox(polygons: list[list[list[tuple[float, float]]]]) -> tuple[float, float, float, float] | None:
+    points = [point for polygon in polygons for ring in polygon for point in ring]
+    if not points:
+        return None
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _bbox_contains(bbox: tuple[float, float, float, float], longitude: float, latitude: float) -> bool:
+    min_x, min_y, max_x, max_y = bbox
+    return min_x <= longitude <= max_x and min_y <= latitude <= max_y
+
+
+def _point_in_polygon_with_holes(longitude: float, latitude: float, polygon: list[list[tuple[float, float]]]) -> bool:
+    if not polygon or not _point_in_ring(longitude, latitude, polygon[0]):
+        return False
+    return not any(_point_in_ring(longitude, latitude, hole) for hole in polygon[1:])
+
+
+def _point_in_ring(longitude: float, latitude: float, ring: list[tuple[float, float]]) -> bool:
+    inside = False
+    count = len(ring)
+    if count < 3:
+        return False
+    j = count - 1
+    for i in range(count):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        intersects = ((yi > latitude) != (yj > latitude)) and (
+            longitude < (xj - xi) * (latitude - yi) / ((yj - yi) or 1e-12) + xi
+        )
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
 def _profile_response(
     row: VesselProfile,
     *,
@@ -454,92 +595,39 @@ class VesselService:
         mmsi_values = sorted({item for values in mmsi_by_profile.values() for item in values if item})
         if not mmsi_values:
             return self._empty_position_response(generated_at, "匹配船舶缺少可用于实时查询的 MMSI", len(profiles))
-        try:
-            positions = await self._search_realtime_positions(mmsi_values, max_hits=max(query.max_items * 4, 200))
-        except Exception as exc:  # noqa: BLE001
-            return VesselPositionMonitorResponse(
-                source_status="ERROR",
-                source_status_name=_source_status_name("ERROR"),
-                generated_at=generated_at,
-                message=f"实时 ES 查询失败：{exc}",
-                summary=VesselPositionMonitorSummary(
-                    matched_profile_count=len(profiles),
-                    positioned_count=0,
-                    stale_position_count=0,
-                    contactable_position_count=0,
-                ),
-                items=[],
-            )
-        if not positions:
-            return self._empty_position_response(generated_at, "实时 ES 未返回匹配船位", len(profiles))
-
-        profile_by_mmsi: dict[str, VesselProfile] = {}
-        for profile in profiles:
-            for mmsi in mmsi_by_profile.get(profile.id, [profile.current_mmsi]):
-                profile_by_mmsi[mmsi] = profile
-        positioned_profiles: list[VesselProfile] = []
-        position_by_profile: dict[int, dict[str, Any]] = {}
-        stale_count = 0
-        freshness_limit = generated_at - timedelta(minutes=query.reported_within_minutes or 1440)
-        for mmsi, position in positions.items():
-            profile = profile_by_mmsi.get(mmsi)
-            if profile is None:
-                continue
-            position_time = position.get("position_time")
-            if position_time and position_time < freshness_limit:
-                stale_count += 1
-                continue
-            if profile.id in position_by_profile:
-                continue
-            positioned_profiles.append(profile)
-            position_by_profile[profile.id] = position
-            if len(positioned_profiles) >= query.max_items:
-                break
-        list_items = await self._build_list_items(positioned_profiles)
-        items: list[VesselPositionMonitorItemResponse] = []
-        for item in list_items:
-            position = position_by_profile.get(item.id)
-            if position is None:
-                continue
-            longitude = _to_decimal(position.get("longitude"))
-            latitude = _to_decimal(position.get("latitude"))
-            if longitude is None or latitude is None:
-                continue
-            position_time = position.get("position_time")
-            age_minutes = int((generated_at - position_time).total_seconds() // 60) if position_time else None
-            items.append(
-                VesselPositionMonitorItemResponse(
-                    **item.model_dump(),
-                    longitude=longitude,
-                    latitude=latitude,
-                    speed_kn=_to_decimal(position.get("speed_kn")),
-                    course_deg=_to_decimal(position.get("course_deg")),
-                    heading_deg=_to_decimal(position.get("heading_deg")),
-                    position_time=position_time,
-                    position_age_minutes=age_minutes,
-                    city_code=position.get("city_code"),
-                    city_name=position.get("city_name"),
-                    location_text=position.get("location_text"),
-                    position_source_name="实时 ES",
-                )
-            )
-        return VesselPositionMonitorResponse(
-            source_status="AVAILABLE" if items else "EMPTY",
-            source_status_name=_source_status_name("AVAILABLE" if items else "EMPTY"),
+        result = await self._position_monitor_items_for_profiles(
+            profiles,
             generated_at=generated_at,
-            message=None if items else "实时 ES 暂无符合筛选条件的船位",
+            reported_within_minutes=query.reported_within_minutes or 1440,
+            es_batch_size=200,
+            include_stale=True,
+        )
+        if not result.items and not result.partial:
+            return self._empty_position_response(generated_at, "实时 ES 未返回匹配船位", len(profiles))
+        fresh_items = [
+            item for item in result.items
+            if not self._is_stale_position(item, generated_at, query.reported_within_minutes or 1440)
+        ][:query.max_items]
+        return VesselPositionMonitorResponse(
+            source_status="ERROR" if result.partial and not fresh_items else ("AVAILABLE" if fresh_items else "EMPTY"),
+            source_status_name=_source_status_name("ERROR" if result.partial and not fresh_items else ("AVAILABLE" if fresh_items else "EMPTY")),
+            generated_at=generated_at,
+            message=result.error_message if result.partial else (None if fresh_items else "实时 ES 暂无符合筛选条件的船位"),
             summary=VesselPositionMonitorSummary(
                 matched_profile_count=len(profiles),
-                positioned_count=len(items),
-                stale_position_count=stale_count,
-                contactable_position_count=sum(1 for item in items if item.contact_available),
+                positioned_count=len(fresh_items),
+                stale_position_count=max(0, len(result.items) - len(fresh_items)),
+                contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
             ),
-            items=items,
+            items=fresh_items,
         )
 
     async def position_city_situation(self, query) -> VesselPositionCitySituationResponse:
         generated_at = datetime.utcnow()
-        profiles = await self._position_monitor_profiles(query, limit=query.max_profiles)
+        profile_limit = query.profile_limit or query.max_profiles
+        total_profile_count = await self._position_monitor_profile_count(query) if profile_limit is not None else None
+        profiles = await self._position_monitor_profiles(query, limit=profile_limit)
+        unscanned_profile_count = max(0, (total_profile_count or len(profiles)) - len(profiles))
         if not profiles:
             return VesselPositionCitySituationResponse(
                 source_status="EMPTY",
@@ -548,14 +636,19 @@ class VesselService:
                 message="未匹配到符合条件的船舶档案",
                 summary=VesselPositionCitySituationSummary(
                     matched_profile_count=0,
+                    scanned_profile_count=0,
+                    unscanned_profile_count=0,
                     queried_mmsi_count=0,
                     matched_position_count=0,
                     unpositioned_count=0,
+                    invalid_position_count=0,
+                    unknown_city_count=0,
                     positioned_count=0,
                     stale_position_count=0,
                     contactable_position_count=0,
                     certificate_risk_count=0,
                     city_count=0,
+                    query_snapshot_id=None,
                 ),
                 cities=[],
             )
@@ -566,80 +659,125 @@ class VesselService:
                 generated_at=generated_at,
                 message="实时 ES 未配置，暂无城市态势",
                 summary=VesselPositionCitySituationSummary(
-                    matched_profile_count=len(profiles),
+                    matched_profile_count=total_profile_count or len(profiles),
+                    scanned_profile_count=len(profiles),
+                    unscanned_profile_count=unscanned_profile_count,
                     queried_mmsi_count=0,
                     matched_position_count=0,
                     unpositioned_count=0,
+                    invalid_position_count=0,
+                    unknown_city_count=0,
                     positioned_count=0,
                     stale_position_count=0,
                     contactable_position_count=0,
                     certificate_risk_count=0,
                     city_count=0,
+                    query_snapshot_id=None,
                 ),
                 cities=[],
             )
-        items, partial, error_message, queried_mmsi_count, matched_position_count, unpositioned_count = await self._position_monitor_items_for_profiles(
+        result = await self._position_monitor_items_for_profiles(
             profiles,
             generated_at=generated_at,
             reported_within_minutes=query.reported_within_minutes or 1440,
             es_batch_size=query.es_batch_size,
             include_stale=True,
         )
-        risk_by_profile = await self._compliance_risk_by_profile([item.id for item in items])
+        partial = result.partial
+        error_message = result.error_message
+        if profile_limit is not None:
+            partial = True
+            error_parts = [part for part in [error_message, f"当前按 profile_limit={profile_limit} 做部分统计"] if part]
+            error_message = "；".join(error_parts) or None
+        risk_by_profile = await self._compliance_risk_by_profile([item.id for item in result.items])
         cities = self._city_situation_items(
-            items,
+            result.items,
             risk_by_profile,
             generated_at,
             query.reported_within_minutes or 1440,
-            queried_mmsi_count,
-            matched_position_count,
+            result.queried_mmsi_count,
+            result.matched_position_count,
+            result.unpositioned_count,
+            result.invalid_position_count,
+            result.unknown_city_count,
             partial,
             error_message,
         )
-        positioned_items = [item for item in items if not self._is_stale_position(item, generated_at, query.reported_within_minutes or 1440)]
+        snapshot_id = self._store_city_situation_snapshot(
+            result.items,
+            generated_at=generated_at,
+            partial=partial,
+            error_message=error_message,
+        )
+        positioned_items = [item for item in result.items if not self._is_stale_position(item, generated_at, query.reported_within_minutes or 1440)]
         return VesselPositionCitySituationResponse(
             source_status="ERROR" if partial and not cities else ("AVAILABLE" if cities else "EMPTY"),
             source_status_name=_source_status_name("ERROR" if partial and not cities else ("AVAILABLE" if cities else "EMPTY")),
             generated_at=generated_at,
             message=error_message if partial else (None if cities else "实时 ES 暂无符合筛选条件的城市态势"),
             summary=VesselPositionCitySituationSummary(
-                matched_profile_count=len(profiles),
-                queried_mmsi_count=queried_mmsi_count,
-                matched_position_count=matched_position_count,
-                unpositioned_count=unpositioned_count,
+                matched_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=unscanned_profile_count,
+                queried_mmsi_count=result.queried_mmsi_count,
+                matched_position_count=result.matched_position_count,
+                unpositioned_count=result.unpositioned_count,
+                invalid_position_count=result.invalid_position_count,
+                unknown_city_count=result.unknown_city_count,
                 positioned_count=len(positioned_items),
-                stale_position_count=len(items) - len(positioned_items),
+                stale_position_count=len(result.items) - len(positioned_items),
                 contactable_position_count=sum(1 for item in positioned_items if item.contact_available),
                 certificate_risk_count=sum(1 for item in positioned_items if risk_by_profile.get(item.id)),
-                city_count=len(cities),
+                city_count=sum(1 for city in cities if city.city_code),
+                query_snapshot_id=snapshot_id,
                 is_partial=partial,
                 error_message=error_message,
             ),
             cities=cities,
         )
 
-    async def position_city_vessels(self, query) -> PageResponse[VesselPositionMonitorItemResponse]:
+    async def position_city_vessels(self, query) -> VesselPositionCityVesselsResponse:
         generated_at = datetime.utcnow()
-        profiles = await self._position_monitor_profiles(query, limit=query.max_profiles)
-        if not profiles or not await self._realtime_es_host():
-            return PageResponse[VesselPositionMonitorItemResponse](total=0, page=query.page, page_size=query.page_size, items=[])
-        items, _, _, _, _, _ = await self._position_monitor_items_for_profiles(
-            profiles,
-            generated_at=generated_at,
-            reported_within_minutes=query.reported_within_minutes or 1440,
-            es_batch_size=query.es_batch_size,
-            include_stale=False,
-        )
+        snapshot = self._get_city_situation_snapshot(query.query_snapshot_id)
+        snapshot_hit = snapshot is not None
+        if snapshot:
+            items = [
+                item for item in snapshot.items
+                if not self._is_stale_position(item, snapshot.generated_at, query.reported_within_minutes or 1440)
+            ]
+            partial = snapshot.partial
+            error_message = snapshot.error_message
+            snapshot_id = snapshot.snapshot_id
+        else:
+            profile_limit = query.profile_limit or query.max_profiles
+            profiles = await self._position_monitor_profiles(query, limit=profile_limit)
+            if not profiles or not await self._realtime_es_host():
+                return VesselPositionCityVesselsResponse(total=0, page=query.page, page_size=query.page_size, items=[], query_snapshot_id=query.query_snapshot_id, snapshot_hit=False)
+            result = await self._position_monitor_items_for_profiles(
+                profiles,
+                generated_at=generated_at,
+                reported_within_minutes=query.reported_within_minutes or 1440,
+                es_batch_size=query.es_batch_size,
+                include_stale=False,
+            )
+            items = result.items
+            partial = result.partial or profile_limit is not None
+            error_message = result.error_message
+            snapshot_id = self._store_city_situation_snapshot(items, generated_at=generated_at, partial=partial, error_message=error_message)
         filtered = [
             item for item in items
             if self._city_matches(item, city_code=query.city_code, city_name=query.city_name)
         ]
         start = (query.page - 1) * query.page_size
-        return PageResponse[VesselPositionMonitorItemResponse](
+        return VesselPositionCityVesselsResponse(
             total=len(filtered),
             page=query.page,
             page_size=query.page_size,
             items=filtered[start:start + query.page_size],
+            query_snapshot_id=snapshot_id,
+            snapshot_hit=snapshot_hit,
+            is_partial=partial,
+            error_message=error_message,
         )
 
     async def position_business_card(self, vessel_id: int) -> VesselBusinessSituationCardResponse:
@@ -647,13 +785,14 @@ class VesselService:
         profile = await self._require_profile(vessel_id)
         items: list[VesselPositionMonitorItemResponse] = []
         if await self._realtime_es_host():
-            items, _, _, _, _, _ = await self._position_monitor_items_for_profiles(
+            result = await self._position_monitor_items_for_profiles(
                 [profile],
                 generated_at=generated_at,
                 reported_within_minutes=43200,
                 es_batch_size=50,
                 include_stale=True,
             )
+            items = result.items
         list_item = (await self._build_list_items([profile]))[0]
         position = items[0] if items else None
         risk = (await self._compliance_risk_by_profile([vessel_id])).get(vessel_id, {})
@@ -672,8 +811,9 @@ class VesselService:
             realtime={
                 "longitude": position.longitude if position else None,
                 "latitude": position.latitude if position else None,
-                "city_code": getattr(position, "city_code", None) if position else None,
-                "city_name": self._position_city_name(position) if position else None,
+                "current_city_code": getattr(position, "current_city_code", None) if position else None,
+                "current_city_name": getattr(position, "current_city_name", None) if position else None,
+                "current_city_source": getattr(position, "current_city_source", None) if position else None,
                 "location_text": position.location_text if position else None,
                 "speed_kn": position.speed_kn if position else None,
                 "course_deg": position.course_deg if position else None,
@@ -692,7 +832,6 @@ class VesselService:
             business={
                 "contactable": bool(list_item.contact_available and list_item.primary_contact_phone),
                 "tonnage_ready": list_item.deadweight_ton is not None,
-                "key_area": self._position_city_name(position) if position else list_item.registry_city_name,
             },
         )
 
@@ -2389,7 +2528,7 @@ class VesselService:
         rows = (await self.db.execute(select(VesselProfile).where(VesselProfile.id.in_(ids)))).scalars().all()
         return {row.id: row for row in rows}
 
-    async def _position_monitor_profiles(self, query, *, limit: int | None = None) -> list[VesselProfile]:
+    def _position_monitor_profile_base_stmt(self, query):
         stmt = (
             select(VesselProfile)
             .outerjoin(VesselCapacityDimension, VesselCapacityDimension.vessel_profile_id == VesselProfile.id)
@@ -2431,14 +2570,20 @@ class VesselService:
             stmt = stmt.where(VesselCapacityDimension.design_draft_m <= query.draft_max)
         if query.contact_available is not None:
             stmt = stmt.where(VesselContact.is_available.is_(query.contact_available))
-        row_limit = limit or max(query.max_items * 3, query.max_items)
-        rows = (
-            await self.db.execute(
-                stmt.group_by(VesselProfile.id)
-                .order_by(VesselProfile.updated_at.desc(), VesselProfile.id.desc())
-                .limit(row_limit)
-            )
-        ).scalars().all()
+        return stmt
+
+    async def _position_monitor_profile_count(self, query) -> int:
+        subquery = self._position_monitor_profile_base_stmt(query).with_only_columns(VesselProfile.id).group_by(VesselProfile.id).subquery()
+        return int((await self.db.execute(select(func.count()).select_from(subquery))).scalar_one() or 0)
+
+    async def _position_monitor_profiles(self, query, *, limit: int | None = None) -> list[VesselProfile]:
+        stmt = self._position_monitor_profile_base_stmt(query)
+        stmt = stmt.group_by(VesselProfile.id).order_by(VesselProfile.updated_at.desc(), VesselProfile.id.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        elif hasattr(query, "max_items"):
+            stmt = stmt.limit(max(query.max_items * 3, query.max_items))
+        rows = (await self.db.execute(stmt)).scalars().all()
         return list(rows)
 
     async def _mmsi_values_by_profile(self, ids: list[int]) -> dict[int, list[str]]:
@@ -2568,10 +2713,6 @@ class VesselService:
             mmsi = str(mmsi_raw).strip()
             longitude = _to_decimal(_first_value(source, ["lon", "lng", "longitude", "x", "longitude_gcj02"]))
             latitude = _to_decimal(_first_value(source, ["lat", "latitude", "y", "latitude_gcj02"]))
-            if longitude is None or latitude is None:
-                continue
-            if not (Decimal("-180") <= longitude <= Decimal("180") and Decimal("-90") <= latitude <= Decimal("90")):
-                continue
             position_time = _parse_position_time(
                 _first_value(source, ["posTime", "updateTime", "timestamp", "location_time", "update_time", "position_time", "time", "@timestamp"])
             )
@@ -2587,8 +2728,8 @@ class VesselService:
                 "heading_deg": _first_value(source, ["heading", "head", "hdg", "heading_deg"]),
                 "position_time": position_time,
                 "location_text": _first_value(source, ["location_text", "address", "area_name", "city_name"]),
-                "city_code": _first_value(source, ["city_code", "cityCode", "adcode", "city_adcode", "region_code"]),
-                "city_name": _first_value(source, ["city_name", "city", "area_name"]),
+                "raw_city_code": _first_value(source, ["city_code", "cityCode", "adcode", "city_adcode", "region_code"]),
+                "raw_city_name": _first_value(source, ["city_name", "city", "area_name"]),
             }
         return result
 
@@ -2617,15 +2758,16 @@ class VesselService:
         reported_within_minutes: int,
         es_batch_size: int,
         include_stale: bool,
-    ) -> tuple[list[VesselPositionMonitorItemResponse], bool, str | None, int, int, int]:
+    ) -> _PositionBuildResult:
         mmsi_by_profile = await self._mmsi_values_by_profile([row.id for row in profiles])
         mmsi_values = sorted({item for values in mmsi_by_profile.values() for item in values if item})
         if not mmsi_values:
-            return [], False, None, 0, 0, 0
+            return _PositionBuildResult([], False, None, 0, 0, 0, 0, 0)
         positions, partial, error_message = await self._search_realtime_positions_batched(
             mmsi_values,
             batch_size=es_batch_size,
         )
+        boundaries = await self._city_boundaries()
         profile_by_mmsi: dict[str, VesselProfile] = {}
         for profile in profiles:
             for mmsi in mmsi_by_profile.get(profile.id, [profile.current_mmsi]):
@@ -2643,14 +2785,20 @@ class VesselService:
         positioned_profiles = [profile for profile in profiles if profile.id in position_by_profile]
         list_items = await self._build_list_items(positioned_profiles)
         items: list[VesselPositionMonitorItemResponse] = []
+        invalid_position_count = 0
+        unknown_city_count = 0
         for item in list_items:
             position = position_by_profile.get(item.id)
             if position is None:
                 continue
             longitude = _to_decimal(position.get("longitude"))
             latitude = _to_decimal(position.get("latitude"))
-            if longitude is None or latitude is None:
+            if longitude is None or latitude is None or not self._valid_longitude_latitude(longitude, latitude):
+                invalid_position_count += 1
                 continue
+            resolved_city = self._resolve_current_city_from_boundaries(longitude, latitude, boundaries)
+            if resolved_city.current_city_source != CURRENT_CITY_SOURCE_ADMIN_BOUNDARY:
+                unknown_city_count += 1
             position_time = position.get("position_time")
             age_minutes = int((generated_at - position_time).total_seconds() // 60) if position_time else None
             items.append(
@@ -2663,14 +2811,29 @@ class VesselService:
                     heading_deg=_to_decimal(position.get("heading_deg")),
                     position_time=position_time,
                     position_age_minutes=age_minutes,
-                    city_code=str(position.get("city_code")).strip() if position.get("city_code") not in (None, "") else None,
-                    city_name=str(position.get("city_name")).strip() if position.get("city_name") not in (None, "") else None,
+                    city_code=resolved_city.city_code,
+                    city_name=resolved_city.city_name,
+                    current_city_code=resolved_city.city_code,
+                    current_city_name=resolved_city.city_name,
+                    current_city_source=resolved_city.current_city_source,
+                    city_center_longitude=resolved_city.city_center_longitude,
+                    city_center_latitude=resolved_city.city_center_latitude,
+                    matched_city_candidates=resolved_city.matched_city_candidates,
                     location_text=position.get("location_text"),
                     position_source_name="实时 ES",
                 )
             )
-        matched_position_count = len(position_by_profile)
-        return items, partial, error_message, len(mmsi_values), matched_position_count, max(0, len(mmsi_values) - matched_position_count)
+        matched_position_count = len(items)
+        return _PositionBuildResult(
+            items=items,
+            partial=partial,
+            error_message=error_message,
+            queried_mmsi_count=len(mmsi_values),
+            matched_position_count=matched_position_count,
+            unpositioned_count=max(0, len(mmsi_values) - matched_position_count - invalid_position_count),
+            invalid_position_count=invalid_position_count,
+            unknown_city_count=unknown_city_count,
+        )
 
     def _is_stale_position(self, item: VesselPositionMonitorItemResponse, generated_at: datetime, reported_within_minutes: int) -> bool:
         return bool(item.position_time and item.position_time < generated_at - timedelta(minutes=reported_within_minutes))
@@ -2678,12 +2841,12 @@ class VesselService:
     def _position_city_code(self, item: VesselPositionMonitorItemResponse | None) -> str:
         if item is None:
             return UNKNOWN_CITY_CODE
-        return (item.city_code or "").strip() or UNKNOWN_CITY_CODE
+        return (item.current_city_code or item.city_code or "").strip() or UNKNOWN_CITY_CODE
 
     def _position_city_name(self, item: VesselPositionMonitorItemResponse | None) -> str:
         if item is None:
             return UNKNOWN_CITY_NAME
-        return (item.city_name or item.location_text or "").strip() or UNKNOWN_CITY_NAME
+        return (item.current_city_name or item.city_name or "").strip() or UNKNOWN_CITY_NAME
 
     def _city_matches(self, item: VesselPositionMonitorItemResponse, *, city_code: str | None, city_name: str | None) -> bool:
         if city_code:
@@ -2704,6 +2867,9 @@ class VesselService:
         reported_within_minutes: int,
         queried_mmsi_count: int,
         matched_position_count: int,
+        unpositioned_count: int,
+        invalid_position_count: int,
+        unknown_city_count: int,
         partial: bool,
         error_message: str | None,
     ) -> list[VesselPositionCitySituationItemResponse]:
@@ -2726,12 +2892,20 @@ class VesselService:
             latitudes = [_to_decimal(item.latitude) for item in stats_items]
             longitudes = [value for value in longitudes if value is not None]
             latitudes = [value for value in latitudes if value is not None]
+            is_unknown_city = city_code == UNKNOWN_CITY_CODE
+            heat_longitude = (sum(longitudes, Decimal("0")) / Decimal(len(longitudes))).quantize(Decimal("0.000001")) if longitudes and not is_unknown_city else None
+            heat_latitude = (sum(latitudes, Decimal("0")) / Decimal(len(latitudes))).quantize(Decimal("0.000001")) if latitudes and not is_unknown_city else None
+            first_item = stats_items[0] if stats_items else None
             result.append(
                 VesselPositionCitySituationItemResponse(
-                    city_code=None if city_code == UNKNOWN_CITY_CODE else city_code,
-                    city_name=self._position_city_name(stats_items[0]) if stats_items else UNKNOWN_CITY_NAME,
-                    longitude=(sum(longitudes, Decimal("0")) / Decimal(len(longitudes))).quantize(Decimal("0.000001")) if longitudes else None,
-                    latitude=(sum(latitudes, Decimal("0")) / Decimal(len(latitudes))).quantize(Decimal("0.000001")) if latitudes else None,
+                    city_code=None if is_unknown_city else city_code,
+                    city_name=self._position_city_name(first_item) if first_item else UNKNOWN_CITY_NAME,
+                    longitude=None if is_unknown_city else getattr(first_item, "city_center_longitude", None),
+                    latitude=None if is_unknown_city else getattr(first_item, "city_center_latitude", None),
+                    city_center_longitude=None if is_unknown_city else getattr(first_item, "city_center_longitude", None),
+                    city_center_latitude=None if is_unknown_city else getattr(first_item, "city_center_latitude", None),
+                    heat_center_longitude=heat_longitude,
+                    heat_center_latitude=heat_latitude,
                     positioned_count=len(fresh_items),
                     contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
                     average_ship_age=(sum(ages, Decimal("0")) / Decimal(len(ages))).quantize(Decimal("0.1")) if ages else None,
@@ -2747,21 +2921,25 @@ class VesselService:
                     stale_position_count=len(city_items) - len(fresh_items),
                     certificate_risk_count=sum(1 for item in fresh_items if risk_by_profile.get(item.id, {}).get("has_certificate_risk")),
                     latest_position_time=max([item.position_time for item in city_items if item.position_time], default=None),
-                    mmsi_count=queried_mmsi_count if city_code == UNKNOWN_CITY_CODE else len(city_items),
-                    matched_position_count=matched_position_count if city_code == UNKNOWN_CITY_CODE else len(city_items),
-                    unpositioned_count=max(0, queried_mmsi_count - matched_position_count) if city_code == UNKNOWN_CITY_CODE else 0,
+                    mmsi_count=queried_mmsi_count if is_unknown_city else len(city_items),
+                    matched_position_count=matched_position_count if is_unknown_city else len(city_items),
+                    unpositioned_count=(unpositioned_count + invalid_position_count) if is_unknown_city else 0,
                     is_partial=partial,
                     error_message=error_message,
                 )
             )
-        unpositioned_count = max(0, queried_mmsi_count - matched_position_count)
-        if unpositioned_count and UNKNOWN_CITY_CODE not in grouped:
+        missing_position_count = unpositioned_count + invalid_position_count
+        if missing_position_count and UNKNOWN_CITY_CODE not in grouped:
             result.append(
                 VesselPositionCitySituationItemResponse(
                     city_code=None,
                     city_name=UNKNOWN_CITY_NAME,
                     longitude=None,
                     latitude=None,
+                    city_center_longitude=None,
+                    city_center_latitude=None,
+                    heat_center_longitude=None,
+                    heat_center_latitude=None,
                     positioned_count=0,
                     contactable_position_count=0,
                     average_ship_age=None,
@@ -2772,12 +2950,143 @@ class VesselService:
                     latest_position_time=None,
                     mmsi_count=queried_mmsi_count,
                     matched_position_count=matched_position_count,
-                    unpositioned_count=unpositioned_count,
+                    unpositioned_count=missing_position_count,
                     is_partial=partial,
                     error_message=error_message,
                 )
             )
         return sorted(result, key=lambda item: (item.positioned_count, item.total_deadweight_ton or Decimal("0")), reverse=True)
+
+    @staticmethod
+    def _valid_longitude_latitude(longitude: Decimal | None, latitude: Decimal | None) -> bool:
+        if longitude is None or latitude is None:
+            return False
+        return Decimal("-180") <= longitude <= Decimal("180") and Decimal("-90") <= latitude <= Decimal("90")
+
+    async def _city_boundaries(self) -> list[_CityBoundary]:
+        now = datetime.utcnow()
+        loaded_at = _CITY_BOUNDARY_CACHE.get("loaded_at")
+        if loaded_at and (now - loaded_at).total_seconds() < CITY_BOUNDARY_CACHE_TTL_SECONDS:
+            return list(_CITY_BOUNDARY_CACHE.get("boundaries") or [])
+
+        rows = (
+            await self.db.execute(
+                select(AdminRegionBoundary, AdminRegion)
+                .join(AdminRegion, AdminRegion.id == AdminRegionBoundary.admin_region_id)
+                .where(
+                    AdminRegionBoundary.is_current.is_(True),
+                    AdminRegion.level == 2,
+                    AdminRegion.status == 1,
+                )
+            )
+        ).all()
+        boundaries: list[_CityBoundary] = []
+        for boundary, region in rows:
+            polygons = _extract_geojson_polygons(normalize_boundary_geometry(boundary.geometry_json))
+            if not polygons:
+                continue
+            bbox = _polygons_bbox(polygons)
+            if bbox is None:
+                continue
+            min_x, min_y, max_x, max_y = bbox
+            boundaries.append(
+                _CityBoundary(
+                    code=region.code,
+                    name=region.name,
+                    center_longitude=_to_decimal(boundary.center_longitude if boundary.center_longitude is not None else region.longitude),
+                    center_latitude=_to_decimal(boundary.center_latitude if boundary.center_latitude is not None else region.latitude),
+                    area_km2=_to_decimal(boundary.area_km2),
+                    bbox=bbox,
+                    bbox_area=max(0.0, (max_x - min_x) * (max_y - min_y)),
+                    polygons=polygons,
+                )
+            )
+        _CITY_BOUNDARY_CACHE["loaded_at"] = now
+        _CITY_BOUNDARY_CACHE["boundaries"] = boundaries
+        return boundaries
+
+    def _resolve_current_city_from_boundaries(
+        self,
+        longitude: Decimal | None,
+        latitude: Decimal | None,
+        boundaries: list[_CityBoundary],
+    ) -> _ResolvedCity:
+        if not self._valid_longitude_latitude(longitude, latitude):
+            return _ResolvedCity(None, UNKNOWN_CITY_NAME, CURRENT_CITY_SOURCE_INVALID_POSITION)
+        lon = float(longitude)
+        lat = float(latitude)
+        matches = [
+            boundary for boundary in boundaries
+            if _bbox_contains(boundary.bbox, lon, lat)
+            and any(_point_in_polygon_with_holes(lon, lat, polygon) for polygon in boundary.polygons)
+        ]
+        if not matches:
+            return _ResolvedCity(None, UNKNOWN_CITY_NAME, CURRENT_CITY_SOURCE_UNKNOWN)
+        matches.sort(key=lambda item: (item.area_km2 if item.area_km2 is not None else Decimal("999999999"), Decimal(str(item.bbox_area))))
+        selected = matches[0]
+        candidates: list[dict[str, Any]] | None = None
+        if len(matches) > 1:
+            candidates = [
+                {
+                    "city_code": item.code,
+                    "city_name": item.name,
+                    "area_km2": str(item.area_km2) if item.area_km2 is not None else None,
+                    "bbox_area": item.bbox_area,
+                }
+                for item in matches
+            ]
+            logger.warning(
+                "vessel position matched multiple city boundaries: longitude=%s latitude=%s candidates=%s selected=%s",
+                longitude,
+                latitude,
+                candidates,
+                selected.code,
+            )
+        return _ResolvedCity(
+            selected.code,
+            selected.name,
+            CURRENT_CITY_SOURCE_ADMIN_BOUNDARY,
+            selected.center_longitude,
+            selected.center_latitude,
+            candidates,
+        )
+
+    def _store_city_situation_snapshot(
+        self,
+        items: list[VesselPositionMonitorItemResponse],
+        *,
+        generated_at: datetime,
+        partial: bool,
+        error_message: str | None,
+    ) -> str:
+        now = datetime.utcnow()
+        expired = [key for key, value in _CITY_SITUATION_SNAPSHOTS.items() if value.expires_at <= now]
+        for key in expired:
+            _CITY_SITUATION_SNAPSHOTS.pop(key, None)
+        while len(_CITY_SITUATION_SNAPSHOTS) >= CITY_SITUATION_SNAPSHOT_MAX_SIZE:
+            oldest_key = min(_CITY_SITUATION_SNAPSHOTS, key=lambda key: _CITY_SITUATION_SNAPSHOTS[key].expires_at)
+            _CITY_SITUATION_SNAPSHOTS.pop(oldest_key, None)
+        snapshot_id = uuid.uuid4().hex
+        _CITY_SITUATION_SNAPSHOTS[snapshot_id] = _CitySituationSnapshot(
+            snapshot_id=snapshot_id,
+            expires_at=now + timedelta(seconds=CITY_SITUATION_SNAPSHOT_TTL_SECONDS),
+            items=list(items),
+            partial=partial,
+            error_message=error_message,
+            generated_at=generated_at,
+        )
+        return snapshot_id
+
+    def _get_city_situation_snapshot(self, snapshot_id: str | None) -> _CitySituationSnapshot | None:
+        if not snapshot_id:
+            return None
+        snapshot = _CITY_SITUATION_SNAPSHOTS.get(snapshot_id)
+        if snapshot is None:
+            return None
+        if snapshot.expires_at <= datetime.utcnow():
+            _CITY_SITUATION_SNAPSHOTS.pop(snapshot_id, None)
+            return None
+        return snapshot
 
     def _empty_position_response(
         self,

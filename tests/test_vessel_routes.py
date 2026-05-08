@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
 
 from main import app
-from app.modules.vessel.service import VesselService
+from app.modules.vessel.service import (
+    CURRENT_CITY_SOURCE_ADMIN_BOUNDARY,
+    CURRENT_CITY_SOURCE_INVALID_POSITION,
+    CURRENT_CITY_SOURCE_UNKNOWN,
+    UNKNOWN_CITY_NAME,
+    VesselService,
+    _CityBoundary,
+)
 
 
 def test_vessel_certificate_update_route_uses_json_body() -> None:
@@ -149,3 +157,47 @@ def test_owner_document_completeness_depends_on_party_type() -> None:
     assert personal_partial.missing_document_type_codes == ["PERSON_ID_BACK"]
     assert company_complete.status_code == "COMPLETE"
     assert unknown.status_code == "UNKNOWN_OWNER_TYPE"
+
+
+def test_vessel_city_resolution_uses_boundary_not_external_city_fields() -> None:
+    service = object.__new__(VesselService)
+    large_city = _CityBoundary(
+        code="320500",
+        name="大边界市",
+        center_longitude=Decimal("120.00"),
+        center_latitude=Decimal("31.00"),
+        area_km2=Decimal("100"),
+        bbox=(0.0, 0.0, 10.0, 10.0),
+        bbox_area=100.0,
+        polygons=[[[ (0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0) ]]],
+    )
+    small_city = _CityBoundary(
+        code="320501",
+        name="小边界市",
+        center_longitude=Decimal("121.00"),
+        center_latitude=Decimal("32.00"),
+        area_km2=Decimal("1"),
+        bbox=(1.0, 1.0, 2.0, 2.0),
+        bbox_area=1.0,
+        polygons=[[[ (1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0), (1.0, 1.0) ]]],
+    )
+
+    resolved = service._resolve_current_city_from_boundaries(Decimal("1.5"), Decimal("1.5"), [large_city, small_city])
+
+    assert resolved.city_code == "320501"
+    assert resolved.city_name == "小边界市"
+    assert resolved.current_city_source == CURRENT_CITY_SOURCE_ADMIN_BOUNDARY
+    assert resolved.matched_city_candidates is not None
+    assert [item["city_code"] for item in resolved.matched_city_candidates] == ["320501", "320500"]
+
+
+def test_vessel_city_resolution_unknown_and_invalid() -> None:
+    service = object.__new__(VesselService)
+
+    invalid = service._resolve_current_city_from_boundaries(Decimal("200"), Decimal("31"), [])
+    unknown = service._resolve_current_city_from_boundaries(Decimal("120"), Decimal("31"), [])
+
+    assert invalid.city_name == UNKNOWN_CITY_NAME
+    assert invalid.current_city_source == CURRENT_CITY_SOURCE_INVALID_POSITION
+    assert unknown.city_name == UNKNOWN_CITY_NAME
+    assert unknown.current_city_source == CURRENT_CITY_SOURCE_UNKNOWN
