@@ -57,18 +57,19 @@
 ## 清洗任务
 
 - 新增 `freight_normalization_suggestion`，记录原文级装卸地/货品的匹配建议、置信度、应用状态和应用前后快照。
-- 新增 `freight_normalization_task`，记录清洗任务号、Celery task id、状态、阶段、进度、扫描数、建议数、自动应用数、失败原因和耗时。
-- 新增接口：
-  - `GET /freight/normalization-suggestions`
-  - `POST /freight/normalization-suggestions/bulk-apply`
-  - `POST /freight/normalization-suggestions/{id}/apply`
-  - `POST /freight/normalization-suggestions/{id}/reject`
+- 新增 `freight_normalization_task`，记录清洗任务号、Celery task id、执行状态、业务闭环状态、阶段、进度、扫描数、建议数、自动应用数、失败原因和耗时。
+- 清洗建议只通过任务进入，新增接口：
   - `GET /freight/normalization/tasks`
   - `GET /freight/normalization/tasks/{id}`
+  - `GET /freight/normalization/tasks/{id}/suggestions`
+  - `POST /freight/normalization/tasks/{id}/suggestions/bulk-apply`
+  - `POST /freight/normalization/tasks/{id}/suggestions/bulk-reject`
+  - `POST /freight/normalization/tasks/{id}/suggestions/{suggestion_id}/apply`
+  - `POST /freight/normalization/tasks/{id}/suggestions/{suggestion_id}/reject`
   - `GET /freight/normalization/quality`
   - `POST /freight/normalization/clean`
 - `POST /freight/normalization/clean` 改为投递 Celery `freight.clean_normalization` 后台任务并立即返回任务信息；前端通过任务列表和质量接口查看进度。
-- 清洗服务扫描正式货源中 `RAW` 或缺标准维度的数据。高置信建议自动回填，低置信建议保留为待人工确认，并支持勾选批量应用和当前筛选全部应用。
+- 清洗服务扫描正式货源中 `RAW` 或缺标准维度的数据。高置信建议自动回填，低置信建议保留在任务内待人工确认；任务内建议全部应用或拒绝后，任务闭环状态流转为 `COMPLETED`。
 - 清洗回填后会触发受影响日期范围内的货源流向、城市、节点、货品事实重算。
 
 ## 分析口径

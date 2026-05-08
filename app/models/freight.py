@@ -305,6 +305,8 @@ class FreightNormalizationTask(Base, TimestampMixin):
     auto_applied_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    review_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="NOT_REQUIRED", index=True)
+    review_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     requested_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

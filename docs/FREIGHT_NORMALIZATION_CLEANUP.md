@@ -25,6 +25,8 @@
 - `task_no`：清洗任务号。
 - `celery_task_id`：Celery 后台任务 ID，便于在 worker 日志中追踪。
 - `status_code`：`QUEUED`、`RUNNING`、`SUCCESS`、`PARTIAL_SUCCESS`、`FAILED`。
+- `review_status_code`：`NOT_REQUIRED`、`PENDING_REVIEW`、`COMPLETED`，表示任务建议是否完成业务闭环。
+- `review_completed_at`：任务内待确认建议全部应用或拒绝后的闭环时间。
 - `stage_code`、`stage_name`、`stage_message`、`progress_percent`：前端展示真实进度。
 - `scanned_count`、`suggestion_count`、`auto_applied_count`、`pending_count`、`failed_count`：任务结果统计。
 
@@ -67,23 +69,27 @@ curl http://127.0.0.1:8000/api/v1/freight/normalization/tasks/{task_id}
 curl http://127.0.0.1:8000/api/v1/freight/normalization/quality
 ```
 
-查询待确认建议：
+查询任务内待确认建议：
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/freight/normalization-suggestions?status_code=PENDING"
+curl "http://127.0.0.1:8000/api/v1/freight/normalization/tasks/{task_id}/suggestions?status_code=PENDING"
 ```
 
-批量应用建议：
+批量处理任务内建议：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/freight/normalization-suggestions/bulk-apply \
+curl -X POST http://127.0.0.1:8000/api/v1/freight/normalization/tasks/{task_id}/suggestions/bulk-apply \
   -H "Content-Type: application/json" \
   -d '{"suggestion_ids":[1,2,3]}'
+
+curl -X POST http://127.0.0.1:8000/api/v1/freight/normalization/tasks/{task_id}/suggestions/bulk-reject \
+  -H "Content-Type: application/json" \
+  -d '{"suggestion_ids":[4,5]}'
 ```
 
 前端入口：`货源采集 -> 数据清洗`。
 
-页面会展示最近任务、进度条、失败原因、货源详情悬浮预览，并支持“勾选批量应用”和“应用当前筛选全部待确认建议”。
+页面默认展示清洗质量和清洗任务列表；待确认建议只能从对应任务进入，避免不同任务的建议混在同一个全局列表中。
 
 ## 自动与人工策略
 

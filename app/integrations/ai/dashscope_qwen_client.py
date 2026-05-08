@@ -9,7 +9,9 @@ parse progress.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from threading import Thread
@@ -407,6 +409,124 @@ class FreightSegmentSchema(BaseModel):
 class FreightParsePayloadSchema(BaseModel):
     segments: list[FreightSegmentSchema]
     warnings: list[str] = Field(default_factory=list)
+
+
+_SEGMENT_NUMERIC_FIELDS = {
+    "estimated_tonnage",
+    "min_tonnage",
+    "max_tonnage",
+    "unit_price",
+    "total_price",
+    "confidence_score",
+}
+_SEGMENT_PRICE_FIELDS = {"unit_price", "total_price"}
+_SEGMENT_TONNAGE_FIELDS = {"estimated_tonnage", "min_tonnage", "max_tonnage"}
+_DIRTY_PRICE_TONNAGE_REASON = "AI 将疑似吨位误填为价格"
+
+
+def _as_float_or_none(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().replace(",", "")
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _looks_like_tonnage_expression(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = re.sub(r"\s+", "", value.strip())
+    if not text or not re.search(r"\d", text):
+        return False
+    if re.search(r"(元|块|价格|单价|运价|运费|报价|¥)", text):
+        return False
+    if re.search(r"(吨|左右|上下|约|大概|船|档期|装)", text):
+        return True
+    return bool(re.fullmatch(r"\d{3,6}(?:[/-]\d{3,6})+(?:左右|上下|约)?", text))
+
+
+def _append_segment_review_reason(segment: dict[str, Any], reason: str) -> None:
+    segment["needs_strong_review"] = True
+    segment["ai_review_status_code"] = "REVIEW_REQUIRED"
+    current = str(segment.get("manual_review_reason") or segment.get("ai_review_reason") or "").strip()
+    if current:
+        if reason not in current:
+            segment["manual_review_reason"] = f"{current}；{reason}"
+    else:
+        segment["manual_review_reason"] = reason
+    ai_reason = str(segment.get("ai_review_reason") or "").strip()
+    if reason not in ai_reason:
+        segment["ai_review_reason"] = f"{ai_reason}；{reason}" if ai_reason else reason
+
+
+def _add_tonnage_candidate(segment: dict[str, Any], *, text: str, source_field: str) -> None:
+    candidates = segment.get("tonnage_candidates")
+    if isinstance(candidates, dict):
+        candidates = [candidates]
+    elif not isinstance(candidates, list):
+        candidates = []
+    candidate = {
+        "text": text,
+        "source_field": source_field,
+        "belongs_to_current_segment": None,
+        "reason": _DIRTY_PRICE_TONNAGE_REASON,
+    }
+    if candidate not in candidates:
+        candidates.append(candidate)
+    segment["tonnage_candidates"] = candidates
+    if not segment.get("raw_tonnage_text"):
+        segment["raw_tonnage_text"] = text
+
+
+def _preclean_parse_payload_numbers(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    cleaned = copy.deepcopy(payload)
+    warnings: list[str] = []
+    segments = cleaned.get("segments")
+    if not isinstance(segments, list):
+        return cleaned, warnings
+    for index, segment in enumerate(segments, start=1):
+        if not isinstance(segment, dict):
+            continue
+        clue_ref = segment.get("clue_temp_id") or segment.get("segment_index") or index
+        for field_name in _SEGMENT_NUMERIC_FIELDS:
+            if field_name not in segment:
+                continue
+            value = segment.get(field_name)
+            if value in (None, ""):
+                segment[field_name] = None
+                continue
+            if _as_float_or_none(value) is not None:
+                continue
+            text = str(value).strip()
+            if field_name in _SEGMENT_PRICE_FIELDS and _looks_like_tonnage_expression(text):
+                _add_tonnage_candidate(segment, text=text, source_field=field_name)
+                segment[field_name] = None
+                _append_segment_review_reason(segment, _DIRTY_PRICE_TONNAGE_REASON)
+                warnings.append(f"{clue_ref}: {_DIRTY_PRICE_TONNAGE_REASON}，已清空 {field_name} 并转入吨位候选")
+                continue
+            if field_name in _SEGMENT_TONNAGE_FIELDS:
+                _add_tonnage_candidate(segment, text=text, source_field=field_name)
+            segment[field_name] = 0.5 if field_name == "confidence_score" else None
+            reason = f"AI 返回的 {field_name} 不是合法数字，已清空并要求复核"
+            _append_segment_review_reason(segment, reason)
+            warnings.append(f"{clue_ref}: {reason}")
+    if warnings:
+        existing_warnings = cleaned.get("warnings")
+        if isinstance(existing_warnings, list):
+            cleaned["warnings"] = [*existing_warnings, *warnings]
+        else:
+            cleaned["warnings"] = warnings
+    return cleaned, warnings
 
 
 def _json_schema_hint() -> dict[str, Any]:
@@ -1397,6 +1517,7 @@ class DashScopeQwenFreightParserClient:
                     progress_percent=45 + min(20, int(chunk_index / max(len(chunks), 1) * 20)),
                 )
                 raw_responses.append(raw)
+                payload, _ = _preclean_parse_payload_numbers(payload)
                 try:
                     validated = FreightParsePayloadSchema.model_validate(payload)
                 except Exception as exc:
@@ -1467,6 +1588,7 @@ class DashScopeQwenFreightParserClient:
                 stage_message="强模型正在复核风险候选",
                 progress_percent=76,
             )
+            review_payload, _ = _preclean_parse_payload_numbers(review_payload)
             review_validated = FreightParsePayloadSchema.model_validate(review_payload)
             reviewed = self._segments_from_payload(review_validated.model_dump(exclude_none=True))
             return reviewed, review_raw, 0, [evidence_metrics]
@@ -1528,6 +1650,7 @@ class DashScopeQwenFreightParserClient:
             progress_percent=55,
         )
         try:
+            payload, _ = _preclean_parse_payload_numbers(payload)
             validated = FreightParsePayloadSchema.model_validate(payload)
             parsed_payload = validated.model_dump(exclude_none=True)
         except Exception as exc:

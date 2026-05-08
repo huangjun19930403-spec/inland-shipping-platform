@@ -440,16 +440,29 @@ class FreightNormalizationSuggestionRepository:
             )
         )
 
-    async def list_items(
+    async def get_by_task_and_id(self, task_id: int, suggestion_id: int) -> FreightNormalizationSuggestion | None:
+        return await self.db.scalar(
+            select(FreightNormalizationSuggestion).where(
+                FreightNormalizationSuggestion.id == suggestion_id,
+                FreightNormalizationSuggestion.clean_task_id == task_id,
+            )
+        )
+
+    async def list_by_task(
         self,
         *,
+        task_id: int,
         keyword: str | None,
         status_code: str | None,
         suggestion_type_code: str | None,
         page: int,
         page_size: int,
     ) -> tuple[list[FreightNormalizationSuggestion], int]:
-        stmt = select(FreightNormalizationSuggestion).join(Freight, Freight.id == FreightNormalizationSuggestion.freight_id)
+        stmt = (
+            select(FreightNormalizationSuggestion)
+            .join(Freight, Freight.id == FreightNormalizationSuggestion.freight_id)
+            .where(FreightNormalizationSuggestion.clean_task_id == task_id)
+        )
         if keyword:
             like_value = f"%{keyword.strip()}%"
             stmt = stmt.where(
@@ -471,14 +484,16 @@ class FreightNormalizationSuggestionRepository:
         ).scalars().all()
         return list(rows), total
 
-    async def list_pending_for_bulk(
+    async def list_pending_for_task_bulk(
         self,
         *,
+        task_id: int,
         suggestion_ids: list[int] | None = None,
         keyword: str | None = None,
         suggestion_type_code: str | None = None,
     ) -> list[FreightNormalizationSuggestion]:
         stmt = select(FreightNormalizationSuggestion).join(Freight, Freight.id == FreightNormalizationSuggestion.freight_id).where(
+            FreightNormalizationSuggestion.clean_task_id == task_id,
             FreightNormalizationSuggestion.status_code == "PENDING"
         )
         if suggestion_ids:
@@ -496,6 +511,68 @@ class FreightNormalizationSuggestionRepository:
             stmt = stmt.where(FreightNormalizationSuggestion.suggestion_type_code == suggestion_type_code)
         rows = (await self.db.execute(stmt.order_by(FreightNormalizationSuggestion.id.asc()))).scalars().all()
         return list(rows)
+
+    async def count_status_by_task(self, task_id: int) -> dict[str, int]:
+        rows = (
+            await self.db.execute(
+                select(FreightNormalizationSuggestion.status_code, func.count(FreightNormalizationSuggestion.id))
+                .where(FreightNormalizationSuggestion.clean_task_id == task_id)
+                .group_by(FreightNormalizationSuggestion.status_code)
+            )
+        ).all()
+        return {str(status): int(count) for status, count in rows}
+
+    async def count_type_by_task(self, task_id: int) -> dict[str, int]:
+        rows = (
+            await self.db.execute(
+                select(FreightNormalizationSuggestion.suggestion_type_code, func.count(FreightNormalizationSuggestion.id))
+                .where(FreightNormalizationSuggestion.clean_task_id == task_id)
+                .group_by(FreightNormalizationSuggestion.suggestion_type_code)
+            )
+        ).all()
+        return {str(suggestion_type): int(count) for suggestion_type, count in rows}
+
+    async def count_status_by_tasks(self, task_ids: list[int]) -> dict[int, dict[str, int]]:
+        if not task_ids:
+            return {}
+        rows = (
+            await self.db.execute(
+                select(
+                    FreightNormalizationSuggestion.clean_task_id,
+                    FreightNormalizationSuggestion.status_code,
+                    func.count(FreightNormalizationSuggestion.id),
+                )
+                .where(FreightNormalizationSuggestion.clean_task_id.in_(task_ids))
+                .group_by(FreightNormalizationSuggestion.clean_task_id, FreightNormalizationSuggestion.status_code)
+            )
+        ).all()
+        result: dict[int, dict[str, int]] = {task_id: {} for task_id in task_ids}
+        for task_id, status_code, count in rows:
+            if task_id is None:
+                continue
+            result.setdefault(int(task_id), {})[str(status_code)] = int(count)
+        return result
+
+    async def count_type_by_tasks(self, task_ids: list[int]) -> dict[int, dict[str, int]]:
+        if not task_ids:
+            return {}
+        rows = (
+            await self.db.execute(
+                select(
+                    FreightNormalizationSuggestion.clean_task_id,
+                    FreightNormalizationSuggestion.suggestion_type_code,
+                    func.count(FreightNormalizationSuggestion.id),
+                )
+                .where(FreightNormalizationSuggestion.clean_task_id.in_(task_ids))
+                .group_by(FreightNormalizationSuggestion.clean_task_id, FreightNormalizationSuggestion.suggestion_type_code)
+            )
+        ).all()
+        result: dict[int, dict[str, int]] = {task_id: {} for task_id in task_ids}
+        for task_id, suggestion_type, count in rows:
+            if task_id is None:
+                continue
+            result.setdefault(int(task_id), {})[str(suggestion_type)] = int(count)
+        return result
 
     async def create(self, data: dict[str, Any]) -> FreightNormalizationSuggestion:
         row = FreightNormalizationSuggestion(**data)

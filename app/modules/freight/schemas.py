@@ -618,6 +618,7 @@ class FreightNormalizationCleanResponse(BaseModel):
     task_no: str
     celery_task_id: str | None = None
     status_code: str
+    review_status_code: str = "NOT_REQUIRED"
     stage_name: str | None = None
     message: str | None = None
     scanned_count: int
@@ -649,6 +650,9 @@ class FreightNormalizationTaskResponse(BaseModel):
     task_no: str
     celery_task_id: str | None = None
     status_code: str
+    review_status_code: str = "NOT_REQUIRED"
+    review_status_name: str | None = None
+    review_completed_at: datetime | None = None
     stage_code: str | None = None
     stage_name: str | None = None
     stage_message: str | None = None
@@ -657,7 +661,13 @@ class FreightNormalizationTaskResponse(BaseModel):
     suggestion_count: int
     auto_applied_count: int
     pending_count: int
+    applied_count: int = 0
+    rejected_count: int = 0
     failed_count: int
+    suggestion_status_counts: dict[str, int] = Field(default_factory=dict)
+    suggestion_type_counts: dict[str, int] = Field(default_factory=dict)
+    affected_date_from: datetime | None = None
+    affected_date_to: datetime | None = None
     requested_by: int | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -668,14 +678,14 @@ class FreightNormalizationTaskResponse(BaseModel):
     updated_at: datetime
 
 
-class FreightNormalizationBulkApplyRequest(BaseModel):
+class FreightNormalizationBulkActionRequest(BaseModel):
     suggestion_ids: list[int] = Field(default_factory=list)
     keyword: str | None = None
     suggestion_type_code: str | None = None
     apply_all_filtered: bool = False
 
 
-class FreightNormalizationBulkApplyResponse(BaseModel):
-    applied_count: int
+class FreightNormalizationBulkActionResponse(BaseModel):
+    processed_count: int
     skipped_count: int
     skipped: list[dict[str, Any]] = Field(default_factory=list)

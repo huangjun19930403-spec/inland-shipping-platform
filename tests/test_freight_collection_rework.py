@@ -36,8 +36,10 @@ from app.modules.dictionary.service import CodeSequenceService
 from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
 from app.modules.freight.ai_text_index import FreightTextIndexer
 from app.modules.freight.master_data_matcher import FreightMasterDataBatchMatcher
+from app.modules.freight.router import router as freight_router
 from app.modules.freight.schemas import (
     FreightBatchCreateRequest,
+    FreightNormalizationBulkActionRequest,
     FreightCandidateConfirmRequest,
     FreightTmsInboundCreateRequest,
 )
@@ -1607,6 +1609,223 @@ async def test_location_matching_city_short_name_beats_weak_node_contains(sessio
     assert basis["status"] == "MATCHED_CITY"
 
 
+def test_normalization_suggestion_routes_are_task_scoped_only() -> None:
+    paths = {route.path for route in freight_router.routes}
+
+    assert "/normalization-suggestions" not in paths
+    assert "/normalization-suggestions/bulk-apply" not in paths
+    assert "/normalization-suggestions/{suggestion_id}/apply" not in paths
+    assert "/normalization-suggestions/{suggestion_id}/reject" not in paths
+    assert "/normalization/tasks/{task_id}/suggestions" in paths
+    assert "/normalization/tasks/{task_id}/suggestions/bulk-apply" in paths
+    assert "/normalization/tasks/{task_id}/suggestions/bulk-reject" in paths
+    assert "/normalization/tasks/{task_id}/suggestions/{suggestion_id}/apply" in paths
+    assert "/normalization/tasks/{task_id}/suggestions/{suggestion_id}/reject" in paths
+
+
+@pytest.mark.asyncio
+async def test_ai_detail_dirty_price_tonnage_enters_review_without_schema_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_text = "芜湖到江阴 板坯 5200/5500左右"
+    indexed = FreightTextIndexer().index(raw_text)
+    semantic_map = {
+        "route_clues": [
+            {
+                "clue_temp_id": "C1",
+                "line_refs": ["L1"],
+                "context_block_id": "B1",
+                "raw_text": raw_text,
+                "route_summary": "芜湖到江阴板坯",
+                "confidence_score": 0.9,
+            }
+        ],
+        "context_blocks": [{"context_block_id": "B1", "route_clue_ids": ["C1"], "line_refs": ["L1"]}],
+        "context_notes": [],
+    }
+    payload = {
+        "segments": [
+            {
+                "clue_temp_id": "C1",
+                "segment_index": 1,
+                "context_block_id": "B1",
+                "line_refs": ["L1"],
+                "raw_text": raw_text,
+                "origin_text": "芜湖",
+                "destination_text": "江阴",
+                "commodity_name": "板坯",
+                "unit_price": "5200/5500左右",
+                "availability_status_code": "READY",
+                "confidence_score": 0.9,
+            }
+        ]
+    }
+    client = DashScopeQwenFreightParserClient(runtime_config=SimpleNamespace())
+
+    async def fake_call_json(**kwargs):
+        _ = kwargs
+        return payload, {"ok": True}
+
+    monkeypatch.setattr(client, "_call_json", fake_call_json)
+
+    segments, _, warnings, _ = await client.complete_candidate_fields(
+        indexed,
+        semantic_map,
+        runtime={
+            "detail_model": "qwen-turbo",
+            "api_key": "test",
+            "timeout": 30,
+            "detail_batch_size": 8,
+            "detail_concurrency": 1,
+        },
+    )
+
+    assert len(segments) == 1
+    assert segments[0].get("unit_price") is None
+    assert segments[0]["raw_tonnage_text"] == "5200/5500左右"
+    assert segments[0]["needs_strong_review"] is True
+    assert segments[0]["ai_review_status_code"] == "REVIEW_REQUIRED"
+    assert "AI 将疑似吨位误填为价格" in segments[0]["manual_review_reason"]
+    assert any("疑似吨位误填为价格" in item for item in warnings)
+
+
+@pytest.mark.asyncio
+async def test_normalization_task_suggestions_are_isolated_and_review_status_closes(session: AsyncSession) -> None:
+    node = await session.scalar(select(TransportNode).where(TransportNode.code == "ND-NJ"))
+    assert node is not None
+    now = datetime.utcnow()
+    freight_one = Freight(
+        freight_no="FR-NORM-0001",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        raw_origin_text="南京港",
+        raw_destination_text="芜湖港",
+        raw_commodity_name="动力煤",
+        cargo_title="南京港至芜湖港动力煤",
+        commodity_match_level_code="STANDARD",
+        origin_match_level_code="RAW",
+        destination_match_level_code="NODE",
+        estimated_tonnage=Decimal("1000"),
+        status_code="PUBLISHED",
+        hall_status_code="NOT_LISTED",
+        audit_status="APPROVED",
+    )
+    freight_two = Freight(
+        freight_no="FR-NORM-0002",
+        source_type_code="WECHAT",
+        source_channel_code="WECHAT_TEXT",
+        raw_origin_text="南京港",
+        raw_destination_text="芜湖港",
+        raw_commodity_name="动力煤",
+        cargo_title="南京港至芜湖港动力煤",
+        commodity_match_level_code="STANDARD",
+        origin_match_level_code="RAW",
+        destination_match_level_code="NODE",
+        estimated_tonnage=Decimal("1200"),
+        status_code="PUBLISHED",
+        hall_status_code="NOT_LISTED",
+        audit_status="APPROVED",
+    )
+    task_one = FreightNormalizationTask(
+        task_no="FNT-SCOPE-0001",
+        status_code="SUCCESS",
+        review_status_code="PENDING_REVIEW",
+        stage_code="DONE",
+        stage_name="清洗完成",
+        progress_percent=100,
+        scanned_count=1,
+        suggestion_count=1,
+        pending_count=1,
+        finished_at=now,
+        heartbeat_at=now,
+    )
+    task_two = FreightNormalizationTask(
+        task_no="FNT-SCOPE-0002",
+        status_code="SUCCESS",
+        review_status_code="PENDING_REVIEW",
+        stage_code="DONE",
+        stage_name="清洗完成",
+        progress_percent=100,
+        scanned_count=1,
+        suggestion_count=2,
+        pending_count=2,
+        finished_at=now,
+        heartbeat_at=now,
+    )
+    session.add_all([freight_one, freight_two, task_one, task_two])
+    await session.flush()
+    suggestion_one = FreightNormalizationSuggestion(
+        clean_task_id=task_one.id,
+        freight_id=freight_one.id,
+        suggestion_type_code="ORIGIN",
+        raw_text="南京港",
+        current_level_code="RAW",
+        suggested_level_code="NODE",
+        suggested_node_id=node.id,
+        suggested_province_code=node.province_code,
+        suggested_city_code=node.city_code,
+        confidence_score=Decimal("0.9000"),
+        status_code="PENDING",
+        auto_apply_flag=False,
+    )
+    suggestion_two = FreightNormalizationSuggestion(
+        clean_task_id=task_two.id,
+        freight_id=freight_two.id,
+        suggestion_type_code="ORIGIN",
+        raw_text="南京港",
+        current_level_code="RAW",
+        suggested_level_code="NODE",
+        suggested_node_id=node.id,
+        suggested_province_code=node.province_code,
+        suggested_city_code=node.city_code,
+        confidence_score=Decimal("0.9000"),
+        status_code="PENDING",
+        auto_apply_flag=False,
+    )
+    suggestion_three = FreightNormalizationSuggestion(
+        clean_task_id=task_two.id,
+        freight_id=freight_two.id,
+        suggestion_type_code="COMMODITY",
+        raw_text="动力煤",
+        current_level_code="RAW",
+        suggested_level_code="STANDARD",
+        confidence_score=Decimal("0.7000"),
+        status_code="PENDING",
+        auto_apply_flag=False,
+    )
+    session.add_all([suggestion_one, suggestion_two, suggestion_three])
+    await session.commit()
+
+    service = FreightNormalizationSuggestionService(session)
+    task_one_page = await service.list_task_suggestions(
+        task_one.id,
+        keyword=None,
+        status_code="PENDING",
+        suggestion_type_code=None,
+        page=1,
+        page_size=20,
+    )
+
+    assert [item.id for item in task_one_page.items] == [suggestion_one.id]
+
+    applied = await service.apply(task_one.id, suggestion_one.id, operator_id=9)
+    assert applied.status_code == "APPLIED"
+    task_one_detail = await service.get_task(task_one.id)
+    assert task_one_detail.review_status_code == "COMPLETED"
+    assert task_one_detail.pending_count == 0
+    assert task_one_detail.applied_count == 1
+
+    bulk_result = await service.bulk_reject(
+        task_two.id,
+        FreightNormalizationBulkActionRequest(apply_all_filtered=True),
+        operator_id=9,
+    )
+    task_two_detail = await service.get_task(task_two.id)
+
+    assert bulk_result.processed_count == 2
+    assert task_two_detail.review_status_code == "COMPLETED"
+    assert task_two_detail.pending_count == 0
+    assert task_two_detail.rejected_count == 2
+
+
 @pytest.mark.asyncio
 async def test_normalization_clean_auto_applies_high_confidence_raw_freight(session: AsyncSession) -> None:
     freight = Freight(
@@ -1654,9 +1873,12 @@ async def test_normalization_clean_auto_applies_high_confidence_raw_freight(sess
 
     assert result.task_id == task.id
     assert result.status_code == "SUCCESS"
+    assert result.review_status_code == "NOT_REQUIRED"
     assert result.auto_applied_count >= 3
     assert stored_task is not None
     assert stored_task.status_code == "SUCCESS"
+    assert stored_task.review_status_code == "NOT_REQUIRED"
+    assert stored_task.review_completed_at is not None
     assert stored is not None
     assert stored.commodity_standard_id is not None
     assert stored.origin_city_code == "320100"

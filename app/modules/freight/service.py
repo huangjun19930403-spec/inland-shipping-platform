@@ -49,7 +49,7 @@ from app.modules.freight.schemas import (
     FreightContactResponse,
     FreightDetailResponse,
     FreightNormalizationCleanResponse,
-    FreightNormalizationBulkApplyResponse,
+    FreightNormalizationBulkActionResponse,
     FreightNormalizationTaskResponse,
     FreightNormalizationQualityResponse,
     FreightNormalizationSuggestionResponse,
@@ -78,6 +78,9 @@ DISPLAY_DICT_CODES = [
     "FREIGHT_HALL_STATUS",
     "FREIGHT_AVAILABILITY_STATUS",
     "FREIGHT_AI_REVIEW_STATUS",
+    "FREIGHT_NORMALIZATION_TASK_STATUS",
+    "FREIGHT_NORMALIZATION_REVIEW_STATUS",
+    "FREIGHT_NORMALIZATION_SUGGESTION_STATUS",
 ]
 
 AI_REVIEW_PASS = "PASS"
@@ -436,12 +439,35 @@ def _freight_preview(entity: Freight, ctx: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _to_normalization_task_response(entity: FreightNormalizationTask) -> FreightNormalizationTaskResponse:
+def _parse_optional_datetime(value: Any) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _to_normalization_task_response(
+    entity: FreightNormalizationTask,
+    *,
+    status_counts: dict[str, int] | None = None,
+    type_counts: dict[str, int] | None = None,
+    ctx: dict[str, Any] | None = None,
+) -> FreightNormalizationTaskResponse:
+    status_counts = status_counts or {}
+    type_counts = type_counts or {}
+    result_json = entity.result_json or {}
     return FreightNormalizationTaskResponse(
         id=entity.id,
         task_no=entity.task_no,
         celery_task_id=entity.celery_task_id,
         status_code=entity.status_code,
+        review_status_code=getattr(entity, "review_status_code", None) or "NOT_REQUIRED",
+        review_status_name=_label(ctx or {}, "FREIGHT_NORMALIZATION_REVIEW_STATUS", getattr(entity, "review_status_code", None) or "NOT_REQUIRED"),
+        review_completed_at=getattr(entity, "review_completed_at", None),
         stage_code=entity.stage_code,
         stage_name=entity.stage_name,
         stage_message=entity.stage_message,
@@ -450,7 +476,13 @@ def _to_normalization_task_response(entity: FreightNormalizationTask) -> Freight
         suggestion_count=entity.suggestion_count,
         auto_applied_count=entity.auto_applied_count,
         pending_count=entity.pending_count,
+        applied_count=status_counts.get("APPLIED", 0),
+        rejected_count=status_counts.get("REJECTED", 0),
         failed_count=entity.failed_count,
+        suggestion_status_counts=status_counts,
+        suggestion_type_counts=type_counts,
+        affected_date_from=_parse_optional_datetime(result_json.get("affected_date_from")),
+        affected_date_to=_parse_optional_datetime(result_json.get("affected_date_to")),
         requested_by=entity.requested_by,
         started_at=entity.started_at,
         finished_at=entity.finished_at,
@@ -2503,21 +2535,40 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
 
     async def list_tasks(self, *, page: int, page_size: int) -> PageResponse[FreightNormalizationTaskResponse]:
         rows, total = await self.task_repo.list_items(page=page, page_size=page_size)
+        task_ids = [int(item.id) for item in rows]
+        status_counts = await self.repo.count_status_by_tasks(task_ids)
+        type_counts = await self.repo.count_type_by_tasks(task_ids)
+        ctx = await _load_display_context(self.db)
         return PageResponse(
             total=total,
             page=page,
             page_size=page_size,
-            items=[_to_normalization_task_response(item) for item in rows],
+            items=[
+                _to_normalization_task_response(
+                    item,
+                    status_counts=status_counts.get(int(item.id), {}),
+                    type_counts=type_counts.get(int(item.id), {}),
+                    ctx=ctx,
+                )
+                for item in rows
+            ],
         )
 
     async def get_task(self, task_id: int) -> FreightNormalizationTaskResponse:
         row = await self.task_repo.get_by_id(task_id)
         if row is None:
             raise NotFoundError("FreightNormalizationTask", task_id)
-        return _to_normalization_task_response(row)
+        ctx = await _load_display_context(self.db)
+        return _to_normalization_task_response(
+            row,
+            status_counts=await self.repo.count_status_by_task(task_id),
+            type_counts=await self.repo.count_type_by_task(task_id),
+            ctx=ctx,
+        )
 
-    async def list_items(
+    async def list_task_suggestions(
         self,
+        task_id: int,
         *,
         keyword: str | None,
         status_code: str | None,
@@ -2525,7 +2576,11 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
         page: int,
         page_size: int,
     ) -> PageResponse[FreightNormalizationSuggestionResponse]:
-        rows, total = await self.repo.list_items(
+        task = await self.task_repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundError("FreightNormalizationTask", task_id)
+        rows, total = await self.repo.list_by_task(
+            task_id=task_id,
             keyword=keyword,
             status_code=status_code,
             suggestion_type_code=suggestion_type_code,
@@ -2626,6 +2681,7 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
                 "task_no": await self.sequence_service.next_code("FREIGHT_NORMALIZATION_TASK_NO"),
                 "celery_task_id": None,
                 "status_code": "QUEUED",
+                "review_status_code": "NOT_REQUIRED",
                 "stage_code": "QUEUED",
                 "stage_name": "排队中",
                 "stage_message": "清洗任务已提交，等待 Celery worker 消费",
@@ -2676,6 +2732,7 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
             task_no=task.task_no,
             celery_task_id=task.celery_task_id,
             status_code=task.status_code,
+            review_status_code=getattr(task, "review_status_code", None) or "NOT_REQUIRED",
             stage_name=task.stage_name,
             message=message or task.stage_message,
             scanned_count=task.scanned_count,
@@ -2801,13 +2858,18 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
             )
             await self._rebuild_affected_analysis(min(affected_dates), max(affected_dates))
         finished = datetime.utcnow()
+        review_status_code = "PENDING_REVIEW" if pending_count > 0 else "NOT_REQUIRED"
+        status_counts = await self.repo.count_status_by_task(task_id)
+        type_counts = await self.repo.count_type_by_task(task_id)
         task = await self.task_repo.update(
             task_id,
             {
                 "status_code": "SUCCESS" if failed_count == 0 else "PARTIAL_SUCCESS",
+                "review_status_code": review_status_code,
+                "review_completed_at": finished if review_status_code == "NOT_REQUIRED" else None,
                 "stage_code": "DONE",
                 "stage_name": "清洗完成",
-                "stage_message": "正式货源清洗任务已完成",
+                "stage_message": "正式货源清洗任务已完成" if pending_count == 0 else f"清洗执行完成，仍有 {pending_count} 条建议待确认",
                 "progress_percent": 100,
                 "scanned_count": len(rows),
                 "suggestion_count": suggestion_count,
@@ -2819,6 +2881,8 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
                 "result_json": {
                     "affected_date_from": min(affected_dates).isoformat() if affected_dates else None,
                     "affected_date_to": max(affected_dates).isoformat() if affected_dates else None,
+                    "suggestion_status_counts": status_counts,
+                    "suggestion_type_counts": type_counts,
                 },
             },
         ) or task
@@ -2828,36 +2892,90 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
             message=f"已扫描 {len(rows)} 条，自动提升 {auto_applied_count} 条，待确认 {pending_count} 条",
         )
 
-    async def apply(self, suggestion_id: int, operator_id: int | None = None) -> FreightNormalizationSuggestionResponse:
-        row = await self.repo.get_by_id(suggestion_id)
+    async def _get_task_suggestion(self, task_id: int, suggestion_id: int) -> FreightNormalizationSuggestion:
+        task = await self.task_repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundError("FreightNormalizationTask", task_id)
+        row = await self.repo.get_by_task_and_id(task_id, suggestion_id)
         if row is None:
             raise NotFoundError("FreightNormalizationSuggestion", suggestion_id)
+        return row
+
+    async def _refresh_task_review_state(self, task_id: int) -> FreightNormalizationTask:
+        task = await self.task_repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundError("FreightNormalizationTask", task_id)
+        status_counts = await self.repo.count_status_by_task(task_id)
+        type_counts = await self.repo.count_type_by_task(task_id)
+        pending_count = status_counts.get("PENDING", 0)
+        applied_count = status_counts.get("APPLIED", 0)
+        auto_applied_count = status_counts.get("AUTO_APPLIED", 0)
+        rejected_count = status_counts.get("REJECTED", 0)
+        suggestion_count = sum(status_counts.values())
+        if pending_count > 0:
+            review_status_code = "PENDING_REVIEW"
+            review_completed_at = None
+        elif task.status_code in {"SUCCESS", "PARTIAL_SUCCESS"} and (
+            applied_count > 0 or rejected_count > 0 or getattr(task, "review_status_code", None) == "PENDING_REVIEW"
+        ):
+            review_status_code = "COMPLETED"
+            review_completed_at = datetime.utcnow()
+        else:
+            review_status_code = "NOT_REQUIRED"
+            review_completed_at = getattr(task, "finished_at", None)
+
+        result_json = dict(task.result_json or {})
+        result_json["suggestion_status_counts"] = status_counts
+        result_json["suggestion_type_counts"] = type_counts
+        return await self.task_repo.update(
+            task_id,
+            {
+                "suggestion_count": suggestion_count,
+                "auto_applied_count": auto_applied_count,
+                "pending_count": pending_count,
+                "review_status_code": review_status_code,
+                "review_completed_at": review_completed_at,
+                "result_json": result_json,
+                "updated_at": datetime.utcnow(),
+            },
+        ) or task
+
+    async def apply(self, task_id: int, suggestion_id: int, operator_id: int | None = None) -> FreightNormalizationSuggestionResponse:
+        row = await self._get_task_suggestion(task_id, suggestion_id)
         if row.status_code != "PENDING":
             raise ValidationError("只有待确认清洗建议可以应用")
+        freight = await self.freight_repo.get_freight_by_id(row.freight_id)
+        affected_date = (freight.published_at or freight.confirmed_at or freight.created_at) if freight is not None else None
         await self._apply_suggestion(row, operator_id=operator_id, auto=False)
+        await self._refresh_task_review_state(task_id)
         await self.db.commit()
+        if affected_date is not None:
+            await self._rebuild_affected_analysis(affected_date, affected_date)
         ctx = await _load_display_context(self.db, suggestions=[row])
         return _to_normalization_suggestion_response(row, ctx)
 
-    async def reject(self, suggestion_id: int, operator_id: int | None = None) -> FreightNormalizationSuggestionResponse:
-        row = await self.repo.get_by_id(suggestion_id)
-        if row is None:
-            raise NotFoundError("FreightNormalizationSuggestion", suggestion_id)
+    async def reject(self, task_id: int, suggestion_id: int, operator_id: int | None = None) -> FreightNormalizationSuggestionResponse:
+        row = await self._get_task_suggestion(task_id, suggestion_id)
         if row.status_code != "PENDING":
             raise ValidationError("只有待确认清洗建议可以拒绝")
         row = await self.repo.update(
             suggestion_id,
             {"status_code": "REJECTED", "rejected_at": datetime.utcnow(), "rejected_by": operator_id},
         ) or row
+        await self._refresh_task_review_state(task_id)
         await self.db.commit()
         ctx = await _load_display_context(self.db, suggestions=[row])
         return _to_normalization_suggestion_response(row, ctx)
 
-    async def bulk_apply(self, payload, operator_id: int | None = None) -> FreightNormalizationBulkApplyResponse:
+    async def bulk_apply(self, task_id: int, payload, operator_id: int | None = None) -> FreightNormalizationBulkActionResponse:
+        task = await self.task_repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundError("FreightNormalizationTask", task_id)
         suggestion_ids = [int(item) for item in (payload.suggestion_ids or []) if int(item) > 0]
         if not payload.apply_all_filtered and not suggestion_ids:
             raise ValidationError("请选择要批量应用的清洗建议")
-        rows = await self.repo.list_pending_for_bulk(
+        rows = await self.repo.list_pending_for_task_bulk(
+            task_id=task_id,
             suggestion_ids=None if payload.apply_all_filtered else suggestion_ids,
             keyword=(payload.keyword or "").strip() or None,
             suggestion_type_code=(payload.suggestion_type_code or "").strip() or None,
@@ -2876,11 +2994,44 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
                         affected_dates.append(affected_date)
             except Exception as exc:  # noqa: BLE001
                 skipped.append({"suggestion_id": row.id, "reason": str(exc)})
+        await self._refresh_task_review_state(task_id)
         await self.db.commit()
         if affected_dates:
             await self._rebuild_affected_analysis(min(affected_dates), max(affected_dates))
-        return FreightNormalizationBulkApplyResponse(
-            applied_count=applied_count,
+        return FreightNormalizationBulkActionResponse(
+            processed_count=applied_count,
+            skipped_count=len(skipped),
+            skipped=skipped,
+        )
+
+    async def bulk_reject(self, task_id: int, payload, operator_id: int | None = None) -> FreightNormalizationBulkActionResponse:
+        task = await self.task_repo.get_by_id(task_id)
+        if task is None:
+            raise NotFoundError("FreightNormalizationTask", task_id)
+        suggestion_ids = [int(item) for item in (payload.suggestion_ids or []) if int(item) > 0]
+        if not payload.apply_all_filtered and not suggestion_ids:
+            raise ValidationError("请选择要批量拒绝的清洗建议")
+        rows = await self.repo.list_pending_for_task_bulk(
+            task_id=task_id,
+            suggestion_ids=None if payload.apply_all_filtered else suggestion_ids,
+            keyword=(payload.keyword or "").strip() or None,
+            suggestion_type_code=(payload.suggestion_type_code or "").strip() or None,
+        )
+        rejected_count = 0
+        skipped: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                await self.repo.update(
+                    int(row.id),
+                    {"status_code": "REJECTED", "rejected_at": datetime.utcnow(), "rejected_by": operator_id},
+                )
+                rejected_count += 1
+            except Exception as exc:  # noqa: BLE001
+                skipped.append({"suggestion_id": row.id, "reason": str(exc)})
+        await self._refresh_task_review_state(task_id)
+        await self.db.commit()
+        return FreightNormalizationBulkActionResponse(
+            processed_count=rejected_count,
             skipped_count=len(skipped),
             skipped=skipped,
         )

@@ -64,6 +64,7 @@ async def _clean_freight_normalization(task_id: int, requested_by: int | None = 
             return {
                 "task_id": task_id,
                 "status_code": result.status_code,
+                "review_status_code": result.review_status_code,
                 "scanned_count": result.scanned_count,
                 "suggestion_count": result.suggestion_count,
                 "auto_applied_count": result.auto_applied_count,
