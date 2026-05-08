@@ -905,6 +905,7 @@ class VesselService:
             error_message = "；".join(error_parts) or None
         risk_by_profile = await self._compliance_risk_by_profile([item.id for item in result.items])
         boundaries = await self._city_boundaries()
+        boundary_codes = {boundary.code for boundary in boundaries}
         boundary_paths_by_code = self._city_boundary_paths_by_code(boundaries, query.boundary_precision) if query.include_boundary else {}
         cities = self._city_situation_items(
             result.items,
@@ -919,7 +920,18 @@ class VesselService:
             partial,
             error_message,
             boundary_paths_by_code,
+            query.boundary_precision if query.include_boundary else None,
+            boundary_codes,
         )
+        missing_boundary_cities = [
+            {
+                "city_code": city.city_code,
+                "city_name": city.city_name,
+                "positioned_count": city.positioned_count,
+            }
+            for city in cities
+            if city.city_code and city.positioned_count > 0 and not city.has_boundary
+        ]
         snapshot_id = await self._store_city_situation_snapshot(
             result.items,
             generated_at=generated_at,
@@ -950,6 +962,9 @@ class VesselService:
                 contactable_position_count=sum(1 for item in positioned_items if item.contact_available),
                 certificate_risk_count=sum(1 for item in positioned_items if risk_by_profile.get(item.id)),
                 city_count=sum(1 for city in cities if city.city_code),
+                boundary_city_count=sum(1 for city in cities if city.city_code and city.has_boundary),
+                missing_boundary_city_count=len(missing_boundary_cities),
+                missing_boundary_cities=missing_boundary_cities,
                 query_snapshot_id=snapshot_id,
                 failed_batch_count=result.failed_batch_count,
                 is_partial=partial,
@@ -3113,8 +3128,11 @@ class VesselService:
         partial: bool,
         error_message: str | None,
         boundary_paths_by_code: dict[str, list[list[tuple[float, float]]]] | None = None,
+        boundary_precision: str | None = None,
+        boundary_codes: set[str] | None = None,
     ) -> list[VesselPositionCitySituationItemResponse]:
         boundary_paths_by_code = boundary_paths_by_code or {}
+        boundary_codes = boundary_codes or set(boundary_paths_by_code.keys())
         grouped: dict[str, list[VesselPositionMonitorItemResponse]] = defaultdict(list)
         for item in items:
             grouped[self._position_city_code(item)].append(item)
@@ -3138,6 +3156,8 @@ class VesselService:
             heat_longitude = (sum(longitudes, Decimal("0")) / Decimal(len(longitudes))).quantize(Decimal("0.000001")) if longitudes and not is_unknown_city else None
             heat_latitude = (sum(latitudes, Decimal("0")) / Decimal(len(latitudes))).quantize(Decimal("0.000001")) if latitudes and not is_unknown_city else None
             first_item = stats_items[0] if stats_items else None
+            serialized_boundary_paths = None if is_unknown_city else self._serialize_boundary_paths(boundary_paths_by_code.get(city_code))
+            has_boundary = False if is_unknown_city else city_code in boundary_codes
             result.append(
                 VesselPositionCitySituationItemResponse(
                     city_code=None if is_unknown_city else city_code,
@@ -3148,7 +3168,9 @@ class VesselService:
                     city_center_latitude=None if is_unknown_city else getattr(first_item, "city_center_latitude", None),
                     heat_center_longitude=heat_longitude,
                     heat_center_latitude=heat_latitude,
-                    boundary_paths=None if is_unknown_city else self._serialize_boundary_paths(boundary_paths_by_code.get(city_code)),
+                    boundary_paths=serialized_boundary_paths,
+                    has_boundary=has_boundary,
+                    boundary_precision=None if is_unknown_city or not serialized_boundary_paths else boundary_precision,
                     positioned_count=len(fresh_items),
                     contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
                     average_ship_age=(sum(ages, Decimal("0")) / Decimal(len(ages))).quantize(Decimal("0.1")) if ages else None,

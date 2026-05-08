@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -213,6 +214,59 @@ def test_vessel_city_boundary_paths_are_simplified_for_situation_payload() -> No
     assert paths
     assert len(paths[0]) < len(ring)
     assert paths[0][0] == paths[0][-1]
+
+
+def test_vessel_city_situation_marks_boundary_coverage() -> None:
+    service = object.__new__(VesselService)
+    generated_at = datetime.now()
+
+    def make_item(identifier: int, city_code: str | None, city_name: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=identifier,
+            current_city_code=city_code,
+            city_code=None,
+            current_city_name=city_name,
+            city_name=None,
+            city_center_longitude=Decimal("120.00") if city_code else None,
+            city_center_latitude=Decimal("31.00") if city_code else None,
+            longitude=Decimal("120.10") if city_code else None,
+            latitude=Decimal("31.10") if city_code else None,
+            position_time=generated_at,
+            contact_available=True,
+            ship_age=Decimal("6"),
+            deadweight_ton=Decimal("1000"),
+            ship_type_code="DRY_CARGO",
+            ship_type_name="干货船",
+        )
+
+    cities = service._city_situation_items(
+        [
+            make_item(1, "320500", "有边界市"),
+            make_item(2, "320600", "缺边界市"),
+            make_item(3, None, UNKNOWN_CITY_NAME),
+        ],
+        {},
+        generated_at,
+        1440,
+        3,
+        2,
+        1,
+        0,
+        1,
+        False,
+        None,
+        {"320500": [[(120.0, 31.0), (120.2, 31.0), (120.2, 31.2), (120.0, 31.2), (120.0, 31.0)]]},
+        "low",
+    )
+    by_name = {city.city_name: city for city in cities}
+
+    assert by_name["有边界市"].has_boundary is True
+    assert by_name["有边界市"].boundary_precision == "low"
+    assert by_name["有边界市"].boundary_paths
+    assert by_name["缺边界市"].has_boundary is False
+    assert by_name["缺边界市"].boundary_paths is None
+    assert by_name[UNKNOWN_CITY_NAME].has_boundary is False
+    assert by_name[UNKNOWN_CITY_NAME].boundary_precision is None
 
 
 def test_vessel_city_resolution_uses_grid_candidates_when_available() -> None:

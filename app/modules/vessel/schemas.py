@@ -732,6 +732,8 @@ class VesselPositionCitySituationItemResponse(BaseModel):
     heat_center_longitude: Decimal | None = None
     heat_center_latitude: Decimal | None = None
     boundary_paths: list[list[list[float]]] | None = None
+    has_boundary: bool = False
+    boundary_precision: str | None = None
     positioned_count: int
     contactable_position_count: int
     average_ship_age: Decimal | None = None
@@ -761,6 +763,9 @@ class VesselPositionCitySituationSummary(BaseModel):
     contactable_position_count: int
     certificate_risk_count: int
     city_count: int
+    boundary_city_count: int = 0
+    missing_boundary_city_count: int = 0
+    missing_boundary_cities: list[dict[str, Any]] = Field(default_factory=list)
     query_snapshot_id: str | None = None
     failed_batch_count: int = 0
     is_partial: bool = False
