@@ -28,6 +28,7 @@ from app.modules.vessel.schemas import (
     VesselCreateRequest,
     VesselCrewReplaceRequest,
     VesselCrewResponse,
+    VesselBusinessSituationCardResponse,
     VesselDetailResponse,
     VesselListItemResponse,
     VesselListQuery,
@@ -46,6 +47,10 @@ from app.modules.vessel.schemas import (
     VesselPersonCertificateReplaceRequest,
     VesselPersonCertificateResponse,
     VesselPersonCertificateUpdateRequest,
+    VesselPositionCitySituationQuery,
+    VesselPositionCitySituationResponse,
+    VesselPositionCityVesselsQuery,
+    VesselPositionMonitorItemResponse,
     VesselPositionMonitorQuery,
     VesselPositionMonitorResponse,
     VesselProfileResponse,
@@ -72,6 +77,36 @@ async def monitor_vessel_positions(
 ):
     _ = current_user
     return await VesselService(db).position_monitor(query)
+
+
+@router.get("/position-monitor/city-situation", response_model=VesselPositionCitySituationResponse)
+async def monitor_vessel_city_situation(
+    query: VesselPositionCitySituationQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselService(db).position_city_situation(query)
+
+
+@router.get("/position-monitor/city-vessels", response_model=PageResponse[VesselPositionMonitorItemResponse])
+async def monitor_vessel_city_vessels(
+    query: VesselPositionCityVesselsQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselService(db).position_city_vessels(query)
+
+
+@router.get("/position-monitor/vessels/{vessel_id}/situation-card", response_model=VesselBusinessSituationCardResponse)
+async def monitor_vessel_situation_card(
+    vessel_id: int,
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselService(db).position_business_card(vessel_id)
 
 
 @router.get("", response_model=PageResponse[VesselListItemResponse])

@@ -58,6 +58,9 @@ def test_vessel_certificate_ledger_and_void_routes_exist() -> None:
     paths = app.openapi()["paths"]
 
     assert "get" in paths["/api/v1/vessels/{vessel_id}/certificates/ledger"]
+    assert "get" in paths["/api/v1/vessels/position-monitor/city-situation"]
+    assert "get" in paths["/api/v1/vessels/position-monitor/city-vessels"]
+    assert "get" in paths["/api/v1/vessels/position-monitor/vessels/{vessel_id}/situation-card"]
     assert "get" in paths[
         "/api/v1/vessels/{vessel_id}/certificates/{certificate_id}/image-recognitions"
     ]
@@ -123,3 +126,26 @@ def test_vessel_certificate_ledger_status_uses_current_task_not_history() -> Non
 
     assert service._certificate_ledger_status(verified_certificate) == "VERIFIED"
     assert service._certificate_ledger_status(failed_after_confirm) == "RECOGNITION_FAILED"
+
+
+def test_owner_document_completeness_depends_on_party_type() -> None:
+    service = object.__new__(VesselService)
+
+    personal_owner = SimpleNamespace(party_type_code="PERSON")
+    company_owner = SimpleNamespace(party_type_code="COMPANY")
+    unknown_owner = SimpleNamespace(party_type_code="UNKNOWN")
+
+    personal_partial = service._owner_document_completeness(
+        personal_owner,
+        [SimpleNamespace(document_type_code="PERSON_ID_FRONT")],
+    )
+    company_complete = service._owner_document_completeness(
+        company_owner,
+        [SimpleNamespace(document_type_code="BUSINESS_LICENSE")],
+    )
+    unknown = service._owner_document_completeness(unknown_owner, [])
+
+    assert personal_partial.status_code == "INCOMPLETE"
+    assert personal_partial.missing_document_type_codes == ["PERSON_ID_BACK"]
+    assert company_complete.status_code == "COMPLETE"
+    assert unknown.status_code == "UNKNOWN_OWNER_TYPE"

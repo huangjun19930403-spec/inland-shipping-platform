@@ -69,6 +69,26 @@ class VesselPositionMonitorQuery(BaseModel):
     max_items: int = Field(default=200, ge=1, le=500)
 
 
+class VesselPositionCitySituationQuery(BaseModel):
+    keyword: str | None = None
+    ship_type_code: str | None = None
+    deadweight_min: Decimal | None = None
+    deadweight_max: Decimal | None = None
+    draft_max: Decimal | None = None
+    contact_available: bool | None = None
+    profile_status_code: str | None = None
+    reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
+    max_profiles: int = Field(default=5000, ge=1, le=20000)
+    es_batch_size: int = Field(default=200, ge=20, le=500)
+
+
+class VesselPositionCityVesselsQuery(VesselPositionCitySituationQuery):
+    city_code: str | None = None
+    city_name: str | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
 class VesselRecognitionHistoryQuery(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
@@ -414,11 +434,31 @@ class VesselOwnerDocumentResponse(BaseModel):
     has_recognition_history: bool = False
 
 
+class VesselOwnerDocumentLedgerItemResponse(BaseModel):
+    document_type_code: str
+    document_type_name: str | None = None
+    required: bool = False
+    status_code: str
+    status_name: str
+    document: VesselOwnerDocumentResponse | None = None
+
+
+class VesselOwnerDocumentCompletenessResponse(BaseModel):
+    status_code: str
+    status_name: str
+    required_count: int
+    completed_count: int
+    missing_document_type_codes: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
 class VesselOwnerResponse(VesselOwnerItem):
     id: int
     vessel_profile_id: int
     party_type_name: str | None = None
     documents: list[VesselOwnerDocumentResponse] = Field(default_factory=list)
+    document_ledger: list[VesselOwnerDocumentLedgerItemResponse] = Field(default_factory=list)
+    document_completeness: VesselOwnerDocumentCompletenessResponse | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -641,6 +681,8 @@ class VesselPositionMonitorItemResponse(VesselListItemResponse):
     heading_deg: Decimal | None = None
     position_time: datetime | None = None
     position_age_minutes: int | None = None
+    city_code: str | None = None
+    city_name: str | None = None
     location_text: str | None = None
     position_source_code: str = "ES_REALTIME"
     position_source_name: str | None = None
@@ -660,6 +702,65 @@ class VesselPositionMonitorResponse(BaseModel):
     message: str | None = None
     summary: VesselPositionMonitorSummary
     items: list[VesselPositionMonitorItemResponse] = Field(default_factory=list)
+
+
+class VesselShipTypeDistributionItemResponse(BaseModel):
+    ship_type_code: str | None = None
+    ship_type_name: str | None = None
+    count: int
+
+
+class VesselPositionCitySituationItemResponse(BaseModel):
+    city_code: str | None = None
+    city_name: str
+    longitude: Decimal | None = None
+    latitude: Decimal | None = None
+    positioned_count: int
+    contactable_position_count: int
+    average_ship_age: Decimal | None = None
+    total_deadweight_ton: Decimal | None = None
+    ship_type_distribution: list[VesselShipTypeDistributionItemResponse] = Field(default_factory=list)
+    stale_position_count: int = 0
+    certificate_risk_count: int = 0
+    latest_position_time: datetime | None = None
+    mmsi_count: int = 0
+    matched_position_count: int = 0
+    unpositioned_count: int = 0
+    is_partial: bool = False
+    error_message: str | None = None
+
+
+class VesselPositionCitySituationSummary(BaseModel):
+    matched_profile_count: int
+    queried_mmsi_count: int
+    matched_position_count: int
+    unpositioned_count: int
+    positioned_count: int
+    stale_position_count: int
+    contactable_position_count: int
+    certificate_risk_count: int
+    city_count: int
+    is_partial: bool = False
+    error_message: str | None = None
+
+
+class VesselPositionCitySituationResponse(BaseModel):
+    source_status: str
+    source_status_name: str
+    generated_at: datetime
+    message: str | None = None
+    summary: VesselPositionCitySituationSummary
+    cities: list[VesselPositionCitySituationItemResponse] = Field(default_factory=list)
+
+
+class VesselBusinessSituationCardResponse(BaseModel):
+    vessel_id: int
+    generated_at: datetime
+    identity: dict[str, Any]
+    realtime: dict[str, Any]
+    operation: dict[str, Any]
+    compliance: dict[str, Any]
+    business: dict[str, Any]
 
 
 class VesselDetailResponse(BaseModel):

@@ -55,20 +55,27 @@ from app.modules.vessel.schemas import (
     VesselChangeEventResponse,
     VesselContactResponse,
     VesselCrewResponse,
+    VesselBusinessSituationCardResponse,
     VesselDetailResponse,
     VesselIdentifierHistoryResponse,
     VesselListItemResponse,
     VesselNameHistoryResponse,
     VesselOperatorResponse,
+    VesselOwnerDocumentCompletenessResponse,
+    VesselOwnerDocumentLedgerItemResponse,
     VesselOwnerResponse,
     VesselOwnerDocumentImageRecognitionResponse,
     VesselOwnerDocumentResponse,
     VesselPersonCertificateFileResponse,
     VesselPersonCertificateImageRecognitionResponse,
     VesselPersonCertificateResponse,
+    VesselPositionCitySituationItemResponse,
+    VesselPositionCitySituationResponse,
+    VesselPositionCitySituationSummary,
     VesselPositionMonitorItemResponse,
     VesselPositionMonitorResponse,
     VesselPositionMonitorSummary,
+    VesselShipTypeDistributionItemResponse,
     VesselProfileResponse,
     VesselRegistrationResponse,
 )
@@ -109,6 +116,22 @@ CREW_CERTIFICATE_TYPE = "CREW_COMPETENCY_CERT"
 ACTIVE_RECOGNITION_STATUSES = {"QUEUED", "PROCESSING"}
 CURRENT_RECOGNITION_STATUSES = {"QUEUED", "PROCESSING", "NEED_CONFIRM", "FAILED"}
 IMAGE_RECOGNIZABLE_OWNER_DOCUMENT_TYPES = {"PERSON_ID_FRONT", "PERSON_ID_BACK", "BUSINESS_LICENSE"}
+OWNER_DOCUMENT_LEDGER_TYPES = [
+    "PERSON_ID_FRONT",
+    "PERSON_ID_BACK",
+    "BUSINESS_LICENSE",
+    "AUTHORIZATION_DOC",
+    "AFFILIATION_PROOF",
+    "PERSON_VESSEL_PHOTO",
+    "VESSEL_PHOTO",
+    "OTHER",
+]
+OWNER_REQUIRED_DOCUMENT_TYPES_BY_PARTY = {
+    "PERSON": {"PERSON_ID_FRONT", "PERSON_ID_BACK"},
+    "COMPANY": {"BUSINESS_LICENSE"},
+}
+UNKNOWN_CITY_CODE = "UNKNOWN"
+UNKNOWN_CITY_NAME = "未知城市"
 
 
 def _dispatch_certificate_recognition_task(recognition_id: int) -> None:
@@ -494,6 +517,8 @@ class VesselService:
                     heading_deg=_to_decimal(position.get("heading_deg")),
                     position_time=position_time,
                     position_age_minutes=age_minutes,
+                    city_code=position.get("city_code"),
+                    city_name=position.get("city_name"),
                     location_text=position.get("location_text"),
                     position_source_name="实时 ES",
                 )
@@ -510,6 +535,165 @@ class VesselService:
                 contactable_position_count=sum(1 for item in items if item.contact_available),
             ),
             items=items,
+        )
+
+    async def position_city_situation(self, query) -> VesselPositionCitySituationResponse:
+        generated_at = datetime.utcnow()
+        profiles = await self._position_monitor_profiles(query, limit=query.max_profiles)
+        if not profiles:
+            return VesselPositionCitySituationResponse(
+                source_status="EMPTY",
+                source_status_name=_source_status_name("EMPTY"),
+                generated_at=generated_at,
+                message="未匹配到符合条件的船舶档案",
+                summary=VesselPositionCitySituationSummary(
+                    matched_profile_count=0,
+                    queried_mmsi_count=0,
+                    matched_position_count=0,
+                    unpositioned_count=0,
+                    positioned_count=0,
+                    stale_position_count=0,
+                    contactable_position_count=0,
+                    certificate_risk_count=0,
+                    city_count=0,
+                ),
+                cities=[],
+            )
+        if not await self._realtime_es_host():
+            return VesselPositionCitySituationResponse(
+                source_status="UNCONFIGURED",
+                source_status_name=_source_status_name("UNCONFIGURED"),
+                generated_at=generated_at,
+                message="实时 ES 未配置，暂无城市态势",
+                summary=VesselPositionCitySituationSummary(
+                    matched_profile_count=len(profiles),
+                    queried_mmsi_count=0,
+                    matched_position_count=0,
+                    unpositioned_count=0,
+                    positioned_count=0,
+                    stale_position_count=0,
+                    contactable_position_count=0,
+                    certificate_risk_count=0,
+                    city_count=0,
+                ),
+                cities=[],
+            )
+        items, partial, error_message, queried_mmsi_count, matched_position_count, unpositioned_count = await self._position_monitor_items_for_profiles(
+            profiles,
+            generated_at=generated_at,
+            reported_within_minutes=query.reported_within_minutes or 1440,
+            es_batch_size=query.es_batch_size,
+            include_stale=True,
+        )
+        risk_by_profile = await self._compliance_risk_by_profile([item.id for item in items])
+        cities = self._city_situation_items(
+            items,
+            risk_by_profile,
+            generated_at,
+            query.reported_within_minutes or 1440,
+            queried_mmsi_count,
+            matched_position_count,
+            partial,
+            error_message,
+        )
+        positioned_items = [item for item in items if not self._is_stale_position(item, generated_at, query.reported_within_minutes or 1440)]
+        return VesselPositionCitySituationResponse(
+            source_status="ERROR" if partial and not cities else ("AVAILABLE" if cities else "EMPTY"),
+            source_status_name=_source_status_name("ERROR" if partial and not cities else ("AVAILABLE" if cities else "EMPTY")),
+            generated_at=generated_at,
+            message=error_message if partial else (None if cities else "实时 ES 暂无符合筛选条件的城市态势"),
+            summary=VesselPositionCitySituationSummary(
+                matched_profile_count=len(profiles),
+                queried_mmsi_count=queried_mmsi_count,
+                matched_position_count=matched_position_count,
+                unpositioned_count=unpositioned_count,
+                positioned_count=len(positioned_items),
+                stale_position_count=len(items) - len(positioned_items),
+                contactable_position_count=sum(1 for item in positioned_items if item.contact_available),
+                certificate_risk_count=sum(1 for item in positioned_items if risk_by_profile.get(item.id)),
+                city_count=len(cities),
+                is_partial=partial,
+                error_message=error_message,
+            ),
+            cities=cities,
+        )
+
+    async def position_city_vessels(self, query) -> PageResponse[VesselPositionMonitorItemResponse]:
+        generated_at = datetime.utcnow()
+        profiles = await self._position_monitor_profiles(query, limit=query.max_profiles)
+        if not profiles or not await self._realtime_es_host():
+            return PageResponse[VesselPositionMonitorItemResponse](total=0, page=query.page, page_size=query.page_size, items=[])
+        items, _, _, _, _, _ = await self._position_monitor_items_for_profiles(
+            profiles,
+            generated_at=generated_at,
+            reported_within_minutes=query.reported_within_minutes or 1440,
+            es_batch_size=query.es_batch_size,
+            include_stale=False,
+        )
+        filtered = [
+            item for item in items
+            if self._city_matches(item, city_code=query.city_code, city_name=query.city_name)
+        ]
+        start = (query.page - 1) * query.page_size
+        return PageResponse[VesselPositionMonitorItemResponse](
+            total=len(filtered),
+            page=query.page,
+            page_size=query.page_size,
+            items=filtered[start:start + query.page_size],
+        )
+
+    async def position_business_card(self, vessel_id: int) -> VesselBusinessSituationCardResponse:
+        generated_at = datetime.utcnow()
+        profile = await self._require_profile(vessel_id)
+        items: list[VesselPositionMonitorItemResponse] = []
+        if await self._realtime_es_host():
+            items, _, _, _, _, _ = await self._position_monitor_items_for_profiles(
+                [profile],
+                generated_at=generated_at,
+                reported_within_minutes=43200,
+                es_batch_size=50,
+                include_stale=True,
+            )
+        list_item = (await self._build_list_items([profile]))[0]
+        position = items[0] if items else None
+        risk = (await self._compliance_risk_by_profile([vessel_id])).get(vessel_id, {})
+        return VesselBusinessSituationCardResponse(
+            vessel_id=vessel_id,
+            generated_at=generated_at,
+            identity={
+                "ship_name": list_item.ship_name,
+                "current_mmsi": list_item.current_mmsi,
+                "ship_type_name": list_item.ship_type_name,
+                "deadweight_ton": list_item.deadweight_ton,
+                "size_text": list_item.size_text,
+                "ship_age": list_item.ship_age,
+                "registry_city_name": list_item.registry_city_name,
+            },
+            realtime={
+                "longitude": position.longitude if position else None,
+                "latitude": position.latitude if position else None,
+                "city_code": getattr(position, "city_code", None) if position else None,
+                "city_name": self._position_city_name(position) if position else None,
+                "location_text": position.location_text if position else None,
+                "speed_kn": position.speed_kn if position else None,
+                "course_deg": position.course_deg if position else None,
+                "heading_deg": position.heading_deg if position else None,
+                "position_time": position.position_time if position else None,
+                "position_age_minutes": position.position_age_minutes if position else None,
+            },
+            operation={
+                "owner_name": list_item.primary_owner_name,
+                "operator_name": list_item.primary_operator_name,
+                "primary_contact_name": list_item.primary_contact_name,
+                "primary_contact_phone": list_item.primary_contact_phone,
+                "contact_available": list_item.contact_available,
+            },
+            compliance=risk,
+            business={
+                "contactable": bool(list_item.contact_available and list_item.primary_contact_phone),
+                "tonnage_ready": list_item.deadweight_ton is not None,
+                "key_area": self._position_city_name(position) if position else list_item.registry_city_name,
+            },
         )
 
     async def create_vessel(self, payload, *, operator_id: int | None = None) -> VesselProfileResponse:
@@ -1894,6 +2078,74 @@ class VesselService:
         await self.db.commit()
         return {"recognition_id": recognition.id, "status_code": recognition.status_code}
 
+    async def _compliance_risk_by_profile(self, ids: list[int]) -> dict[int, dict[str, Any]]:
+        if not ids:
+            return {}
+        today = date.today()
+        expiring_until = today + timedelta(days=30)
+        cert_rows = (
+            await self.db.execute(
+                select(VesselCertificate).where(
+                    VesselCertificate.vessel_profile_id.in_(ids),
+                    VesselCertificate.voided_at.is_(None),
+                )
+            )
+        ).scalars().all()
+        certs_by_profile: dict[int, list[VesselCertificate]] = defaultdict(list)
+        for cert in cert_rows:
+            certs_by_profile[cert.vessel_profile_id].append(cert)
+
+        owner_rows = (
+            await self.db.execute(
+                select(VesselOwnerPeriod).where(
+                    VesselOwnerPeriod.vessel_profile_id.in_(ids),
+                    VesselOwnerPeriod.is_current.is_(True),
+                )
+            )
+        ).scalars().all()
+        owner_by_profile = {owner.vessel_profile_id: owner for owner in owner_rows}
+        owner_ids = [owner.id for owner in owner_rows]
+        owner_docs = (
+            await self.db.execute(
+                select(VesselOwnerDocument).where(
+                    VesselOwnerDocument.vessel_owner_period_id.in_(owner_ids),
+                    VesselOwnerDocument.voided_at.is_(None),
+                )
+            )
+        ).scalars().all() if owner_ids else []
+        owner_doc_types: dict[int, set[str]] = defaultdict(set)
+        for document in owner_docs:
+            owner_doc_types[document.vessel_owner_period_id].add(document.document_type_code)
+
+        result: dict[int, dict[str, Any]] = {}
+        for profile_id in ids:
+            certs = certs_by_profile.get(profile_id, [])
+            cert_types = {cert.certificate_type_code for cert in certs}
+            missing_cert_types = [code for code in REQUIRED_VESSEL_CERTIFICATE_TYPES if code not in cert_types]
+            expiring_certs = [
+                cert.certificate_type_code for cert in certs
+                if cert.valid_to is not None and cert.valid_to <= expiring_until and not cert.is_long_term_valid
+            ]
+            owner = owner_by_profile.get(profile_id)
+            missing_owner_docs: list[str] = []
+            owner_completeness_status = "UNKNOWN_OWNER_TYPE"
+            if owner is not None:
+                required_owner_docs = self._owner_required_document_types(owner)
+                if required_owner_docs:
+                    missing_owner_docs = sorted(required_owner_docs - owner_doc_types.get(owner.id, set()))
+                    owner_completeness_status = "COMPLETE" if not missing_owner_docs else "INCOMPLETE"
+            has_risk = bool(missing_cert_types or expiring_certs or missing_owner_docs)
+            result[profile_id] = {
+                "has_certificate_risk": has_risk,
+                "missing_certificate_type_codes": missing_cert_types,
+                "expiring_certificate_type_codes": expiring_certs,
+                "owner_document_completeness_status": owner_completeness_status,
+                "missing_owner_document_type_codes": missing_owner_docs,
+                "required_certificate_count": len(REQUIRED_VESSEL_CERTIFICATE_TYPES),
+                "archived_certificate_count": len(cert_types & set(REQUIRED_VESSEL_CERTIFICATE_TYPES)),
+            }
+        return result
+
     async def _build_profile_response(self, vessel_id: int) -> VesselProfileResponse:
         profile = await self._require_profile(vessel_id)
         label_map = await _load_label_map(self.db)
@@ -2137,7 +2389,7 @@ class VesselService:
         rows = (await self.db.execute(select(VesselProfile).where(VesselProfile.id.in_(ids)))).scalars().all()
         return {row.id: row for row in rows}
 
-    async def _position_monitor_profiles(self, query) -> list[VesselProfile]:
+    async def _position_monitor_profiles(self, query, *, limit: int | None = None) -> list[VesselProfile]:
         stmt = (
             select(VesselProfile)
             .outerjoin(VesselCapacityDimension, VesselCapacityDimension.vessel_profile_id == VesselProfile.id)
@@ -2179,11 +2431,12 @@ class VesselService:
             stmt = stmt.where(VesselCapacityDimension.design_draft_m <= query.draft_max)
         if query.contact_available is not None:
             stmt = stmt.where(VesselContact.is_available.is_(query.contact_available))
+        row_limit = limit or max(query.max_items * 3, query.max_items)
         rows = (
             await self.db.execute(
                 stmt.group_by(VesselProfile.id)
                 .order_by(VesselProfile.updated_at.desc(), VesselProfile.id.desc())
-                .limit(max(query.max_items * 3, query.max_items))
+                .limit(row_limit)
             )
         ).scalars().all()
         return list(rows)
@@ -2266,6 +2519,12 @@ class VesselService:
             "address",
             "area_name",
             "city_name",
+            "city",
+            "city_code",
+            "cityCode",
+            "adcode",
+            "city_adcode",
+            "region_code",
             "shipEnName",
         ]
         query_body = {
@@ -2328,8 +2587,197 @@ class VesselService:
                 "heading_deg": _first_value(source, ["heading", "head", "hdg", "heading_deg"]),
                 "position_time": position_time,
                 "location_text": _first_value(source, ["location_text", "address", "area_name", "city_name"]),
+                "city_code": _first_value(source, ["city_code", "cityCode", "adcode", "city_adcode", "region_code"]),
+                "city_name": _first_value(source, ["city_name", "city", "area_name"]),
             }
         return result
+
+    async def _search_realtime_positions_batched(
+        self,
+        mmsi_values: list[str],
+        *,
+        batch_size: int,
+    ) -> tuple[dict[str, dict[str, Any]], bool, str | None]:
+        positions: dict[str, dict[str, Any]] = {}
+        errors: list[str] = []
+        unique_values = [value for value in dict.fromkeys(mmsi_values) if value]
+        for start in range(0, len(unique_values), batch_size):
+            batch = unique_values[start:start + batch_size]
+            try:
+                positions.update(await self._search_realtime_positions(batch, max_hits=max(len(batch) * 3, 200)))
+            except Exception as exc:  # noqa: BLE001
+                errors.append(str(exc))
+        return positions, bool(errors), "；".join(errors[:3]) if errors else None
+
+    async def _position_monitor_items_for_profiles(
+        self,
+        profiles: list[VesselProfile],
+        *,
+        generated_at: datetime,
+        reported_within_minutes: int,
+        es_batch_size: int,
+        include_stale: bool,
+    ) -> tuple[list[VesselPositionMonitorItemResponse], bool, str | None, int, int, int]:
+        mmsi_by_profile = await self._mmsi_values_by_profile([row.id for row in profiles])
+        mmsi_values = sorted({item for values in mmsi_by_profile.values() for item in values if item})
+        if not mmsi_values:
+            return [], False, None, 0, 0, 0
+        positions, partial, error_message = await self._search_realtime_positions_batched(
+            mmsi_values,
+            batch_size=es_batch_size,
+        )
+        profile_by_mmsi: dict[str, VesselProfile] = {}
+        for profile in profiles:
+            for mmsi in mmsi_by_profile.get(profile.id, [profile.current_mmsi]):
+                profile_by_mmsi[mmsi] = profile
+        position_by_profile: dict[int, dict[str, Any]] = {}
+        freshness_limit = generated_at - timedelta(minutes=reported_within_minutes)
+        for mmsi, position in positions.items():
+            profile = profile_by_mmsi.get(mmsi)
+            if profile is None or profile.id in position_by_profile:
+                continue
+            position_time = position.get("position_time")
+            if not include_stale and position_time and position_time < freshness_limit:
+                continue
+            position_by_profile[profile.id] = position
+        positioned_profiles = [profile for profile in profiles if profile.id in position_by_profile]
+        list_items = await self._build_list_items(positioned_profiles)
+        items: list[VesselPositionMonitorItemResponse] = []
+        for item in list_items:
+            position = position_by_profile.get(item.id)
+            if position is None:
+                continue
+            longitude = _to_decimal(position.get("longitude"))
+            latitude = _to_decimal(position.get("latitude"))
+            if longitude is None or latitude is None:
+                continue
+            position_time = position.get("position_time")
+            age_minutes = int((generated_at - position_time).total_seconds() // 60) if position_time else None
+            items.append(
+                VesselPositionMonitorItemResponse(
+                    **item.model_dump(),
+                    longitude=longitude,
+                    latitude=latitude,
+                    speed_kn=_to_decimal(position.get("speed_kn")),
+                    course_deg=_to_decimal(position.get("course_deg")),
+                    heading_deg=_to_decimal(position.get("heading_deg")),
+                    position_time=position_time,
+                    position_age_minutes=age_minutes,
+                    city_code=str(position.get("city_code")).strip() if position.get("city_code") not in (None, "") else None,
+                    city_name=str(position.get("city_name")).strip() if position.get("city_name") not in (None, "") else None,
+                    location_text=position.get("location_text"),
+                    position_source_name="实时 ES",
+                )
+            )
+        matched_position_count = len(position_by_profile)
+        return items, partial, error_message, len(mmsi_values), matched_position_count, max(0, len(mmsi_values) - matched_position_count)
+
+    def _is_stale_position(self, item: VesselPositionMonitorItemResponse, generated_at: datetime, reported_within_minutes: int) -> bool:
+        return bool(item.position_time and item.position_time < generated_at - timedelta(minutes=reported_within_minutes))
+
+    def _position_city_code(self, item: VesselPositionMonitorItemResponse | None) -> str:
+        if item is None:
+            return UNKNOWN_CITY_CODE
+        return (item.city_code or "").strip() or UNKNOWN_CITY_CODE
+
+    def _position_city_name(self, item: VesselPositionMonitorItemResponse | None) -> str:
+        if item is None:
+            return UNKNOWN_CITY_NAME
+        return (item.city_name or item.location_text or "").strip() or UNKNOWN_CITY_NAME
+
+    def _city_matches(self, item: VesselPositionMonitorItemResponse, *, city_code: str | None, city_name: str | None) -> bool:
+        if city_code:
+            expected = city_code.strip()
+            actual = self._position_city_code(item)
+            if expected == UNKNOWN_CITY_CODE:
+                return actual == UNKNOWN_CITY_CODE
+            return actual == expected
+        if city_name:
+            return self._position_city_name(item) == city_name.strip()
+        return True
+
+    def _city_situation_items(
+        self,
+        items: list[VesselPositionMonitorItemResponse],
+        risk_by_profile: dict[int, dict[str, Any]],
+        generated_at: datetime,
+        reported_within_minutes: int,
+        queried_mmsi_count: int,
+        matched_position_count: int,
+        partial: bool,
+        error_message: str | None,
+    ) -> list[VesselPositionCitySituationItemResponse]:
+        grouped: dict[str, list[VesselPositionMonitorItemResponse]] = defaultdict(list)
+        for item in items:
+            grouped[self._position_city_code(item)].append(item)
+        result: list[VesselPositionCitySituationItemResponse] = []
+        for city_code, city_items in grouped.items():
+            fresh_items = [item for item in city_items if not self._is_stale_position(item, generated_at, reported_within_minutes)]
+            stats_items = fresh_items or city_items
+            ages = [Decimal(item.ship_age) for item in stats_items if item.ship_age is not None]
+            deadweights = [_to_decimal(item.deadweight_ton) for item in stats_items if item.deadweight_ton is not None]
+            deadweights = [value for value in deadweights if value is not None]
+            type_counts: dict[str | None, int] = defaultdict(int)
+            type_names: dict[str | None, str | None] = {}
+            for item in stats_items:
+                type_counts[item.ship_type_code] += 1
+                type_names[item.ship_type_code] = item.ship_type_name
+            longitudes = [_to_decimal(item.longitude) for item in stats_items]
+            latitudes = [_to_decimal(item.latitude) for item in stats_items]
+            longitudes = [value for value in longitudes if value is not None]
+            latitudes = [value for value in latitudes if value is not None]
+            result.append(
+                VesselPositionCitySituationItemResponse(
+                    city_code=None if city_code == UNKNOWN_CITY_CODE else city_code,
+                    city_name=self._position_city_name(stats_items[0]) if stats_items else UNKNOWN_CITY_NAME,
+                    longitude=(sum(longitudes, Decimal("0")) / Decimal(len(longitudes))).quantize(Decimal("0.000001")) if longitudes else None,
+                    latitude=(sum(latitudes, Decimal("0")) / Decimal(len(latitudes))).quantize(Decimal("0.000001")) if latitudes else None,
+                    positioned_count=len(fresh_items),
+                    contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
+                    average_ship_age=(sum(ages, Decimal("0")) / Decimal(len(ages))).quantize(Decimal("0.1")) if ages else None,
+                    total_deadweight_ton=sum(deadweights, Decimal("0")).quantize(Decimal("0.01")) if deadweights else Decimal("0"),
+                    ship_type_distribution=[
+                        VesselShipTypeDistributionItemResponse(
+                            ship_type_code=code,
+                            ship_type_name=type_names.get(code),
+                            count=count,
+                        )
+                        for code, count in sorted(type_counts.items(), key=lambda item: item[1], reverse=True)
+                    ],
+                    stale_position_count=len(city_items) - len(fresh_items),
+                    certificate_risk_count=sum(1 for item in fresh_items if risk_by_profile.get(item.id, {}).get("has_certificate_risk")),
+                    latest_position_time=max([item.position_time for item in city_items if item.position_time], default=None),
+                    mmsi_count=queried_mmsi_count if city_code == UNKNOWN_CITY_CODE else len(city_items),
+                    matched_position_count=matched_position_count if city_code == UNKNOWN_CITY_CODE else len(city_items),
+                    unpositioned_count=max(0, queried_mmsi_count - matched_position_count) if city_code == UNKNOWN_CITY_CODE else 0,
+                    is_partial=partial,
+                    error_message=error_message,
+                )
+            )
+        unpositioned_count = max(0, queried_mmsi_count - matched_position_count)
+        if unpositioned_count and UNKNOWN_CITY_CODE not in grouped:
+            result.append(
+                VesselPositionCitySituationItemResponse(
+                    city_code=None,
+                    city_name=UNKNOWN_CITY_NAME,
+                    longitude=None,
+                    latitude=None,
+                    positioned_count=0,
+                    contactable_position_count=0,
+                    average_ship_age=None,
+                    total_deadweight_ton=Decimal("0"),
+                    ship_type_distribution=[],
+                    stale_position_count=0,
+                    certificate_risk_count=0,
+                    latest_position_time=None,
+                    mmsi_count=queried_mmsi_count,
+                    matched_position_count=matched_position_count,
+                    unpositioned_count=unpositioned_count,
+                    is_partial=partial,
+                    error_message=error_message,
+                )
+            )
+        return sorted(result, key=lambda item: (item.positioned_count, item.total_deadweight_ton or Decimal("0")), reverse=True)
 
     def _empty_position_response(
         self,
@@ -2592,10 +3040,103 @@ class VesselService:
         *,
         documents: list[VesselOwnerDocumentResponse] | None = None,
     ) -> VesselOwnerResponse:
+        document_list = documents or []
         return VesselOwnerResponse(
             **_row_dict(row),
             party_type_name=label_map.get("PARTY_SUBJECT_TYPE", {}).get(row.party_type_code),
-            documents=documents or [],
+            documents=document_list,
+            document_ledger=self._owner_document_ledger(row, document_list, label_map),
+            document_completeness=self._owner_document_completeness(row, document_list),
+        )
+
+    def _owner_required_document_types(self, row: VesselOwnerPeriod) -> set[str]:
+        return OWNER_REQUIRED_DOCUMENT_TYPES_BY_PARTY.get(row.party_type_code or "UNKNOWN", set())
+
+    def _owner_document_ledger(
+        self,
+        owner: VesselOwnerPeriod,
+        documents: list[VesselOwnerDocumentResponse],
+        label_map: dict[str, dict[str, str]],
+    ) -> list[VesselOwnerDocumentLedgerItemResponse]:
+        required_types = self._owner_required_document_types(owner)
+        doc_by_type: dict[str, VesselOwnerDocumentResponse] = {}
+        for document in documents:
+            doc_by_type.setdefault(document.document_type_code, document)
+        types = [code for code in OWNER_DOCUMENT_LEDGER_TYPES if code in required_types or code in doc_by_type or code not in {"OTHER"}]
+        if "OTHER" in doc_by_type:
+            types.append("OTHER")
+        result: list[VesselOwnerDocumentLedgerItemResponse] = []
+        for code in dict.fromkeys(types):
+            document = doc_by_type.get(code)
+            status = self._owner_document_ledger_status(owner, document)
+            result.append(
+                VesselOwnerDocumentLedgerItemResponse(
+                    document_type_code=code,
+                    document_type_name=label_map.get("OWNER_DOCUMENT_TYPE", {}).get(code),
+                    required=code in required_types,
+                    status_code=status,
+                    status_name=self._owner_document_ledger_status_name(status),
+                    document=document,
+                )
+            )
+        return result
+
+    def _owner_document_ledger_status(
+        self,
+        owner: VesselOwnerPeriod,
+        document: VesselOwnerDocumentResponse | None,
+    ) -> str:
+        if owner.party_type_code not in OWNER_REQUIRED_DOCUMENT_TYPES_BY_PARTY:
+            return "UNKNOWN_OWNER_TYPE"
+        if document is None:
+            return "MISSING"
+        current = document.current_image_recognition
+        if current is not None and current.status_code == "NEED_CONFIRM":
+            return "NEED_CONFIRM"
+        if current is not None and current.status_code in ACTIVE_RECOGNITION_STATUSES:
+            return current.status_code
+        if current is not None and current.status_code == "FAILED":
+            return "RECOGNITION_FAILED"
+        if document.latest_confirmed_image_recognition is not None:
+            return "CONFIRMED"
+        return "ARCHIVED"
+
+    def _owner_document_ledger_status_name(self, status: str) -> str:
+        return {
+            "UNKNOWN_OWNER_TYPE": "主体类型未确认",
+            "MISSING": "缺失",
+            "ARCHIVED": "已归档",
+            "QUEUED": "排队识别",
+            "PROCESSING": "识别中",
+            "NEED_CONFIRM": "待确认",
+            "RECOGNITION_FAILED": "识别失败",
+            "CONFIRMED": "已确认",
+        }.get(status, status)
+
+    def _owner_document_completeness(
+        self,
+        owner: VesselOwnerPeriod,
+        documents: list[VesselOwnerDocumentResponse],
+    ) -> VesselOwnerDocumentCompletenessResponse:
+        required_types = self._owner_required_document_types(owner)
+        if not required_types:
+            return VesselOwnerDocumentCompletenessResponse(
+                status_code="UNKNOWN_OWNER_TYPE",
+                status_name="主体类型未确认",
+                required_count=0,
+                completed_count=0,
+                missing_document_type_codes=[],
+                message="主体类型未确认，无法计算资料完整度",
+            )
+        existing_types = {document.document_type_code for document in documents}
+        missing = sorted(required_types - existing_types)
+        return VesselOwnerDocumentCompletenessResponse(
+            status_code="COMPLETE" if not missing else "INCOMPLETE",
+            status_name="资料完整" if not missing else "资料缺失",
+            required_count=len(required_types),
+            completed_count=len(required_types) - len(missing),
+            missing_document_type_codes=missing,
+            message=None if not missing else "缺少必备所有方证照",
         )
 
     def _operator_response(self, row: VesselOperatorPeriod, label_map: dict[str, dict[str, str]]) -> VesselOperatorResponse:
