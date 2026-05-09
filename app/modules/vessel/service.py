@@ -8184,6 +8184,7 @@ class VesselService:
         await self._add_change_event(vessel_id, "CREATE_CONTROLLER_EVIDENCE", "新增实际控制人证据", None, _row_dict(row), operator_id, object_type="vessel_controller_evidence", object_id=row.id)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
         return self._controller_evidence_response(row, await _load_label_map(self.db))
 
     async def update_controller_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselControllerEvidenceResponse:
@@ -8210,6 +8211,7 @@ class VesselService:
         await self._add_change_event(vessel_id, "UPDATE_CONTROLLER_EVIDENCE", "更新实际控制人证据", before, _row_dict(row), operator_id, object_type="vessel_controller_evidence", object_id=row.id, reason=reason)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
         return self._controller_evidence_response(row, await _load_label_map(self.db))
 
     async def void_controller_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselControllerEvidenceResponse:
@@ -8227,6 +8229,7 @@ class VesselService:
         await self._add_change_event(vessel_id, "VOID_CONTROLLER_EVIDENCE", "作废实际控制人证据", before, _row_dict(row), operator_id, object_type="vessel_controller_evidence", object_id=row.id, reason=row.void_reason)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
         return self._controller_evidence_response(row, await _load_label_map(self.db))
 
     async def list_affiliation_evidence(self, vessel_id: int) -> list[VesselAffiliationEvidenceResponse]:
@@ -8259,6 +8262,7 @@ class VesselService:
         await self._add_change_event(vessel_id, "CREATE_AFFILIATION_EVIDENCE", "新增挂靠关系证据", None, _row_dict(row), operator_id, object_type="vessel_affiliation_evidence", object_id=row.id)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
         return self._affiliation_evidence_response(row, await _load_label_map(self.db))
 
     async def update_affiliation_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselAffiliationEvidenceResponse:
@@ -8286,6 +8290,7 @@ class VesselService:
         await self._add_change_event(vessel_id, "UPDATE_AFFILIATION_EVIDENCE", "更新挂靠关系证据", before, _row_dict(row), operator_id, object_type="vessel_affiliation_evidence", object_id=row.id, reason=reason)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
         return self._affiliation_evidence_response(row, await _load_label_map(self.db))
 
     async def void_affiliation_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselAffiliationEvidenceResponse:
@@ -8303,6 +8308,7 @@ class VesselService:
         await self._add_change_event(vessel_id, "VOID_AFFILIATION_EVIDENCE", "作废挂靠关系证据", before, _row_dict(row), operator_id, object_type="vessel_affiliation_evidence", object_id=row.id, reason=row.void_reason)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
         return self._affiliation_evidence_response(row, await _load_label_map(self.db))
 
     async def list_recognition_queue(self, query: Any) -> PageResponse[VesselRecognitionQueueItemResponse]:

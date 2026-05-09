@@ -25,6 +25,8 @@ from app.models.vessel import (
 from app.modules.vessel.governance_service import VesselGovernanceService
 from app.modules.vessel.schemas import (
     VesselBlacklistSignalCreateRequest,
+    VesselControllerEvidenceCreateRequest,
+    VesselControllerEvidenceUpdateRequest,
     VesselGovernanceTaskActionRequest,
     VesselGovernanceTaskQuery,
     VesselVoidRequest,
@@ -91,6 +93,16 @@ def test_round10_openapi_models_and_dicts_exist() -> None:
         "VESSEL_BLACKLIST_SIGNAL_TYPE",
         "VESSEL_BLACKLIST_SIGNAL_STATUS",
     }.issubset(dict_codes)
+    dict_items = {
+        item["dict_code"]: {option["item_code"]: option["item_name"] for option in item["items"]}
+        for item in BUILTIN_DICTS
+    }
+    assert dict_items["VESSEL_DATA_SOURCE_TYPE"]["GOVERNANCE_TASK"] == "治理任务"
+    assert dict_items["VESSEL_DATA_SOURCE_TYPE"]["VESSEL_SUMMARY"] == "船舶摘要"
+    assert dict_items["VESSEL_DATA_SOURCE_TYPE"]["VESSEL_SPATIAL_OBSERVATION"] == "空间观测"
+    assert dict_items["VESSEL_DATA_SOURCE_TYPE"]["VESSEL_NODE_OBSERVATION"] == "节点观测"
+    assert dict_items["VESSEL_DATA_SOURCE_TYPE"]["VESSEL_ROUTE_SEGMENT_OBSERVATION"] == "航线段观测"
+    assert dict_items["ANALYSIS_NOT_COMPUTABLE_REASON"]["NO_GOVERNANCE_SAMPLE"] == "暂无治理样本"
 
 
 @pytest.mark.asyncio
@@ -242,6 +254,68 @@ async def test_controller_evidence_requires_approval_before_risk_is_cleared(sess
     await session.commit()
     risk = await VesselService(session).refresh_compliance_risk(1, operator_id=1)
     assert not any(item.risk_type_code == "CONTROLLER_UNKNOWN" and item.status_code in {"OPEN", "IN_REVIEW", "EVIDENCE_ADDED"} for item in risk.signals)
+
+
+@pytest.mark.asyncio
+async def test_controller_evidence_submit_review_resolve_and_void_reopens_risk(session: AsyncSession) -> None:
+    await _seed_profile(session)
+    vessel_service = VesselService(session)
+    governance_service = VesselGovernanceService(session)
+
+    risk = await vessel_service.refresh_compliance_risk(1, operator_id=1)
+    assert any(item.risk_type_code == "CONTROLLER_UNKNOWN" for item in risk.signals)
+
+    evidence = await vessel_service.create_controller_evidence(
+        1,
+        VesselControllerEvidenceCreateRequest(
+            party_name="待审控制人",
+            controller_role_code="EVIDENCE_PROVIDER",
+            confidence_level="HIGH",
+            evidence_summary="合同与付款流水指向同一控制主体",
+            verified_status_code="DRAFT",
+        ),
+        operator_id=8,
+    )
+    risk = await vessel_service.refresh_compliance_risk(1, operator_id=1)
+    assert any(item.risk_type_code == "CONTROLLER_UNKNOWN" and item.status_code in {"OPEN", "IN_REVIEW", "EVIDENCE_ADDED"} for item in risk.signals)
+
+    pending = await vessel_service.update_controller_evidence(
+        1,
+        evidence.id,
+        VesselControllerEvidenceUpdateRequest(
+            revision=evidence.revision,
+            verified_status_code="PENDING",
+            evidence_json={"submitted_from": "test"},
+        ),
+        operator_id=8,
+    )
+    assert pending.verified_status_code == "PENDING"
+    assert pending.audit_task_id is not None
+
+    task_page = await governance_service.list_tasks(
+        VesselGovernanceTaskQuery(source_object_type="VESSEL_CONTROLLER_EVIDENCE", status_code="OPEN", page=1, page_size=20)
+    )
+    task = next(item for item in task_page.items if item.source_object_id == str(evidence.id))
+    await governance_service.update_task(
+        task.id,
+        VesselGovernanceTaskActionRequest(action_code="RESOLVE", revision=task.revision, reason="控制人证据审核通过"),
+        operator_id=9,
+    )
+    approved = await session.get(VesselControllerEvidence, evidence.id)
+    assert approved is not None
+    assert approved.verified_status_code == "APPROVED"
+    risk = await vessel_service.refresh_compliance_risk(1, operator_id=9)
+    assert not any(item.risk_type_code == "CONTROLLER_UNKNOWN" and item.status_code in {"OPEN", "IN_REVIEW", "EVIDENCE_ADDED"} for item in risk.signals)
+
+    voided = await vessel_service.void_controller_evidence(
+        1,
+        evidence.id,
+        VesselVoidRequest(revision=approved.revision, reason="证据撤回"),
+        operator_id=9,
+    )
+    assert voided.status_code == "VOIDED"
+    risk = await vessel_service.refresh_compliance_risk(1, operator_id=9)
+    assert any(item.risk_type_code == "CONTROLLER_UNKNOWN" and item.status_code in {"OPEN", "IN_REVIEW", "EVIDENCE_ADDED"} for item in risk.signals)
 
 
 @pytest.mark.asyncio

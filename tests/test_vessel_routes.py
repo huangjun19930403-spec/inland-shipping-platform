@@ -176,6 +176,43 @@ def test_vessel_round2_asset_center_routes_exist_before_dynamic_id() -> None:
     assert "business" not in ais_card_props
 
 
+def test_vessel_seed_menu_groups_keep_business_entries_visible() -> None:
+    from scripts.seed_system_base import MENUS, ROLE_MENU_CODES
+
+    menu_by_code = {item["menu_code"]: item for item in MENUS}
+    group_codes = {
+        "VESSEL_WORKBENCH_GROUP",
+        "VESSEL_ASSET_GROUP",
+        "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_ANALYSIS_GROUP",
+    }
+    assert group_codes.issubset(menu_by_code)
+    for code in group_codes:
+        assert menu_by_code[code]["parent_code"] == "VESSEL_ROOT"
+        assert menu_by_code[code]["menu_type_code"] == "DIRECTORY"
+
+    expected_parent = {
+        "VESSEL_GOVERNANCE_DASHBOARD": "VESSEL_WORKBENCH_GROUP",
+        "VESSEL_GOVERNANCE_TASKS": "VESSEL_WORKBENCH_GROUP",
+        "VESSEL_ASSETS": "VESSEL_ASSET_GROUP",
+        "VESSEL_PROFILE_ENTRY": "VESSEL_ASSET_GROUP",
+        "VESSEL_QUALITY": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_RELATIONS_ENTRY": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_COMPLIANCE_RISKS": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_RECOGNITIONS": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_AIS_SITUATION": "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_NODE_ROUTE_ANALYSIS": "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_CANDIDATE_ANALYSIS": "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_SHIP_ANALYSIS": "VESSEL_ANALYSIS_GROUP",
+    }
+    for code, parent_code in expected_parent.items():
+        assert menu_by_code[code]["parent_code"] == parent_code
+
+    required_codes = {"VESSEL_ROOT", *group_codes, *expected_parent}
+    for role_code in ("DATA_STEWARD", "OPS_ANALYST"):
+        assert required_codes.issubset(set(ROLE_MENU_CODES[role_code]))
+
+
 def test_vessel_round3_asset_summary_routes_and_schema_exist() -> None:
     paths = app.openapi()["paths"]
 

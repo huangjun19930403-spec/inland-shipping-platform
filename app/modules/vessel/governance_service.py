@@ -174,7 +174,7 @@ class VesselGovernanceService:
             self._metric("high_risk_open_count", "高风险未闭合数", open_high_risks, "条", active_risks, latest),
             self._metric("ocr_pending_fields", "OCR 待确认字段", ocr_pending, "项", ocr_pending, latest),
             self._metric("unmatched_mmsi", "未匹配 MMSI", unmatched_mmsi, "个", unmatched_mmsi, latest),
-            self._metric("unknown_risk_ratio", "UNKNOWN 风险占比", self._rate(unknown_risks, active_risks), "%", active_risks, latest),
+            self._metric("unknown_risk_ratio", "未知风险占比", self._rate(unknown_risks, active_risks), "%", active_risks, latest),
             self._metric("high_quality_profile_ratio", "高质量档案占比", self._rate(high_quality, summary_total), "%", summary_total, latest),
         ]
         return VesselGovernanceDashboardResponse(
