@@ -27,7 +27,13 @@ from app.modules.analysis.schemas import (
     PriceAnalysisOverviewResponse,
     RegionAnalysisQuery,
     RegionAnalysisOverviewResponse,
+    RegionSupplyDemandAnalysisResponse,
     ShipAnalysisOverviewResponse,
+    VesselAssetAnalysisResponse,
+    VesselCandidateFitAnalysisResponse,
+    VesselQualityAnalysisResponse,
+    VesselRiskAnalysisResponse,
+    VesselTrajectoryAnalysisResponse,
 )
 from app.modules.analysis.service import AnalysisDashboardService
 
@@ -211,6 +217,61 @@ async def get_ship_flow_map(
     return await service.ship_flow_map(start, end, 40)
 
 
+@router.get("/vessels/assets", response_model=VesselAssetAnalysisResponse)
+async def get_vessel_asset_analysis(
+    query: AnalysisDateRangeQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.vessel_asset_analysis(query.date_from, query.date_to)
+
+
+@router.get("/vessels/trajectory", response_model=VesselTrajectoryAnalysisResponse)
+async def get_vessel_trajectory_analysis(
+    query: AnalysisDateRangeQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.vessel_trajectory_analysis(query.date_from, query.date_to)
+
+
+@router.get("/vessels/quality", response_model=VesselQualityAnalysisResponse)
+async def get_vessel_quality_analysis(
+    query: AnalysisDateRangeQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.vessel_quality_analysis(query.date_from, query.date_to)
+
+
+@router.get("/vessels/risks", response_model=VesselRiskAnalysisResponse)
+async def get_vessel_risk_analysis(
+    query: AnalysisDateRangeQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.vessel_risk_analysis(query.date_from, query.date_to)
+
+
+@router.get("/vessels/candidate-fit", response_model=VesselCandidateFitAnalysisResponse)
+async def get_vessel_candidate_fit_analysis(
+    query: AnalysisDateRangeQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.vessel_candidate_fit_analysis(query.date_from, query.date_to)
+
+
 @router.get("/regions/overview", response_model=RegionAnalysisOverviewResponse)
 async def get_region_analysis_overview(
     query: RegionAnalysisQuery = Depends(),
@@ -242,6 +303,17 @@ async def get_region_heat_map(
         include_boundary=query.include_boundary,
         boundary_precision=query.boundary_precision,
     )
+
+
+@router.get("/regions/supply-demand", response_model=RegionSupplyDemandAnalysisResponse)
+async def get_region_supply_demand_analysis(
+    query: AnalysisDateRangeQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = AnalysisDashboardService(db)
+    return await service.region_supply_demand_analysis(query.date_from, query.date_to)
 
 
 @router.get("/flows/overview", response_model=FlowAnalysisOverviewResponse)

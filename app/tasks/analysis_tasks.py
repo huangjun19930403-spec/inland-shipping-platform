@@ -100,7 +100,7 @@ async def _run_analysis_job(
 
         try:
             service = AnalysisStatisticsService(db)
-            result = await service.run(job_code, start, end, force_rebuild=force_rebuild)
+            result = await service.run(job_code, start, end, force_rebuild=force_rebuild, job_run_id=run.id)
             finished = datetime.utcnow()
             run.status_code = "SUCCESS"
             run.status_name = _status_name("SUCCESS")

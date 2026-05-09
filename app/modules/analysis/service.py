@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -15,6 +16,7 @@ from app.models.address import AdminRegion, AdminRegionBoundary, Region, Transpo
 from app.models.analysis import (
     AnalysisJobDefinition,
     AnalysisJobRun,
+    FactCandidateFitDaily,
     FactFreightCityDaily,
     FactFreightCommodityDaily,
     FactFreightDaily,
@@ -22,9 +24,15 @@ from app.models.analysis import (
     FactFreightNodeDaily,
     FactFreightPriceDaily,
     FactRegionDaily,
+    FactRegionSupplyDemandDaily,
     FactShipCityDaily,
     FactShipDaily,
     FactShipFlowDaily,
+    FactVesselAisFreshnessDaily,
+    FactVesselAssetDaily,
+    FactVesselQualityDaily,
+    FactVesselRiskDaily,
+    FactVesselTrajectoryDaily,
 )
 from app.models.commodity import CommodityStandard
 from app.models.freight import Freight
@@ -48,10 +56,17 @@ from app.modules.analysis.schemas import (
     FreightAnalysisOverviewResponse,
     HeatMapItem,
     MetricCard,
+    MetricEvidence,
     PageResponse,
     PriceAnalysisOverviewResponse,
+    RegionSupplyDemandAnalysisResponse,
     RegionAnalysisOverviewResponse,
     ShipAnalysisOverviewResponse,
+    VesselAssetAnalysisResponse,
+    VesselCandidateFitAnalysisResponse,
+    VesselQualityAnalysisResponse,
+    VesselRiskAnalysisResponse,
+    VesselTrajectoryAnalysisResponse,
 )
 
 
@@ -76,6 +91,50 @@ def _metric(code: str, title: str, value: Any, unit: str | None = None, descript
     else:
         display_value = round(numeric, 2)
     return MetricCard(code=code, title=title, value=display_value, unit=unit, description=description)
+
+
+def _reasons(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    if value:
+        return [str(value)]
+    return []
+
+
+def _evidence(
+    code: str,
+    value: Any,
+    *,
+    unit: str | None,
+    start: date,
+    end: date,
+    row: Any | None = None,
+    last_successful_run_at: datetime | None = None,
+    extra: dict | None = None,
+) -> MetricEvidence:
+    numeric_value: float | int | None
+    if value is None:
+        numeric_value = None
+    else:
+        numeric = _num(value)
+        numeric_value = int(numeric) if numeric.is_integer() else round(numeric, 4)
+    return MetricEvidence(
+        metric_code=code,
+        value=numeric_value,
+        unit=unit,
+        date_from=start,
+        date_to=end,
+        source_layer_code=getattr(row, "source_layer_code", None) if row is not None else None,
+        sample_count=getattr(row, "sample_count", None) if row is not None else None,
+        coverage_rate=round(_num(getattr(row, "coverage_rate", None)), 2) if row is not None and getattr(row, "coverage_rate", None) is not None else None,
+        confidence_level=getattr(row, "confidence_level", None) if row is not None else None,
+        not_computable_reasons=_reasons(getattr(row, "not_computable_reasons_json", None)) if row is not None else [],
+        uncertainty_reasons=_reasons(getattr(row, "uncertainty_reasons_json", None)) if row is not None else [],
+        generated_at=getattr(row, "generated_at", None) if row is not None else None,
+        source_updated_at=getattr(row, "source_updated_at", None) if row is not None else None,
+        last_successful_run_at=last_successful_run_at,
+        extra=extra,
+    )
 
 
 def _job_to_response(entity: AnalysisJobRun) -> AnalysisJobRunResponse:
@@ -794,6 +853,259 @@ class AnalysisDashboardService:
                 for row in commodity_rows
             ],
             route_prices=route_prices,
+        )
+
+    async def _last_successful_run_at(self, job_code: str) -> datetime | None:
+        row = await self.db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == job_code))
+        if row and row.last_status_code == "SUCCESS":
+            return row.last_finished_at
+        latest = await self.db.scalar(
+            select(func.max(AnalysisJobRun.finished_at)).where(
+                AnalysisJobRun.job_code == job_code,
+                AnalysisJobRun.status_code == "SUCCESS",
+            )
+        )
+        return latest
+
+    def _source_status(self, rows: list[Any], start: date, end: date, last_successful_run_at: datetime | None) -> list[MetricEvidence]:
+        if not rows:
+            return [
+                MetricEvidence(
+                    metric_code="source_status",
+                    value=None,
+                    unit=None,
+                    date_from=start,
+                    date_to=end,
+                    source_layer_code="NOT_AVAILABLE",
+                    sample_count=0,
+                    coverage_rate=0,
+                    confidence_level="UNKNOWN",
+                    not_computable_reasons=["SOURCE_MISSING"],
+                    uncertainty_reasons=["分析事实未生成"],
+                    last_successful_run_at=last_successful_run_at,
+                )
+            ]
+        buckets: dict[tuple[str | None, str | None], dict[str, Any]] = defaultdict(
+            lambda: {"count": 0, "sample": 0, "coverage": [], "reasons": set(), "updated": None, "generated": None}
+        )
+        for row in rows:
+            key = (getattr(row, "source_layer_code", None), getattr(row, "confidence_level", None))
+            item = buckets[key]
+            item["count"] += 1
+            item["sample"] += int(getattr(row, "sample_count", None) or 0)
+            coverage = getattr(row, "coverage_rate", None)
+            if coverage is not None:
+                item["coverage"].append(_num(coverage))
+            item["reasons"].update(_reasons(getattr(row, "not_computable_reasons_json", None)))
+            for field, attr in (("updated", "source_updated_at"), ("generated", "generated_at")):
+                value = getattr(row, attr, None)
+                if value and (item[field] is None or value > item[field]):
+                    item[field] = value
+        return [
+            MetricEvidence(
+                metric_code="source_status",
+                value=item["count"],
+                unit="条",
+                date_from=start,
+                date_to=end,
+                source_layer_code=source_layer,
+                sample_count=item["sample"],
+                coverage_rate=round(sum(item["coverage"]) / len(item["coverage"]), 2) if item["coverage"] else None,
+                confidence_level=confidence,
+                not_computable_reasons=sorted(item["reasons"]),
+                generated_at=item["generated"],
+                source_updated_at=item["updated"],
+                last_successful_run_at=last_successful_run_at,
+            )
+            for (source_layer, confidence), item in sorted(buckets.items(), key=lambda pair: str(pair[0]))
+        ]
+
+    async def vessel_asset_analysis(self, date_from: date | None, date_to: date | None) -> VesselAssetAnalysisResponse:
+        start, end = await self._date_range(date_from, date_to)
+        rows = (
+            await self.db.execute(
+                select(FactVesselAssetDaily)
+                .where(FactVesselAssetDaily.stat_date >= start, FactVesselAssetDaily.stat_date <= end)
+                .order_by(FactVesselAssetDaily.stat_date.asc())
+            )
+        ).scalars().all()
+        ref = rows[0] if rows else None
+        last = await self._last_successful_run_at("ANALYSIS_VESSEL_ASSET_DAILY")
+        latest_date = max((row.stat_date for row in rows), default=None)
+        latest_rows = [row for row in rows if row.stat_date == latest_date] if latest_date else []
+        quality_totals: dict[str, int] = defaultdict(int)
+        risk_totals: dict[str, int] = defaultdict(int)
+        for row in latest_rows:
+            quality_totals[row.quality_level] += int(row.profile_count or 0)
+            risk_totals[row.risk_level] += int(row.profile_count or 0)
+        return VesselAssetAnalysisResponse(
+            date_from=start,
+            date_to=end,
+            metrics=[
+                _evidence("profile_count", sum(row.profile_count or 0 for row in latest_rows), unit="艘", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("trusted_profile_count", sum(row.trusted_profile_count or 0 for row in latest_rows), unit="艘", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("low_quality_count", sum(row.low_quality_count or 0 for row in latest_rows), unit="艘", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("active_sample_count", sum(row.active_sample_count or 0 for row in latest_rows), unit="艘", start=start, end=end, row=ref, last_successful_run_at=last),
+            ],
+            quality_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(quality_totals.items())],
+            risk_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(risk_totals.items())],
+            source_status=self._source_status(rows, start, end, last),
+        )
+
+    async def vessel_trajectory_analysis(self, date_from: date | None, date_to: date | None) -> VesselTrajectoryAnalysisResponse:
+        start, end = await self._date_range(date_from, date_to)
+        rows = (
+            await self.db.execute(
+                select(FactVesselTrajectoryDaily)
+                .where(FactVesselTrajectoryDaily.stat_date >= start, FactVesselTrajectoryDaily.stat_date <= end)
+                .order_by(FactVesselTrajectoryDaily.stat_date.asc())
+            )
+        ).scalars().all()
+        ref = rows[0] if rows else None
+        last = await self._last_successful_run_at("ANALYSIS_VESSEL_TRAJECTORY_DAILY")
+        by_date: dict[date, list[FactVesselTrajectoryDaily]] = defaultdict(list)
+        gap_buckets: dict[str, int] = defaultdict(int)
+        for row in rows:
+            by_date[row.stat_date].append(row)
+            gap_buckets["有断点" if int(row.gap_count or 0) > 0 else "无断点"] += 1
+        coverage_trend = []
+        for stat_date, day_rows in sorted(by_date.items()):
+            coverages = [_num(row.coverage_rate) for row in day_rows if row.coverage_rate is not None]
+            coverage_trend.append(ChartPoint(name=stat_date.strftime("%m-%d"), date=stat_date, value=round(sum(coverages) / len(coverages), 2) if coverages else 0))
+        return VesselTrajectoryAnalysisResponse(
+            date_from=start,
+            date_to=end,
+            metrics=[
+                _evidence("route_match_count", sum(row.route_match_count or 0 for row in rows), unit="次", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("gap_count", sum(row.gap_count or 0 for row in rows), unit="个", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("not_computable_count", sum(1 for row in rows if row.not_computable_reasons_json), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+            ],
+            coverage_trend=coverage_trend,
+            gap_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(gap_buckets.items())],
+            source_status=self._source_status(rows, start, end, last),
+        )
+
+    async def vessel_quality_analysis(self, date_from: date | None, date_to: date | None) -> VesselQualityAnalysisResponse:
+        start, end = await self._date_range(date_from, date_to)
+        rows = (
+            await self.db.execute(
+                select(FactVesselQualityDaily).where(FactVesselQualityDaily.stat_date >= start, FactVesselQualityDaily.stat_date <= end)
+            )
+        ).scalars().all()
+        ref = rows[0] if rows else None
+        last = await self._last_successful_run_at("ANALYSIS_VESSEL_QUALITY_DAILY")
+        issue_totals: dict[str, int] = defaultdict(int)
+        severity_totals: dict[str, int] = defaultdict(int)
+        for row in rows:
+            count = int(row.opened_count or 0) + int(row.closed_count or 0)
+            issue_totals[row.issue_type_code] += count
+            severity_totals[row.severity_code] += count
+        return VesselQualityAnalysisResponse(
+            date_from=start,
+            date_to=end,
+            metrics=[
+                _evidence("opened_count", sum(row.opened_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("closed_count", sum(row.closed_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("avg_close_hours", sum(_num(row.avg_close_hours) for row in rows) / len(rows) if rows else None, unit="小时", start=start, end=end, row=ref, last_successful_run_at=last),
+            ],
+            issue_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(issue_totals.items())],
+            severity_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(severity_totals.items())],
+            source_status=self._source_status(rows, start, end, last),
+        )
+
+    async def vessel_risk_analysis(self, date_from: date | None, date_to: date | None) -> VesselRiskAnalysisResponse:
+        start, end = await self._date_range(date_from, date_to)
+        rows = (
+            await self.db.execute(
+                select(FactVesselRiskDaily).where(FactVesselRiskDaily.stat_date >= start, FactVesselRiskDaily.stat_date <= end)
+            )
+        ).scalars().all()
+        ref = rows[0] if rows else None
+        last = await self._last_successful_run_at("ANALYSIS_VESSEL_RISK_DAILY")
+        level_totals: dict[str, int] = defaultdict(int)
+        type_totals: dict[str, int] = defaultdict(int)
+        for row in rows:
+            level_totals[row.risk_level] += int(row.risk_count or 0)
+            type_totals[row.risk_type_code] += int(row.risk_count or 0)
+        return VesselRiskAnalysisResponse(
+            date_from=start,
+            date_to=end,
+            metrics=[
+                _evidence("risk_count", sum(row.risk_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("high_count", sum(row.high_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("unknown_count", sum(row.unknown_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+            ],
+            risk_level_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(level_totals.items())],
+            risk_type_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(type_totals.items())],
+            source_status=self._source_status(rows, start, end, last),
+        )
+
+    async def vessel_candidate_fit_analysis(self, date_from: date | None, date_to: date | None) -> VesselCandidateFitAnalysisResponse:
+        start, end = await self._date_range(date_from, date_to)
+        rows = (
+            await self.db.execute(
+                select(FactCandidateFitDaily).where(FactCandidateFitDaily.stat_date >= start, FactCandidateFitDaily.stat_date <= end)
+            )
+        ).scalars().all()
+        ref = rows[0] if rows else None
+        last = await self._last_successful_run_at("ANALYSIS_CANDIDATE_FIT_DAILY")
+        value_totals: dict[str, int] = defaultdict(int)
+        annotation_totals: dict[str, int] = defaultdict(int)
+        for row in rows:
+            value_totals[row.candidate_value_level] += int(row.candidate_item_count or 0)
+            for key, value in (row.annotation_distribution_json or {}).items():
+                annotation_totals[str(key)] += int(value or 0)
+        return VesselCandidateFitAnalysisResponse(
+            date_from=start,
+            date_to=end,
+            metrics=[
+                _evidence("analysis_count", sum(row.analysis_count or 0 for row in rows), unit="次", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("candidate_item_count", sum(row.candidate_item_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("low_confidence_count", sum(row.low_confidence_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("not_computable_count", sum(row.not_computable_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+            ],
+            value_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(value_totals.items())],
+            annotation_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(annotation_totals.items())],
+            source_status=self._source_status(rows, start, end, last),
+        )
+
+    async def region_supply_demand_analysis(self, date_from: date | None, date_to: date | None) -> RegionSupplyDemandAnalysisResponse:
+        start, end = await self._date_range(date_from, date_to)
+        rows = (
+            await self.db.execute(
+                select(FactRegionSupplyDemandDaily).where(
+                    FactRegionSupplyDemandDaily.stat_date >= start,
+                    FactRegionSupplyDemandDaily.stat_date <= end,
+                )
+            )
+        ).scalars().all()
+        ref = rows[0] if rows else None
+        last = await self._last_successful_run_at("ANALYSIS_REGION_SUPPLY_DEMAND_DAILY")
+        tension_distribution: dict[str, int] = defaultdict(int)
+        not_computable_distribution: dict[str, int] = defaultdict(int)
+        for row in rows:
+            if row.tension_index is None:
+                tension_distribution["不可计算"] += 1
+            elif _num(row.tension_index) >= 1.5:
+                tension_distribution["高张力"] += 1
+            elif _num(row.tension_index) >= 0.8:
+                tension_distribution["中张力"] += 1
+            else:
+                tension_distribution["低张力"] += 1
+            for reason in _reasons(row.not_computable_reasons_json):
+                not_computable_distribution[reason] += 1
+        return RegionSupplyDemandAnalysisResponse(
+            date_from=start,
+            date_to=end,
+            metrics=[
+                _evidence("demand_sample_count", sum(row.demand_sample_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("ais_supply_count", sum(row.ais_supply_count or 0 for row in rows), unit="艘", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("trusted_supply", sum(row.trusted_supply or 0 for row in rows), unit="艘", start=start, end=end, row=ref, last_successful_run_at=last),
+                _evidence("unmatched_mmsi_count", sum(row.unmatched_mmsi_count or 0 for row in rows), unit="条", start=start, end=end, row=ref, last_successful_run_at=last),
+            ],
+            tension_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(tension_distribution.items())],
+            not_computable_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(not_computable_distribution.items())],
+            source_status=self._source_status(rows, start, end, last),
         )
 
     async def list_jobs(

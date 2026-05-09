@@ -37,6 +37,25 @@ class MetricCard(BaseModel):
     description: str | None = None
 
 
+class MetricEvidence(BaseModel):
+    metric_code: str
+    value: float | int | None
+    unit: str | None = None
+    stat_date: date | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    source_layer_code: str | None = None
+    sample_count: int | None = None
+    coverage_rate: float | None = None
+    confidence_level: str | None = None
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    uncertainty_reasons: list[str] = Field(default_factory=list)
+    generated_at: datetime | None = None
+    source_updated_at: datetime | None = None
+    last_successful_run_at: datetime | None = None
+    extra: dict | None = None
+
+
 class ChartPoint(BaseModel):
     name: str
     value: float | int
@@ -153,6 +172,60 @@ class PriceAnalysisOverviewResponse(BaseModel):
     route_prices: list[FlowMapItem]
 
 
+class VesselAssetAnalysisResponse(BaseModel):
+    date_from: date
+    date_to: date
+    metrics: list[MetricEvidence]
+    quality_distribution: list[ChartPoint]
+    risk_distribution: list[ChartPoint]
+    source_status: list[MetricEvidence] = Field(default_factory=list)
+
+
+class VesselTrajectoryAnalysisResponse(BaseModel):
+    date_from: date
+    date_to: date
+    metrics: list[MetricEvidence]
+    coverage_trend: list[ChartPoint]
+    gap_distribution: list[ChartPoint]
+    source_status: list[MetricEvidence] = Field(default_factory=list)
+
+
+class VesselQualityAnalysisResponse(BaseModel):
+    date_from: date
+    date_to: date
+    metrics: list[MetricEvidence]
+    issue_distribution: list[ChartPoint]
+    severity_distribution: list[ChartPoint]
+    source_status: list[MetricEvidence] = Field(default_factory=list)
+
+
+class VesselRiskAnalysisResponse(BaseModel):
+    date_from: date
+    date_to: date
+    metrics: list[MetricEvidence]
+    risk_level_distribution: list[ChartPoint]
+    risk_type_distribution: list[ChartPoint]
+    source_status: list[MetricEvidence] = Field(default_factory=list)
+
+
+class VesselCandidateFitAnalysisResponse(BaseModel):
+    date_from: date
+    date_to: date
+    metrics: list[MetricEvidence]
+    value_distribution: list[ChartPoint]
+    annotation_distribution: list[ChartPoint]
+    source_status: list[MetricEvidence] = Field(default_factory=list)
+
+
+class RegionSupplyDemandAnalysisResponse(BaseModel):
+    date_from: date
+    date_to: date
+    metrics: list[MetricEvidence]
+    tension_distribution: list[ChartPoint]
+    not_computable_distribution: list[ChartPoint]
+    source_status: list[MetricEvidence] = Field(default_factory=list)
+
+
 class AnalysisJobRunQuery(BaseModel):
     module_code: str | None = None
     status_code: str | None = None
@@ -172,7 +245,7 @@ class AnalysisTaskQuery(BaseModel):
 class AnalysisTaskTriggerRequest(BaseModel):
     date_from: date
     date_to: date
-    force_rebuild: bool = True
+    force_rebuild: bool = False
     parameters_json: dict | None = None
 
 

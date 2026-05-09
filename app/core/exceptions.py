@@ -23,13 +23,13 @@ class NotFoundError(AppException):
 
 
 class ValidationError(AppException):
-    def __init__(self, message: str, detail: Any = None) -> None:
-        super().__init__(message=message, code="422000", status_code=422, detail=detail)
+    def __init__(self, message: str, detail: Any = None, code: str = "422000") -> None:
+        super().__init__(message=message, code=code, status_code=422, detail=detail)
 
 
 class ConflictError(AppException):
-    def __init__(self, message: str) -> None:
-        super().__init__(message=message, code="409000", status_code=409)
+    def __init__(self, message: str, code: str = "409000", detail: Any = None) -> None:
+        super().__init__(message=message, code=code, status_code=409, detail=detail)
 
 
 class AuthenticationError(AppException):

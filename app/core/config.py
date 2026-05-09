@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # 应用基础配置
     APP_NAME: str = "Inland Shipping Platform"
     APP_VERSION: str = "3.0.0"
+    APP_ENV: str = "local"
     DEBUG: bool = True
 
     # 数据库
@@ -19,10 +20,21 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://127.0.0.1:6379/1"
     ANALYSIS_CELERY_EAGER: bool = False
     ANALYSIS_DEFAULT_DAILY_CRON: str = "20 2 * * *"
-    VESSEL_CITY_SITUATION_CACHE_BACKEND: str = "memory"  # memory / redis
+    VESSEL_CITY_SITUATION_CACHE_BACKEND: str = "redis"  # redis / memory(local only)
     VESSEL_CITY_SITUATION_CACHE_TTL_SECONDS: int = 60
     VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS: int = 300
     VESSEL_CITY_SITUATION_PRECOMPUTE_SECONDS: int = 60
+    VESSEL_AIS_PROFILE_LIMIT: int = 2000
+    VESSEL_AIS_ES_BATCH_SIZE: int = 500
+    VESSEL_AIS_ES_MAX_CONCURRENCY: int = 4
+    VESSEL_AIS_UNMATCHED_SCAN_LIMIT: int = 1000
+    VESSEL_SPATIAL_NODE_DEFAULT_RADIUS_KM: float = 2.0
+    VESSEL_SPATIAL_NODE_STAY_MINUTES: int = 120
+    VESSEL_SPATIAL_ROUTE_BUFFER_KM: float = 2.0
+    VESSEL_SPATIAL_DIRECTION_TOLERANCE_DEG: float = 45.0
+    VESSEL_SPATIAL_MIN_COVERAGE_RATE: float = 40.0
+    VESSEL_SPATIAL_SNAPSHOT_TTL_SECONDS: int = 900
+    VESSEL_SPATIAL_HISTORY_MAX_POINTS: int = 5000
 
     # 认证
     SECRET_KEY: str = "inland-shipping-platform-secret-key"

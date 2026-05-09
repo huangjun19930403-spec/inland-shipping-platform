@@ -121,6 +121,10 @@ class VesselRepository:
         identifier_type_code: str,
         identifier_value: str,
         source_type_code: str = "MANUAL",
+        *,
+        source_trace_id: str | None = None,
+        status_code: str = "ACTIVE",
+        confidence_score: int = 100,
     ) -> VesselIdentifierHistory:
         row = VesselIdentifierHistory(
             vessel_profile_id=vessel_id,
@@ -129,6 +133,9 @@ class VesselRepository:
             start_date=None,
             end_date=None,
             source_type_code=source_type_code,
+            source_trace_id=source_trace_id,
+            status_code=status_code,
+            confidence_score=confidence_score,
             created_at=datetime.utcnow(),
         )
         self.db.add(row)

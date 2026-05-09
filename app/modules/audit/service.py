@@ -11,7 +11,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.models.address import Region, TransportNode
 from app.models.commodity import CommodityStandard
 from app.models.freight import Freight
-from app.models.vessel import VesselProfile
+from app.models.vessel import VesselAffiliationEvidence, VesselControllerEvidence, VesselProfile
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.audit.repository import (
     AuditRecordRepository,
@@ -42,6 +42,13 @@ _OBJECT_TYPE_META = {
     "REGION": ("业务区域", "success"),
     "COMMODITY_STANDARD": ("标准货品", "warning"),
     "VESSEL_PROFILE": ("船舶档案", "info"),
+    "VESSEL_RELATION": ("船舶主关系", "primary"),
+    "VESSEL_CERTIFICATE": ("船舶证书", "warning"),
+    "VESSEL_OCR_ADOPTION": ("OCR 采纳", "warning"),
+    "VESSEL_CONTROLLER_EVIDENCE": ("实际控制人证据", "primary"),
+    "VESSEL_AFFILIATION_EVIDENCE": ("挂靠关系证据", "primary"),
+    "VESSEL_RISK_REVIEW": ("船舶风险复核", "danger"),
+    "VESSEL_BLACKLIST_SIGNAL": ("船舶名单信号", "danger"),
     "FREIGHT": ("正式货源", "danger"),
 }
 _CHANGE_TYPE_META = {
@@ -70,6 +77,8 @@ _AUDIT_TARGET_MODELS = {
     "REGION": Region,
     "COMMODITY_STANDARD": CommodityStandard,
     "VESSEL_PROFILE": VesselProfile,
+    "VESSEL_CONTROLLER_EVIDENCE": VesselControllerEvidence,
+    "VESSEL_AFFILIATION_EVIDENCE": VesselAffiliationEvidence,
     "FREIGHT": Freight,
 }
 
@@ -429,7 +438,19 @@ class AuditTaskService:
         if model is None:
             return
         target = await self.db.get(model, task.biz_id)
-        if target is None or not hasattr(target, "audit_status"):
+        if target is None:
+            return
+        if hasattr(target, "verified_status_code"):
+            target.verified_status_code = target_status
+            if target_status == "APPROVED":
+                if hasattr(target, "verified_by"):
+                    target.verified_by = operator_user_id
+                if hasattr(target, "verified_at"):
+                    target.verified_at = audited_at
+            if hasattr(target, "revision"):
+                target.revision = int(target.revision or 1) + 1
+            return
+        if not hasattr(target, "audit_status"):
             return
         target.audit_status = target_status
         if hasattr(target, "auditor_id"):

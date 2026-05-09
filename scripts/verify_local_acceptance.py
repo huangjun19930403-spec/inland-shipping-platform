@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 
 import sqlalchemy as sa
@@ -42,7 +43,7 @@ from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightNormalizationSuggestion, FreightNormalizationTask, FreightTmsInbound
 from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
-from app.models.system import SysMenu, SystemConfig
+from app.models.system import SysMenu, SysRole, SysRoleMenu, SystemConfig
 from app.models.vessel import (
     VesselBuildInfo,
     VesselCapacityDimension,
@@ -152,6 +153,12 @@ LEGACY_ROUTE_PATHS = {
 
 REQUIRED_ROUTE_PATHS = {
     "/api/v1/vessels",
+    "/api/v1/vessels/assets",
+    "/api/v1/vessels/quality",
+    "/api/v1/vessels/{vessel_id}/profile-card",
+    "/api/v1/vessels/ais/city-situation",
+    "/api/v1/vessels/ais/city-vessels",
+    "/api/v1/vessels/ais/vessels/{vessel_id}/situation-card",
     "/api/v1/vessels/position-monitor",
     "/api/v1/vessels/{vessel_id}",
     "/api/v1/vessels/{vessel_id}/profile",
@@ -520,7 +527,20 @@ async def verify() -> list[CheckResult]:
             .all()
         )
         results.append(_result("legacy menu entries removed", not menu_left, str(menu_left or "none")))
-        required_vessel_paths = {"/vessels/position-monitor", "/vessels/list"}
+        required_vessel_paths = {
+            "/vessels/assets",
+            "/vessels/profile-cards",
+            "/vessels/relations",
+            "/vessels/governance/dashboard",
+            "/vessels/governance/tasks",
+            "/vessels/quality",
+            "/vessels/compliance-risks",
+            "/vessels/recognitions",
+            "/vessels/ais-situation",
+            "/vessels/node-route-analysis",
+            "/vessels/candidate-analysis",
+            "/analysis/ships",
+        }
         vessel_paths = {
             row[0]
             for row in (
@@ -533,6 +553,60 @@ async def verify() -> list[CheckResult]:
                 "business vessel menus present",
                 not missing_vessel_paths,
                 "all present" if not missing_vessel_paths else ", ".join(missing_vessel_paths),
+            )
+        )
+        vessel_entry_rows = (
+            await session.execute(
+                select(SysMenu.menu_code, SysMenu.route_path, SysMenu.component_path).where(
+                    SysMenu.menu_code.in_(("VESSEL_ASSETS", "VESSEL_PROFILE_ENTRY", "VESSEL_RELATIONS_ENTRY"))
+                )
+            )
+        ).all()
+        vessel_entry_map = {code: (route_path, component_path) for code, route_path, component_path in vessel_entry_rows}
+        entry_routes = [route for route, _ in vessel_entry_map.values()]
+        entry_components = [component for _, component in vessel_entry_map.values()]
+        distinct_entry_menus = (
+            len(vessel_entry_map) == 3
+            and len(set(entry_routes)) == 3
+            and len(set(entry_components)) == 3
+            and all(route and "entry=" not in route for route in entry_routes)
+        )
+        results.append(
+            _result(
+                "vessel core menu entries distinct",
+                distinct_entry_menus,
+                "assets/profile/relations use separate routes and pages"
+                if distinct_entry_menus
+                else str(vessel_entry_map),
+            )
+        )
+
+        menu_rows = (await session.execute(select(SysMenu.id, SysMenu.menu_code, SysMenu.parent_id))).all()
+        menu_code_by_id = {menu_id: menu_code for menu_id, menu_code, _ in menu_rows}
+        parent_by_id = {menu_id: parent_id for menu_id, _, parent_id in menu_rows}
+        role_menu_rows = (
+            await session.execute(
+                select(SysRole.role_code, SysRoleMenu.menu_id)
+                .join(SysRoleMenu, SysRoleMenu.role_id == SysRole.id)
+                .where(SysRole.role_code.in_(("DATA_STEWARD", "OPS_ANALYST", "BUSINESS_INPUTTER")))
+            )
+        ).all()
+        assigned_menu_ids_by_role: dict[str, set[int]] = defaultdict(set)
+        for role_code, menu_id in role_menu_rows:
+            assigned_menu_ids_by_role[role_code].add(menu_id)
+        missing_menu_parents: list[str] = []
+        for role_code, assigned_menu_ids in assigned_menu_ids_by_role.items():
+            for menu_id in assigned_menu_ids:
+                parent_id = parent_by_id.get(menu_id)
+                if parent_id and parent_id not in assigned_menu_ids:
+                    missing_menu_parents.append(
+                        f"{role_code}:{menu_code_by_id.get(menu_id, menu_id)}->{menu_code_by_id.get(parent_id, parent_id)}"
+                    )
+        results.append(
+            _result(
+                "role menu hierarchy complete",
+                not missing_menu_parents,
+                "all role menu parents assigned" if not missing_menu_parents else ", ".join(sorted(missing_menu_parents)),
             )
         )
 
