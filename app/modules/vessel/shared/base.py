@@ -268,6 +268,7 @@ CITY_GRID_CELL_SIZE_DEGREES = 1.0
 UNKNOWN_WATER_SYSTEM_CODE = "UNKNOWN"
 UNKNOWN_WATER_SYSTEM_NAME = "未知水系"
 CURRENT_WATER_SYSTEM_SOURCE_BOUNDARY = "WATER_SYSTEM_BOUNDARY"
+CURRENT_WATER_SYSTEM_SOURCE_NEAR_BOUNDARY = "NEAR_BOUNDARY"
 WATER_SYSTEM_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_SITUATION_CACHE_KEY_PREFIX = "vessel:city_situation:response:"
 CITY_SITUATION_SNAPSHOT_KEY_PREFIX = "vessel:city_situation:snapshot:"
@@ -341,6 +342,8 @@ class _WaterSystemBoundary:
     display_center_longitude: Decimal | None
     display_center_latitude: Decimal | None
     boundary_quality_code: str
+    geometry_coordinate_system_code: str
+    boundary_coordinate_system_code: str
     shape_area_degree: Decimal | None
     bbox: tuple[float, float, float, float]
     bbox_area: float
@@ -365,6 +368,7 @@ class _ResolvedWaterSystem:
     current_water_system_source: str
     water_level: int | None = None
     boundary: _WaterSystemBoundary | None = None
+    match_distance_m: Decimal | None = None
 
 
 @dataclass(slots=True)
@@ -699,7 +703,16 @@ def _source_status_name(code: str) -> str:
 def _water_level_name(level: int | None) -> str | None:
     if level is None:
         return None
-    return {0: "待补边界", 1: "一级水系", 2: "二级水系", 3: "三级水系", 4: "四级水系"}.get(level, f"{level}级水系")
+    return {
+        0: "待补边界",
+        1: "一级水系",
+        2: "二级水系",
+        3: "三级水系",
+        4: "四级水系",
+        5: "五级水系",
+        6: "六级水系",
+        7: "七级水系",
+    }.get(level, f"{level}级水系")
 
 
 def _water_feature_type_name(code: str | None) -> str | None:
@@ -752,8 +765,11 @@ def _water_navigation_scope_name(code: str | None) -> str | None:
 
 def _water_boundary_quality_name(code: str | None) -> str | None:
     return {
+        "PRECISE_SOURCE": "精确来源",
         "HIGH_CONFIDENCE": "高置信",
         "MEDIUM_CONFIDENCE": "中置信",
+        "CARRIER_COMPOSITE": "承载合并",
+        "LOW_CONFIDENCE_CARRIER": "低置信承载",
         "REVIEW": "待复核",
         "MISSING": "缺少边界",
         "UNKNOWN": "未知",

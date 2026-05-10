@@ -65,7 +65,7 @@ class AdminRegionBoundaryResponse(BaseModel):
 
 class WaterSystemQuery(BaseModel):
     keyword: str | None = None
-    water_level: int | None = Field(default=None, ge=0, le=4)
+    water_level: int | None = Field(default=None, ge=0, le=7)
     feature_type_code: str | None = None
     hydrology_period_code: str | None = None
     salinity_type_code: str | None = None
@@ -148,6 +148,8 @@ class WaterSystemDetailResponse(WaterSystemResponse):
     point_count: int = 0
     boundary_quality_code: str = "UNKNOWN"
     boundary_quality_name: str = "未知"
+    geometry_coordinate_system_code: str = "WGS84"
+    boundary_coordinate_system_code: str = "WGS84"
 
 
 class WaterSystemBoundaryResponse(BaseModel):
@@ -171,6 +173,8 @@ class WaterSystemBoundaryResponse(BaseModel):
     center_latitude: Decimal | None = None
     display_center_longitude: Decimal | None = None
     display_center_latitude: Decimal | None = None
+    geometry_coordinate_system_code: str = "WGS84"
+    boundary_coordinate_system_code: str = "WGS84"
 
 
 class BusinessRegionListQuery(BaseModel):

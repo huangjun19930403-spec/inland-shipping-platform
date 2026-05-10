@@ -26,7 +26,7 @@ from app.modules.address.boundary_utils import (
     polygons_bbox,
     serialize_boundary_paths,
 )
-from scripts.seed_data import navigation_water_systems_v2 as embedded_water_systems
+from scripts.seed_data import navigation_water_systems_v5 as embedded_water_systems
 
 try:
     import shapefile  # type: ignore[import-not-found]
@@ -35,13 +35,22 @@ except Exception:  # pragma: no cover - dependency guard for bootstrap environme
 
 
 SOURCE_VERSION = embedded_water_systems.DATA_VERSION
-OLD_SOURCE_VERSIONS = {"revier_wgs84_l1_l4_v1", "revier_wgs84_navigation_v1"}
-DEFAULT_LEVELS = (1, 2, 3, 4)
+OLD_SOURCE_VERSIONS = {
+    "revier_wgs84_l1_l4_v1",
+    "revier_wgs84_navigation_v1",
+    "revier_wgs84_navigation_v2",
+    "revier_wgs84_navigation_v3",
+    "revier_wgs84_navigation_v4",
+}
+DEFAULT_LEVELS = (1, 2, 3, 4, 5, 6, 7)
 LEVEL_LAYER_NAMES = {
     1: "一级水系",
     2: "二级水系",
     3: "三级水系",
     4: "四级水系",
+    5: "五级水系",
+    6: "六级水系",
+    7: "七级水系",
 }
 BOUNDARY_SIMPLIFY_TOLERANCE = {
     "low": 0.02,
@@ -512,6 +521,8 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
                 "point_count": int(row.get("point_count") or 0),
                 "geometry_status_code": row.get("geometry_status_code") or "AVAILABLE",
                 "boundary_quality_code": row.get("boundary_quality_code") or "UNKNOWN",
+                "geometry_coordinate_system_code": row.get("geometry_coordinate_system_code") or "WGS84",
+                "boundary_coordinate_system_code": row.get("boundary_coordinate_system_code") or "GCJ02",
                 "is_current": True,
                 "imported_at": now,
             }
@@ -526,6 +537,9 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
             WaterSystem.water_system_code.like("WS-L2-%"),
             WaterSystem.water_system_code.like("WS-L3-%"),
             WaterSystem.water_system_code.like("WS-L4-%"),
+            WaterSystem.water_system_code.like("WS-L5-%"),
+            WaterSystem.water_system_code.like("WS-L6-%"),
+            WaterSystem.water_system_code.like("WS-L7-%"),
         )
         if set(levels) == set(DEFAULT_LEVELS) and current_codes:
             stale_condition = or_(
@@ -555,7 +569,7 @@ def _parse_levels(value: str | None) -> tuple[int, ...]:
             continue
         level = int(text)
         if level not in LEVEL_LAYER_NAMES:
-            raise ValueError("levels 仅支持 1,2,3,4")
+            raise ValueError("levels 仅支持 1,2,3,4,5,6,7")
         levels.append(level)
     return tuple(levels) or DEFAULT_LEVELS
 
@@ -563,7 +577,7 @@ def _parse_levels(value: str | None) -> tuple[int, ...]:
 async def _main() -> None:
     parser = argparse.ArgumentParser(description="Seed preset water system boundaries.")
     parser.add_argument("--source", default=None, help="校验 revier.zip 是否存在；正式导入始终使用内置清洗预制数据")
-    parser.add_argument("--levels", default="1,2,3,4", help="导入层级，逗号分隔，默认 1,2,3,4")
+    parser.add_argument("--levels", default="1,2,3,4,5,6,7", help="导入层级，逗号分隔，默认 1,2,3,4,5,6,7")
     args = parser.parse_args()
     result = await seed_water_systems(args.source, _parse_levels(args.levels))
     print(

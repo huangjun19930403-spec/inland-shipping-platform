@@ -94,7 +94,7 @@ class VesselPositionWaterSystemSituationQuery(BaseModel):
     profile_status_code: str | None = None
     risk_level: str | None = None
     certificate_risk_available: bool | None = None
-    water_level: int | None = Field(default=None, ge=1, le=4)
+    water_level: int | None = Field(default=None, ge=1, le=7)
     water_levels: str | None = None
     navigation_scope_codes: str | None = None
     navigation_category_codes: str | None = None
@@ -120,7 +120,7 @@ class VesselAisWaterSystemSituationQuery(BaseModel):
     profile_status_code: str | None = None
     risk_level: str | None = None
     certificate_risk_available: bool | None = None
-    water_level: int | None = Field(default=None, ge=1, le=4)
+    water_level: int | None = Field(default=None, ge=1, le=7)
     water_levels: str | None = None
     navigation_scope_codes: str | None = None
     navigation_category_codes: str | None = None
@@ -146,7 +146,7 @@ class VesselAisWaterSystemBoundaryQuery(BaseModel):
     water_system_code: str | None = None
     water_system_codes: str | None = None
     water_system_name: str | None = None
-    water_level: int | None = Field(default=None, ge=1, le=4)
+    water_level: int | None = Field(default=None, ge=1, le=7)
     water_levels: str | None = None
     navigation_scope_codes: str | None = None
     navigation_category_codes: str | None = None
@@ -211,6 +211,10 @@ class VesselPositionMonitorItemResponse(VesselListItemResponse):
     current_city_code: str | None = None
     current_city_name: str | None = None
     current_city_source: str | None = None
+    current_water_system_code: str | None = None
+    current_water_system_name: str | None = None
+    current_water_system_source: str | None = None
+    water_system_match_distance_m: Decimal | None = None
     city_center_longitude: Decimal | None = None
     city_center_latitude: Decimal | None = None
     matched_city_candidates: list[dict[str, Any]] | None = None
@@ -375,6 +379,8 @@ class VesselPositionWaterSystemSituationItemResponse(BaseModel):
     boundary_precision: str | None = None
     boundary_quality_code: str | None = None
     boundary_quality_name: str | None = None
+    geometry_coordinate_system_code: str | None = None
+    boundary_coordinate_system_code: str | None = None
     positioned_count: int
     contactable_position_count: int
     total_deadweight_ton: Decimal | None = None
@@ -465,6 +471,8 @@ class VesselAisWaterSystemBoundaryItemResponse(BaseModel):
     boundary_quality_name: str | None = None
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
+    geometry_coordinate_system_code: str | None = None
+    boundary_coordinate_system_code: str | None = None
 
 class VesselAisWaterSystemBoundaryResponse(BaseModel):
     generated_at: datetime

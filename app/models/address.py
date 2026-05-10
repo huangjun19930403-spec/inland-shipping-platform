@@ -120,6 +120,8 @@ class WaterSystemBoundary(Base, TimestampMixin):
     point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     geometry_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="AVAILABLE", index=True)
     boundary_quality_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    geometry_coordinate_system_code: Mapped[str] = mapped_column(String(16), nullable=False, default="WGS84")
+    boundary_coordinate_system_code: Mapped[str] = mapped_column(String(16), nullable=False, default="WGS84")
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     imported_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
 

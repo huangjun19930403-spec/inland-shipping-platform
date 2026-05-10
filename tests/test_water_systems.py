@@ -107,7 +107,9 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
     category_counts: dict[str, int] = {}
     ais_counts: dict[str, int] = {}
     for row in rows:
-        assert not row["water_system_code"].startswith(("WS-L1-", "WS-L2-", "WS-L3-", "WS-L4-"))
+        assert not row["water_system_code"].startswith(
+            ("WS-L1-", "WS-L2-", "WS-L3-", "WS-L4-", "WS-L5-", "WS-L6-", "WS-L7-")
+        )
         assert row["navigation_category_code"] in {"MAIN_RIVER", "TRIBUTARY", "CANAL", "LAKE", "DELTA_NETWORK"}
         scope_counts[row["navigation_scope_code"]] = scope_counts.get(row["navigation_scope_code"], 0) + 1
         category_counts[row["navigation_category_code"]] = category_counts.get(row["navigation_category_code"], 0) + 1
@@ -124,27 +126,62 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
 
     by_code = {row["water_system_code"]: row for row in rows}
     by_name = {row["water_system_name"]: row for row in rows}
-    assert len(rows) == 70
-    assert scope_counts == {"CORE": 12, "IMPORTANT": 26, "WATER_AREA": 10, "REVIEW": 2, "MISSING": 20}
-    assert category_counts == {"MAIN_RIVER": 14, "TRIBUTARY": 19, "CANAL": 25, "LAKE": 10, "DELTA_NETWORK": 2}
-    assert ais_counts == {"INCLUDED": 48, "EXCLUDED": 22}
+    assert len(rows) == 120
+    assert sum(1 for row in rows if row["geometry_status_code"] == "AVAILABLE") == 111
+    assert scope_counts == {"CORE": 12, "IMPORTANT": 79, "WATER_AREA": 18, "REVIEW": 2, "MISSING": 9}
+    assert category_counts == {"MAIN_RIVER": 16, "TRIBUTARY": 40, "CANAL": 31, "LAKE": 18, "DELTA_NETWORK": 15}
+    assert ais_counts == {"INCLUDED": 109, "EXCLUDED": 11}
     assert {row["water_system_code"] for row in rows} >= {"WS-YANGTZE", "WS-GRAND-CANAL", "WS-TAIHU", "WS-FUCHUN-RIVER", "WS-BAIYANGDIAN"}
+    assert by_code["WS-YANGTZE"]["water_system_name"] == "长江干线"
+    assert by_code["WS-XIJIANG"]["water_system_name"] == "西江航运干线"
     assert by_name["富春江"]["parent_water_system_code"] == "WS-QIANTANG-RIVER"
     assert by_name["富春江"]["ais_situation_scope"] == "INCLUDED"
     assert "富春江水库" not in by_name["富春江"]["source_names"]
     assert by_name["白洋淀"]["navigation_category_code"] == "LAKE"
     assert by_name["白洋淀"]["navigation_scope_code"] == "WATER_AREA"
-    assert by_name["通扬线"]["source_names"] == ["新通扬运河"]
-    assert by_name["锡澄运河"]["source_names"] == ["锡澄河"]
-    assert by_name["盐邵线"]["source_names"] == ["盐邵河"]
+    assert "新通扬运河" in by_name["通扬线"]["source_names"]
+    assert "锡澄河" in by_name["锡澄运河"]["source_names"]
+    assert "盐邵河" in by_name["盐邵线"]["source_names"]
+    assert by_name["京杭运河"]["boundary_coordinate_system_code"] == "GCJ02"
+    assert by_name["京杭运河"]["geometry_coordinate_system_code"] == "WGS84"
+    assert by_name["京杭运河"]["display_center_longitude"] != by_name["京杭运河"]["center_longitude"]
+    for name in ["淀山湖", "泖河", "横潦泾", "竖潦泾", "通吕运河", "九圩港"]:
+        assert by_name[name]["geometry_status_code"] == "AVAILABLE"
+        assert by_name[name]["ais_situation_scope"] == "INCLUDED"
+    assert by_name["长湖申线—黄浦江—大浦线"]["geometry_union_status"] == "CARRIER_COMPOSITE"
+    assert by_name["长湖申线—黄浦江—大浦线"]["match_confidence_code"] == "MEDIUM"
+    assert by_name["苏申外港线—苏申内港线"]["source_feature_count"] >= 4
+    assert {"黄浦江", "泖河", "浏河", "元和塘"}.issubset(
+        set(by_name["苏申外港线—苏申内港线"]["source_names"])
+    )
+    assert {"曹娥江", "余姚江", "甬江", "杭甬运河"}.issubset(set(by_name["杭甬运河"]["source_names"]))
+    assert "红旗塘" in by_name["杭申线"]["source_names"]
+    assert "闸港" in by_name["杭平申线"]["source_names"]
+    assert by_name["杭湖锡线"]["source_feature_count"] >= 4
+    assert by_name["宿连航道相关水域"]["source_feature_count"] >= 1
+    assert by_name["宿连航道相关水域"]["boundary_quality_code"] == "LOW_CONFIDENCE_CARRIER"
+    assert by_name["南阳湖"]["navigation_category_code"] == "LAKE"
+    assert by_name["黄墩湖"]["navigation_scope_code"] == "WATER_AREA"
     assert by_code["WS-YAMEN-WATERWAY"]["ais_situation_scope"] == "EXCLUDED"
     assert by_code["WS-SHUNDE-WATERWAY"]["ais_situation_scope"] == "EXCLUDED"
+    assert by_code["WS-YAMEN-WATERWAY"]["geometry_status_code"] == "AVAILABLE"
+    assert by_code["WS-SHUNDE-WATERWAY"]["geometry_status_code"] == "AVAILABLE"
+    for name in ["乌苏里江", "太浦河", "望虞河", "德胜河", "蕉门水道", "横门水道", "小榄水道", "虎跳门水道"]:
+        assert by_name[name]["geometry_status_code"] == "AVAILABLE"
+        assert by_name[name]["ais_situation_scope"] == "INCLUDED"
+    assert by_name["合裕线"]["geometry_status_code"] == "AVAILABLE"
+    assert by_name["合裕线"]["boundary_quality_code"] == "LOW_CONFIDENCE_CARRIER"
+    assert {"南淝河", "巢湖", "裕溪河"}.issubset(set(by_name["合裕线"]["source_names"]))
     missing_names = {
-        "苏南运河", "苏北运河", "连申线", "芜申线", "长湖申线", "湖嘉申线", "苏申外港线", "苏申内港线",
-        "杭甬运河", "杭申线", "杭平申线", "宿连航道", "淮河出海航道", "徐宿连通道", "赵家沟", "大芦线", "大浦线",
+        "苏南运河", "苏北运河", "江汉运河", "沙颍河",
+        "徐宿连通道", "赵家沟", "大芦线", "大浦线",
     }
     assert all(by_name[name]["navigation_scope_code"] == "MISSING" for name in missing_names)
-    assert {"杨林塘", "通榆运河", "望虞河", "德胜河"}.isdisjoint(by_name)
+    assert {"杨林塘", "通榆运河"}.isdisjoint(by_name)
+
+    assignment_path = Path("docs/water_system_source_assignment_v5.jsonl")
+    assert assignment_path.exists()
+    assert sum(1 for _ in assignment_path.open(encoding="utf-8")) == 39431
 
 
 def test_default_water_system_seed_uses_embedded_rows_without_zip_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -164,11 +201,11 @@ def test_default_water_system_seed_uses_embedded_rows_without_zip_lookup(monkeyp
     assert set(counts).issubset({1, 2})
 
 
-def test_seed_water_systems_reads_level_1_to_4_from_source_zip() -> None:
+def test_seed_water_systems_reads_level_1_to_7_from_source_zip() -> None:
     if not SOURCE_ZIP.exists():
         pytest.skip("local revier.zip is not available")
 
-    expected_counts = {1: 234, 2: 285, 3: 608, 4: 1407}
+    expected_counts = {1: 234, 2: 285, 3: 608, 4: 1407, 5: 4541, 6: 5175, 7: 27181}
     with zipfile.ZipFile(SOURCE_ZIP) as zip_file:
         for level, layer_name in LEVEL_LAYER_NAMES.items():
             features = _read_layer_features(zip_file, layer_name)
@@ -214,6 +251,23 @@ def test_water_system_match_selects_smallest_area_per_level_and_respects_filter(
     assert [match.water_system_code for match in filtered] == ["big"]
 
 
+def test_water_system_match_uses_near_boundary_fallback() -> None:
+    service = VesselAisService.__new__(VesselAisService)
+    boundary = _water_boundary("lake", 4, Decimal("1"), 116.0, 29.0, 116.01, 29.01, category="LAKE")
+
+    matches = service._resolve_current_water_systems_from_boundaries(
+        Decimal("116.014"),
+        Decimal("29.005"),
+        [boundary],
+        _build_city_boundary_grid([boundary]),
+    )
+
+    assert [match.water_system_code for match in matches] == ["lake"]
+    assert matches[0].current_water_system_source == "NEAR_BOUNDARY"
+    assert matches[0].match_distance_m is not None
+    assert matches[0].match_distance_m <= Decimal("5000")
+
+
 def _water_boundary(
     code: str,
     level: int,
@@ -249,6 +303,8 @@ def _water_boundary(
         display_center_longitude=None,
         display_center_latitude=None,
         boundary_quality_code="HIGH_CONFIDENCE",
+        geometry_coordinate_system_code="WGS84",
+        boundary_coordinate_system_code="GCJ02",
         shape_area_degree=area,
         bbox=(min_lng, min_lat, max_lng, max_lat),
         bbox_area=(max_lng - min_lng) * (max_lat - min_lat),

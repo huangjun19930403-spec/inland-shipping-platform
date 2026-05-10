@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from app.modules.vessel.shared import base as _base
 
 globals().update({name: getattr(_base, name) for name in dir(_base) if not name.startswith("__")})
@@ -848,10 +850,13 @@ class VesselAisMixin:
             )
         boundaries = await self._water_system_boundaries()
         levels = self._water_system_query_levels(query)
+        boundary_keyword = getattr(query, "water_system_name", None)
+        if getattr(query, "water_system_code", None) == UNKNOWN_WATER_SYSTEM_CODE or boundary_keyword == UNKNOWN_WATER_SYSTEM_NAME:
+            boundary_keyword = None
         filtered_boundaries = self._filter_water_boundaries(
             boundaries,
             levels,
-            getattr(query, "water_system_name", None),
+            boundary_keyword,
             self._water_system_query_code_set(query, "navigation_scope_codes"),
             self._water_system_query_code_set(query, "navigation_category_codes"),
         )
@@ -862,23 +867,28 @@ class VesselAisMixin:
         risk_by_profile = await self._compliance_risk_by_profile([item.id for item in items])
         summary_risk_by_profile = await self._summary_risk_level_by_profile([item.id for item in items])
         items = self._filter_water_situation_items_by_risk(items, query, risk_by_profile, summary_risk_by_profile)
-        filtered = [
-            item for item in items
-            if self._water_system_matches_position(
+        matched_items: list[tuple[VesselPositionMonitorItemResponse, _ResolvedWaterSystem | None]] = []
+        for item in items:
+            match = self._water_system_match_for_position(
                 item,
                 water_system_code=query.water_system_code,
                 water_system_name=query.water_system_name,
                 boundaries=filtered_boundaries,
             )
-        ]
+            if match is not False:
+                matched_items.append((item, match))
         enriched = [
             item.model_copy(
                 update={
                     "risk_level": summary_risk_by_profile.get(item.id),
                     "certificate_risk_available": bool(risk_by_profile.get(item.id, {}).get("has_certificate_risk")),
+                    "current_water_system_code": match.water_system_code if match else None,
+                    "current_water_system_name": match.water_system_name if match else None,
+                    "current_water_system_source": match.current_water_system_source if match else None,
+                    "water_system_match_distance_m": match.match_distance_m if match else None,
                 }
             )
-            for item in filtered
+            for item, match in matched_items
         ]
         start = (query.page - 1) * query.page_size
         return VesselPositionWaterSystemVesselsResponse(
@@ -937,6 +947,8 @@ class VesselAisMixin:
                     boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code),
                     center_longitude=boundary.center_longitude,
                     center_latitude=boundary.center_latitude,
+                    geometry_coordinate_system_code=boundary.geometry_coordinate_system_code,
+                    boundary_coordinate_system_code=boundary.boundary_coordinate_system_code,
                 )
             )
         missing = sorted(requested_codes - {item.water_system_code for item in items})
@@ -1910,6 +1922,8 @@ class VesselAisMixin:
             boundary_precision=boundary_precision if serialized_paths else None,
             boundary_quality_code=boundary.boundary_quality_code,
             boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code),
+            geometry_coordinate_system_code=boundary.geometry_coordinate_system_code,
+            boundary_coordinate_system_code=boundary.boundary_coordinate_system_code,
             positioned_count=len(fresh_items),
             contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
             total_deadweight_ton=self._sum_deadweight(stats_items),
@@ -2194,6 +2208,8 @@ class VesselAisMixin:
                     display_center_longitude=_to_decimal(water_system.display_center_longitude),
                     display_center_latitude=_to_decimal(water_system.display_center_latitude),
                     boundary_quality_code=boundary.boundary_quality_code,
+                    geometry_coordinate_system_code=boundary.geometry_coordinate_system_code,
+                    boundary_coordinate_system_code=boundary.boundary_coordinate_system_code,
                     shape_area_degree=_to_decimal(boundary.source_shape_area_degree),
                     bbox=bbox,
                     bbox_area=max(0.0, (max_x - min_x) * (max_y - min_y)),
@@ -2325,7 +2341,34 @@ class VesselAisMixin:
             and any(_point_in_polygon_with_holes(lon, lat, polygon) for polygon in boundary.polygons)
         ]
         if not matches:
-            return []
+            near_matches: list[tuple[_WaterSystemBoundary, Decimal]] = []
+            for boundary in boundaries:
+                if not self._expanded_water_bbox_contains(boundary.bbox, lon, lat, 0.06):
+                    continue
+                distance_m = self._water_boundary_distance_m(lon, lat, boundary)
+                if distance_m is not None and distance_m <= Decimal("5000"):
+                    near_matches.append((boundary, distance_m))
+            if not near_matches:
+                return []
+            selected, distance_m = min(
+                near_matches,
+                key=lambda item: (
+                    self._water_boundary_category_rank(item[0]),
+                    item[1],
+                    item[0].shape_area_degree if item[0].shape_area_degree is not None else Decimal("999999999"),
+                    Decimal(str(item[0].bbox_area)),
+                ),
+            )
+            return [
+                _ResolvedWaterSystem(
+                    water_system_code=selected.code,
+                    water_system_name=selected.name,
+                    current_water_system_source=CURRENT_WATER_SYSTEM_SOURCE_NEAR_BOUNDARY,
+                    water_level=selected.level,
+                    boundary=selected,
+                    match_distance_m=distance_m.quantize(Decimal("0.1")),
+                )
+            ]
         selected = min(matches, key=self._water_boundary_sort_key)
         return [
             _ResolvedWaterSystem(
@@ -2334,28 +2377,84 @@ class VesselAisMixin:
                 current_water_system_source=CURRENT_WATER_SYSTEM_SOURCE_BOUNDARY,
                 water_level=selected.level,
                 boundary=selected,
+                match_distance_m=Decimal("0"),
             )
         ]
 
     def _water_boundary_sort_key(self, boundary: _WaterSystemBoundary) -> tuple[int, Decimal, Decimal]:
-        category_rank = {
+        category_rank = self._water_boundary_category_rank(boundary)
+        shape_area = boundary.shape_area_degree if boundary.shape_area_degree is not None else Decimal("999999999")
+        return category_rank, shape_area, Decimal(str(boundary.bbox_area))
+
+    def _water_boundary_category_rank(self, boundary: _WaterSystemBoundary) -> int:
+        return {
             "CANAL": 0,
             "DELTA_NETWORK": 0,
             "TRIBUTARY": 1,
             "MAIN_RIVER": 2,
             "LAKE": 3,
         }.get(boundary.navigation_category_code or "", 4)
-        shape_area = boundary.shape_area_degree if boundary.shape_area_degree is not None else Decimal("999999999")
-        return category_rank, shape_area, Decimal(str(boundary.bbox_area))
 
-    def _water_system_matches_position(
+    def _expanded_water_bbox_contains(
+        self,
+        bbox: tuple[float, float, float, float],
+        lon: float,
+        lat: float,
+        margin_degree: float,
+    ) -> bool:
+        min_lng, min_lat, max_lng, max_lat = bbox
+        return (
+            min_lng - margin_degree <= lon <= max_lng + margin_degree
+            and min_lat - margin_degree <= lat <= max_lat + margin_degree
+        )
+
+    def _water_boundary_distance_m(
+        self,
+        lon: float,
+        lat: float,
+        boundary: _WaterSystemBoundary,
+    ) -> Decimal | None:
+        distances: list[float] = []
+        for polygon in boundary.polygons:
+            for ring in polygon:
+                if len(ring) < 2:
+                    continue
+                for start, end in zip(ring, ring[1:], strict=False):
+                    distances.append(self._point_segment_distance_m(lon, lat, start, end))
+        if not distances:
+            return None
+        return Decimal(str(min(distances)))
+
+    def _point_segment_distance_m(
+        self,
+        lon: float,
+        lat: float,
+        start: tuple[float, float],
+        end: tuple[float, float],
+    ) -> float:
+        mean_lat = math.radians((lat + start[1] + end[1]) / 3)
+        meters_per_degree_lng = 111320.0 * max(math.cos(mean_lat), 0.000001)
+        meters_per_degree_lat = 110540.0
+        px, py = lon * meters_per_degree_lng, lat * meters_per_degree_lat
+        ax, ay = start[0] * meters_per_degree_lng, start[1] * meters_per_degree_lat
+        bx, by = end[0] * meters_per_degree_lng, end[1] * meters_per_degree_lat
+        dx = bx - ax
+        dy = by - ay
+        if dx == 0 and dy == 0:
+            return math.hypot(px - ax, py - ay)
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+        projection_x = ax + t * dx
+        projection_y = ay + t * dy
+        return math.hypot(px - projection_x, py - projection_y)
+
+    def _water_system_match_for_position(
         self,
         item: VesselPositionMonitorItemResponse,
         *,
         water_system_code: str | None,
         water_system_name: str | None,
         boundaries: list[_WaterSystemBoundary],
-    ) -> bool:
+    ) -> _ResolvedWaterSystem | None | bool:
         grid_index = _WATER_SYSTEM_BOUNDARY_CACHE.get("grid_index") or {}
         matches = self._resolve_current_water_systems_from_boundaries(
             _to_decimal(item.longitude),
@@ -2366,14 +2465,29 @@ class VesselAisMixin:
         if water_system_code:
             expected = water_system_code.strip()
             if expected == UNKNOWN_WATER_SYSTEM_CODE:
-                return not matches
-            return any(match.water_system_code == expected for match in matches)
+                return None if not matches else False
+            return next((match for match in matches if match.water_system_code == expected), False)
         if water_system_name:
             expected_name = water_system_name.strip()
             if expected_name == UNKNOWN_WATER_SYSTEM_NAME:
-                return not matches
-            return any(match.water_system_name == expected_name for match in matches)
-        return True
+                return None if not matches else False
+            return next((match for match in matches if match.water_system_name == expected_name), False)
+        return matches[0] if matches else None
+
+    def _water_system_matches_position(
+        self,
+        item: VesselPositionMonitorItemResponse,
+        *,
+        water_system_code: str | None,
+        water_system_name: str | None,
+        boundaries: list[_WaterSystemBoundary],
+    ) -> bool:
+        return self._water_system_match_for_position(
+            item,
+            water_system_code=water_system_code,
+            water_system_name=water_system_name,
+            boundaries=boundaries,
+        ) is not False
 
     async def _store_city_situation_snapshot(
         self,

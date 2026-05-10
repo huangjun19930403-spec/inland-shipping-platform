@@ -78,6 +78,9 @@ WATER_LEVEL_LABELS = {
     2: "二级水系",
     3: "三级水系",
     4: "四级水系",
+    5: "五级水系",
+    6: "六级水系",
+    7: "七级水系",
 }
 WATER_FEATURE_TYPE_LABELS = {
     "RIVER": "河流",
@@ -128,9 +131,13 @@ WATER_AIS_SCOPE_LABELS = {
     "EXCLUDED": "暂不参与",
 }
 WATER_MATCH_LEVEL_LABELS = {
+    "OFFICIAL_TARGET": "官方目录目标",
     "EXACT": "精确匹配",
     "ALIAS": "别名匹配",
     "SAFE_CONTAINS": "安全包含",
+    "CARRIER_COMPOSITE": "承载合并",
+    "SPATIAL_CARRIER": "空间承载",
+    "LOW_CONFIDENCE_CARRIER": "低置信承载",
     "MISSING": "未命中",
 }
 WATER_MATCH_CONFIDENCE_LABELS = {
@@ -141,11 +148,15 @@ WATER_MATCH_CONFIDENCE_LABELS = {
 WATER_GEOMETRY_UNION_LABELS = {
     "SINGLE_SOURCE": "单要素",
     "MULTIPART_MERGED": "多要素合并",
+    "CARRIER_COMPOSITE": "承载合并",
     "MISSING": "缺少边界",
 }
 WATER_BOUNDARY_QUALITY_LABELS = {
+    "PRECISE_SOURCE": "精确来源",
     "HIGH_CONFIDENCE": "高置信",
     "MEDIUM_CONFIDENCE": "中置信",
+    "CARRIER_COMPOSITE": "承载合并",
+    "LOW_CONFIDENCE_CARRIER": "低置信承载",
     "REVIEW": "待复核",
     "MISSING": "缺少边界",
     "UNKNOWN": "未知",
@@ -361,6 +372,8 @@ def _to_water_system_detail_response(
         point_count=boundary.point_count if boundary else 0,
         boundary_quality_code=boundary.boundary_quality_code if boundary else "MISSING",
         boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code if boundary else "MISSING"),
+        geometry_coordinate_system_code=boundary.geometry_coordinate_system_code if boundary else "WGS84",
+        boundary_coordinate_system_code=boundary.boundary_coordinate_system_code if boundary else "WGS84",
     )
 
 
@@ -392,6 +405,8 @@ def _to_water_boundary_response(
         center_latitude=boundary.center_latitude if boundary else None,
         display_center_longitude=row.display_center_longitude,
         display_center_latitude=row.display_center_latitude,
+        geometry_coordinate_system_code=boundary.geometry_coordinate_system_code if boundary else "WGS84",
+        boundary_coordinate_system_code=boundary.boundary_coordinate_system_code if boundary else "WGS84",
     )
 
 
@@ -735,9 +750,11 @@ class WaterSystemService:
                 WaterSystemBoundary.imported_at,
                 WaterSystemBoundary.center_longitude,
                 WaterSystemBoundary.center_latitude,
-                WaterSystemBoundary.boundary_quality_code,
-                WaterSystemBoundary.ring_count,
-                WaterSystemBoundary.point_count,
+                    WaterSystemBoundary.boundary_quality_code,
+                    WaterSystemBoundary.geometry_coordinate_system_code,
+                    WaterSystemBoundary.boundary_coordinate_system_code,
+                    WaterSystemBoundary.ring_count,
+                    WaterSystemBoundary.point_count,
                 )
                 .where(
                     WaterSystemBoundary.water_system_id == row.id,
@@ -754,6 +771,8 @@ class WaterSystemService:
                 center_longitude=boundary_row.center_longitude,
                 center_latitude=boundary_row.center_latitude,
                 boundary_quality_code=boundary_row.boundary_quality_code,
+                geometry_coordinate_system_code=boundary_row.geometry_coordinate_system_code,
+                boundary_coordinate_system_code=boundary_row.boundary_coordinate_system_code,
                 ring_count=boundary_row.ring_count,
                 point_count=boundary_row.point_count,
             )
