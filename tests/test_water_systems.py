@@ -104,23 +104,47 @@ def test_water_system_backend_menus_are_initialized_for_visible_routes() -> None
 def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> None:
     rows = load_embedded_water_system_rows()
     scope_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    ais_counts: dict[str, int] = {}
     for row in rows:
         assert not row["water_system_code"].startswith(("WS-L1-", "WS-L2-", "WS-L3-", "WS-L4-"))
         assert row["navigation_category_code"] in {"MAIN_RIVER", "TRIBUTARY", "CANAL", "LAKE", "DELTA_NETWORK"}
         scope_counts[row["navigation_scope_code"]] = scope_counts.get(row["navigation_scope_code"], 0) + 1
+        category_counts[row["navigation_category_code"]] = category_counts.get(row["navigation_category_code"], 0) + 1
+        ais_counts[row["ais_situation_scope"]] = ais_counts.get(row["ais_situation_scope"], 0) + 1
         if row["geometry_status_code"] == "AVAILABLE":
             assert row["geometry_json"]["type"] == "MultiPolygon"
             assert row["boundary_paths_low"]
             assert row["boundary_paths_medium"]
             assert row["boundary_paths_high"]
-            assert row["ais_situation_scope"] == "INCLUDED"
         else:
             assert row["navigation_scope_code"] == "MISSING"
             assert row["ais_situation_scope"] == "EXCLUDED"
+            assert not row["boundary_paths_low"]
 
-    assert len(rows) == 57
-    assert scope_counts == {"CORE": 12, "IMPORTANT": 25, "WATER_AREA": 9, "REVIEW": 2, "MISSING": 9}
-    assert {row["water_system_code"] for row in rows} >= {"WS-YANGTZE", "WS-GRAND-CANAL", "WS-TAIHU"}
+    by_code = {row["water_system_code"]: row for row in rows}
+    by_name = {row["water_system_name"]: row for row in rows}
+    assert len(rows) == 70
+    assert scope_counts == {"CORE": 12, "IMPORTANT": 26, "WATER_AREA": 10, "REVIEW": 2, "MISSING": 20}
+    assert category_counts == {"MAIN_RIVER": 14, "TRIBUTARY": 19, "CANAL": 25, "LAKE": 10, "DELTA_NETWORK": 2}
+    assert ais_counts == {"INCLUDED": 48, "EXCLUDED": 22}
+    assert {row["water_system_code"] for row in rows} >= {"WS-YANGTZE", "WS-GRAND-CANAL", "WS-TAIHU", "WS-FUCHUN-RIVER", "WS-BAIYANGDIAN"}
+    assert by_name["富春江"]["parent_water_system_code"] == "WS-QIANTANG-RIVER"
+    assert by_name["富春江"]["ais_situation_scope"] == "INCLUDED"
+    assert "富春江水库" not in by_name["富春江"]["source_names"]
+    assert by_name["白洋淀"]["navigation_category_code"] == "LAKE"
+    assert by_name["白洋淀"]["navigation_scope_code"] == "WATER_AREA"
+    assert by_name["通扬线"]["source_names"] == ["新通扬运河"]
+    assert by_name["锡澄运河"]["source_names"] == ["锡澄河"]
+    assert by_name["盐邵线"]["source_names"] == ["盐邵河"]
+    assert by_code["WS-YAMEN-WATERWAY"]["ais_situation_scope"] == "EXCLUDED"
+    assert by_code["WS-SHUNDE-WATERWAY"]["ais_situation_scope"] == "EXCLUDED"
+    missing_names = {
+        "苏南运河", "苏北运河", "连申线", "芜申线", "长湖申线", "湖嘉申线", "苏申外港线", "苏申内港线",
+        "杭甬运河", "杭申线", "杭平申线", "宿连航道", "淮河出海航道", "徐宿连通道", "赵家沟", "大芦线", "大浦线",
+    }
+    assert all(by_name[name]["navigation_scope_code"] == "MISSING" for name in missing_names)
+    assert {"杨林塘", "通榆运河", "望虞河", "德胜河"}.isdisjoint(by_name)
 
 
 def test_default_water_system_seed_uses_embedded_rows_without_zip_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,19 +186,24 @@ def test_water_system_match_selects_smallest_area_per_level_and_respects_filter(
     service = VesselAisService.__new__(VesselAisService)
     big = _water_boundary("big", 1, Decimal("10"), 0, 0, 4, 4)
     small = _water_boundary("small", 1, Decimal("1"), 0, 0, 2, 2)
-    level_two = _water_boundary("level-two", 2, Decimal("3"), 0, 0, 3, 3)
-    grid_index = _build_city_boundary_grid([big, small, level_two])
+    canal = _water_boundary("canal", 4, Decimal("3"), 0, 0, 3, 3, category="CANAL")
+    grid_index = _build_city_boundary_grid([big, small, canal])
 
     matches = service._resolve_current_water_systems_from_boundaries(
         Decimal("1"),
         Decimal("1"),
-        [big, small, level_two],
+        [big, small],
         grid_index,
     )
-    assert {match.water_level: match.water_system_code for match in matches} == {
-        1: "small",
-        2: "level-two",
-    }
+    assert [match.water_system_code for match in matches] == ["small"]
+
+    priority_matches = service._resolve_current_water_systems_from_boundaries(
+        Decimal("1"),
+        Decimal("1"),
+        [big, small, canal],
+        grid_index,
+    )
+    assert [match.water_system_code for match in priority_matches] == ["canal"]
 
     filtered = service._resolve_current_water_systems_from_boundaries(
         Decimal("1"),
@@ -193,6 +222,8 @@ def _water_boundary(
     min_lat: float,
     max_lng: float,
     max_lat: float,
+    *,
+    category: str = "MAIN_RIVER",
 ) -> _WaterSystemBoundary:
     ring = [
         (min_lng, min_lat),
@@ -204,16 +235,20 @@ def _water_boundary(
     return _WaterSystemBoundary(
         code=code,
         name=code,
+        parent_water_system_code=None,
         level=level,
         feature_type_code="RIVER",
         hydrology_period_code="UNKNOWN",
         salinity_type_code="UNKNOWN",
         water_boundary_type_code="STANDARD",
-        navigation_category_code="MAIN_RIVER",
+        navigation_category_code=category,
         navigation_scope_code="CORE",
         ais_situation_scope="INCLUDED",
         center_longitude=None,
         center_latitude=None,
+        display_center_longitude=None,
+        display_center_latitude=None,
+        boundary_quality_code="HIGH_CONFIDENCE",
         shape_area_degree=area,
         bbox=(min_lng, min_lat, max_lng, max_lat),
         bbox_area=(max_lng - min_lng) * (max_lat - min_lat),

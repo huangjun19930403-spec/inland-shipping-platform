@@ -143,6 +143,13 @@ WATER_GEOMETRY_UNION_LABELS = {
     "MULTIPART_MERGED": "多要素合并",
     "MISSING": "缺少边界",
 }
+WATER_BOUNDARY_QUALITY_LABELS = {
+    "HIGH_CONFIDENCE": "高置信",
+    "MEDIUM_CONFIDENCE": "中置信",
+    "REVIEW": "待复核",
+    "MISSING": "缺少边界",
+    "UNKNOWN": "未知",
+}
 
 
 def _to_admin_region_response(row) -> AdminRegionResponse:
@@ -264,6 +271,10 @@ def _water_geometry_union_status_name(code: str | None) -> str | None:
     return WATER_GEOMETRY_UNION_LABELS.get(code or "")
 
 
+def _water_boundary_quality_name(code: str | None) -> str:
+    return WATER_BOUNDARY_QUALITY_LABELS.get(code or "UNKNOWN", code or "未知")
+
+
 def _source_level_names(levels: list[int] | None) -> list[str]:
     return [_water_level_name(level) for level in levels or []]
 
@@ -289,6 +300,7 @@ def _to_water_system_response(
         water_system_name=row.water_system_name,
         standard_name=row.standard_name,
         display_name=row.display_name,
+        parent_water_system_code=row.parent_water_system_code,
         water_level=row.water_level,
         water_level_name=_water_level_name(row.water_level),
         feature_type_code=row.feature_type_code,
@@ -312,10 +324,12 @@ def _to_water_system_response(
         match_confidence_name=_water_match_confidence_name(row.match_confidence_code),
         review_required=row.review_required,
         source_feature_count=row.source_feature_count,
+        source_object_ids=row.source_object_ids or [],
         source_levels=row.source_levels or [],
         source_level_names=_source_level_names(row.source_levels),
         source_layer_names=row.source_layer_names or [],
         source_names=row.source_names or [],
+        source_remarks=row.source_remarks or [],
         geometry_union_status=row.geometry_union_status,
         geometry_union_status_name=_water_geometry_union_status_name(row.geometry_union_status),
         business_remark=row.business_remark,
@@ -341,8 +355,12 @@ def _to_water_system_detail_response(
         **base,
         center_longitude=boundary.center_longitude if boundary else None,
         center_latitude=boundary.center_latitude if boundary else None,
+        display_center_longitude=row.display_center_longitude,
+        display_center_latitude=row.display_center_latitude,
         ring_count=boundary.ring_count if boundary else 0,
         point_count=boundary.point_count if boundary else 0,
+        boundary_quality_code=boundary.boundary_quality_code if boundary else "MISSING",
+        boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code if boundary else "MISSING"),
     )
 
 
@@ -362,13 +380,18 @@ def _to_water_boundary_response(
         navigation_category_name=_water_navigation_category_name(row.navigation_category_code),
         navigation_scope_code=row.navigation_scope_code,
         navigation_scope_name=_water_navigation_scope_name(row.navigation_scope_code),
+        parent_water_system_code=row.parent_water_system_code,
         precision=precision,
         boundary_paths=paths,
         has_boundary=bool(paths),
         geometry_status_code=geometry_status_code,
         geometry_status_name=_water_geometry_status_name(geometry_status_code),
+        boundary_quality_code=boundary.boundary_quality_code if boundary else "MISSING",
+        boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code if boundary else "MISSING"),
         center_longitude=boundary.center_longitude if boundary else None,
         center_latitude=boundary.center_latitude if boundary else None,
+        display_center_longitude=row.display_center_longitude,
+        display_center_latitude=row.display_center_latitude,
     )
 
 
@@ -588,6 +611,20 @@ class WaterSystemService:
                 .group_by(WaterSystem.navigation_scope_code)
             )
         ).all()
+        category_rows = (
+            await self.db.execute(
+                select(WaterSystem.navigation_category_code, func.count())
+                .where(WaterSystem.is_enabled.is_(True))
+                .group_by(WaterSystem.navigation_category_code)
+            )
+        ).all()
+        ais_scope_rows = (
+            await self.db.execute(
+                select(WaterSystem.ais_situation_scope, func.count())
+                .where(WaterSystem.is_enabled.is_(True))
+                .group_by(WaterSystem.ais_situation_scope)
+            )
+        ).all()
         version_row = await self.db.scalar(
             select(WaterSystem.source_version)
             .where(WaterSystem.is_enabled.is_(True))
@@ -601,6 +638,8 @@ class WaterSystemService:
             enabled_count=enabled_count,
             level_counts={str(level): int(count) for level, count in level_rows},
             navigation_scope_counts={str(scope or "UNKNOWN"): int(count) for scope, count in scope_rows},
+            navigation_category_counts={str(category or "UNKNOWN"): int(count) for category, count in category_rows},
+            ais_situation_scope_counts={str(scope or "UNKNOWN"): int(count) for scope, count in ais_scope_rows},
             current_source_version=version_row,
         )
 
@@ -693,11 +732,12 @@ class WaterSystemService:
                 select(
                     WaterSystemBoundary.id,
                     WaterSystemBoundary.geometry_status_code,
-                    WaterSystemBoundary.imported_at,
-                    WaterSystemBoundary.center_longitude,
-                    WaterSystemBoundary.center_latitude,
-                    WaterSystemBoundary.ring_count,
-                    WaterSystemBoundary.point_count,
+                WaterSystemBoundary.imported_at,
+                WaterSystemBoundary.center_longitude,
+                WaterSystemBoundary.center_latitude,
+                WaterSystemBoundary.boundary_quality_code,
+                WaterSystemBoundary.ring_count,
+                WaterSystemBoundary.point_count,
                 )
                 .where(
                     WaterSystemBoundary.water_system_id == row.id,
@@ -713,6 +753,7 @@ class WaterSystemService:
                 imported_at=boundary_row.imported_at,
                 center_longitude=boundary_row.center_longitude,
                 center_latitude=boundary_row.center_latitude,
+                boundary_quality_code=boundary_row.boundary_quality_code,
                 ring_count=boundary_row.ring_count,
                 point_count=boundary_row.point_count,
             )

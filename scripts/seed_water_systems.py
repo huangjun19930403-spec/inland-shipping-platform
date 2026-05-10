@@ -26,7 +26,7 @@ from app.modules.address.boundary_utils import (
     polygons_bbox,
     serialize_boundary_paths,
 )
-from scripts.seed_data import navigation_water_systems_v1 as embedded_water_systems
+from scripts.seed_data import navigation_water_systems_v2 as embedded_water_systems
 
 try:
     import shapefile  # type: ignore[import-not-found]
@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover - dependency guard for bootstrap environme
 
 
 SOURCE_VERSION = embedded_water_systems.DATA_VERSION
-OLD_SOURCE_VERSION = "revier_wgs84_l1_l4_v1"
+OLD_SOURCE_VERSIONS = {"revier_wgs84_l1_l4_v1", "revier_wgs84_navigation_v1"}
 DEFAULT_LEVELS = (1, 2, 3, 4)
 LEVEL_LAYER_NAMES = {
     1: "一级水系",
@@ -450,6 +450,7 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
                 "water_system_name": row["water_system_name"],
                 "standard_name": row.get("standard_name") or row["water_system_name"],
                 "display_name": row.get("display_name") or row["water_system_name"],
+                "parent_water_system_code": row.get("parent_water_system_code"),
                 "water_level": int(row["water_level"]),
                 "feature_type_code": row["feature_type_code"],
                 "hydrology_period_code": row["hydrology_period_code"],
@@ -470,6 +471,8 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
                 "source_remarks": row.get("source_remarks") or [],
                 "geometry_union_status": row.get("geometry_union_status"),
                 "business_remark": row.get("business_remark"),
+                "display_center_longitude": row.get("display_center_longitude"),
+                "display_center_latitude": row.get("display_center_latitude"),
                 "source_remark": row.get("source_remark"),
                 "source_layer_name": row["source_layer_name"],
                 "source_version": row.get("source_version") or SOURCE_VERSION,
@@ -508,6 +511,7 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
                 "ring_count": int(row.get("ring_count") or 0),
                 "point_count": int(row.get("point_count") or 0),
                 "geometry_status_code": row.get("geometry_status_code") or "AVAILABLE",
+                "boundary_quality_code": row.get("boundary_quality_code") or "UNKNOWN",
                 "is_current": True,
                 "imported_at": now,
             }
@@ -517,7 +521,7 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
                 for key, value in boundary_payload.items():
                     setattr(boundary, key, value)
         stale_condition = or_(
-            WaterSystem.source_version == OLD_SOURCE_VERSION,
+            WaterSystem.source_version.in_(OLD_SOURCE_VERSIONS),
             WaterSystem.water_system_code.like("WS-L1-%"),
             WaterSystem.water_system_code.like("WS-L2-%"),
             WaterSystem.water_system_code.like("WS-L3-%"),

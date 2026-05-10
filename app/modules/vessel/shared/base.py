@@ -327,6 +327,7 @@ class _CityBoundary:
 class _WaterSystemBoundary:
     code: str
     name: str
+    parent_water_system_code: str | None
     level: int
     feature_type_code: str
     hydrology_period_code: str
@@ -337,6 +338,9 @@ class _WaterSystemBoundary:
     ais_situation_scope: str | None
     center_longitude: Decimal | None
     center_latitude: Decimal | None
+    display_center_longitude: Decimal | None
+    display_center_latitude: Decimal | None
+    boundary_quality_code: str
     shape_area_degree: Decimal | None
     bbox: tuple[float, float, float, float]
     bbox_area: float
@@ -744,6 +748,16 @@ def _water_navigation_scope_name(code: str | None) -> str | None:
         "REVIEW": "复核保留",
         "MISSING": "待补边界",
     }.get(code or "")
+
+
+def _water_boundary_quality_name(code: str | None) -> str | None:
+    return {
+        "HIGH_CONFIDENCE": "高置信",
+        "MEDIUM_CONFIDENCE": "中置信",
+        "REVIEW": "待复核",
+        "MISSING": "缺少边界",
+        "UNKNOWN": "未知",
+    }.get(code or "UNKNOWN")
 
 
 def _ais_freshness_level(age_minutes: int | None) -> str:

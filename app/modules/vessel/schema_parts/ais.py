@@ -96,9 +96,12 @@ class VesselPositionWaterSystemSituationQuery(BaseModel):
     certificate_risk_available: bool | None = None
     water_level: int | None = Field(default=None, ge=1, le=4)
     water_levels: str | None = None
+    navigation_scope_codes: str | None = None
+    navigation_category_codes: str | None = None
     water_system_name: str | None = None
     reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
     include_boundary: bool = True
+    include_empty_water_systems: bool = True
     boundary_precision: str = Field(default="low", pattern="^(low|medium)$")
 
 class VesselPositionWaterSystemVesselsQuery(VesselPositionWaterSystemSituationQuery):
@@ -119,9 +122,12 @@ class VesselAisWaterSystemSituationQuery(BaseModel):
     certificate_risk_available: bool | None = None
     water_level: int | None = Field(default=None, ge=1, le=4)
     water_levels: str | None = None
+    navigation_scope_codes: str | None = None
+    navigation_category_codes: str | None = None
     water_system_name: str | None = None
     reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
     include_boundary: bool = True
+    include_empty_water_systems: bool = True
     boundary_precision: str = Field(default="low", pattern="^(low|medium)$")
 
     def to_internal_query(self) -> VesselPositionWaterSystemSituationQuery:
@@ -142,6 +148,8 @@ class VesselAisWaterSystemBoundaryQuery(BaseModel):
     water_system_name: str | None = None
     water_level: int | None = Field(default=None, ge=1, le=4)
     water_levels: str | None = None
+    navigation_scope_codes: str | None = None
+    navigation_category_codes: str | None = None
     precision: str = Field(default="low", pattern="^(low|medium|high)$")
 
 class VesselAisSnapshotQuery(BaseModel):
@@ -341,6 +349,7 @@ class VesselAisCityBoundaryResponse(BaseModel):
 class VesselPositionWaterSystemSituationItemResponse(BaseModel):
     water_system_code: str | None = None
     water_system_name: str
+    parent_water_system_code: str | None = None
     water_level: int | None = None
     water_level_name: str | None = None
     feature_type_code: str | None = None
@@ -357,11 +366,15 @@ class VesselPositionWaterSystemSituationItemResponse(BaseModel):
     navigation_scope_name: str | None = None
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
+    display_center_longitude: Decimal | None = None
+    display_center_latitude: Decimal | None = None
     heat_center_longitude: Decimal | None = None
     heat_center_latitude: Decimal | None = None
     boundary_paths: list[list[list[float]]] | None = None
     has_boundary: bool = False
     boundary_precision: str | None = None
+    boundary_quality_code: str | None = None
+    boundary_quality_name: str | None = None
     positioned_count: int
     contactable_position_count: int
     total_deadweight_ton: Decimal | None = None
@@ -435,16 +448,21 @@ class VesselPositionWaterSystemVesselsResponse(PageResponse[VesselPositionMonito
 class VesselAisWaterSystemBoundaryItemResponse(BaseModel):
     water_system_code: str
     water_system_name: str
+    parent_water_system_code: str | None = None
     water_level: int
     water_level_name: str
     navigation_category_code: str | None = None
     navigation_category_name: str | None = None
     navigation_scope_code: str | None = None
     navigation_scope_name: str | None = None
+    display_center_longitude: Decimal | None = None
+    display_center_latitude: Decimal | None = None
     boundary_paths: list[list[list[float]]] = Field(default_factory=list)
     has_boundary: bool = False
     boundary_precision: str = "low"
     boundary_status_code: str = "UNKNOWN"
+    boundary_quality_code: str | None = None
+    boundary_quality_name: str | None = None
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
 

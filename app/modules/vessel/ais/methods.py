@@ -596,6 +596,8 @@ class VesselAisMixin:
         generated_at = datetime.utcnow()
         cache_backend = await self._city_cache_backend()
         levels = self._water_system_query_levels(query)
+        navigation_scope_codes = self._water_system_query_code_set(query, "navigation_scope_codes")
+        navigation_category_codes = self._water_system_query_code_set(query, "navigation_category_codes")
         limits = await self._ais_runtime_limits()
         profile_limit = limits["profile_limit"]
         es_batch_size = limits["es_batch_size"]
@@ -604,6 +606,32 @@ class VesselAisMixin:
         profiles = await self._position_monitor_profiles(query, limit=profile_limit)
         unscanned_profile_count = max(0, (total_profile_count or len(profiles)) - len(profiles))
         if not profiles:
+            water_systems: list[VesselPositionWaterSystemSituationItemResponse] = []
+            if bool(getattr(query, "include_empty_water_systems", True)):
+                filtered_boundaries = self._filter_water_boundaries(
+                    await self._water_system_boundaries(),
+                    levels,
+                    getattr(query, "water_system_name", None),
+                    navigation_scope_codes,
+                    navigation_category_codes,
+                )
+                water_systems = self._water_system_situation_items(
+                    [],
+                    {},
+                    {},
+                    generated_at,
+                    query.reported_within_minutes or 1440,
+                    0,
+                    0,
+                    0,
+                    0,
+                    False,
+                    None,
+                    filtered_boundaries,
+                    {},
+                    None,
+                    True,
+                )
             return VesselPositionWaterSystemSituationResponse(
                 source_status="EMPTY",
                 source_status_name=_source_status_name("EMPTY"),
@@ -622,11 +650,39 @@ class VesselAisMixin:
                     stale_position_count=0,
                     contactable_position_count=0,
                     certificate_risk_count=0,
-                    water_system_count=0,
+                    water_system_count=sum(1 for item in water_systems if item.water_system_code),
+                    boundary_water_system_count=sum(1 for item in water_systems if item.water_system_code and item.has_boundary),
+                    missing_boundary_water_system_count=sum(1 for item in water_systems if item.water_system_code and not item.has_boundary),
                 ),
-                water_systems=[],
+                water_systems=water_systems,
             )
         if not await self._realtime_es_host():
+            water_systems: list[VesselPositionWaterSystemSituationItemResponse] = []
+            if bool(getattr(query, "include_empty_water_systems", True)):
+                filtered_boundaries = self._filter_water_boundaries(
+                    await self._water_system_boundaries(),
+                    levels,
+                    getattr(query, "water_system_name", None),
+                    navigation_scope_codes,
+                    navigation_category_codes,
+                )
+                water_systems = self._water_system_situation_items(
+                    [],
+                    {},
+                    {},
+                    generated_at,
+                    query.reported_within_minutes or 1440,
+                    0,
+                    0,
+                    0,
+                    0,
+                    False,
+                    None,
+                    filtered_boundaries,
+                    {},
+                    None,
+                    True,
+                )
             return VesselPositionWaterSystemSituationResponse(
                 source_status="UNCONFIGURED",
                 source_status_name=_source_status_name("UNCONFIGURED"),
@@ -645,9 +701,11 @@ class VesselAisMixin:
                     stale_position_count=0,
                     contactable_position_count=0,
                     certificate_risk_count=0,
-                    water_system_count=0,
+                    water_system_count=sum(1 for item in water_systems if item.water_system_code),
+                    boundary_water_system_count=sum(1 for item in water_systems if item.water_system_code and item.has_boundary),
+                    missing_boundary_water_system_count=sum(1 for item in water_systems if item.water_system_code and not item.has_boundary),
                 ),
-                water_systems=[],
+                water_systems=water_systems,
             )
         result = await self._position_monitor_items_for_profiles(
             profiles,
@@ -669,7 +727,13 @@ class VesselAisMixin:
         summary_risk_by_profile = await self._summary_risk_level_by_profile([item.id for item in result.items])
         items = self._filter_water_situation_items_by_risk(result.items, query, risk_by_profile, summary_risk_by_profile)
         boundaries = await self._water_system_boundaries()
-        filtered_boundaries = self._filter_water_boundaries(boundaries, levels, getattr(query, "water_system_name", None))
+        filtered_boundaries = self._filter_water_boundaries(
+            boundaries,
+            levels,
+            getattr(query, "water_system_name", None),
+            navigation_scope_codes,
+            navigation_category_codes,
+        )
         boundary_paths_by_code = (
             self._water_boundary_paths_by_code(filtered_boundaries, query.boundary_precision)
             if query.include_boundary
@@ -690,6 +754,7 @@ class VesselAisMixin:
             filtered_boundaries,
             boundary_paths_by_code,
             query.boundary_precision if query.include_boundary else None,
+            bool(getattr(query, "include_empty_water_systems", True)),
         )
         snapshot_id = await self._store_city_situation_snapshot(
             result.items,
@@ -783,7 +848,13 @@ class VesselAisMixin:
             )
         boundaries = await self._water_system_boundaries()
         levels = self._water_system_query_levels(query)
-        filtered_boundaries = self._filter_water_boundaries(boundaries, levels, getattr(query, "water_system_name", None))
+        filtered_boundaries = self._filter_water_boundaries(
+            boundaries,
+            levels,
+            getattr(query, "water_system_name", None),
+            self._water_system_query_code_set(query, "navigation_scope_codes"),
+            self._water_system_query_code_set(query, "navigation_category_codes"),
+        )
         items = [
             item for item in snapshot.items
             if not self._is_stale_position(item, snapshot.generated_at, query.reported_within_minutes or 1440)
@@ -837,6 +908,8 @@ class VesselAisMixin:
             await self._water_system_boundaries(),
             levels,
             getattr(query, "water_system_name", None),
+            self._water_system_query_code_set(query, "navigation_scope_codes"),
+            self._water_system_query_code_set(query, "navigation_category_codes"),
         )
         items: list[VesselAisWaterSystemBoundaryItemResponse] = []
         for boundary in boundaries:
@@ -847,16 +920,21 @@ class VesselAisMixin:
                 VesselAisWaterSystemBoundaryItemResponse(
                     water_system_code=boundary.code,
                     water_system_name=boundary.name,
+                    parent_water_system_code=boundary.parent_water_system_code,
                     water_level=boundary.level,
                     water_level_name=_water_level_name(boundary.level) or "",
                     navigation_category_code=boundary.navigation_category_code,
                     navigation_category_name=_water_navigation_category_name(boundary.navigation_category_code),
                     navigation_scope_code=boundary.navigation_scope_code,
                     navigation_scope_name=_water_navigation_scope_name(boundary.navigation_scope_code),
+                    display_center_longitude=boundary.display_center_longitude,
+                    display_center_latitude=boundary.display_center_latitude,
                     boundary_paths=_serialize_boundary_paths(paths) or [],
                     has_boundary=bool(paths),
                     boundary_precision=precision,
                     boundary_status_code="AVAILABLE" if paths else "MISSING",
+                    boundary_quality_code=boundary.boundary_quality_code,
+                    boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code),
                     center_longitude=boundary.center_longitude,
                     center_latitude=boundary.center_latitude,
                 )
@@ -1648,13 +1726,25 @@ class VesselAisMixin:
                     continue
         return {item for item in levels if item in {1, 2, 3, 4}} or {1, 2, 3, 4}
 
+    def _water_system_query_code_set(self, query, attr_name: str) -> set[str]:
+        raw = getattr(query, attr_name, None)
+        if not raw:
+            return set()
+        return {part.strip() for part in str(raw).split(",") if part.strip()}
+
     def _filter_water_boundaries(
         self,
         boundaries: list[_WaterSystemBoundary],
         levels: set[int],
         keyword: str | None,
+        navigation_scope_codes: set[str] | None = None,
+        navigation_category_codes: set[str] | None = None,
     ) -> list[_WaterSystemBoundary]:
         result = [boundary for boundary in boundaries if boundary.level in levels]
+        if navigation_scope_codes:
+            result = [boundary for boundary in result if (boundary.navigation_scope_code or "") in navigation_scope_codes]
+        if navigation_category_codes:
+            result = [boundary for boundary in result if (boundary.navigation_category_code or "") in navigation_category_codes]
         if keyword:
             text = keyword.strip()
             result = [boundary for boundary in result if text in boundary.name or text in boundary.code]
@@ -1676,6 +1766,7 @@ class VesselAisMixin:
         boundaries: list[_WaterSystemBoundary],
         boundary_paths_by_code: dict[str, list[list[tuple[float, float]]]] | None = None,
         boundary_precision: str | None = None,
+        include_empty_water_systems: bool = True,
     ) -> list[VesselPositionWaterSystemSituationItemResponse]:
         boundary_paths_by_code = boundary_paths_by_code or {}
         boundary_by_code = {boundary.code: boundary for boundary in boundaries}
@@ -1714,6 +1805,24 @@ class VesselAisMixin:
                     boundary_precision,
                 )
             )
+        if include_empty_water_systems:
+            for boundary in boundaries:
+                if boundary.code in grouped:
+                    continue
+                result.append(
+                    self._water_system_situation_response_item(
+                        boundary,
+                        [],
+                        risk_by_profile,
+                        summary_risk_by_profile,
+                        generated_at,
+                        reported_within_minutes,
+                        partial,
+                        error_message,
+                        boundary_paths_by_code.get(boundary.code),
+                        boundary_precision,
+                    )
+                )
         if unmatched_items:
             fresh_items = [item for item in unmatched_items if not self._is_stale_position(item, generated_at, reported_within_minutes)]
             longitudes = [_to_decimal(item.longitude) for item in fresh_items]
@@ -1775,6 +1884,7 @@ class VesselAisMixin:
         return VesselPositionWaterSystemSituationItemResponse(
             water_system_code=boundary.code,
             water_system_name=boundary.name,
+            parent_water_system_code=boundary.parent_water_system_code,
             water_level=boundary.level,
             water_level_name=_water_level_name(boundary.level),
             feature_type_code=boundary.feature_type_code,
@@ -1791,11 +1901,15 @@ class VesselAisMixin:
             navigation_scope_name=_water_navigation_scope_name(boundary.navigation_scope_code),
             center_longitude=boundary.center_longitude,
             center_latitude=boundary.center_latitude,
-            heat_center_longitude=heat_longitude,
-            heat_center_latitude=heat_latitude,
+            display_center_longitude=boundary.display_center_longitude,
+            display_center_latitude=boundary.display_center_latitude,
+            heat_center_longitude=heat_longitude or boundary.display_center_longitude or boundary.center_longitude,
+            heat_center_latitude=heat_latitude or boundary.display_center_latitude or boundary.center_latitude,
             boundary_paths=serialized_paths,
             has_boundary=bool(paths),
             boundary_precision=boundary_precision if serialized_paths else None,
+            boundary_quality_code=boundary.boundary_quality_code,
+            boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code),
             positioned_count=len(fresh_items),
             contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
             total_deadweight_ton=self._sum_deadweight(stats_items),
@@ -2066,6 +2180,7 @@ class VesselAisMixin:
                 _WaterSystemBoundary(
                     code=water_system.water_system_code,
                     name=water_system.water_system_name,
+                    parent_water_system_code=water_system.parent_water_system_code,
                     level=water_system.water_level,
                     feature_type_code=water_system.feature_type_code,
                     hydrology_period_code=water_system.hydrology_period_code,
@@ -2076,6 +2191,9 @@ class VesselAisMixin:
                     ais_situation_scope=water_system.ais_situation_scope,
                     center_longitude=_to_decimal(boundary.center_longitude),
                     center_latitude=_to_decimal(boundary.center_latitude),
+                    display_center_longitude=_to_decimal(water_system.display_center_longitude),
+                    display_center_latitude=_to_decimal(water_system.display_center_latitude),
+                    boundary_quality_code=boundary.boundary_quality_code,
                     shape_area_degree=_to_decimal(boundary.source_shape_area_degree),
                     bbox=bbox,
                     bbox_area=max(0.0, (max_x - min_x) * (max_y - min_y)),
@@ -2208,25 +2326,27 @@ class VesselAisMixin:
         ]
         if not matches:
             return []
-        selected_by_level: dict[int, _WaterSystemBoundary] = {}
-        for boundary in matches:
-            current = selected_by_level.get(boundary.level)
-            if current is None or self._water_boundary_sort_key(boundary) < self._water_boundary_sort_key(current):
-                selected_by_level[boundary.level] = boundary
+        selected = min(matches, key=self._water_boundary_sort_key)
         return [
             _ResolvedWaterSystem(
-                water_system_code=boundary.code,
-                water_system_name=boundary.name,
+                water_system_code=selected.code,
+                water_system_name=selected.name,
                 current_water_system_source=CURRENT_WATER_SYSTEM_SOURCE_BOUNDARY,
-                water_level=boundary.level,
-                boundary=boundary,
+                water_level=selected.level,
+                boundary=selected,
             )
-            for boundary in selected_by_level.values()
         ]
 
-    def _water_boundary_sort_key(self, boundary: _WaterSystemBoundary) -> tuple[Decimal, Decimal]:
+    def _water_boundary_sort_key(self, boundary: _WaterSystemBoundary) -> tuple[int, Decimal, Decimal]:
+        category_rank = {
+            "CANAL": 0,
+            "DELTA_NETWORK": 0,
+            "TRIBUTARY": 1,
+            "MAIN_RIVER": 2,
+            "LAKE": 3,
+        }.get(boundary.navigation_category_code or "", 4)
         shape_area = boundary.shape_area_degree if boundary.shape_area_degree is not None else Decimal("999999999")
-        return shape_area, Decimal(str(boundary.bbox_area))
+        return category_rank, shape_area, Decimal(str(boundary.bbox_area))
 
     def _water_system_matches_position(
         self,

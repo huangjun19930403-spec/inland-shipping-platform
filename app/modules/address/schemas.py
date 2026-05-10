@@ -83,6 +83,8 @@ class WaterSystemSummaryResponse(BaseModel):
     enabled_count: int
     level_counts: dict[str, int] = Field(default_factory=dict)
     navigation_scope_counts: dict[str, int] = Field(default_factory=dict)
+    navigation_category_counts: dict[str, int] = Field(default_factory=dict)
+    ais_situation_scope_counts: dict[str, int] = Field(default_factory=dict)
     current_source_version: str | None = None
 
 
@@ -92,6 +94,7 @@ class WaterSystemResponse(BaseModel):
     water_system_name: str
     standard_name: str | None = None
     display_name: str | None = None
+    parent_water_system_code: str | None = None
     water_level: int
     water_level_name: str
     feature_type_code: str
@@ -115,10 +118,12 @@ class WaterSystemResponse(BaseModel):
     match_confidence_name: str | None = None
     review_required: bool = False
     source_feature_count: int = 0
+    source_object_ids: list[int] = Field(default_factory=list)
     source_levels: list[int] = Field(default_factory=list)
     source_level_names: list[str] = Field(default_factory=list)
     source_layer_names: list[str] = Field(default_factory=list)
     source_names: list[str] = Field(default_factory=list)
+    source_remarks: list[str] = Field(default_factory=list)
     geometry_union_status: str | None = None
     geometry_union_status_name: str | None = None
     business_remark: str | None = None
@@ -137,8 +142,12 @@ class WaterSystemResponse(BaseModel):
 class WaterSystemDetailResponse(WaterSystemResponse):
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
+    display_center_longitude: Decimal | None = None
+    display_center_latitude: Decimal | None = None
     ring_count: int = 0
     point_count: int = 0
+    boundary_quality_code: str = "UNKNOWN"
+    boundary_quality_name: str = "未知"
 
 
 class WaterSystemBoundaryResponse(BaseModel):
@@ -150,13 +159,18 @@ class WaterSystemBoundaryResponse(BaseModel):
     navigation_category_name: str | None = None
     navigation_scope_code: str | None = None
     navigation_scope_name: str | None = None
+    parent_water_system_code: str | None = None
     precision: str
     boundary_paths: list[list[list[float]]] = Field(default_factory=list)
     has_boundary: bool = False
     geometry_status_code: str = "UNKNOWN"
     geometry_status_name: str = "未知"
+    boundary_quality_code: str = "UNKNOWN"
+    boundary_quality_name: str = "未知"
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
+    display_center_longitude: Decimal | None = None
+    display_center_latitude: Decimal | None = None
 
 
 class BusinessRegionListQuery(BaseModel):
