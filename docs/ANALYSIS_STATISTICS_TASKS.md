@@ -75,7 +75,7 @@
 
 ### ANALYSIS_SHIP_DAILY
 
-- 模块：船舶分析。
+- 模块：船舶指标分析。
 - 源表：`vessel_profile`、`vessel_capacity_dimension`、`vessel_operator_period`。
 - 目标表：`fact_ship_daily`。
 - 日期字段：统计日使用任务日期范围内每一天。

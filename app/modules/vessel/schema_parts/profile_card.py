@@ -121,7 +121,7 @@ class VesselProfileRecognitionCard(VesselProfileCardBaseCard):
 
 class VesselProfileCandidateCard(VesselProfileCardBaseCard):
     round: str = "Round 8"
-    message: str = "候选资源适配分析将在 Round 8 接入"
+    message: str = "候选船舶分析将在 Round 8 接入"
     analysis_history_count: int = 0
 
 class VesselProfileCardEvidenceItem(BaseModel):

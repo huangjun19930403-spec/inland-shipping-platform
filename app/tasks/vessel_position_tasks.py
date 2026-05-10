@@ -38,16 +38,13 @@ def _run_coro_sync(coro):
 
 async def _precompute_city_situation() -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
-        response = await VesselService(db).position_city_situation(
-            VesselPositionCitySituationQuery(
-                reported_within_minutes=1440,
-                es_batch_size=500,
-                es_max_concurrency=4,
-                include_boundary=True,
-                boundary_precision="low",
-                force_refresh=True,
-            )
+        query = VesselPositionCitySituationQuery(
+            reported_within_minutes=1440,
+            include_boundary=True,
+            boundary_precision="low",
         )
+        object.__setattr__(query, "force_refresh", True)
+        response = await VesselService(db).position_city_situation(query)
         return {
             "source_status": response.source_status,
             "generated_at": response.generated_at.isoformat(),

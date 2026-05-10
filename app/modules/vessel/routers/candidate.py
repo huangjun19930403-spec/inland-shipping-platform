@@ -143,8 +143,6 @@ from app.modules.vessel.schemas import (
 )
 from app.modules.vessel.candidate_service import VesselCandidateAnalysisService
 from app.modules.vessel.governance_service import VesselGovernanceService
-from app.modules.vessel.service import VesselService
-from app.modules.vessel.spatial_service import VesselSpatialAnalysisService
 
 router = APIRouter()
 

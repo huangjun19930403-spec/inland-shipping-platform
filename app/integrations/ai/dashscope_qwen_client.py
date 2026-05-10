@@ -36,6 +36,16 @@ from app.integrations.config_keys import (
     FREIGHT_AI_WARN_RAW_CHARS,
 )
 from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
+from app.modules.freight.ai_evidence_gate import (
+    GateIssue,
+    apply_segment_evidence_gate,
+    evidence_clue_schema_hint,
+    evidence_detail_schema_hint,
+    patch_semantic_map_with_gate_result,
+    repair_prompt_payload,
+    should_call_ai_repair,
+    validate_semantic_map_contract,
+)
 from app.modules.freight.ai_text_index import FreightIndexedText, FreightTextIndexer
 
 if TYPE_CHECKING:
@@ -139,12 +149,18 @@ class FreightSemanticRouteClueSchema(BaseModel):
     line_refs: list[str | int] = Field(default_factory=list)
     context_block_id: str | int | None = None
     raw_text: str
+    route_type_code: str | None = None
+    route_intent_code: str | None = None
+    origin: dict[str, Any] | None = None
+    destination: dict[str, Any] | None = None
     route_summary: str | None = None
+    shared_field_refs: list[str] = Field(default_factory=list)
+    missing_field_codes: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     confidence_score: float = 0.5
     warnings: list[str] = Field(default_factory=list)
 
-    @field_validator("line_refs", "evidence", "warnings", mode="before")
+    @field_validator("line_refs", "shared_field_refs", "missing_field_codes", "evidence", "warnings", mode="before")
     @classmethod
     def _default_list(cls, value: Any) -> Any:
         if value is None:
@@ -164,11 +180,15 @@ class FreightClueSplitItemSchema(FreightSemanticRouteClueSchema):
 
 
 class FreightContextNoteSchema(BaseModel):
+    note_id: str | int | None = None
     note_index: int | None = None
     raw_text: str
-    context_type_code: str = Field(default="OTHER", description="TONNAGE/PRICE/CONTACT/REMARK/SETTLEMENT/LOADING/OTHER")
+    context_type_code: str = Field(default="OTHER", description="COMMODITY/TONNAGE/PRICE/CONTACT/REMARK/SETTLEMENT/LOADING/OTHER")
     line_refs: list[str | int] = Field(default_factory=list)
     applies_to: list[str] = Field(default_factory=list)
+    scope_type_code: str | None = None
+    scope_reason: str | None = None
+    evidence_text: str | None = None
     evidence: list[str] = Field(default_factory=list)
     confidence_score: float = 0.5
 
@@ -176,7 +196,7 @@ class FreightContextNoteSchema(BaseModel):
     @classmethod
     def _normalize_context_type(cls, value: Any) -> str:
         code = str(value or "OTHER").strip().upper()
-        return code if code in {"TONNAGE", "PRICE", "CONTACT", "REMARK", "SETTLEMENT", "LOADING", "OTHER"} else "OTHER"
+        return code if code in {"COMMODITY", "TONNAGE", "PRICE", "CONTACT", "REMARK", "SETTLEMENT", "LOADING", "OTHER"} else "OTHER"
 
     @field_validator("line_refs", "evidence", mode="before")
     @classmethod
@@ -204,10 +224,12 @@ class FreightContextBlockSchema(BaseModel):
     line_refs: list[str | int] = Field(default_factory=list)
     raw_text: str | None = None
     context_summary: str | None = None
+    scope_type_code: str | None = None
     shared_contact_name: str | None = None
     shared_contact_phone: str | None = None
     shared_contact_wechat: str | None = None
     shared_tonnage_text: str | None = None
+    shared_commodity_text: str | None = None
     shared_price_text: str | None = None
     shared_unit_price: float | None = None
     shared_total_price: float | None = None
@@ -308,8 +330,10 @@ class FreightSegmentSchema(BaseModel):
     segment_index: int | None = None
     context_block_id: str | int | None = None
     semantic_role_code: str | None = Field(default="ROUTE", description="ROUTE/CONTEXT/IGNORED")
+    route_intent_code: str | None = Field(default=None, description="FORMAL_FREIGHT/SEEK_VESSEL/VESSEL_INQUIRY/OTHER")
     line_refs: list[str | int] = Field(default_factory=list, description="原文行号或行标识")
     raw_text: str = Field(description="原文片段，必须可在原文中追溯")
+    field_evidence: dict[str, Any] | None = Field(default=None, description="字段级 evidence contract")
     context_summary: str | None = Field(default=None, description="AI 判断的上下文继承说明")
     inherited_context: dict[str, Any] | None = Field(default=None, description="从公共上下文继承到该货源的价格、联系人、备注等信息")
     is_freight_candidate: bool = True
@@ -530,124 +554,11 @@ def _preclean_parse_payload_numbers(payload: dict[str, Any]) -> tuple[dict[str, 
 
 
 def _json_schema_hint() -> dict[str, Any]:
-    return {
-        "segments": [
-            {
-                "clue_temp_id": "<必须等于输入 route_clue 的 clue_temp_id>",
-                "segment_index": 1,
-                "context_block_id": "<继承上下文块 ID，未知填 null>",
-                "semantic_role_code": "ROUTE",
-                "line_refs": ["<原文行号或行标识>"],
-                "raw_text": "<完整货源线索原文片段>",
-                "context_summary": "<继承的公共上下文摘要，不能写未在原文或 context_notes 中出现的信息>",
-                "inherited_context": {
-                    "price": "<继承的价格原文或 null>",
-                    "tonnage": "<仅当 AI 已裁决该吨位明确归属本条线索时填写，否则 null>",
-                    "contact": "<继承的联系人原文或 null>",
-                    "remark": "<继承的装卸/结算/天气备注原文或 null>",
-                    "evidence": ["<上下文证据片段>"],
-                },
-                "is_freight_candidate": True,
-                "drop_reason": None,
-                "cargo_title": "<装货地 至 卸货地 货品>",
-                "cargo_description": "<装卸、结算、备注等原文信息>",
-                "commodity_name": "<货品原文；若由上下文强推断，填推断货品并在 ai_review_json 标明>",
-                "origin_text": "<装货地原文>",
-                "destination_text": "<卸货地原文>",
-                "origin_match_level_code": "<AI 判断装货地是 NODE/CITY/RAW，未知填 null>",
-                "destination_match_level_code": "<AI 判断卸货地是 NODE/CITY/RAW，未知填 null>",
-                "raw_tonnage_text": "<吨位原文，例如 2000左右 或 1500-2000内>",
-                "estimated_tonnage": None,
-                "min_tonnage": None,
-                "max_tonnage": None,
-                "quantity_description": "<50米船、拖队一条等数量/船型描述；不是吨位时写这里>",
-                "vessel_description": "<船型、拖队、米数等非吨位信息>",
-                "tonnage_decision": {
-                    "status_code": "PASS",
-                    "selected_text": "<本条货源自己的吨位原文或 null>",
-                    "reason": "<为什么这个吨位属于本条货源；不输出思考过程，只输出结论证据>",
-                },
-                "tonnage_candidates": [
-                    {"text": "<候选吨位原文>", "line_ref": "<来源行>", "belongs_to_current_segment": True}
-                ],
-                "unit_price": None,
-                "total_price": None,
-                "price_unit": "<价格单位原文或 null>",
-                "settlement_method_code": "<CASH/MONTHLY/TRANSFER/OTHER 或 null>",
-                "contact_name": "<联系人原文或 null>",
-                "contact_phone": "<手机号原文或 null>",
-                "availability_status_code": "READY",
-                "manual_review_reason": None,
-                "ai_review_status_code": "PASS",
-                "ai_review_reason": None,
-                "ai_review_json": {"summary": "<业务复核结论>"},
-                "confidence_score": 0.86,
-                "evidence": ["<路线证据>", "<货品证据>", "<继承上下文证据>"],
-                "needs_strong_review": False,
-            }
-        ],
-        "warnings": ["无法确定吨位的线索需人工补充"],
-    }
+    return evidence_detail_schema_hint()
 
 
 def _clue_schema_hint() -> dict[str, Any]:
-    return {
-        "route_clues": [
-            {
-                "clue_temp_id": "C1",
-                "context_block_id": "<该线索所属上下文块 ID，未知填 null>",
-                "line_refs": ["<原文行号或行标识>"],
-                "raw_text": "<可从 line_refs 追溯的原文片段；不要生成正式候选字段>",
-                "route_summary": "<只描述为何疑似路线线索；不抽正式字段；不确定填 null>",
-                "warnings": [],
-                "confidence_score": 0.86,
-                "evidence": ["<路线线索证据原文>"],
-            }
-        ],
-        "context_blocks": [
-            {
-                "context_block_id": "B1",
-                "route_clue_ids": ["C1"],
-                "line_refs": ["<上下文块证据行号>"],
-                "raw_text": "<该公共上下文块覆盖的连续原文片段>",
-                "context_summary": "<联系人、电话、价格、吨位、装卸、结算等公共上下文摘要>",
-                "shared_contact_name": "<公共联系人姓名或 null>",
-                "shared_contact_phone": "<公共联系电话或 null>",
-                "shared_contact_wechat": "<公共微信号或 null>",
-                "shared_tonnage_text": "<公共吨位原文或 null>",
-                "shared_price_text": "<公共价格原文或 null>",
-                "shared_unit_price": None,
-                "shared_total_price": None,
-                "shared_price_unit": "<价格单位原文或 null>",
-                "shared_settlement_method_code": "<CASH/MONTHLY/TRANSFER/OTHER 或 null>",
-                "shared_loading_remark": "<公共装卸备注或 null>",
-                "shared_remark": "<其它公共备注或 null>",
-                "evidence": ["<上下文证据原文>"],
-                "scope_reason": "<为什么这些上下文适用于 route_clue_ids>",
-                "warnings": [],
-                "confidence_score": 0.86,
-            }
-        ],
-        "context_notes": [
-            {
-                "note_index": 1,
-                "line_refs": ["<上下文行号>"],
-                "raw_text": "<公告、联系人、吨位、价格、装卸、结算或天气等上下文原文>",
-                "context_type_code": "TONNAGE",
-                "applies_to": ["C1"],
-                "evidence": ["<该上下文可继承给哪些货源线索的判断依据>"],
-                "confidence_score": 0.86,
-            }
-        ],
-        "ignored_notes": [
-            {
-                "note_index": 1,
-                "raw_text": "<公告标题、问候语或完全不能形成路线的片段>",
-                "drop_reason": "<忽略原因>",
-            }
-        ],
-        "warnings": ["有起讫地但缺货品的路线必须进入 route_clues，并写 missing_field_codes"],
-    }
+    return evidence_clue_schema_hint()
 
 
 def _normalize_json_text(content: str) -> str:
@@ -1031,6 +942,61 @@ class DashScopeQwenFreightParserClient:
         return await self.runtime_config.get_float(key, default, profile_code=DASHSCOPE_CONFIG_PROFILE)
 
     @staticmethod
+    def _schema_compat_flags(payload: dict[str, Any]) -> list[str]:
+        flags: list[str] = []
+        if "route_clues" not in payload and "freight_clues" in payload:
+            flags.append("freight_clues")
+        if "route_clues" not in payload and "clues" in payload:
+            flags.append("clues")
+        for block in payload.get("context_blocks") or []:
+            if isinstance(block, dict) and "route_clue_ids" not in block:
+                for key in ("applies_to", "clue_ids", "segment_indices"):
+                    if key in block:
+                        flags.append(f"context_blocks.{key}")
+                        break
+        return list(dict.fromkeys(flags))
+
+    @staticmethod
+    def _semantic_map_is_complex(
+        indexed_text: FreightIndexedText,
+        semantic_map: dict[str, Any],
+        gate_result: Any | None = None,
+    ) -> bool:
+        route_clues = [item for item in semantic_map.get("route_clues") or [] if isinstance(item, dict)]
+        context_blocks = [item for item in semantic_map.get("context_blocks") or [] if isinstance(item, dict)]
+        context_notes = [item for item in semantic_map.get("context_notes") or [] if isinstance(item, dict)]
+        if len(indexed_text.line_map) >= 6 or len(route_clues) >= 3:
+            return True
+        if context_blocks or context_notes:
+            return True
+        if any(len(_as_clue_refs(block.get("route_clue_ids"))) > 1 for block in context_blocks):
+            return True
+        if any(str(clue.get("route_type_code") or "").upper() == "MULTI_DESTINATION_EXPANDED" for clue in route_clues):
+            return True
+        if any(clue.get("missing_field_codes") for clue in route_clues):
+            return True
+        if semantic_map.get("scope_risk_codes") or semantic_map.get("_schema_compat_flags"):
+            return True
+        quality_gate = semantic_map.get("quality_gate")
+        if isinstance(quality_gate, dict) and (quality_gate.get("should_repair") or quality_gate.get("should_review")):
+            return True
+        return bool(gate_result and (getattr(gate_result, "should_repair", False) or getattr(gate_result, "should_review", False)))
+
+    @staticmethod
+    def _detail_model_for_wechat(
+        indexed_text: FreightIndexedText,
+        semantic_map: dict[str, Any],
+        runtime: dict[str, Any],
+        gate_result: Any | None = None,
+    ) -> str:
+        configured = str(runtime.get("detail_model") or "").strip()
+        if not DashScopeQwenFreightParserClient._semantic_map_is_complex(indexed_text, semantic_map, gate_result):
+            return configured
+        if configured and "turbo" not in configured.lower():
+            return configured
+        return str(runtime.get("semantic_model") or runtime.get("review_model") or configured or "qwen-plus").strip()
+
+    @staticmethod
     def _json_from_content(content: str) -> dict[str, Any]:
         text = _normalize_json_text(content)
         try:
@@ -1077,14 +1043,17 @@ class DashScopeQwenFreightParserClient:
                     "第一轮只输出语义地图，不生成正式候选货源，不输出完整候选字段。"
                     "输出必须分为 route_clues、context_blocks、context_notes、ignored_notes 和 warnings。"
                     "每个 route_clue 必须有稳定 clue_temp_id、line_refs、context_block_id、raw_text、evidence 和 confidence_score。"
+                    "每个 route_clue 还必须给出 route_type_code、route_intent_code、origin/destination 的 evidence_line_refs/evidence_text；无法确认填 null 并写 missing_field_codes。"
                     "clue_temp_id 必须使用 C1/C2/C3 这类字符串；context_block.route_clue_ids 也必须引用这些字符串，禁止混用 1/2 数字。"
                     "所有 route_clue/context_blocks/context_notes/ignored_notes 都必须带 line_refs；line_refs 只能使用输入中真实存在的 L 行号。"
                     "route_clues 只描述疑似路线线索和上下文关系；严禁输出 origin_text、destination_text、commodity_name、inherited_context、needs_strong_review 等正式候选字段。"
                     "召回优先：宁可多保留疑似路线并在 warnings 标风险，也不能把多条路线合并成一条。"
-                    "公共联系人、吨位、价格、结算、装卸备注必须抽成 context_blocks/context_notes，并用 route_clue_ids 说明适用范围。"
+                    "一行多目的地必须在第一轮展开为多条 route_clues，route_type_code 写 MULTI_DESTINATION_EXPANDED，不要把多个目的地塞到一个 destination。"
+                    "公共联系人、货品、吨位、价格、结算、装卸备注必须抽成 context_blocks/context_notes，并用 route_clue_ids 或 applies_to 说明适用范围。"
+                    "context_blocks/context_notes 必须给出 scope_type_code：只有 LOCAL_LINE 或 EXPLICIT_SHARED 才是可自动继承；WEAK_INFERRED/UNKNOWN 只能触发人工复核。"
                     "联系人作用域必须谨慎：多个手机号、@所有人、公告边界、相邻联系人块不能合并为一个全局联系人块。"
                     "一行或多行上下文可继承给多个 route_clues，但不能因此新增不存在的货源，不能跨另一个联系人锚点扩大继承范围。"
-                    "吨位只能作为候选上下文记录，不能因为同一公告块就默认继承给所有路线。"
+                    "吨位和货品只能作为带 scope_type_code 的候选上下文记录，不能因为同一公告块就默认继承给所有路线。"
                     "不确定填 null 或空数组；不得编造，不能使用 JSON 结构说明里的占位值。"
                 ),
             },
@@ -1172,11 +1141,14 @@ class DashScopeQwenFreightParserClient:
             "输入 route_clues 已由第一轮完整原文语义地图给出；当前只提供本批 clue 相关 evidence_lines、context_blocks、context_notes。"
             "不得重新切分原文，不得新增 route_clues 之外的货源；只能补全输入中给定 clue_temp_id 的字段。"
             "每个 segment 必须带回 clue_temp_id、line_refs、context_block_id 和 raw_text；字段必须来自 evidence_lines、route_clues 或关联 context_blocks/context_notes。"
+            "每个非空核心字段必须写入 field_evidence，包含 value、source_type_code、line_refs、evidence_text、confidence_score。"
+            "origin_text/destination_text/commodity_name/raw_tonnage_text 只有 source_type_code 为 LOCAL_LINE 或 EXPLICIT_SHARED 时才能写入顶层字段。"
+            "WEAK_INFERRED 或 UNKNOWN 的货品、吨位、地点只放入 ai_review_json.suggested_fields，并把 ai_review_status_code 写 REVIEW_REQUIRED；不能写入顶层字段供自动确认。"
             "普通 route_clue 输出一个 segment；若第一轮 clue 明确包含多目的地，可输出多个同 clue_temp_id 的 segment，但不能创建新的 clue_temp_id。"
             "context_blocks/context_notes 只能用于继承联系人、价格、结算、装卸备注，不能单独输出为 segment。"
             "只有联系人作用域明确、context_block 无风险、且证据行能支撑时，才可继承公共联系人和电话；证据不足填 null 并标记 REVIEW_REQUIRED。"
             "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据当前 evidence package 判断。"
-            "有装货地和卸货地但缺货品的 clue 必须输出 segment；若上下文强相关，可填推断货品，但 ai_review_status_code 必须 REVIEW_REQUIRED，manual_review_reason 写明 AI 根据上下文推断货品，不能一键确认。"
+            "有装货地和卸货地但缺货品的 clue 必须输出 segment；若只是相邻上下文推测货品，commodity_name 必须为 null，并在 ai_review_json.suggested_fields 记录建议，不能一键确认。"
             "如果目的地是多个地点，必须拆成多个 segments；不要把多个目的地塞进一个 destination_text。"
             "请保留 clue 中的 context_block_id；origin_match_level_code/destination_match_level_code 只有具体设施才标 NODE，只有城市名或城市简称标 CITY。"
             "吨位原文必须写 raw_tonnage_text；单点吨位填 estimated_tonnage；范围吨位填 min_tonnage 和 max_tonnage。"
@@ -1186,7 +1158,7 @@ class DashScopeQwenFreightParserClient:
             "1500-2000内 表示 min_tonnage=1500、max_tonnage=2000；2000左右 表示 estimated_tonnage=2000；2000--2500吨 表示 min_tonnage=2000、max_tonnage=2500。"
             "2-3500吨这类微信群简写通常表示 2000-3500吨，若你能从上下文确认就填 min_tonnage=2000、max_tonnage=3500；不能确认则只填 raw_tonnage_text 并写 manual_review_reason。"
             "每个 segment 必须给出 tonnage_decision，说明吨位是否 PASS；无法确认时写 ai_review_reason，不要为了凑字段拼接其它线路的吨位。"
-            "寻船、要船、现货类公告没有吨位是常见情况；只要路线、货品、联系人和可发状态可信，不要仅因为无吨位标记 REVIEW_REQUIRED。"
+            "正式货源 FORMAL_FREIGHT 没有吨位必须 REVIEW_REQUIRED。寻船/询船 SEEK_VESSEL 或 VESSEL_INQUIRY 可以无吨位，但 availability_status_code 不得 READY。"
             "非空字段必须能从当前 evidence package 中找到证据；没有证据必须填 null，不能凭完整原文记忆补全。"
             "如果某个 freight_clue 复核后不是完整货源线索，输出 is_freight_candidate=false 并写 drop_reason。"
             "船已够、暂时不要、过几天要应标为 FULL 或 DEFERRED；滚动发、随船装缺明确装期时标为 UNKNOWN。"
@@ -1227,11 +1199,14 @@ class DashScopeQwenFreightParserClient:
                 "输入 route_clues 已由第一轮 AI 从同一段完整原文语义地图中给出，context_blocks 是公共上下文块，context_notes 是补充上下文。"
                 "不得重新切分原文，不得新增 route_clues 之外的货源；只能补全输入中给定 clue_temp_id 的字段。"
                 "每个 segment 必须带回 clue_temp_id、line_refs、context_block_id 和 raw_text；字段必须来自原文行、第一轮 route_clues 或 context_blocks/context_notes。"
+                "每个非空核心字段必须写入 field_evidence，包含 value、source_type_code、line_refs、evidence_text、confidence_score。"
+                "origin_text/destination_text/commodity_name/raw_tonnage_text 只有 source_type_code 为 LOCAL_LINE 或 EXPLICIT_SHARED 时才能写入顶层字段。"
+                "WEAK_INFERRED 或 UNKNOWN 的货品、吨位、地点只放入 ai_review_json.suggested_fields，并把 ai_review_status_code 写 REVIEW_REQUIRED。"
                 "普通 route_clue 输出一个 segment；若第一轮 clue 明确包含多目的地，可输出多个同 clue_temp_id 的 segment，但不能创建新的 clue_temp_id。"
                 "context_blocks/context_notes 只能用于继承联系人、价格、结算、装卸备注，不能单独输出为 segment。"
                 "每个 segment 必须保留对应 freight_clue 的 context_block_id；只有作用域明确且证据充分时，才可继承同一 context_block 的公共联系人和电话。"
                 "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据原文与 clue 上下文判断。"
-                "有装货地和卸货地但缺货品的 clue 必须输出 segment；若上下文强相关，可填推断货品，但 ai_review_status_code 必须 REVIEW_REQUIRED，manual_review_reason 写明 AI 根据上下文推断货品，不能一键确认。"
+                "有装货地和卸货地但缺货品的 clue 必须输出 segment；若只是相邻上下文推测货品，commodity_name 必须为 null，并在 ai_review_json.suggested_fields 记录建议，不能一键确认。"
                 "如果目的地是多个地点，必须拆成多个 segments；不要把多个目的地塞进一个 destination_text。"
                 "请保留 clue 中的 origin_match_level_code/destination_match_level_code；只有具体设施才标 NODE，只有城市名或城市简称标 CITY。"
                 "吨位原文必须写 raw_tonnage_text；单点吨位填 estimated_tonnage；范围吨位填 min_tonnage 和 max_tonnage。"
@@ -1241,7 +1216,7 @@ class DashScopeQwenFreightParserClient:
                 "1500-2000内 表示 min_tonnage=1500、max_tonnage=2000；2000左右 表示 estimated_tonnage=2000；2000--2500吨 表示 min_tonnage=2000、max_tonnage=2500。"
                 "2-3500吨这类微信群简写通常表示 2000-3500吨，若你能从上下文确认就填 min_tonnage=2000、max_tonnage=3500；不能确认则只填 raw_tonnage_text 并写 manual_review_reason。"
                 "每个 segment 必须给出 tonnage_decision，说明吨位是否 PASS；无法确认时写 ai_review_reason，不要为了凑字段拼接其它线路的吨位。"
-                "寻船、要船、现货类公告没有吨位是常见情况；只要路线、货品、联系人和可发状态可信，不要仅因为无吨位标记 REVIEW_REQUIRED。"
+                "正式货源 FORMAL_FREIGHT 没有吨位必须 REVIEW_REQUIRED。寻船/询船 SEEK_VESSEL 或 VESSEL_INQUIRY 可以无吨位，但 availability_status_code 不得 READY。"
                 "非空字段必须能从原文、freight_clue、context_notes、evidence 或 inherited_context 中找到证据；没有证据必须填 null。"
                 "如果某个 freight_clue 复核后不是完整货源线索，输出 is_freight_candidate=false 并写 drop_reason。"
                 "船已够、暂时不要、过几天要应标为 FULL 或 DEFERRED；滚动发、随船装缺明确装期时标为 UNKNOWN。"
@@ -1282,11 +1257,12 @@ class DashScopeQwenFreightParserClient:
                     "请复核输入 segments 的字段完整性、吨位归类、可发状态、上下文继承和证据来源。"
                     "不得新增原文中不存在的货源，不得新增输入以外的 clue_temp_id；只能修正输入 segment 的字段、清空无证据字段，或把上下文-only/空线索标记为 is_freight_candidate=false。"
                     "当前只提供风险候选相关 evidence_lines、route_clues、context_blocks、context_notes；不得凭完整原文记忆补字段。"
+                    "每个非空核心字段必须保留或补齐 field_evidence；缺证据、WEAK_INFERRED 或 UNKNOWN 的字段必须 REVIEW_REQUIRED，不能作为顶层字段自动确认。"
                     "必须核对 context_blocks 的 route_clue_ids：只有作用域明确、无 CONTACT_SCOPE_CONFLICT/CONTEXT_BLOCK_CONFLICT/MULTI_CONTACT_BLOCK 风险时，公共联系人、电话、装卸备注才可继承到该 block 覆盖的 segment。"
                     "公共吨位不能自动继承；必须根据 route_clue 原文和上下文语义逐条裁决归属，不能把多个线路的吨位范围合并到一个 segment。"
                     "手机号紧跟路线或位于连续公告块末尾时，只有证据行和 context_block scope_reason 明确支撑才可覆盖该块。证据不足则填 null 并标记需人工判断，但不要丢弃路线。"
-                    "缺货品但上下文能强推断时，填推断货品并标记 REVIEW_REQUIRED；不要让采集人员从空白货品开始补。"
-                    "寻船、要船、现货类公告无吨位不应单独触发 REVIEW_REQUIRED。"
+                    "缺货品但上下文只是弱推断时，不要填 commodity_name；可把建议放在 ai_review_json.suggested_fields.commodity_name。"
+                    "正式货源无吨位必须 REVIEW_REQUIRED；寻船、要船、询船无吨位可以保留候选，但不得 READY 或一键确认。"
                     "如果 inherited_context.price 中实际是吨位表达，应移入 raw_tonnage_text 和 estimated_tonnage/min_tonnage/max_tonnage，并清空价格字段。"
                     "复核 2-3500吨 等简写时按微信群货源吨位语境处理，不能确认时保留 raw_tonnage_text 并要求人工判断。"
                     "发现字段来自 JSON 占位示例而非原文证据时必须清空，并写 manual_review_reason。"
@@ -1302,6 +1278,89 @@ class DashScopeQwenFreightParserClient:
                 ),
             },
         ]
+
+    @staticmethod
+    def _repair_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "你是内河航运微信群货源语义修复助手。只输出 JSON。"
+                    "你只能根据输入 indexed_text、semantic_map、segments 和 issues 修复结构化结果，不得编造原文没有的信息。"
+                    "修复目标是补齐字段级证据、修正线索边界、清空弱推断顶层字段，并把无法确认的候选标记 REVIEW_REQUIRED/UNKNOWN。"
+                    "如果无法可靠修复，保留原值或清空不安全字段，并写明 ai_review_reason。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "请修复这些 AI 解析结果：\n"
+                    f"{json.dumps(payload, ensure_ascii=False)}"
+                ),
+            },
+        ]
+
+    @staticmethod
+    def _normalize_semantic_map_payload(payload: dict[str, Any], indexed_text: FreightIndexedText) -> dict[str, Any]:
+        validated = FreightSemanticMapPayloadSchema.model_validate(payload)
+        route_clues = []
+        for index, item in enumerate(validated.route_clues, start=1):
+            clue = item.model_dump(exclude_none=True)
+            clue["clue_temp_id"] = _normalize_clue_ref(clue.get("clue_temp_id") or index) or f"C{index}"
+            clue["line_refs"] = _as_line_refs(clue.get("line_refs"))
+            route_clues.append(clue)
+        semantic_map = validated.model_dump(exclude_none=True)
+        semantic_map["route_clues"] = route_clues
+        for block in semantic_map.get("context_blocks") or []:
+            if isinstance(block, dict):
+                block["route_clue_ids"] = _as_clue_refs(block.get("route_clue_ids"))
+                block["line_refs"] = _as_line_refs(block.get("line_refs"))
+        for note in semantic_map.get("context_notes") or []:
+            if isinstance(note, dict):
+                note["applies_to"] = _as_clue_refs(note.get("applies_to"))
+                note["line_refs"] = _as_line_refs(note.get("line_refs"))
+        semantic_map["indexed_text"] = indexed_text.indexed_text
+        semantic_map["line_count"] = len(indexed_text.line_map)
+        return semantic_map
+
+    async def repair_semantic_output(
+        self,
+        indexed_text: FreightIndexedText,
+        semantic_map: dict[str, Any],
+        segments: list[dict[str, Any]],
+        issues: list[GateIssue],
+        *,
+        runtime: dict[str, Any] | None = None,
+        progress_callback: ProgressCallback | None = None,
+        stage_code: str = "AI_REPAIR",
+        progress_percent: int = 66,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+        runtime = runtime or await self._runtime()
+        repair_payload, raw = await self._call_json(
+            model=runtime["review_model"],
+            api_key=runtime["api_key"],
+            messages=self._repair_messages(repair_prompt_payload(indexed_text, semantic_map, segments, issues)),
+            timeout=runtime["timeout"],
+            progress_callback=progress_callback,
+            stage_code=stage_code,
+            stage_name="AI 证据修复",
+            stage_message="强模型正在修复字段证据和上下文归属",
+            progress_percent=progress_percent,
+        )
+        repaired_semantic_payload = repair_payload.get("semantic_map") if isinstance(repair_payload.get("semantic_map"), dict) else None
+        repaired_semantic = (
+            self._normalize_semantic_map_payload(repaired_semantic_payload, indexed_text)
+            if repaired_semantic_payload is not None
+            else dict(semantic_map)
+        )
+        repaired_semantic["_repair_summary"] = repair_payload.get("repair_summary")
+        repaired_segments = segments
+        if isinstance(repair_payload.get("segments"), list) and repair_payload.get("segments"):
+            payload_with_segments = {"segments": repair_payload.get("segments") or []}
+            payload_with_segments, _ = _preclean_parse_payload_numbers(payload_with_segments)
+            validated = FreightParsePayloadSchema.model_validate(payload_with_segments)
+            repaired_segments = self._segments_from_payload(validated.model_dump(exclude_none=True))
+        return repaired_semantic, repaired_segments, {"raw_response": raw, "repair_payload": repair_payload}
 
     async def _call_dashscope_stream(
         self,
@@ -1446,30 +1505,15 @@ class DashScopeQwenFreightParserClient:
             stage_message="AI 正在阅读全文并输出语义地图",
             progress_percent=30,
         )
+        compat_flags = self._schema_compat_flags(payload)
         try:
-            validated = FreightSemanticMapPayloadSchema.model_validate(payload)
+            semantic_map = self._normalize_semantic_map_payload(payload, indexed_text)
         except Exception as exc:
             raise ValidationError("通义千问语义地图结构不符合 schema", detail={"error": str(exc), "payload": payload}) from exc
-        route_clues = []
-        for index, item in enumerate(validated.route_clues, start=1):
-            clue = item.model_dump(exclude_none=True)
-            clue["clue_temp_id"] = _normalize_clue_ref(clue.get("clue_temp_id") or index) or f"C{index}"
-            clue["line_refs"] = _as_line_refs(clue.get("line_refs"))
-            route_clues.append(clue)
-        if not route_clues:
+        if not semantic_map.get("route_clues"):
             raise ValidationError("通义千问未输出货源语义线索", detail={"payload": payload})
-        semantic_map = validated.model_dump(exclude_none=True)
-        semantic_map["route_clues"] = route_clues
-        for block in semantic_map.get("context_blocks") or []:
-            if isinstance(block, dict):
-                block["route_clue_ids"] = _as_clue_refs(block.get("route_clue_ids"))
-                block["line_refs"] = _as_line_refs(block.get("line_refs"))
-        for note in semantic_map.get("context_notes") or []:
-            if isinstance(note, dict):
-                note["applies_to"] = _as_clue_refs(note.get("applies_to"))
-                note["line_refs"] = _as_line_refs(note.get("line_refs"))
-        semantic_map["indexed_text"] = indexed_text.indexed_text
-        semantic_map["line_count"] = len(indexed_text.line_map)
+        if compat_flags:
+            semantic_map["_schema_compat_flags"] = compat_flags
         warnings = list(semantic_map.get("warnings") or [])
         warn_raw_chars = int(runtime.get("warn_raw_chars") or 0)
         if warn_raw_chars and len(indexed_text.raw_text) > warn_raw_chars:
@@ -1504,9 +1548,11 @@ class DashScopeQwenFreightParserClient:
             async with semaphore:
                 evidence_payload, evidence_metrics = self._build_evidence_payload(indexed_text, semantic_map, clues)
                 evidence_metrics["batch_index"] = chunk_index
+                detail_model = self._detail_model_for_wechat(indexed_text, semantic_map, runtime)
+                evidence_metrics["detail_model"] = detail_model
                 metrics_by_chunk[chunk_index] = evidence_metrics
                 payload, raw = await self._call_json(
-                    model=runtime["detail_model"],
+                    model=detail_model,
                     api_key=runtime["api_key"],
                     messages=self._detail_messages(evidence_payload),
                     timeout=runtime["timeout"],
@@ -1685,6 +1731,7 @@ class DashScopeQwenFreightParserClient:
             return await self._parse_tms(content, runtime=runtime, progress_callback=progress_callback)
 
         indexed_text = FreightTextIndexer().index(raw_content or "")
+        repair_records: list[dict[str, Any]] = []
         semantic_map, semantic_raw = await self.parse_semantic_map(
             indexed_text,
             runtime=runtime,
@@ -1692,6 +1739,29 @@ class DashScopeQwenFreightParserClient:
         )
         semantic_validator = FreightSemanticValidator(indexed_text)
         semantic_validator.validate_semantic_map(semantic_map)
+        semantic_gate = validate_semantic_map_contract(indexed_text, semantic_map)
+        patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
+        if should_call_ai_repair(semantic_gate):
+            try:
+                repaired_map, _, repair_raw = await self.repair_semantic_output(
+                    indexed_text,
+                    semantic_map,
+                    [],
+                    semantic_gate.issues,
+                    runtime=runtime,
+                    progress_callback=progress_callback,
+                    stage_code="AI_SEMANTIC_REPAIR",
+                    progress_percent=36,
+                )
+                repair_records.append({"stage": "semantic", **repair_raw})
+                semantic_map = repaired_map
+                semantic_validator = FreightSemanticValidator(indexed_text)
+                semantic_validator.validate_semantic_map(semantic_map)
+                semantic_gate = validate_semantic_map_contract(indexed_text, semantic_map)
+                patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
+            except Exception as exc:  # noqa: BLE001
+                semantic_map.setdefault("warnings", []).append(f"AI_SEMANTIC_REPAIR_FAILED: {exc}")
+                patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
         segments, detail_raws, detail_warnings, detail_metrics = await self.complete_candidate_fields(
             indexed_text,
             semantic_map,
@@ -1699,6 +1769,34 @@ class DashScopeQwenFreightParserClient:
             progress_callback=progress_callback,
         )
         semantic_warnings = semantic_validator.validate_segments(semantic_map, segments)
+        detail_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
+        patch_semantic_map_with_gate_result(semantic_map, detail_gate)
+        if should_call_ai_repair(detail_gate):
+            try:
+                repaired_map, repaired_segments, repair_raw = await self.repair_semantic_output(
+                    indexed_text,
+                    semantic_map,
+                    segments,
+                    detail_gate.issues,
+                    runtime=runtime,
+                    progress_callback=progress_callback,
+                    stage_code="AI_DETAIL_REPAIR",
+                    progress_percent=69,
+                )
+                repair_records.append({"stage": "detail", **repair_raw})
+                semantic_map = repaired_map
+                segments = repaired_segments
+                semantic_validator = FreightSemanticValidator(indexed_text)
+                semantic_validator.validate_semantic_map(semantic_map)
+                semantic_warnings.extend(semantic_validator.validate_segments(semantic_map, segments))
+                detail_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
+                patch_semantic_map_with_gate_result(semantic_map, detail_gate)
+            except Exception as exc:  # noqa: BLE001
+                semantic_map.setdefault("warnings", []).append(f"AI_DETAIL_REPAIR_FAILED: {exc}")
+                for item in segments:
+                    item["availability_status_code"] = "UNKNOWN"
+                    item["needs_strong_review"] = True
+                    _append_review_reason(item, f"AI 证据修复失败，需人工判断：{exc}")
         review_results, review_raw, review_failed_count, review_metrics = await self.review_risky_segments(
             indexed_text,
             semantic_map,
@@ -1708,6 +1806,9 @@ class DashScopeQwenFreightParserClient:
         )
         if review_results:
             segments = self.merge_review_results(segments, review_results)
+            semantic_warnings.extend(semantic_validator.validate_segments(semantic_map, segments))
+            final_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
+            patch_semantic_map_with_gate_result(semantic_map, final_gate)
 
         accepted_segments, ignored_segments, quality_warnings = _prepare_segments(content, segments)
         warnings = [
@@ -1723,8 +1824,11 @@ class DashScopeQwenFreightParserClient:
             "context_notes": semantic_map.get("context_notes") or [],
             "warnings": warnings,
         }
-        used_models = [runtime["semantic_model"], runtime["detail_model"]]
+        detail_models = [str(item.get("detail_model") or runtime["detail_model"]) for item in detail_metrics]
+        used_models = [runtime["semantic_model"], *detail_models]
         if review_raw is not None:
+            used_models.append(runtime["review_model"])
+        if repair_records:
             used_models.append(runtime["review_model"])
         return QwenFreightParseResult(
             provider=runtime["provider"],
@@ -1736,6 +1840,7 @@ class DashScopeQwenFreightParserClient:
                 "semantic_map": semantic_raw,
                 "detail": detail_raws,
                 "review": review_raw,
+                "repair": repair_records,
                 "detail_metrics": detail_metrics,
                 "review_metrics": review_metrics,
             },

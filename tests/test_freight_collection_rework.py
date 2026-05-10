@@ -33,6 +33,20 @@ from app.models.common import CodeSequence
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightNormalizationSuggestion, FreightNormalizationTask
 from app.modules.freight import service as freight_service_module
 from app.modules.dictionary.service import CodeSequenceService
+from app.modules.freight.ai_evidence_gate import (
+    COMMODITY_SCOPE_UNSAFE,
+    CONTEXT_BLOCK_UNSAFE,
+    DUPLICATE_ROUTE_POINT,
+    FIELD_EVIDENCE_MISSING,
+    FORMAL_TONNAGE_MISSING,
+    LOW_ROUTE_RECALL,
+    NON_FORMAL_ROUTE_NOT_READY,
+    PROMPT_SCHEMA_DRIFT,
+    ROUTE_FIELD_UNSAFE,
+    apply_segment_evidence_gate,
+    patch_semantic_map_with_gate_result,
+    should_call_ai_repair,
+)
 from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
 from app.modules.freight.ai_text_index import FreightTextIndexer
 from app.modules.freight.master_data_matcher import FreightMasterDataBatchMatcher
@@ -301,6 +315,198 @@ def test_semantic_validator_marks_low_route_recall_when_many_lines_become_one_cl
 
     assert any("LOW_ROUTE_RECALL" in item for item in warnings)
     assert semantic_map["route_clues"][0]["needs_strong_review"] is True
+
+
+def test_evidence_gate_marks_weak_commodity_as_suggestion_not_top_level() -> None:
+    raw_text = "A到B黄沙\nC到D要船"
+    indexed = FreightTextIndexer().index(raw_text)
+    semantic_map = {
+        "route_clues": [{"clue_temp_id": "C1", "line_refs": ["L2"], "raw_text": "C到D要船"}],
+        "context_notes": [
+            {
+                "note_id": "N1",
+                "context_type_code": "COMMODITY",
+                "line_refs": ["L1"],
+                "raw_text": "A到B黄沙",
+                "applies_to": ["C1"],
+                "scope_type_code": "WEAK_INFERRED",
+            }
+        ],
+    }
+    segments = [
+        {
+            "clue_temp_id": "C1",
+            "segment_index": 1,
+            "route_intent_code": "SEEK_VESSEL",
+            "line_refs": ["L2"],
+            "raw_text": "C到D要船",
+            "origin_text": "C",
+            "destination_text": "D",
+            "commodity_name": "黄沙",
+            "availability_status_code": "READY",
+            "field_evidence": {
+                "origin_text": {"value": "C", "source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "C到D"},
+                "destination_text": {"value": "D", "source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "C到D"},
+                "commodity_name": {
+                    "value": "黄沙",
+                    "source_type_code": "WEAK_INFERRED",
+                    "line_refs": ["L1"],
+                    "evidence_text": "A到B黄沙",
+                },
+            },
+        }
+    ]
+
+    result = apply_segment_evidence_gate(indexed, semantic_map, segments)
+
+    assert COMMODITY_SCOPE_UNSAFE in result.issue_codes
+    assert segments[0]["commodity_name"] is None
+    assert segments[0]["availability_status_code"] == "UNKNOWN"
+    assert segments[0]["ai_review_json"]["suggested_fields"]["commodity_name"]["value"] == "黄沙"
+
+
+def test_evidence_gate_requires_formal_tonnage_but_not_ready_for_seek_vessel() -> None:
+    indexed = FreightTextIndexer().index("南京到芜湖动力煤\n怀远安澜到泗洪双沟要船")
+    semantic_map = {
+        "route_clues": [
+            {"clue_temp_id": "C1", "line_refs": ["L1"], "raw_text": "南京到芜湖动力煤"},
+            {"clue_temp_id": "C2", "line_refs": ["L2"], "raw_text": "怀远安澜到泗洪双沟要船"},
+        ]
+    }
+    base_evidence = {
+        "origin_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "南京到芜湖"},
+        "destination_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "南京到芜湖"},
+        "commodity_name": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "动力煤"},
+    }
+    segments = [
+        {
+            "clue_temp_id": "C1",
+            "line_refs": ["L1"],
+            "raw_text": "南京到芜湖动力煤",
+            "route_intent_code": "FORMAL_FREIGHT",
+            "origin_text": "南京",
+            "destination_text": "芜湖",
+            "commodity_name": "动力煤",
+            "availability_status_code": "READY",
+            "field_evidence": base_evidence,
+        },
+        {
+            "clue_temp_id": "C2",
+            "line_refs": ["L2"],
+            "raw_text": "怀远安澜到泗洪双沟要船",
+            "route_intent_code": "SEEK_VESSEL",
+            "origin_text": "怀远安澜",
+            "destination_text": "泗洪双沟",
+            "commodity_name": "沙子",
+            "availability_status_code": "READY",
+            "field_evidence": {
+                "origin_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "怀远安澜"},
+                "destination_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "泗洪双沟"},
+                "commodity_name": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "沙子"},
+            },
+        },
+    ]
+
+    result = apply_segment_evidence_gate(indexed, semantic_map, segments)
+
+    assert FORMAL_TONNAGE_MISSING in result.issue_codes
+    assert NON_FORMAL_ROUTE_NOT_READY in result.issue_codes
+    assert all(segment["availability_status_code"] == "UNKNOWN" for segment in segments)
+
+
+def test_evidence_gate_flags_route_point_errors_and_context_scope() -> None:
+    indexed = FreightTextIndexer().index("太仓到无锡黄沙2000吨")
+    semantic_map = {
+        "_schema_compat_flags": ["freight_clues"],
+        "route_clues": [{"clue_temp_id": "C1", "line_refs": ["L1"], "raw_text": "太仓到无锡黄沙2000吨"}],
+        "context_blocks": [
+            {
+                "context_block_id": "B1",
+                "route_clue_ids": ["C1"],
+                "line_refs": ["L1"],
+                "raw_text": "太仓到无锡黄沙2000吨",
+                "shared_tonnage_text": "2000吨",
+                "scope_type_code": "UNKNOWN",
+            }
+        ],
+    }
+    segments = [
+        {
+            "clue_temp_id": "C1",
+            "line_refs": ["L1"],
+            "raw_text": "太仓到无锡黄沙2000吨",
+            "origin_text": "太仓到无锡",
+            "destination_text": "太仓到无锡",
+            "commodity_name": "黄沙",
+            "raw_tonnage_text": "2000吨",
+            "availability_status_code": "READY",
+            "field_evidence": {
+                "commodity_name": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "黄沙"},
+                "raw_tonnage_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "2000吨"},
+            },
+            "tonnage_decision": {
+                "status_code": "PASS",
+                "selected_text": "2000吨",
+                "source_type_code": "LOCAL_LINE",
+                "line_refs": ["L1"],
+                "belongs_to_current_segment": True,
+            },
+        }
+    ]
+
+    result = apply_segment_evidence_gate(indexed, semantic_map, segments)
+    patch_semantic_map_with_gate_result(semantic_map, result)
+
+    assert PROMPT_SCHEMA_DRIFT in result.issue_codes
+    assert CONTEXT_BLOCK_UNSAFE in result.issue_codes
+    assert DUPLICATE_ROUTE_POINT in result.issue_codes
+    assert ROUTE_FIELD_UNSAFE in result.issue_codes
+    assert segments[0]["availability_status_code"] == "UNKNOWN"
+    assert semantic_map["quality_gate"]["should_review"] is True
+
+
+def test_evidence_gate_low_route_recall_requires_ai_repair() -> None:
+    raw_text = "\n".join([f"路线{i}" for i in range(1, 8)])
+    indexed = FreightTextIndexer().index(raw_text)
+    semantic_map = {
+        "route_clues": [
+            {
+                "clue_temp_id": "C1",
+                "line_refs": ["L1", "L2", "L3", "L4", "L5", "L6", "L7"],
+                "raw_text": raw_text,
+            }
+        ]
+    }
+    segments = [{"clue_temp_id": "C1", "line_refs": ["L1"], "raw_text": "路线1", "origin_text": "A", "destination_text": "B"}]
+
+    result = apply_segment_evidence_gate(indexed, semantic_map, segments)
+
+    assert LOW_ROUTE_RECALL in result.issue_codes
+    assert should_call_ai_repair(result) is True
+    assert segments[0]["needs_strong_review"] is True
+
+
+def test_evidence_gate_marks_missing_field_evidence() -> None:
+    indexed = FreightTextIndexer().index("南京到芜湖动力煤1000吨")
+    semantic_map = {"route_clues": [{"clue_temp_id": "C1", "line_refs": ["L1"], "raw_text": "南京到芜湖动力煤1000吨"}]}
+    segments = [
+        {
+            "clue_temp_id": "C1",
+            "line_refs": ["L1"],
+            "raw_text": "南京到芜湖动力煤1000吨",
+            "origin_text": "南京",
+            "destination_text": "芜湖",
+            "commodity_name": "动力煤",
+            "raw_tonnage_text": "1000吨",
+            "tonnage_decision": {"status_code": "PASS", "selected_text": "1000吨", "belongs_to_current_segment": True},
+            "availability_status_code": "READY",
+        }
+    ]
+
+    result = apply_segment_evidence_gate(indexed, semantic_map, segments)
+
+    assert FIELD_EVIDENCE_MISSING in result.issue_codes
+    assert segments[0]["availability_status_code"] == "UNKNOWN"
 
 
 def test_user_multi_contact_sample_preserves_seventeen_clues_and_contact_scopes() -> None:
@@ -624,7 +830,7 @@ def test_wechat_split_schema_accepts_route_clues_missing_commodity() -> None:
     assert len(payload.freight_clues) == 1
     clue = payload.freight_clues[0].model_dump(exclude_none=True)
     assert "commodity_name" not in clue
-    assert "missing_field_codes" not in clue
+    assert clue["missing_field_codes"] == ["COMMODITY"]
 
 
 def test_prepare_segments_keeps_route_semantics_even_when_route_field_unstable() -> None:
@@ -1685,6 +1891,174 @@ async def test_ai_detail_dirty_price_tonnage_enters_review_without_schema_failur
     assert segments[0]["ai_review_status_code"] == "REVIEW_REQUIRED"
     assert "AI 将疑似吨位误填为价格" in segments[0]["manual_review_reason"]
     assert any("疑似吨位误填为价格" in item for item in warnings)
+
+
+@pytest.mark.asyncio
+async def test_wechat_detail_model_upgrades_for_complex_semantic_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_lines = [
+        "南京到芜湖动力煤1000吨",
+        "太仓到无锡黄沙2000吨",
+        "镇江到常州石子1500吨",
+    ]
+    indexed = FreightTextIndexer().index("\n".join(raw_lines))
+    semantic_map = {
+        "route_clues": [
+            {"clue_temp_id": f"C{index}", "line_refs": [f"L{index}"], "raw_text": line}
+            for index, line in enumerate(raw_lines, start=1)
+        ],
+        "context_blocks": [{"context_block_id": "B1", "route_clue_ids": ["C1", "C2"], "line_refs": ["L1", "L2"]}],
+    }
+    segments_payload = {
+        "segments": [
+            {
+                "clue_temp_id": "C1",
+                "segment_index": 1,
+                "line_refs": ["L1"],
+                "raw_text": raw_lines[0],
+                "origin_text": "南京",
+                "destination_text": "芜湖",
+                "commodity_name": "动力煤",
+                "raw_tonnage_text": "1000吨",
+                "estimated_tonnage": 1000,
+                "availability_status_code": "READY",
+                "confidence_score": 0.9,
+                "field_evidence": {
+                    "origin_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "南京"},
+                    "destination_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "芜湖"},
+                    "commodity_name": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "动力煤"},
+                    "raw_tonnage_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "1000吨"},
+                },
+                "tonnage_decision": {
+                    "status_code": "PASS",
+                    "selected_text": "1000吨",
+                    "source_type_code": "LOCAL_LINE",
+                    "line_refs": ["L1"],
+                    "belongs_to_current_segment": True,
+                },
+            }
+        ]
+    }
+    called_models: list[str] = []
+    client = DashScopeQwenFreightParserClient(runtime_config=SimpleNamespace())
+
+    async def fake_call_json(**kwargs):
+        called_models.append(kwargs["model"])
+        return segments_payload, {"ok": True, "model": kwargs["model"]}
+
+    monkeypatch.setattr(client, "_call_json", fake_call_json)
+
+    _, _, _, metrics = await client.complete_candidate_fields(
+        indexed,
+        semantic_map,
+        runtime={
+            "semantic_model": "qwen-plus",
+            "detail_model": "qwen-turbo",
+            "api_key": "test",
+            "timeout": 30,
+            "detail_batch_size": 8,
+            "detail_concurrency": 1,
+        },
+    )
+
+    assert called_models == ["qwen-plus"]
+    assert metrics[0]["detail_model"] == "qwen-plus"
+
+
+@pytest.mark.asyncio
+async def test_wechat_parse_low_route_recall_calls_ai_repair_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_lines = [
+        "南京到芜湖动力煤1000吨",
+        "太仓到无锡黄沙2000吨",
+        "镇江到常州石子1500吨",
+        "苏州到杭州矿粉1800吨",
+        "泰州到盐城砂石1200吨",
+        "常州到南通钢材2200吨",
+        "扬州到淮安水渣1300吨",
+    ]
+    raw_text = "\n".join(raw_lines)
+    low_recall_map = {
+        "route_clues": [{"clue_temp_id": "C1", "line_refs": [f"L{i}" for i in range(1, 8)], "raw_text": raw_text}],
+        "context_blocks": [],
+        "context_notes": [],
+    }
+    repaired_map = {
+        "semantic_map": {
+            "route_clues": [
+                {"clue_temp_id": f"C{index}", "line_refs": [f"L{index}"], "raw_text": line}
+                for index, line in enumerate(raw_lines, start=1)
+            ],
+            "context_blocks": [],
+            "context_notes": [],
+        },
+        "segments": [],
+        "repair_summary": "拆分为七条线索",
+    }
+    detail_payload = {
+        "segments": [
+            {
+                "clue_temp_id": "C1",
+                "segment_index": 1,
+                "line_refs": ["L1"],
+                "raw_text": raw_lines[0],
+                "origin_text": "南京",
+                "destination_text": "芜湖",
+                "commodity_name": "动力煤",
+                "raw_tonnage_text": "1000吨",
+                "estimated_tonnage": 1000,
+                "availability_status_code": "READY",
+                "confidence_score": 0.91,
+                "evidence": [raw_lines[0]],
+                "field_evidence": {
+                    "origin_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "南京"},
+                    "destination_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "芜湖"},
+                    "commodity_name": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "动力煤"},
+                    "raw_tonnage_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L1"], "evidence_text": "1000吨"},
+                },
+                "tonnage_decision": {
+                    "status_code": "PASS",
+                    "selected_text": "1000吨",
+                    "source_type_code": "LOCAL_LINE",
+                    "line_refs": ["L1"],
+                    "belongs_to_current_segment": True,
+                },
+            }
+        ]
+    }
+    stage_calls: list[str] = []
+    client = DashScopeQwenFreightParserClient(runtime_config=SimpleNamespace())
+
+    async def fake_runtime():
+        return {
+            "provider": "TEST",
+            "semantic_model": "qwen-plus",
+            "detail_model": "qwen-turbo",
+            "review_model": "qwen-plus",
+            "api_key": "test",
+            "timeout": 30,
+            "detail_batch_size": 8,
+            "detail_concurrency": 1,
+            "review_threshold": 0.80,
+            "warn_raw_chars": 0,
+        }
+
+    async def fake_call_json(**kwargs):
+        stage_calls.append(kwargs["stage_code"])
+        if kwargs["stage_code"] == "AI_SEMANTIC_MAP":
+            return low_recall_map, {"stage": "semantic"}
+        if kwargs["stage_code"] == "AI_SEMANTIC_REPAIR":
+            return repaired_map, {"stage": "repair"}
+        if kwargs["stage_code"] == "AI_DETAIL":
+            return detail_payload, {"stage": "detail", "model": kwargs["model"]}
+        raise AssertionError(f"unexpected stage {kwargs['stage_code']}")
+
+    monkeypatch.setattr(client, "_runtime", fake_runtime)
+    monkeypatch.setattr(client, "_call_json", fake_call_json)
+
+    parsed = await client.parse(raw_text, source_type_code="WECHAT")
+
+    assert stage_calls.count("AI_SEMANTIC_REPAIR") == 1
+    assert parsed.segments[0]["availability_status_code"] == "READY"
+    assert parsed.raw_response["repair"][0]["stage"] == "semantic"
 
 
 @pytest.mark.asyncio

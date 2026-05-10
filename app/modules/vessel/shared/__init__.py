@@ -1,0 +1,1 @@
+"""Shared vessel service internals."""

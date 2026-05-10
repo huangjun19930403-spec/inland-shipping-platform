@@ -11,6 +11,10 @@ from app.core.exceptions import AppException, ConflictError, ValidationError
 from app.models.vessel import VesselProfileSummary, VesselRecognitionFieldDiff
 from app.models.vessel import VesselAisSnapshot, VesselAisCitySnapshotItem, VesselLatestPositionSnapshot
 from app.modules.vessel import service as vessel_service_module
+from app.modules.vessel.ais.methods import _public_ais_error_message
+from app.modules.vessel.ais.service import VesselAisService
+from app.modules.vessel.compliance import methods as vessel_compliance_methods
+from app.modules.vessel.profile_card import methods as vessel_profile_card_methods
 from app.modules.vessel.service import (
     CURRENT_CITY_SOURCE_ADMIN_BOUNDARY,
     CURRENT_CITY_SOURCE_INVALID_POSITION,
@@ -176,6 +180,12 @@ def test_vessel_round2_asset_center_routes_exist_before_dynamic_id() -> None:
     assert "business" not in ais_card_props
 
 
+def test_vessel_ais_service_has_relation_rules_for_compliance_summary() -> None:
+    service = VesselAisService.__new__(VesselAisService)
+
+    assert callable(getattr(service, "_owner_required_document_types", None))
+
+
 def test_vessel_domain_split_keeps_key_openapi_paths() -> None:
     paths = app.openapi()["paths"]
     expected = {
@@ -247,11 +257,14 @@ def test_vessel_seed_menu_groups_keep_business_entries_visible() -> None:
     from scripts.seed_system_base import MENUS, ROLE_MENU_CODES
 
     menu_by_code = {item["menu_code"]: item for item in MENUS}
+    assert "VESSEL_SHIP_ANALYSIS" not in menu_by_code
+    assert menu_by_code["ANALYSIS_SHIPS"]["parent_code"] == "ANALYSIS_ROOT"
     group_codes = {
         "VESSEL_WORKBENCH_GROUP",
         "VESSEL_ASSET_GROUP",
         "VESSEL_GOVERNANCE_GROUP",
         "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_CARGO_ANALYSIS_GROUP",
     }
     assert group_codes.issubset(menu_by_code)
     for code in group_codes:
@@ -263,14 +276,14 @@ def test_vessel_seed_menu_groups_keep_business_entries_visible() -> None:
         "VESSEL_GOVERNANCE_TASKS": "VESSEL_WORKBENCH_GROUP",
         "VESSEL_ASSETS": "VESSEL_ASSET_GROUP",
         "VESSEL_PROFILE_ENTRY": "VESSEL_ASSET_GROUP",
-        "VESSEL_QUALITY": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_QUALITY": "VESSEL_WORKBENCH_GROUP",
         "VESSEL_RELATIONS_ENTRY": "VESSEL_GOVERNANCE_GROUP",
         "VESSEL_COMPLIANCE_RISKS": "VESSEL_GOVERNANCE_GROUP",
-        "VESSEL_RECOGNITIONS": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_BLACKLIST_SIGNALS": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_RECOGNITIONS": "VESSEL_WORKBENCH_GROUP",
         "VESSEL_AIS_SITUATION": "VESSEL_ANALYSIS_GROUP",
         "VESSEL_NODE_ROUTE_ANALYSIS": "VESSEL_ANALYSIS_GROUP",
-        "VESSEL_CANDIDATE_ANALYSIS": "VESSEL_ANALYSIS_GROUP",
-        "VESSEL_SHIP_ANALYSIS": "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_CANDIDATE_ANALYSIS": "VESSEL_CARGO_ANALYSIS_GROUP",
     }
     for code, parent_code in expected_parent.items():
         assert menu_by_code[code]["parent_code"] == parent_code
@@ -496,7 +509,7 @@ async def test_vessel_round5_refresh_failure_returns_explainable_status(monkeypa
             uncertainty_notes=kwargs.get("extra_uncertainty_notes") or [],
         )
 
-    monkeypatch.setattr(vessel_service_module, "_load_label_map", label_map)
+    monkeypatch.setattr(vessel_compliance_methods, "_load_label_map", label_map)
     service.db = FakeDb()
     service._require_profile = require_profile  # type: ignore[method-assign]
     service._evaluate_compliance_risks = fail_evaluate  # type: ignore[method-assign]
@@ -625,9 +638,9 @@ async def test_vessel_round4_profile_card_uses_current_relations_and_certificate
     async def empty_map(_db, *args, **kwargs):
         return {}
 
-    monkeypatch.setattr(vessel_service_module, "_load_label_map", empty_map)
-    monkeypatch.setattr(vessel_service_module, "_load_city_map", empty_map)
-    monkeypatch.setattr(vessel_service_module, "_load_region_map", empty_map)
+    monkeypatch.setattr(vessel_profile_card_methods, "_load_label_map", empty_map)
+    monkeypatch.setattr(vessel_profile_card_methods, "_load_city_map", empty_map)
+    monkeypatch.setattr(vessel_profile_card_methods, "_load_region_map", empty_map)
     service.db = FakeDb()
     service.repo = FakeRepo()
     service._require_profile = require_profile  # type: ignore[method-assign]
@@ -694,6 +707,12 @@ def test_vessel_round3_summary_model_and_freshness_thresholds() -> None:
     assert _ais_freshness_level(4321) == "EXPIRED"
 
 
+def test_vessel_ais_public_error_message_hides_es_internals() -> None:
+    raw = 'Realtime ES 请求失败: status=400, body={"error":{"type":"parse_exception","reason":"failed to parse date field"}}'
+
+    assert _public_ais_error_message(raw) == "部分实时 AIS 数据暂不可用，请稍后刷新或检查实时数据源配置"
+
+
 def test_vessel_round6_ais_snapshot_models_and_schema_exist() -> None:
     assert VesselAisSnapshot.__tablename__ == "vessel_ais_snapshot"
     assert VesselAisCitySnapshotItem.__tablename__ == "vessel_ais_city_snapshot_item"
@@ -716,83 +735,22 @@ def test_vessel_round6_ais_snapshot_models_and_schema_exist() -> None:
 
 
 @pytest.mark.asyncio
-async def test_vessel_round6_snapshot_parent_is_flushed_before_children() -> None:
-    service = VesselService.__new__(VesselService)
-
-    class FakeDb:
-        def __init__(self) -> None:
-            self.added: list[str] = []
-            self.flush_snapshots: list[list[str]] = []
-
-        async def execute(self, _stmt) -> None:
-            return None
-
-        def add(self, obj) -> None:
-            self.added.append(type(obj).__name__)
-
-        async def flush(self) -> None:
-            self.flush_snapshots.append(list(self.added))
-
-    fake_db = FakeDb()
-    service.db = fake_db
-    service._city_boundary_version_id = lambda: None  # type: ignore[method-assign]
-    generated_at = datetime(2026, 5, 9, 12, 0, 0)
-    query = VesselPositionCitySituationQuery(reported_within_minutes=1440, include_boundary=False)
-    city = VesselPositionCitySituationItemResponse(
-        city_code="320500",
-        city_name="苏州市",
-        positioned_count=1,
-        contactable_position_count=0,
-        matched_position_count=1,
-    )
-    response = VesselPositionCitySituationResponse(
-        source_status="AVAILABLE",
-        source_status_name="实时船位可用",
-        generated_at=generated_at,
-        summary=VesselPositionCitySituationSummary(
-            matched_profile_count=1,
-            scanned_profile_count=1,
-            queried_mmsi_count=1,
-            matched_position_count=1,
-            unpositioned_count=0,
-            positioned_count=1,
-            stale_position_count=0,
-            contactable_position_count=0,
-            certificate_risk_count=0,
-            city_count=1,
-            query_snapshot_id="snapshot-parent-first",
-            snapshot_expires_at=generated_at + timedelta(minutes=5),
-        ),
-        cities=[city],
-    )
-    result = SimpleNamespace(items=[], invalid_positions=[], unmatched_positions=[])
-
-    await service._persist_city_situation_snapshot(
-        snapshot_id="snapshot-parent-first",
-        query=query,
-        response=response,
-        result=result,
-        cities=[city],
-        cache_backend="memory",
-    )
-
-    assert fake_db.flush_snapshots[0] == ["VesselAisSnapshot"]
-    assert "VesselAisCitySnapshotItem" in fake_db.flush_snapshots[-1]
-
-
-@pytest.mark.asyncio
-async def test_vessel_round6_city_situation_persist_failure_disables_drilldown() -> None:
+async def test_vessel_city_situation_uses_cache_snapshot_without_db_persistence() -> None:
     service = VesselService.__new__(VesselService)
     events: list[str] = []
 
     class FakeDb:
         async def rollback(self) -> None:
-            events.append("rollback")
+            raise AssertionError("city situation should not rollback a DB transaction")
 
         async def commit(self) -> None:
-            events.append("commit")
+            raise AssertionError("city situation should not commit a DB transaction")
+
+        async def execute(self, _stmt):
+            raise AssertionError("city situation should not query or write DB snapshots")
 
     generated_at = datetime(2026, 5, 9, 12, 0, 0)
+    item = SimpleNamespace(id=1, position_time=generated_at, contact_available=True, freshness_level="FRESH")
     city = VesselPositionCitySituationItemResponse(
         city_code="320500",
         city_name="苏州市",
@@ -821,8 +779,10 @@ async def test_vessel_round6_city_situation_persist_failure_disables_drilldown()
         return "http://es.example"
 
     async def positions_for_profiles(*args, **kwargs):
+        assert kwargs["include_unmatched"] is False
+        assert kwargs["unmatched_scan_limit"] == 0
         return SimpleNamespace(
-            items=[],
+            items=[item],
             unmatched_positions=[],
             invalid_positions=[],
             partial=False,
@@ -843,16 +803,11 @@ async def test_vessel_round6_city_situation_persist_failure_disables_drilldown()
         return []
 
     async def store_snapshot(*args, **kwargs) -> str:
-        return "snapshot-persist-failed"
-
-    async def persist_snapshot(*args, **kwargs) -> None:
-        raise RuntimeError("fk failed")
-
-    async def discard(snapshot_id: str) -> None:
-        events.append(f"discard:{snapshot_id}")
+        events.append("cache-snapshot")
+        return "cache-snapshot-only"
 
     async def store_response_cache(*args, **kwargs) -> None:
-        events.append("cache")
+        events.append("response-cache")
 
     service.db = FakeDb()
     service._city_cache_backend = cache_backend  # type: ignore[method-assign]
@@ -866,21 +821,143 @@ async def test_vessel_round6_city_situation_persist_failure_disables_drilldown()
     service._city_boundaries = boundaries  # type: ignore[method-assign]
     service._city_situation_items = lambda *args, **kwargs: [city]  # type: ignore[method-assign]
     service._store_city_situation_snapshot = store_snapshot  # type: ignore[method-assign]
-    service._persist_city_situation_snapshot = persist_snapshot  # type: ignore[method-assign]
-    service._discard_city_situation_snapshot = discard  # type: ignore[method-assign]
     service._store_city_situation_response_cache = store_response_cache  # type: ignore[method-assign]
 
     result = await service.position_city_situation(
         VesselPositionCitySituationQuery(reported_within_minutes=1440, include_boundary=False)
     )
 
+    assert result.summary.query_snapshot_id == "cache-snapshot-only"
+    assert result.summary.snapshot_status_code == "READY"
+    assert result.summary.refresh_required is False
+    assert events == ["cache-snapshot", "response-cache"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_city_situation_uses_realtime_cache_before_live_query() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    generated_at = datetime(2026, 5, 10, 8, 0, 0)
+    cached_response = VesselPositionCitySituationResponse(
+        source_status="AVAILABLE",
+        source_status_name="可用",
+        generated_at=generated_at,
+        cache_status="MISS",
+        cache_generated_at=generated_at,
+        snapshot_backend="redis",
+        summary=VesselPositionCitySituationSummary(
+            matched_profile_count=3,
+            scanned_profile_count=3,
+            queried_mmsi_count=3,
+            matched_position_count=3,
+            unpositioned_count=0,
+            positioned_count=3,
+            stale_position_count=0,
+            contactable_position_count=3,
+            certificate_risk_count=0,
+            city_count=2,
+            query_snapshot_id="redis-current-ais",
+            snapshot_status_code="READY",
+            snapshot_expires_at=generated_at + timedelta(days=365),
+            is_partial=False,
+        ),
+        cities=[],
+    )
+
+    async def cache_backend() -> str:
+        events.append("backend")
+        return "redis"
+
+    async def no_cached(_cache_key: str):
+        events.append("cache-read")
+        return cached_response, "redis"
+
+    async def live_limits():
+        raise AssertionError("city situation should not load live ES limits when a realtime cache is available")
+
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._get_city_situation_response_cache = no_cached  # type: ignore[method-assign]
+    service._ais_runtime_limits = live_limits  # type: ignore[method-assign]
+
+    result = await service.position_city_situation(
+        VesselPositionCitySituationQuery(reported_within_minutes=1600, include_boundary=False)
+    )
+
+    assert result.cache_status == "HIT"
+    assert result.summary.query_snapshot_id == "redis-current-ais"
+    assert events == ["backend", "cache-read"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_city_situation_ignores_seed_cache_when_realtime_es_is_configured() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    generated_at = datetime(2026, 5, 10, 8, 0, 0)
+    seed_response = VesselPositionCitySituationResponse(
+        source_status="AVAILABLE",
+        source_status_name="可用",
+        generated_at=generated_at,
+        cache_status="SNAPSHOT",
+        cache_generated_at=generated_at,
+        snapshot_backend="seed",
+        summary=VesselPositionCitySituationSummary(
+            matched_profile_count=3,
+            scanned_profile_count=3,
+            queried_mmsi_count=3,
+            matched_position_count=3,
+            unpositioned_count=0,
+            positioned_count=3,
+            stale_position_count=0,
+            contactable_position_count=3,
+            certificate_risk_count=0,
+            city_count=2,
+            query_snapshot_id="seed-current-ais",
+            snapshot_status_code="READY",
+            snapshot_expires_at=generated_at + timedelta(days=365),
+            is_partial=False,
+        ),
+        cities=[],
+    )
+
+    async def cache_backend() -> str:
+        events.append("backend")
+        return "redis"
+
+    async def cached(_cache_key: str):
+        events.append("cache-read")
+        return seed_response, "redis"
+
+    async def realtime_host() -> str:
+        events.append("realtime-host")
+        return "http://localhost:9200"
+
+    async def limits() -> dict[str, int]:
+        events.append("limits")
+        return {"profile_limit": 2000, "es_batch_size": 500, "es_max_concurrency": 4, "unmatched_scan_limit": 1000}
+
+    async def profile_count(_query) -> int:
+        events.append("count")
+        return 0
+
+    async def profiles(_query, limit: int | None = None):
+        events.append(f"profiles:{limit}")
+        return []
+
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._get_city_situation_response_cache = cached  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
+    service._position_monitor_profiles = profiles  # type: ignore[method-assign]
+
+    result = await service.position_city_situation(
+        VesselPositionCitySituationQuery(reported_within_minutes=1600, include_boundary=False)
+    )
+
+    assert result.source_status == "EMPTY"
+    assert result.cache_status == "MISS"
     assert result.summary.query_snapshot_id is None
-    assert result.summary.snapshot_status_code == "PERSIST_FAILED"
-    assert result.summary.refresh_required is True
-    assert "AIS 城市态势快照持久化失败" in (result.summary.error_message or "")
-    assert "rollback" in events
-    assert "discard:snapshot-persist-failed" in events
-    assert "cache" not in events
+    assert events == ["backend", "cache-read", "realtime-host", "limits", "count", "profiles:2000"]
 
 
 @pytest.mark.asyncio

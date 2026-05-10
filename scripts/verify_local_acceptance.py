@@ -45,25 +45,42 @@ from app.models.freight import Freight, FreightBatchTask, FreightCandidate, Frei
 from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
 from app.models.system import SysMenu, SysRole, SysRoleMenu, SystemConfig
 from app.models.vessel import (
+    VesselAffiliationEvidence,
+    VesselAisCitySnapshotItem,
+    VesselAisSnapshot,
+    VesselBlacklistSignal,
     VesselBuildInfo,
     VesselCapacityDimension,
+    VesselCandidateAnalysis,
+    VesselCandidateAnalysisItem,
     VesselCertificate,
     VesselCertificateFile,
     VesselCertificateImageRecognition,
+    VesselCertificateRequirementRule,
     VesselChangeEvent,
     VesselContact,
+    VesselControllerEvidence,
     VesselCrewAssignment,
+    VesselDataQualityIssue,
+    VesselGovernanceTask,
     VesselIdentifierHistory,
     VesselIdentity,
     VesselIdentityLink,
+    VesselLatestPositionSnapshot,
     VesselNameHistory,
+    VesselNavigationConstraintEvidence,
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
     VesselPersonCertificateFile,
     VesselPersonCertificateImageRecognition,
     VesselProfile,
+    VesselProfileSummary,
+    VesselRecognitionAdoptionRecord,
+    VesselRecognitionFieldDiff,
     VesselRegistrationInfo,
+    VesselRiskSignal,
+    VesselSpatialObservationSnapshot,
 )
 from app.modules.analysis.service import AnalysisDashboardService
 from scripts.seed_local_private_config import (
@@ -100,23 +117,54 @@ LEGACY_TABLES = {
 }
 
 VESSEL_TABLES = {
+    "vessel_affiliation_conclusion",
+    "vessel_affiliation_evidence",
+    "vessel_ais_city_snapshot_item",
+    "vessel_ais_snapshot",
+    "vessel_blacklist_signal",
     "vessel_build_info",
     "vessel_capacity_dimension",
+    "vessel_candidate_analysis",
+    "vessel_candidate_analysis_annotation",
+    "vessel_candidate_analysis_item",
     "vessel_certificate",
     "vessel_certificate_file",
     "vessel_certificate_image_recognition",
+    "vessel_certificate_requirement_rule",
     "vessel_change_event",
     "vessel_contact",
+    "vessel_controller_conclusion",
+    "vessel_controller_evidence",
     "vessel_crew_assignment",
+    "vessel_data_quality_issue",
+    "vessel_governance_sync_batch",
+    "vessel_governance_task",
     "vessel_identifier_history",
     "vessel_identity",
     "vessel_identity_link",
+    "vessel_latest_position_snapshot",
     "vessel_name_history",
+    "vessel_navigation_constraint_evidence",
+    "vessel_node_observation_item",
+    "vessel_node_observation_vessel",
     "vessel_operator_period",
+    "vessel_owner_document",
+    "vessel_owner_document_image_recognition",
     "vessel_owner_period",
     "vessel_person_certificate",
+    "vessel_person_certificate_file",
+    "vessel_person_certificate_image_recognition",
     "vessel_profile",
+    "vessel_profile_summary",
+    "vessel_recognition_adoption_record",
+    "vessel_recognition_field_diff",
     "vessel_registration_info",
+    "vessel_relation_evidence_attachment",
+    "vessel_risk_review",
+    "vessel_risk_signal",
+    "vessel_route_segment_match_sample",
+    "vessel_route_segment_observation_item",
+    "vessel_spatial_observation_snapshot",
 }
 
 LEGACY_ROUTE_PATHS = {
@@ -253,6 +301,22 @@ async def _count(session, model, *conditions) -> int:
     return int(await session.scalar(stmt) or 0)
 
 
+async def _orphan_count(session, child_model, child_column, parent_model, parent_column) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(child_model)
+        .outerjoin(parent_model, child_column == parent_column)
+        .where(child_column.is_not(None), parent_column.is_(None))
+    )
+    return int(await session.scalar(stmt) or 0)
+
+
+async def _duplicate_value_count(session, model, column) -> int:
+    duplicate_values = select(column).select_from(model).where(column.is_not(None)).group_by(column).having(func.count() > 1).subquery()
+    stmt = select(func.count()).select_from(duplicate_values)
+    return int(await session.scalar(stmt) or 0)
+
+
 def _result(name: str, ok: bool, detail: str) -> CheckResult:
     return CheckResult(name=name, ok=ok, detail=detail)
 
@@ -328,10 +392,32 @@ async def verify() -> list[CheckResult]:
             ("vessel identity links", await _count(session, VesselIdentityLink), 137),
             ("vessel registrations", await _count(session, VesselRegistrationInfo), 137),
             ("vessel capacity dimensions", await _count(session, VesselCapacityDimension), 137),
-            ("vessel build info empty-ok", await _count(session, VesselBuildInfo), 0),
+            ("vessel build info", await _count(session, VesselBuildInfo), 137),
             ("vessel owner periods", await _count(session, VesselOwnerPeriod), 137),
-            ("vessel operator periods empty-ok", await _count(session, VesselOperatorPeriod), 0),
-            ("vessel contacts", await _count(session, VesselContact), 137),
+            ("vessel current owners", await _count(session, VesselOwnerPeriod, VesselOwnerPeriod.is_current.is_(True)), 137),
+            ("vessel historical owners", await _count(session, VesselOwnerPeriod, VesselOwnerPeriod.is_current.is_(False)), 137),
+            ("vessel operator periods", await _count(session, VesselOperatorPeriod), 137),
+            ("vessel current operators", await _count(session, VesselOperatorPeriod, VesselOperatorPeriod.is_current.is_(True)), 137),
+            ("vessel contacts", await _count(session, VesselContact), 274),
+            ("vessel operator contacts", await _count(session, VesselContact, VesselContact.contact_scope_code == "OPERATOR"), 137),
+            ("vessel general contacts", await _count(session, VesselContact, VesselContact.contact_scope_code == "GENERAL"), 137),
+            ("vessel profile summaries", await _count(session, VesselProfileSummary), 137),
+            ("vessel AIS snapshots", await _count(session, VesselAisSnapshot), 1),
+            ("vessel AIS city snapshot items", await _count(session, VesselAisCitySnapshotItem), 6),
+            ("vessel latest positions", await _count(session, VesselLatestPositionSnapshot), 137),
+            ("vessel spatial snapshots", await _count(session, VesselSpatialObservationSnapshot), 1),
+            ("vessel quality issues", await _count(session, VesselDataQualityIssue), 18),
+            ("vessel risk signals", await _count(session, VesselRiskSignal), 18),
+            ("vessel governance tasks", await _count(session, VesselGovernanceTask), 18),
+            ("vessel certificate requirement rules", await _count(session, VesselCertificateRequirementRule), 3),
+            ("vessel recognition diffs", await _count(session, VesselRecognitionFieldDiff), 8),
+            ("vessel recognition adoptions", await _count(session, VesselRecognitionAdoptionRecord), 8),
+            ("vessel candidate analyses", await _count(session, VesselCandidateAnalysis), 1),
+            ("vessel candidate analysis items", await _count(session, VesselCandidateAnalysisItem), 10),
+            ("vessel navigation constraint evidence", await _count(session, VesselNavigationConstraintEvidence), 1),
+            ("vessel blacklist signals", await _count(session, VesselBlacklistSignal), 6),
+            ("vessel controller evidence", await _count(session, VesselControllerEvidence), 6),
+            ("vessel affiliation evidence", await _count(session, VesselAffiliationEvidence), 6),
             ("vessel certificates empty-ok", await _count(session, VesselCertificate), 0),
             ("vessel change events", await _count(session, VesselChangeEvent), 137),
             ("vessel crew assignments empty-ok", await _count(session, VesselCrewAssignment), 0),
@@ -372,6 +458,90 @@ async def verify() -> list[CheckResult]:
                 f"name {name_history_count} >= 137, identifier {identifier_history_count} >= 137",
             )
         )
+
+        referential_checks = [
+            (
+                "vessel profiles link existing identities",
+                await _orphan_count(session, VesselProfile, VesselProfile.vessel_identity_id, VesselIdentity, VesselIdentity.id),
+            ),
+            (
+                "identity links reference profiles",
+                await _orphan_count(session, VesselIdentityLink, VesselIdentityLink.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "registrations reference profiles",
+                await _orphan_count(session, VesselRegistrationInfo, VesselRegistrationInfo.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "capacity rows reference profiles",
+                await _orphan_count(session, VesselCapacityDimension, VesselCapacityDimension.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "build rows reference profiles",
+                await _orphan_count(session, VesselBuildInfo, VesselBuildInfo.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "owner periods reference profiles",
+                await _orphan_count(session, VesselOwnerPeriod, VesselOwnerPeriod.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "operator periods reference profiles",
+                await _orphan_count(session, VesselOperatorPeriod, VesselOperatorPeriod.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "contacts reference profiles",
+                await _orphan_count(session, VesselContact, VesselContact.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "contacts reference owner periods",
+                await _orphan_count(session, VesselContact, VesselContact.owner_period_id, VesselOwnerPeriod, VesselOwnerPeriod.id),
+            ),
+            (
+                "contacts reference operator periods",
+                await _orphan_count(session, VesselContact, VesselContact.operator_period_id, VesselOperatorPeriod, VesselOperatorPeriod.id),
+            ),
+            (
+                "profile summaries reference profiles",
+                await _orphan_count(session, VesselProfileSummary, VesselProfileSummary.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "latest positions reference profiles",
+                await _orphan_count(session, VesselLatestPositionSnapshot, VesselLatestPositionSnapshot.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "quality issues reference profiles",
+                await _orphan_count(session, VesselDataQualityIssue, VesselDataQualityIssue.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "risk signals reference profiles",
+                await _orphan_count(session, VesselRiskSignal, VesselRiskSignal.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "governance tasks reference profiles",
+                await _orphan_count(session, VesselGovernanceTask, VesselGovernanceTask.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "recognition diffs reference profiles",
+                await _orphan_count(session, VesselRecognitionFieldDiff, VesselRecognitionFieldDiff.vessel_profile_id, VesselProfile, VesselProfile.id),
+            ),
+            (
+                "candidate items reference analyses",
+                await _orphan_count(session, VesselCandidateAnalysisItem, VesselCandidateAnalysisItem.analysis_id, VesselCandidateAnalysis, VesselCandidateAnalysis.id),
+            ),
+        ]
+        for name, orphan_total in referential_checks:
+            results.append(_result(name, orphan_total == 0, f"{orphan_total} orphan rows"))
+
+        duplicate_checks = [
+            ("vessel profile code unique", await _duplicate_value_count(session, VesselProfile, VesselProfile.vessel_profile_code)),
+            ("vessel identity code unique", await _duplicate_value_count(session, VesselIdentity, VesselIdentity.identity_code)),
+            ("vessel current mmsi unique", await _duplicate_value_count(session, VesselProfile, VesselProfile.current_mmsi)),
+            ("vessel profile summary one per profile", await _duplicate_value_count(session, VesselProfileSummary, VesselProfileSummary.vessel_profile_id)),
+            ("vessel governance task no unique", await _duplicate_value_count(session, VesselGovernanceTask, VesselGovernanceTask.task_no)),
+            ("vessel risk active fingerprint unique", await _duplicate_value_count(session, VesselRiskSignal, VesselRiskSignal.fingerprint)),
+        ]
+        for name, duplicate_total in duplicate_checks:
+            results.append(_result(name, duplicate_total == 0, f"{duplicate_total} duplicate values"))
 
         raw_freight_count = int(
             await session.scalar(
@@ -535,11 +705,11 @@ async def verify() -> list[CheckResult]:
             "/vessels/governance/tasks",
             "/vessels/quality",
             "/vessels/compliance-risks",
+            "/vessels/blacklist-signals",
             "/vessels/recognitions",
             "/vessels/ais-situation",
             "/vessels/node-route-analysis",
             "/vessels/candidate-analysis",
-            "/analysis/ships",
         }
         vessel_paths = {
             row[0]

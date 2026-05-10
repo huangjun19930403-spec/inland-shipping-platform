@@ -143,7 +143,7 @@ from app.modules.vessel.schemas import (
     VesselRiskReviewResponse,
     VesselSpatialSnapshotResponse,
 )
-from app.modules.vessel.services.relation_service import VesselRelationService
+from app.modules.vessel.relation.service import VesselRelationService
 
 router = APIRouter()
 

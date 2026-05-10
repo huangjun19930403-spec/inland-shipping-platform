@@ -46,10 +46,11 @@ from app.modules.vessel.schemas import (
     VesselRiskReviewResponse,
     VesselWorkbenchItemResponse,
 )
+from app.modules.vessel.asset.service import VesselAssetService
+from app.modules.vessel.quality.service import VesselQualityService
 from app.modules.vessel.service import (
     COMPLIANCE_ACTIVE_STATUSES,
     COMPLIANCE_CLOSED_STATUSES,
-    VesselService,
     _load_label_map,
     _jsonable,
     _risk_fingerprint,
@@ -1118,7 +1119,7 @@ class VesselGovernanceService:
 
     async def _ensure_resolution_verified(self, task: VesselGovernanceTask, *, operator_id: int | None = None) -> None:
         if task.source_object_type == "VESSEL_DATA_QUALITY_ISSUE":
-            result = await VesselService(self.db).recheck_quality_issue(
+            result = await VesselQualityService(self.db).recheck_quality_issue(
                 int(task.source_object_id),
                 operator_id=operator_id,
                 commit=False,
@@ -1129,7 +1130,9 @@ class VesselGovernanceService:
         elif task.source_object_type == "VESSEL_RISK_SIGNAL":
             signal = await self.db.get(VesselRiskSignal, int(task.source_object_id))
             if signal is not None:
-                await VesselService(self.db).refresh_compliance_risk(signal.vessel_profile_id, operator_id=operator_id)
+                from app.modules.vessel.compliance.service import VesselComplianceService
+
+                await VesselComplianceService(self.db).refresh_compliance_risk(signal.vessel_profile_id, operator_id=operator_id)
                 signal = await self.db.get(VesselRiskSignal, int(task.source_object_id))
             if signal is not None and signal.status_code in COMPLIANCE_ACTIVE_STATUSES:
                 raise ValidationError("风险仍命中规则，不能直接关闭治理任务；请先补证、修复数据或提交风险复核")
@@ -1226,9 +1229,10 @@ class VesselGovernanceService:
             return
         impact = dict(row.impact_summary_json or {}) if row is not None else {}
         try:
-            service = VesselService(self.db)
-            await service._refresh_summary_best_effort(vessel_id)
-            await service._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+            from app.modules.vessel.compliance.service import VesselComplianceService
+
+            await VesselAssetService(self.db)._refresh_summary_best_effort(vessel_id)
+            await VesselComplianceService(self.db)._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
             impact["summary_refresh"] = "SUCCESS"
             impact["risk_refresh"] = "SUCCESS"
             impact["round9_fact_refresh"] = "RECORDED_FOR_NEXT_ANALYSIS_RUN"

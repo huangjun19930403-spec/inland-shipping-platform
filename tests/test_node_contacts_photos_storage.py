@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
 import io
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from alembic.operations import Operations
-from alembic.runtime.migration import MigrationContext
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
@@ -185,58 +181,18 @@ async def test_replace_node_contacts_keeps_single_primary(session: AsyncSession)
     assert sum(1 for row in rows if row.is_primary) == 1
 
 
-def test_legacy_profile_contact_migration_moves_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    migration_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0017_node_contacts_photos_cos_storage.py"
-    spec = importlib.util.spec_from_file_location("migration_0017_node_contacts", migration_path)
-    assert spec and spec.loader
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
-
+def test_current_baseline_contains_node_contact_tables_without_legacy_profile_columns() -> None:
     engine = sa.create_engine("sqlite:///:memory:")
     with engine.begin() as conn:
-        conn.exec_driver_sql("CREATE TABLE transport_node (id INTEGER PRIMARY KEY AUTOINCREMENT)")
-        conn.exec_driver_sql(
-            """
-            CREATE TABLE transport_node_profile (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_id INTEGER UNIQUE NOT NULL,
-                business_nature_code VARCHAR(64),
-                channel_depth_m NUMERIC(8, 2),
-                max_draft_m NUMERIC(8, 2),
-                berth_count INTEGER,
-                annual_throughput_ton NUMERIC(18, 2),
-                open_hours_desc VARCHAR(128),
-                contact_person VARCHAR(64),
-                contact_phone VARCHAR(32),
-                ext_json JSON,
-                updated_at DATETIME NOT NULL
-            )
-            """
-        )
-        conn.execute(sa.text("INSERT INTO transport_node (id) VALUES (1)"))
-        conn.execute(
-            sa.text(
-                """
-                INSERT INTO transport_node_profile (
-                    node_id, contact_person, contact_phone, updated_at
-                )
-                VALUES (1, '港航调度', '025-88000000', CURRENT_TIMESTAMP)
-                """
-            )
-        )
-
-        context = MigrationContext.configure(conn)
-        monkeypatch.setattr(migration, "op", Operations(context))
-        migration.upgrade()
-
-        columns = {column["name"] for column in sa.inspect(conn).get_columns("transport_node_profile")}
-        contact = conn.execute(
-            sa.text("SELECT contact_name, contact_type_code, mobile_phone FROM transport_node_contact")
-        ).one()
+        Base.metadata.create_all(conn)
+        inspector = sa.inspect(conn)
+        columns = {column["name"] for column in inspector.get_columns("transport_node_profile")}
+        tables = set(inspector.get_table_names())
 
     assert "contact_person" not in columns
     assert "contact_phone" not in columns
-    assert contact == ("港航调度", "OPERATIONS", "025-88000000")
+    assert "transport_node_contact" in tables
+    assert "transport_node_photo" in tables
 
 
 @pytest.mark.asyncio

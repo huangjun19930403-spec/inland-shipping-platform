@@ -143,7 +143,9 @@ from app.modules.vessel.schemas import (
     VesselRiskReviewResponse,
     VesselSpatialSnapshotResponse,
 )
-from app.modules.vessel.services.asset_service import VesselAssetService
+from app.modules.vessel.asset.service import VesselAssetService
+from app.modules.vessel.certificate.service import VesselCertificateService
+from app.modules.vessel.profile_card.service import VesselProfileCardService
 
 router = APIRouter()
 
@@ -218,7 +220,7 @@ async def get_vessel_profile_card(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselAssetService(db).get_profile_card(vessel_id)
+    return await VesselProfileCardService(db).get_profile_card(vessel_id)
 
 
 @router.get("/{vessel_id}/profile-card/evidence", response_model=VesselProfileCardEvidenceResponse)
@@ -229,7 +231,7 @@ async def get_vessel_profile_card_evidence(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselAssetService(db).get_profile_card_evidence(vessel_id, query)
+    return await VesselProfileCardService(db).get_profile_card_evidence(vessel_id, query)
 
 
 @router.get("/{vessel_id}", response_model=VesselDetailResponse)
@@ -289,7 +291,7 @@ async def list_vessel_person_certificates(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselAssetService(db).list_person_certificates(vessel_id)
+    return await VesselCertificateService(db).list_person_certificates(vessel_id)
 
 
 @router.put("/{vessel_id}/person-certificates", response_model=list[VesselPersonCertificateResponse])
@@ -302,7 +304,7 @@ async def replace_vessel_person_certificates(
 ):
     response.headers["Deprecation"] = "true"
     response.headers["X-Replacement-Endpoint"] = "POST/PUT/DELETE person-certificates"
-    return await VesselAssetService(db).replace_person_certificates(vessel_id, body, operator_id=_operator_id(current_user))
+    return await VesselCertificateService(db).replace_person_certificates(vessel_id, body, operator_id=_operator_id(current_user))
 
 
 @router.post("/{vessel_id}/person-certificates", response_model=VesselPersonCertificateResponse)
@@ -312,7 +314,7 @@ async def create_vessel_person_certificate(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).create_person_certificate(vessel_id, body, operator_id=_operator_id(current_user))
+    return await VesselCertificateService(db).create_person_certificate(vessel_id, body, operator_id=_operator_id(current_user))
 
 
 @router.put("/{vessel_id}/person-certificates/{person_certificate_id}", response_model=VesselPersonCertificateResponse)
@@ -323,7 +325,7 @@ async def update_vessel_person_certificate(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).update_person_certificate(
+    return await VesselCertificateService(db).update_person_certificate(
         vessel_id,
         person_certificate_id,
         body,
@@ -339,7 +341,7 @@ async def void_vessel_person_certificate(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await VesselAssetService(db).void_person_certificate(
+    await VesselCertificateService(db).void_person_certificate(
         vessel_id,
         person_certificate_id,
         reason=body.reason if body else None,
@@ -358,7 +360,7 @@ async def upload_vessel_person_certificate_file_first(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).upload_person_certificate_file_first(
+    return await VesselCertificateService(db).upload_person_certificate_file_first(
         vessel_id,
         file,
         crew_assignment_id=crew_assignment_id,
@@ -378,7 +380,7 @@ async def upload_vessel_person_certificate_file(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).upload_person_certificate_file(
+    return await VesselCertificateService(db).upload_person_certificate_file(
         vessel_id,
         person_certificate_id,
         file,
@@ -395,7 +397,7 @@ async def void_vessel_person_certificate_file(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await VesselAssetService(db).void_person_certificate_file(
+    await VesselCertificateService(db).void_person_certificate_file(
         vessel_id,
         person_certificate_id,
         file_id,
@@ -412,7 +414,7 @@ async def list_vessel_certificates(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselAssetService(db).list_certificates(vessel_id)
+    return await VesselCertificateService(db).list_certificates(vessel_id)
 
 
 @router.get("/{vessel_id}/certificates/ledger", response_model=list[VesselCertificateLedgerItemResponse])
@@ -422,7 +424,7 @@ async def get_vessel_certificate_ledger(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselAssetService(db).get_certificate_ledger(vessel_id)
+    return await VesselCertificateService(db).get_certificate_ledger(vessel_id)
 
 
 @router.post("/{vessel_id}/certificates", response_model=VesselCertificateResponse)
@@ -432,7 +434,7 @@ async def create_vessel_certificate(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).create_certificate(vessel_id, body, operator_id=_operator_id(current_user))
+    return await VesselCertificateService(db).create_certificate(vessel_id, body, operator_id=_operator_id(current_user))
 
 
 @router.put("/{vessel_id}/certificates/{certificate_id}", response_model=VesselCertificateResponse)
@@ -443,7 +445,7 @@ async def update_vessel_certificate(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).update_certificate(vessel_id, certificate_id, body, operator_id=_operator_id(current_user))
+    return await VesselCertificateService(db).update_certificate(vessel_id, certificate_id, body, operator_id=_operator_id(current_user))
 
 
 @router.delete("/{vessel_id}/certificates/{certificate_id}", status_code=204)
@@ -454,7 +456,7 @@ async def void_vessel_certificate(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await VesselAssetService(db).void_certificate(
+    await VesselCertificateService(db).void_certificate(
         vessel_id,
         certificate_id,
         reason=body.reason if body else None,
@@ -471,7 +473,7 @@ async def upload_vessel_certificate_file_first(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).upload_certificate_file_first(
+    return await VesselCertificateService(db).upload_certificate_file_first(
         vessel_id,
         file,
         certificate_type_code=certificate_type_code or "UNKNOWN",
@@ -487,7 +489,7 @@ async def upload_vessel_certificate_file(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselAssetService(db).upload_certificate_file(
+    return await VesselCertificateService(db).upload_certificate_file(
         vessel_id,
         certificate_id,
         file,
@@ -504,7 +506,7 @@ async def void_vessel_certificate_file(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await VesselAssetService(db).void_certificate_file(
+    await VesselCertificateService(db).void_certificate_file(
         vessel_id,
         certificate_id,
         file_id,

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 MODULE_NAMES = {
     "FREIGHT": "货源分析",
-    "SHIP": "船舶分析",
+    "SHIP": "船舶指标分析",
     "VESSEL_FACT": "船舶事实分析",
     "REGION": "区域分析",
     "FLOW": "流向分析",

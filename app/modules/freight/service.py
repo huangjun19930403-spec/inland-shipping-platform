@@ -22,6 +22,12 @@ from app.models.dictionary import StdDict, StdDictItem
 from app.models.freight import Freight, FreightCandidate, FreightContact, FreightNormalizationSuggestion, FreightNormalizationTask
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
+from app.modules.freight.ai_evidence_gate import (
+    apply_segment_evidence_gate,
+    patch_semantic_map_with_gate_result,
+    should_call_ai_repair,
+    validate_semantic_map_contract,
+)
 from app.modules.freight.ai_text_index import FreightTextIndexer
 from app.modules.freight.master_data_matcher import FreightMasterDataBatchMatcher
 from app.modules.freight.repository import (
@@ -1271,6 +1277,7 @@ class FreightNormalizationMixin:
                 "decision": segment.get("tonnage_decision_json") or segment.get("tonnage_decision"),
                 "candidates": segment.get("tonnage_candidates_json") or segment.get("tonnage_candidates") or [],
             },
+            "field_evidence": segment.get("field_evidence") or {},
             "quantity_description": _first(segment, "quantity_description", "vessel_description", "ship_description"),
             "inherited_context": segment.get("inherited_context") or {},
             "evidence": segment.get("evidence") or [],
@@ -1285,6 +1292,11 @@ class FreightNormalizationMixin:
             "reason": manual_review_reason,
             "checks": ai_review_checks,
             "llm_review": segment.get("ai_review_json") or segment.get("review_json"),
+            "field_quality_gate": (
+                (segment.get("ai_review_json") or {}).get("field_quality_gate")
+                if isinstance(segment.get("ai_review_json"), dict)
+                else None
+            ),
             "missing_field_codes": segment.get("missing_field_codes") or segment.get("missing_fields") or [],
             "inference_basis": segment.get("inference_basis_json") or segment.get("inference_basis"),
             "needs_strong_review": bool(segment.get("needs_strong_review")),
@@ -1800,6 +1812,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         client = DashScopeQwenFreightParserClient(runtime_config=RuntimeConfigService(self.db))
         try:
             callback = await self._progress_callback(batch_id, started)
+            repair_records: list[dict[str, Any]] = []
             if hasattr(client, "parse_semantic_map") and hasattr(client, "complete_candidate_fields"):
                 runtime = await client._runtime()  # noqa: SLF001 - staged orchestration uses the parser runtime contract.
                 indexed_text = FreightTextIndexer().index(batch.raw_text)
@@ -1810,6 +1823,29 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 )
                 validator = FreightSemanticValidator(indexed_text)
                 semantic_warnings = validator.validate_semantic_map(semantic_map)
+                semantic_gate = validate_semantic_map_contract(indexed_text, semantic_map)
+                patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
+                if should_call_ai_repair(semantic_gate) and hasattr(client, "repair_semantic_output"):
+                    try:
+                        repaired_map, _, repair_raw = await client.repair_semantic_output(
+                            indexed_text,
+                            semantic_map,
+                            [],
+                            semantic_gate.issues,
+                            runtime=runtime,
+                            progress_callback=callback,
+                            stage_code="AI_SEMANTIC_REPAIR",
+                            progress_percent=36,
+                        )
+                        repair_records.append({"stage": "semantic", **repair_raw})
+                        semantic_map = repaired_map
+                        validator = FreightSemanticValidator(indexed_text)
+                        semantic_warnings.extend(validator.validate_semantic_map(semantic_map))
+                        semantic_gate = validate_semantic_map_contract(indexed_text, semantic_map)
+                        patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
+                    except Exception as exc:  # noqa: BLE001
+                        semantic_map.setdefault("warnings", []).append(f"AI_SEMANTIC_REPAIR_FAILED: {exc}")
+                        patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
                 mark_timing("AI_SEMANTIC_MAP")
 
                 segments, detail_raws, detail_warnings, detail_metrics = await client.complete_candidate_fields(
@@ -1822,6 +1858,37 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 timings["AI_DETAIL_EVIDENCE_LINE_COUNTS"] = [int(item.get("evidence_line_count") or 0) for item in detail_metrics]
                 timings["AI_DETAIL_BATCH_METRICS"] = detail_metrics
                 semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
+                detail_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
+                patch_semantic_map_with_gate_result(semantic_map, detail_gate)
+                if should_call_ai_repair(detail_gate) and hasattr(client, "repair_semantic_output"):
+                    try:
+                        repaired_map, repaired_segments, repair_raw = await client.repair_semantic_output(
+                            indexed_text,
+                            semantic_map,
+                            segments,
+                            detail_gate.issues,
+                            runtime=runtime,
+                            progress_callback=callback,
+                            stage_code="AI_DETAIL_REPAIR",
+                            progress_percent=69,
+                        )
+                        repair_records.append({"stage": "detail", **repair_raw})
+                        semantic_map = repaired_map
+                        segments = repaired_segments
+                        validator = FreightSemanticValidator(indexed_text)
+                        semantic_warnings.extend(validator.validate_semantic_map(semantic_map))
+                        semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
+                        detail_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
+                        patch_semantic_map_with_gate_result(semantic_map, detail_gate)
+                    except Exception as exc:  # noqa: BLE001
+                        semantic_map.setdefault("warnings", []).append(f"AI_DETAIL_REPAIR_FAILED: {exc}")
+                        for item in segments:
+                            item["availability_status_code"] = "UNKNOWN"
+                            item["needs_strong_review"] = True
+                            item["manual_review_reason"] = _append_reason(
+                                item.get("manual_review_reason") or item.get("ai_review_reason"),
+                                f"AI 证据修复失败，需人工判断：{exc}",
+                            )
                 mark_timing("AI_DETAIL")
 
                 await self._update_parse_progress(
@@ -1834,8 +1901,6 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     status_code="PARSING",
                 )
                 matcher = FreightMasterDataBatchMatcher(self.db)
-                await matcher.match_segments(segments)
-                mark_timing("MATCHING")
 
                 review_results, review_raw, review_failed_count, review_metrics = await client.review_risky_segments(
                     indexed_text,
@@ -1850,10 +1915,13 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 if review_results:
                     segments = client.merge_review_results(segments, review_results)
                     semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
+                    final_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
+                    patch_semantic_map_with_gate_result(semantic_map, final_gate)
                 mark_timing("AI_REVIEW")
 
                 accepted_segments, ignored_segments, quality_warnings = _prepare_segments(batch.raw_text, segments)
                 final_match_results = await matcher.match_segments(accepted_segments)
+                mark_timing("MATCHING")
                 warnings = list(
                     dict.fromkeys(
                         [
@@ -1875,8 +1943,9 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                             dict.fromkeys(
                                 [
                                     runtime["semantic_model"],
-                                    runtime["detail_model"],
+                                    *[str(item.get("detail_model") or runtime["detail_model"]) for item in detail_metrics],
                                     *([runtime["review_model"]] if review_raw is not None else []),
+                                    *([runtime["review_model"]] if repair_records else []),
                                 ]
                             )
                         ),
@@ -1893,6 +1962,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                             "semantic_map": semantic_raw,
                             "detail": detail_raws,
                             "review": review_raw,
+                            "repair": repair_records,
                         },
                         "review_failed_count": review_failed_count,
                         "semantic_map": semantic_map,

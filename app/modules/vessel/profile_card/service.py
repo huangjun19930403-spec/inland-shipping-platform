@@ -1,0 +1,30 @@
+"""Aggregated vessel profile card and evidence views."""
+
+from __future__ import annotations
+
+from app.modules.vessel.ais.methods import VesselAisMixin
+from app.modules.vessel.asset.methods import VesselAssetMixin
+from app.modules.vessel.certificate.methods import VesselCertificateMixin
+from app.modules.vessel.compliance.methods import VesselComplianceMixin
+from app.modules.vessel.profile_card.methods import VesselProfileCardMixin
+from app.modules.vessel.quality.methods import VesselQualityMixin
+from app.modules.vessel.recognition.methods import VesselRecognitionMixin
+from app.modules.vessel.relation.methods import VesselRelationMixin
+from app.modules.vessel.shared.methods import VesselCoreMixin
+
+
+class VesselProfileCardService(
+    VesselCoreMixin,
+    VesselAssetMixin,
+    VesselCertificateMixin,
+    VesselRelationMixin,
+    VesselRecognitionMixin,
+    VesselQualityMixin,
+    VesselComplianceMixin,
+    VesselAisMixin,
+    VesselProfileCardMixin,
+):
+    """Aggregated vessel profile card and evidence views."""
+
+
+__all__ = ["VesselProfileCardService"]

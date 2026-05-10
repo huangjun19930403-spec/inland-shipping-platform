@@ -19,7 +19,8 @@ from app.models.vessel import (
     VesselRiskReview,
     VesselRiskSignal,
 )
-from app.modules.vessel.service import VesselService
+from app.modules.vessel.compliance.service import VesselComplianceService
+from app.modules.vessel.relation.service import VesselRelationService
 
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class VesselAuditBridgeService:
             return VesselAuditBridgeResult(status_code="TARGET_MISSING", message="船舶证据对象不存在")
 
         vessel_id = int(evidence.vessel_profile_id)
-        await VesselService(self.db).rebuild_relation_conclusion_candidates(
+        await VesselRelationService(self.db).rebuild_relation_conclusion_candidates(
             vessel_id,
             operator_id=operator_user_id,
             commit=False,
@@ -90,7 +91,7 @@ class VesselAuditBridgeService:
 
     async def refresh_compliance_best_effort(self, vessel_id: int, *, operator_user_id: int | None) -> None:
         try:
-            await VesselService(self.db).refresh_compliance_risk(vessel_id, operator_id=operator_user_id)
+            await VesselComplianceService(self.db).refresh_compliance_risk(vessel_id, operator_id=operator_user_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("vessel audit bridge compliance refresh failed for profile %s: %s", vessel_id, exc)
             await self.db.rollback()

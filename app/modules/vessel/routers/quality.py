@@ -143,7 +143,7 @@ from app.modules.vessel.schemas import (
     VesselRiskReviewResponse,
     VesselSpatialSnapshotResponse,
 )
-from app.modules.vessel.services.quality_service import VesselQualityService
+from app.modules.vessel.quality.service import VesselQualityService
 
 router = APIRouter()
 

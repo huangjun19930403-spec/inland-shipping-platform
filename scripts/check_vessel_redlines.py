@@ -55,6 +55,7 @@ def main() -> int:
     failures: list[str] = []
     frontend_files = _iter_files(FRONTEND_SRC, (".ts", ".vue"))
     backend_files = _iter_files(BACKEND / "app" / "modules" / "vessel", (".py",))
+    vessel_root = BACKEND / "app" / "modules" / "vessel"
     ledger = BACKEND / "docs" / "vessel_asset_center_issue_ledger.md"
     ledger_text = ledger.read_text(encoding="utf-8") if ledger.exists() else ""
 
@@ -93,9 +94,65 @@ def main() -> int:
     if dangerous_calls:
         failures.append("production code calls physical replace/delete paths: " + ", ".join(map(str, dangerous_calls)))
 
-    service_fallbacks = _contains("__getattr__", _iter_files(BACKEND / "app" / "modules" / "vessel" / "services", (".py",)))
-    if service_fallbacks:
-        failures.append("vessel domain services must expose explicit methods, no __getattr__ fallback: " + ", ".join(str(path.relative_to(ROOT)) for path in service_fallbacks))
+    required_domain_dirs = {
+        "asset",
+        "certificate",
+        "relation",
+        "recognition",
+        "quality",
+        "compliance",
+        "ais",
+        "profile_card",
+    }
+    missing_domain_services = sorted(
+        name
+        for name in required_domain_dirs
+        if not (vessel_root / name / "service.py").exists() or not (vessel_root / name / "methods.py").exists()
+    )
+    if missing_domain_services:
+        failures.append("vessel domain service/method modules missing: " + ", ".join(missing_domain_services))
+
+    aggregate_domain_services: list[Path] = []
+    for name in required_domain_dirs:
+        service_path = vessel_root / name / "service.py"
+        if not service_path.exists():
+            continue
+        text = service_path.read_text(encoding="utf-8")
+        if "shared.aggregate" in text or "VesselDomainService" in text:
+            aggregate_domain_services.append(service_path.relative_to(ROOT))
+    if aggregate_domain_services:
+        failures.append(
+            "vessel domain services must declare their own mixin dependencies instead of inheriting the full aggregate: "
+            + ", ".join(map(str, aggregate_domain_services))
+        )
+
+    service_boundary_files = [
+        path
+        for path in backend_files
+        if path.parent.name in required_domain_dirs or path.parent.name == "services"
+    ]
+    dynamic_service_patterns = {
+        "__getattr__": "__getattr__ fallback",
+        "_delegate(": "_delegate helper",
+        "setattr(Vessel": "dynamic setattr method export",
+        "getattr(self._facade": "facade getattr dispatch",
+        "getattr(self._core": "core getattr dispatch",
+    }
+    for pattern, label in dynamic_service_patterns.items():
+        findings = _contains(pattern, service_boundary_files)
+        if findings:
+            failures.append(
+                f"vessel domain services must not use {label}: "
+                + ", ".join(str(path.relative_to(ROOT)) for path in findings)
+            )
+
+    aggregate_service = vessel_root / "service.py"
+    if aggregate_service.exists():
+        text = aggregate_service.read_text(encoding="utf-8")
+        if "class VesselService(VesselDomainService)" not in text:
+            failures.append("app/modules/vessel/service.py must remain a compatibility aggregate over split domain services")
+        if "async def " in text or "def __init__" in text:
+            failures.append("app/modules/vessel/service.py must not grow implementation methods again")
 
     governance_service = BACKEND / "app" / "modules" / "vessel" / "governance_service.py"
     if governance_service.exists():
@@ -103,22 +160,31 @@ def main() -> int:
         if 'verified_status_code = "APPROVED"' in text or "verified_status_code = 'APPROVED'" in text:
             failures.append("governance tasks must not approve vessel evidence directly; use audit center bridge")
 
-    migration_helper_pattern = re.compile(r"_has_table|_has_column|_add_column_if_missing|_create_index_if_missing")
-    migration_findings = []
-    untracked_migration_docs = []
-    for path in sorted((BACKEND / "alembic" / "versions").glob("*.py")):
-        number = _migration_number(path)
-        if number is None or number < 36:
-            continue
-        text = path.read_text(encoding="utf-8")
-        if migration_helper_pattern.search(text) and "MIGRATION_COMPATIBILITY_REASON:" not in text:
-            migration_findings.append(path.relative_to(ROOT))
-        if "vessel_" in text and path.name not in ledger_text:
-            untracked_migration_docs.append(path.relative_to(ROOT))
-    if migration_findings:
-        failures.append("new patch-style migrations require MIGRATION_COMPATIBILITY_REASON comments: " + ", ".join(map(str, migration_findings)))
-    if untracked_migration_docs:
-        failures.append("new vessel migrations must be recorded in vessel issue ledger: " + ", ".join(map(str, untracked_migration_docs)))
+    migration_files = sorted((BACKEND / "alembic" / "versions").glob("*.py"))
+    if [path.name for path in migration_files] != ["0001_platform_current_schema.py"]:
+        failures.append(
+            "Alembic must remain a single V3 current-state baseline: "
+            + ", ".join(path.name for path in migration_files)
+        )
+    if migration_files:
+        baseline_text = migration_files[0].read_text(encoding="utf-8")
+        if not re.search(r"down_revision(?:\s*:[^=]+)?\s*=\s*None", baseline_text):
+            failures.append("Alembic baseline must use down_revision = None")
+        legacy_table_patterns = [
+            "ship_profile",
+            "ship_owner",
+            "ship_operation",
+            "ship_certificate",
+            "ship_import_",
+            "stat_ship_",
+            "cargo_channel",
+            "stat_cargo_",
+        ]
+        legacy_hits = sorted(pattern for pattern in legacy_table_patterns if pattern in baseline_text)
+        if legacy_hits:
+            failures.append("Alembic baseline contains legacy table references: " + ", ".join(legacy_hits))
+        if migration_files[0].name not in ledger_text:
+            failures.append("current Alembic baseline must be recorded in vessel issue ledger")
 
     if failures:
         for failure in failures:

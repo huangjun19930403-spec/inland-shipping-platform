@@ -612,7 +612,7 @@ async def seed_freight_samples() -> None:
             success_count=3,
             failed_count=0,
             creator_id=1,
-            remark="本地样例：寻船无吨位、多目的地拆分、上下文推断货品",
+            remark="本地样例：寻船无吨位需复核、多目的地拆分、弱推断货品仅作建议",
             prompt_version=WECHAT_PROMPT_VERSION,
             parse_stage_code="DONE",
             parse_stage_name="解析完成",
@@ -630,12 +630,12 @@ async def seed_freight_samples() -> None:
                         "route_clue_ids": [1, 2, 3],
                         "raw_text": special_raw_text,
                         "shared_contact_phone": special_contact,
-                        "scope_reason": "末尾手机号覆盖同一连续寻船公告块；第二条缺货品按上下文推断。",
+                        "scope_reason": "末尾手机号覆盖同一连续寻船公告块；缺货品线索只保留货品建议，不写入顶层货品。",
                         "evidence": [special_contact, special_raw_text],
                     }
                 ],
                 "context_notes": [],
-                "warnings": ["缺货品线索已按上下文推断，需人工判断"],
+                "warnings": ["寻船无吨位不能一键确认", "缺货品线索只写 suggested_fields，需人工判断"],
             },
             started_at=special_received_at + timedelta(minutes=1),
             finished_at=special_received_at + timedelta(minutes=2),
@@ -654,10 +654,11 @@ async def seed_freight_samples() -> None:
                 "origin": special_origin,
                 "destination": special_destinations[0],
                 "commodity": sand_commodity.name,
-                "review_status": "PASS",
-                "availability": "READY",
-                "review_reason": None,
-                "review_summary": "多目的地原文已拆分，本条目的地来自原文，寻船类无吨位不阻断确认。",
+                "suggested_commodity": None,
+                "review_status": "REVIEW_REQUIRED",
+                "availability": "UNKNOWN",
+                "review_reason": "寻船类无吨位，不能一键确认",
+                "review_summary": "多目的地原文已拆分，本条目的地来自原文；寻船类无吨位需人工确认。",
             },
             {
                 "suffix": "B",
@@ -666,10 +667,11 @@ async def seed_freight_samples() -> None:
                 "origin": special_origin,
                 "destination": special_destinations[1],
                 "commodity": sand_commodity.name,
-                "review_status": "PASS",
-                "availability": "READY",
-                "review_reason": None,
-                "review_summary": "多目的地原文已拆分，本条目的地来自原文，寻船类无吨位不阻断确认。",
+                "suggested_commodity": None,
+                "review_status": "REVIEW_REQUIRED",
+                "availability": "UNKNOWN",
+                "review_reason": "寻船类无吨位，不能一键确认",
+                "review_summary": "多目的地原文已拆分，本条目的地来自原文；寻船类无吨位需人工确认。",
             },
             {
                 "suffix": "C",
@@ -677,11 +679,12 @@ async def seed_freight_samples() -> None:
                 "line_ref": 3,
                 "origin": inferred_origin,
                 "destination": inferred_destination,
-                "commodity": sand_commodity.name,
+                "commodity": None,
+                "suggested_commodity": sand_commodity.name,
                 "review_status": "REVIEW_REQUIRED",
                 "availability": "UNKNOWN",
-                "review_reason": f"本条缺少货品，AI 根据同一公告块上下文推断为{sand_commodity.name}",
-                "review_summary": "货品来自上下文推断，需人工确认后入库。",
+                "review_reason": f"本条缺少货品，AI 只给出建议货品{sand_commodity.name}，需人工确认",
+                "review_summary": "货品来自弱推断，只写入 suggested_fields，不写顶层货品。",
             },
         ]
         for spec in special_specs:
@@ -711,6 +714,13 @@ async def seed_freight_samples() -> None:
                     "contact_phone": special_contact,
                     "ai_review_status_code": spec["review_status"],
                     "manual_review_reason": spec["review_reason"],
+                    "ai_review_json": {
+                        "suggested_fields": (
+                            {"commodity_name": {"value": spec["suggested_commodity"], "source_type_code": "WEAK_INFERRED"}}
+                            if spec.get("suggested_commodity")
+                            else {}
+                        )
+                    },
                 },
                 quality_score=Decimal("0.8600"),
                 status_code="CANDIDATE_CREATED",
@@ -731,13 +741,17 @@ async def seed_freight_samples() -> None:
                     raw_commodity_name=spec["commodity"],
                     raw_origin_text=spec["origin"].name,
                     raw_destination_text=spec["destination"].name,
-                    cargo_title=f"{spec['origin'].short_name or spec['origin'].name}至{spec['destination'].short_name or spec['destination'].name}{spec['commodity']}",
+                    cargo_title=f"{spec['origin'].short_name or spec['origin'].name}至{spec['destination'].short_name or spec['destination'].name}{spec['commodity'] or '待补货品'}",
                     cargo_description="AI 样例候选：寻船类无吨位，联系人按连续公告块继承。",
-                    commodity_standard_id=sand_commodity.id,
+                    commodity_standard_id=sand_commodity.id if spec["commodity"] else None,
                     commodity_match_name=spec["commodity"],
-                    commodity_match_score=Decimal("1.0000"),
-                    commodity_match_level_code="STANDARD",
-                    commodity_options_json=[{"level": "STANDARD", "id": sand_commodity.id, "name": spec["commodity"], "score": 1.0}],
+                    commodity_match_score=Decimal("1.0000") if spec["commodity"] else None,
+                    commodity_match_level_code="STANDARD" if spec["commodity"] else None,
+                    commodity_options_json=(
+                        [{"level": "STANDARD", "id": sand_commodity.id, "name": spec["commodity"], "score": 1.0}]
+                        if spec["commodity"]
+                        else []
+                    ),
                     origin_node_id=spec["origin"].id,
                     destination_node_id=spec["destination"].id,
                     origin_node_match_score=Decimal("1.0000"),
@@ -759,7 +773,11 @@ async def seed_freight_samples() -> None:
                     confidence_score=Decimal("0.8600"),
                     completeness_score=Decimal("0.8200"),
                     match_basis_json={
-                        "commodity": {"level": "STANDARD", "name": spec["commodity"]},
+                        "commodity": (
+                            {"level": "STANDARD", "name": spec["commodity"]}
+                            if spec["commodity"]
+                            else {"status": "WEAK_INFERRED_SUGGESTION_ONLY", "suggested_name": spec.get("suggested_commodity")}
+                        ),
                         "origin": {"level": "NODE", "name": spec["origin"].name},
                         "destination": {"level": "NODE", "name": spec["destination"].name},
                         "evidence": [clue_raw_text, special_contact],
@@ -767,23 +785,51 @@ async def seed_freight_samples() -> None:
                     ai_suggestion_json={"summary": spec["review_summary"], "source_kind": "微信群文本"},
                     ai_understanding_json={
                         "semantic_role_code": "ROUTE",
+                        "route_intent_code": "SEEK_VESSEL",
                         "line_refs": [spec["line_ref"]],
                         "route": {"origin_text": spec["origin"].name, "destination_text": spec["destination"].name},
                         "commodity_name": spec["commodity"],
-                        "tonnage": {"raw_text": None, "decision": {"status_code": "PASS", "selected_text": None, "reason": "寻船类样例无吨位"}},
+                        "field_evidence": {
+                            "commodity_name": (
+                                {
+                                    "value": spec["commodity"],
+                                    "source_type_code": "LOCAL_LINE",
+                                    "line_refs": [spec["line_ref"]],
+                                    "evidence_text": spec["commodity"],
+                                }
+                                if spec["commodity"]
+                                else None
+                            )
+                        },
+                        "tonnage": {
+                            "raw_text": None,
+                            "decision": {"status_code": "NOT_APPLICABLE", "selected_text": None, "reason": "寻船类样例无吨位，需人工确认"},
+                        },
                         "inherited_context": {"contact": special_contact, "evidence": [special_contact]},
                         "evidence": [clue_raw_text, special_contact],
                     },
                     ai_tool_match_json={
-                        "commodity": {"basis": {"status": "MATCHED_STANDARD"}, "selected_id": sand_commodity.id},
+                        "commodity": {
+                            "basis": (
+                                {"status": "MATCHED_STANDARD"}
+                                if spec["commodity"]
+                                else {"status": "WEAK_INFERRED_SUGGESTION_ONLY", "suggested_name": spec.get("suggested_commodity")}
+                            ),
+                            "selected_id": sand_commodity.id if spec["commodity"] else None,
+                        },
                         "origin": {"basis": {"status": "MATCHED_NODE"}, "selected": {"node_id": spec["origin"].id, "city_code": spec["origin"].city_code}},
                         "destination": {"basis": {"status": "MATCHED_NODE"}, "selected": {"node_id": spec["destination"].id, "city_code": spec["destination"].city_code}},
                     },
                     ai_review_json={
                         "status_code": spec["review_status"],
                         "reason": spec["review_reason"],
-                        "checks": [] if spec["review_status"] == "PASS" else ["INFERRED_COMMODITY"],
+                        "checks": ["MISSING_TONNAGE_OR_NON_FORMAL_ROUTE", *(["INFERRED_COMMODITY"] if spec.get("suggested_commodity") else [])],
                         "summary": spec["review_summary"],
+                        "suggested_fields": (
+                            {"commodity_name": {"value": spec["suggested_commodity"], "source_type_code": "WEAK_INFERRED"}}
+                            if spec.get("suggested_commodity")
+                            else {}
+                        ),
                     },
                     ai_review_status_code=spec["review_status"],
                     availability_status_code=spec["availability"],
