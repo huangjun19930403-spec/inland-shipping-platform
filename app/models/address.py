@@ -59,6 +59,50 @@ class AdminRegionBoundary(Base, TimestampMixin):
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
+class WaterSystem(Base, TimestampMixin):
+    __tablename__ = "water_system"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    water_system_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    water_system_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    water_level: Mapped[int] = mapped_column(SmallInteger, nullable=False, index=True)
+    feature_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="OTHER", index=True)
+    hydrology_period_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    salinity_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    water_boundary_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="STANDARD", index=True)
+    source_remark: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    source_layer_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_version: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class WaterSystemBoundary(Base, TimestampMixin):
+    __tablename__ = "water_system_boundary"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    water_system_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("water_system.id"), nullable=False, index=True
+    )
+    geometry_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    boundary_paths_low: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    boundary_paths_medium: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    boundary_paths_high: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    center_longitude: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
+    center_latitude: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
+    bbox_min_lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
+    bbox_min_lat: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
+    bbox_max_lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
+    bbox_max_lat: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
+    source_shape_length_degree: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True)
+    source_shape_area_degree: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True)
+    ring_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    geometry_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="AVAILABLE", index=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    imported_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Region(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     __tablename__ = "region"
 

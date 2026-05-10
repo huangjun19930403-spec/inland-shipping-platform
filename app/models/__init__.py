@@ -4,6 +4,8 @@ from app.models.dictionary import StdDict, StdDictItem
 from app.models.address import (
     AdminRegion,
     AdminRegionBoundary,
+    WaterSystem,
+    WaterSystemBoundary,
     Region,
     RegionBoundaryVersion,
     RegionCityRelation,
@@ -151,6 +153,8 @@ __all__ = [
     "CodeSequence",
     "AdminRegion",
     "AdminRegionBoundary",
+    "WaterSystem",
+    "WaterSystemBoundary",
     "Region",
     "RegionBoundaryVersion",
     "RegionCityRelation",

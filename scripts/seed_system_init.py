@@ -18,6 +18,7 @@ from scripts.seed_navigation_constraints import seed_navigation_constraints
 from scripts.seed_route_samples import seed_route_samples
 from scripts.seed_system_base import seed_system_base
 from scripts.seed_vessel_samples import seed_vessel_samples
+from scripts.seed_water_systems import seed_water_systems
 from scripts.purge_legacy_e2e_data import purge_legacy_e2e_data
 
 
@@ -25,6 +26,7 @@ async def seed_system_init() -> None:
     await seed_builtin_dicts()
     await seed_code_sequences()
     await seed_admin_regions()
+    await seed_water_systems()
     await seed_commodity_taxonomy()
     await seed_commodity_standards()
     await seed_foundation_samples()

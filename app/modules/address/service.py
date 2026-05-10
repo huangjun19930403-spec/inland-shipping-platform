@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from types import SimpleNamespace
 
 from fastapi import UploadFile
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.integrations.amap import AmapGeocodeClient
-from app.models.address import AdminRegion
+from app.models.address import AdminRegion, WaterSystem, WaterSystemBoundary
 from app.modules.address.repository import (
     AdminRegionRepository,
     NavigationConstraintPointRepository,
@@ -38,6 +39,10 @@ from app.modules.address.schemas import (
     RegionBoundaryVersionCreateRequest,
     RegionBoundaryVersionResponse,
     RegionCityRelationResponse,
+    WaterSystemBoundaryResponse,
+    WaterSystemDetailResponse,
+    WaterSystemResponse,
+    WaterSystemSummaryResponse,
     NodeAliasResponse,
     TransportNodeContactResponse,
     TransportNodeContactReplaceRequest,
@@ -65,6 +70,43 @@ from app.modules.storage.service import FileStorageService
 
 
 logger = logging.getLogger(__name__)
+
+
+WATER_LEVEL_LABELS = {
+    1: "一级水系",
+    2: "二级水系",
+    3: "三级水系",
+    4: "四级水系",
+}
+WATER_FEATURE_TYPE_LABELS = {
+    "RIVER": "河流",
+    "LAKE": "湖泊",
+    "RESERVOIR": "水库",
+    "OTHER": "其他水域",
+}
+WATER_HYDROLOGY_PERIOD_LABELS = {
+    "PERENNIAL": "常年",
+    "SEASONAL": "时令",
+    "UNKNOWN": "未知",
+}
+WATER_SALINITY_LABELS = {
+    "SALINE": "咸水",
+    "FRESH": "淡水",
+    "UNKNOWN": "未知",
+}
+WATER_BOUNDARY_TYPE_LABELS = {
+    "DOUBLE_LINE_RIVER": "双线河",
+    "BOUNDARY_RIVER": "界河",
+    "WATER_BODY": "水域面",
+    "STANDARD": "标准边界",
+    "OTHER": "其他",
+}
+WATER_GEOMETRY_STATUS_LABELS = {
+    "AVAILABLE": "有边界",
+    "MISSING": "缺少边界",
+    "INVALID": "边界异常",
+    "UNKNOWN": "未知",
+}
 
 
 def _to_admin_region_response(row) -> AdminRegionResponse:
@@ -135,6 +177,108 @@ def _to_admin_boundary_response(
         remark=row.remark,
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def _water_level_name(level: int) -> str:
+    return WATER_LEVEL_LABELS.get(level, f"{level}级水系")
+
+
+def _water_feature_type_name(code: str | None) -> str:
+    return WATER_FEATURE_TYPE_LABELS.get(code or "OTHER", code or "其他水域")
+
+
+def _water_hydrology_period_name(code: str | None) -> str:
+    return WATER_HYDROLOGY_PERIOD_LABELS.get(code or "UNKNOWN", code or "未知")
+
+
+def _water_salinity_name(code: str | None) -> str:
+    return WATER_SALINITY_LABELS.get(code or "UNKNOWN", code or "未知")
+
+
+def _water_boundary_type_name(code: str | None) -> str:
+    return WATER_BOUNDARY_TYPE_LABELS.get(code or "OTHER", code or "其他")
+
+
+def _water_geometry_status_name(code: str | None) -> str:
+    return WATER_GEOMETRY_STATUS_LABELS.get(code or "UNKNOWN", code or "未知")
+
+
+def _boundary_paths_by_precision(boundary: WaterSystemBoundary | None, precision: str) -> list[list[list[float]]]:
+    if boundary is None:
+        return []
+    if precision == "high":
+        return boundary.boundary_paths_high or []
+    if precision == "medium":
+        return boundary.boundary_paths_medium or []
+    return boundary.boundary_paths_low or []
+
+
+def _to_water_system_response(
+    row: WaterSystem,
+    boundary: WaterSystemBoundary | None,
+) -> WaterSystemResponse:
+    geometry_status_code = boundary.geometry_status_code if boundary else "MISSING"
+    return WaterSystemResponse(
+        id=row.id,
+        water_system_code=row.water_system_code,
+        water_system_name=row.water_system_name,
+        water_level=row.water_level,
+        water_level_name=_water_level_name(row.water_level),
+        feature_type_code=row.feature_type_code,
+        feature_type_name=_water_feature_type_name(row.feature_type_code),
+        hydrology_period_code=row.hydrology_period_code,
+        hydrology_period_name=_water_hydrology_period_name(row.hydrology_period_code),
+        salinity_type_code=row.salinity_type_code,
+        salinity_type_name=_water_salinity_name(row.salinity_type_code),
+        water_boundary_type_code=row.water_boundary_type_code,
+        water_boundary_type_name=_water_boundary_type_name(row.water_boundary_type_code),
+        source_remark=row.source_remark,
+        source_layer_name=row.source_layer_name,
+        source_version=row.source_version,
+        is_enabled=row.is_enabled,
+        has_boundary=bool(boundary and boundary.geometry_status_code == "AVAILABLE"),
+        geometry_status_code=geometry_status_code,
+        geometry_status_name=_water_geometry_status_name(geometry_status_code),
+        imported_at=boundary.imported_at if boundary else None,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_water_system_detail_response(
+    row: WaterSystem,
+    boundary: WaterSystemBoundary | None,
+) -> WaterSystemDetailResponse:
+    base = _to_water_system_response(row, boundary).model_dump()
+    return WaterSystemDetailResponse(
+        **base,
+        center_longitude=boundary.center_longitude if boundary else None,
+        center_latitude=boundary.center_latitude if boundary else None,
+        ring_count=boundary.ring_count if boundary else 0,
+        point_count=boundary.point_count if boundary else 0,
+    )
+
+
+def _to_water_boundary_response(
+    row: WaterSystem,
+    boundary: WaterSystemBoundary | None,
+    precision: str,
+) -> WaterSystemBoundaryResponse:
+    paths = _boundary_paths_by_precision(boundary, precision)
+    geometry_status_code = boundary.geometry_status_code if boundary else "MISSING"
+    return WaterSystemBoundaryResponse(
+        water_system_code=row.water_system_code,
+        water_system_name=row.water_system_name,
+        water_level=row.water_level,
+        water_level_name=_water_level_name(row.water_level),
+        precision=precision,
+        boundary_paths=paths,
+        has_boundary=bool(paths),
+        geometry_status_code=geometry_status_code,
+        geometry_status_name=_water_geometry_status_name(geometry_status_code),
+        center_longitude=boundary.center_longitude if boundary else None,
+        center_latitude=boundary.center_latitude if boundary else None,
     )
 
 
@@ -309,6 +453,185 @@ class AdminRegionService:
     async def list_children(self, admin_code: str) -> list[AdminRegionResponse]:
         rows = await self.repo.get_children(admin_code)
         return [_to_admin_region_response(row) for row in rows]
+
+
+class WaterSystemService:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def summary(self) -> WaterSystemSummaryResponse:
+        total_count = int((await self.db.execute(select(func.count()).select_from(WaterSystem))).scalar_one() or 0)
+        enabled_count = int(
+            (
+                await self.db.execute(
+                    select(func.count()).select_from(WaterSystem).where(WaterSystem.is_enabled.is_(True))
+                )
+            ).scalar_one()
+            or 0
+        )
+        boundary_count = int(
+            (
+                await self.db.execute(
+                    select(func.count())
+                    .select_from(WaterSystemBoundary)
+                    .join(WaterSystem, WaterSystem.id == WaterSystemBoundary.water_system_id)
+                    .where(
+                        WaterSystem.is_enabled.is_(True),
+                        WaterSystemBoundary.is_current.is_(True),
+                        WaterSystemBoundary.geometry_status_code == "AVAILABLE",
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+        level_rows = (
+            await self.db.execute(
+                select(WaterSystem.water_level, func.count())
+                .where(WaterSystem.is_enabled.is_(True))
+                .group_by(WaterSystem.water_level)
+            )
+        ).all()
+        version_row = await self.db.scalar(
+            select(WaterSystem.source_version)
+            .where(WaterSystem.is_enabled.is_(True))
+            .group_by(WaterSystem.source_version)
+            .order_by(func.count().desc(), WaterSystem.source_version.desc())
+            .limit(1)
+        )
+        return WaterSystemSummaryResponse(
+            total_count=total_count,
+            boundary_count=boundary_count,
+            enabled_count=enabled_count,
+            level_counts={str(level): int(count) for level, count in level_rows},
+            current_source_version=version_row,
+        )
+
+    async def list_water_systems(
+        self,
+        *,
+        keyword: str | None,
+        water_level: int | None,
+        feature_type_code: str | None,
+        hydrology_period_code: str | None,
+        salinity_type_code: str | None,
+        geometry_status_code: str | None,
+        page: int,
+        page_size: int,
+    ) -> PageResponse[WaterSystemResponse]:
+        stmt = (
+            select(
+                WaterSystem,
+                WaterSystemBoundary.id.label("boundary_id"),
+                WaterSystemBoundary.geometry_status_code,
+                WaterSystemBoundary.imported_at,
+            )
+            .outerjoin(
+                WaterSystemBoundary,
+                (WaterSystemBoundary.water_system_id == WaterSystem.id)
+                & (WaterSystemBoundary.is_current.is_(True)),
+            )
+            .where(WaterSystem.is_enabled.is_(True))
+        )
+        if keyword:
+            like_value = f"%{keyword.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    WaterSystem.water_system_code.ilike(like_value),
+                    WaterSystem.water_system_name.ilike(like_value),
+                    WaterSystem.source_remark.ilike(like_value),
+                )
+            )
+        if water_level is not None:
+            stmt = stmt.where(WaterSystem.water_level == water_level)
+        if feature_type_code:
+            stmt = stmt.where(WaterSystem.feature_type_code == feature_type_code)
+        if hydrology_period_code:
+            stmt = stmt.where(WaterSystem.hydrology_period_code == hydrology_period_code)
+        if salinity_type_code:
+            stmt = stmt.where(WaterSystem.salinity_type_code == salinity_type_code)
+        if geometry_status_code:
+            stmt = stmt.where(WaterSystemBoundary.geometry_status_code == geometry_status_code)
+
+        total = int((await self.db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar_one())
+        rows = (
+            await self.db.execute(
+                stmt.order_by(WaterSystem.water_level.asc(), WaterSystem.sort_order.asc(), WaterSystem.id.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).all()
+        items: list[WaterSystemResponse] = []
+        for water_system, boundary_id, status_code, imported_at in rows:
+            boundary = (
+                SimpleNamespace(geometry_status_code=status_code, imported_at=imported_at)
+                if boundary_id
+                else None
+            )
+            items.append(_to_water_system_response(water_system, boundary))
+        return PageResponse[WaterSystemResponse](total=total, page=page, page_size=page_size, items=items)
+
+    async def get_water_system_detail(self, water_system_code: str) -> WaterSystemDetailResponse:
+        row = await self.db.scalar(
+            select(WaterSystem).where(
+                WaterSystem.water_system_code == water_system_code,
+                WaterSystem.is_enabled.is_(True),
+            )
+        )
+        if row is None:
+            raise NotFoundError("WaterSystem", water_system_code)
+        boundary_row = (
+            await self.db.execute(
+                select(
+                    WaterSystemBoundary.id,
+                    WaterSystemBoundary.geometry_status_code,
+                    WaterSystemBoundary.imported_at,
+                    WaterSystemBoundary.center_longitude,
+                    WaterSystemBoundary.center_latitude,
+                    WaterSystemBoundary.ring_count,
+                    WaterSystemBoundary.point_count,
+                )
+                .where(
+                    WaterSystemBoundary.water_system_id == row.id,
+                    WaterSystemBoundary.is_current.is_(True),
+                )
+                .limit(1)
+            )
+        ).first()
+        boundary = None
+        if boundary_row is not None:
+            boundary = SimpleNamespace(
+                geometry_status_code=boundary_row.geometry_status_code,
+                imported_at=boundary_row.imported_at,
+                center_longitude=boundary_row.center_longitude,
+                center_latitude=boundary_row.center_latitude,
+                ring_count=boundary_row.ring_count,
+                point_count=boundary_row.point_count,
+            )
+        return _to_water_system_detail_response(row, boundary)
+
+    async def get_water_system_boundary(
+        self,
+        water_system_code: str,
+        precision: str,
+    ) -> WaterSystemBoundaryResponse:
+        normalized_precision = precision if precision in {"low", "medium", "high"} else "medium"
+        row = await self.db.scalar(
+            select(WaterSystem).where(
+                WaterSystem.water_system_code == water_system_code,
+                WaterSystem.is_enabled.is_(True),
+            )
+        )
+        if row is None:
+            raise NotFoundError("WaterSystem", water_system_code)
+        boundary = await self.db.scalar(
+            select(WaterSystemBoundary)
+            .where(
+                WaterSystemBoundary.water_system_id == row.id,
+                WaterSystemBoundary.is_current.is_(True),
+            )
+            .limit(1)
+        )
+        return _to_water_boundary_response(row, boundary, normalized_precision)
 
 
 class BusinessRegionService:

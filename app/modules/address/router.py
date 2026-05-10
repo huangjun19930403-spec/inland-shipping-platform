@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -45,6 +45,11 @@ from app.modules.address.schemas import (
     TransportNodeProfileUpsertRequest,
     TransportNodeResponse,
     TransportNodeUpdateRequest,
+    WaterSystemBoundaryResponse,
+    WaterSystemDetailResponse,
+    WaterSystemQuery,
+    WaterSystemResponse,
+    WaterSystemSummaryResponse,
 )
 from app.modules.address.service import (
     AdminRegionService,
@@ -52,6 +57,7 @@ from app.modules.address.service import (
     BusinessRegionService,
     NavigationConstraintPointService,
     TransportNodeService,
+    WaterSystemService,
 )
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -118,6 +124,49 @@ async def get_admin_region_children(
 ):
     service = AdminRegionService(db)
     return await service.list_children(admin_code)
+
+
+@router.get("/water-systems/summary", response_model=WaterSystemSummaryResponse)
+async def get_water_system_summary(db: AsyncSession = Depends(get_db)):
+    service = WaterSystemService(db)
+    return await service.summary()
+
+
+@router.get("/water-systems", response_model=PageResponse[WaterSystemResponse])
+async def list_water_systems(
+    query: WaterSystemQuery = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    service = WaterSystemService(db)
+    return await service.list_water_systems(
+        keyword=query.keyword,
+        water_level=query.water_level,
+        feature_type_code=query.feature_type_code,
+        hydrology_period_code=query.hydrology_period_code,
+        salinity_type_code=query.salinity_type_code,
+        geometry_status_code=query.geometry_status_code,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
+@router.get("/water-systems/{water_system_code}", response_model=WaterSystemDetailResponse)
+async def get_water_system_detail(
+    water_system_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    service = WaterSystemService(db)
+    return await service.get_water_system_detail(water_system_code)
+
+
+@router.get("/water-systems/{water_system_code}/boundary", response_model=WaterSystemBoundaryResponse)
+async def get_water_system_boundary(
+    water_system_code: str,
+    precision: str = Query("medium", pattern="^(low|medium|high)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    service = WaterSystemService(db)
+    return await service.get_water_system_boundary(water_system_code, precision)
 
 
 @router.get("/options/cities", response_model=list[AdminRegionResponse])

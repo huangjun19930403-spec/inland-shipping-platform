@@ -29,7 +29,7 @@ from app.integrations.config_keys import (
     VESSEL_AIS_UNMATCHED_SCAN_LIMIT,
 )
 from app.integrations.es import RealtimeEsClient
-from app.models.address import AdminRegion, AdminRegionBoundary, Region
+from app.models.address import AdminRegion, AdminRegionBoundary, Region, WaterSystem, WaterSystemBoundary
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.dictionary import StdDict, StdDictItem
 from app.models.vessel import (
@@ -136,8 +136,14 @@ from app.modules.vessel.schemas import (
     VesselPositionCityVesselsResponse,
     VesselAisCityBoundaryItemResponse,
     VesselAisCityBoundaryResponse,
+    VesselAisWaterSystemBoundaryItemResponse,
+    VesselAisWaterSystemBoundaryResponse,
     VesselAisSnapshotResponse,
     VesselAisUnmatchedMmsiResponse,
+    VesselPositionWaterSystemSituationItemResponse,
+    VesselPositionWaterSystemSituationResponse,
+    VesselPositionWaterSystemSituationSummary,
+    VesselPositionWaterSystemVesselsResponse,
     VesselPositionMonitorItemResponse,
     VesselPositionMonitorResponse,
     VesselPositionMonitorSummary,
@@ -259,6 +265,10 @@ CURRENT_CITY_SOURCE_UNKNOWN = "UNKNOWN"
 CURRENT_CITY_SOURCE_INVALID_POSITION = "INVALID_POSITION"
 CITY_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_GRID_CELL_SIZE_DEGREES = 1.0
+UNKNOWN_WATER_SYSTEM_CODE = "UNKNOWN"
+UNKNOWN_WATER_SYSTEM_NAME = "未知水系"
+CURRENT_WATER_SYSTEM_SOURCE_BOUNDARY = "WATER_SYSTEM_BOUNDARY"
+WATER_SYSTEM_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_SITUATION_CACHE_KEY_PREFIX = "vessel:city_situation:response:"
 CITY_SITUATION_SNAPSHOT_KEY_PREFIX = "vessel:city_situation:snapshot:"
 CITY_SITUATION_SNAPSHOT_TTL_SECONDS = settings.VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS
@@ -314,6 +324,24 @@ class _CityBoundary:
 
 
 @dataclass(slots=True)
+class _WaterSystemBoundary:
+    code: str
+    name: str
+    level: int
+    feature_type_code: str
+    hydrology_period_code: str
+    salinity_type_code: str
+    water_boundary_type_code: str
+    center_longitude: Decimal | None
+    center_latitude: Decimal | None
+    shape_area_degree: Decimal | None
+    bbox: tuple[float, float, float, float]
+    bbox_area: float
+    polygons: list[list[list[tuple[float, float]]]]
+    boundary_paths_by_precision: dict[str, list[list[tuple[float, float]]]] | None = None
+
+
+@dataclass(slots=True)
 class _ResolvedCity:
     city_code: str | None
     city_name: str
@@ -321,6 +349,15 @@ class _ResolvedCity:
     city_center_longitude: Decimal | None = None
     city_center_latitude: Decimal | None = None
     matched_city_candidates: list[dict[str, Any]] | None = None
+
+
+@dataclass(slots=True)
+class _ResolvedWaterSystem:
+    water_system_code: str | None
+    water_system_name: str
+    current_water_system_source: str
+    water_level: int | None = None
+    boundary: _WaterSystemBoundary | None = None
 
 
 @dataclass(slots=True)
@@ -359,6 +396,7 @@ class _CitySituationResponseCacheEntry:
 
 
 _CITY_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
+_WATER_SYSTEM_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
 _CITY_SITUATION_SNAPSHOTS: dict[str, _CitySituationSnapshot] = {}
 _CITY_SITUATION_RESPONSE_CACHE: dict[str, _CitySituationResponseCacheEntry] = {}
 _CITY_SITUATION_REDIS_CLIENT: Any | None = None
@@ -649,6 +687,39 @@ def _source_status_name(code: str) -> str:
         "PARTIAL": "实时船位部分可用",
         "ERROR": "实时船位异常",
     }.get(code, code)
+
+
+def _water_level_name(level: int | None) -> str | None:
+    if level is None:
+        return None
+    return {1: "一级水系", 2: "二级水系", 3: "三级水系", 4: "四级水系"}.get(level, f"{level}级水系")
+
+
+def _water_feature_type_name(code: str | None) -> str | None:
+    return {
+        "RIVER": "河流",
+        "LAKE": "湖泊",
+        "RESERVOIR": "水库",
+        "OTHER": "其他水域",
+    }.get(code or "OTHER")
+
+
+def _water_hydrology_period_name(code: str | None) -> str | None:
+    return {"PERENNIAL": "常年", "SEASONAL": "时令", "UNKNOWN": "未知"}.get(code or "UNKNOWN")
+
+
+def _water_salinity_name(code: str | None) -> str | None:
+    return {"SALINE": "咸水", "FRESH": "淡水", "UNKNOWN": "未知"}.get(code or "UNKNOWN")
+
+
+def _water_boundary_type_name(code: str | None) -> str | None:
+    return {
+        "DOUBLE_LINE_RIVER": "双线河",
+        "BOUNDARY_RIVER": "界河",
+        "WATER_BODY": "水域面",
+        "STANDARD": "标准边界",
+        "OTHER": "其他",
+    }.get(code or "OTHER")
 
 
 def _ais_freshness_level(age_minutes: int | None) -> str:

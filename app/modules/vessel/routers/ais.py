@@ -13,6 +13,10 @@ from app.modules.vessel.schemas import (
     VesselAisCitySituationQuery,
     VesselAisCityVesselsQuery,
     VesselAisCityBoundaryQuery,
+    VesselAisWaterSystemBoundaryQuery,
+    VesselAisWaterSystemBoundaryResponse,
+    VesselAisWaterSystemSituationQuery,
+    VesselAisWaterSystemVesselsQuery,
     VesselAisMonitorQuery,
     VesselAisNodeSituationQuery,
     VesselAisNodeSituationResponse,
@@ -111,6 +115,9 @@ from app.modules.vessel.schemas import (
     VesselPositionCitySituationResponse,
     VesselPositionCityVesselsQuery,
     VesselPositionCityVesselsResponse,
+    VesselPositionWaterSystemSituationQuery,
+    VesselPositionWaterSystemSituationResponse,
+    VesselPositionWaterSystemVesselsResponse,
     VesselPositionMonitorItemResponse,
     VesselPositionMonitorQuery,
     VesselPositionMonitorResponse,
@@ -195,6 +202,36 @@ async def get_vessel_ais_city_boundaries(
 ):
     _ = current_user
     return await VesselAisService(db).ais_city_boundaries(query)
+
+
+@router.get("/ais/water-system-situation", response_model=VesselPositionWaterSystemSituationResponse)
+async def get_vessel_ais_water_system_situation(
+    query: VesselAisWaterSystemSituationQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselAisService(db).position_water_system_situation(query.to_internal_query())
+
+
+@router.get("/ais/water-system-vessels", response_model=VesselPositionWaterSystemVesselsResponse)
+async def get_vessel_ais_water_system_vessels(
+    query: VesselAisWaterSystemVesselsQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselAisService(db).position_water_system_vessels(query.to_internal_query())
+
+
+@router.get("/ais/water-system-boundaries", response_model=VesselAisWaterSystemBoundaryResponse)
+async def get_vessel_ais_water_system_boundaries(
+    query: VesselAisWaterSystemBoundaryQuery = Depends(),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await VesselAisService(db).ais_water_system_boundaries(query)
 
 
 @router.get("/ais/node-situation", response_model=VesselAisNodeSituationResponse)

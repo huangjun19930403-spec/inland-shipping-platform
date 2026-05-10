@@ -84,6 +84,66 @@ class VesselAisCityBoundaryQuery(BaseModel):
     city_codes: str | None = None
     precision: str = Field(default="low", pattern="^(low|medium)$")
 
+class VesselPositionWaterSystemSituationQuery(BaseModel):
+    keyword: str | None = None
+    ship_type_code: str | None = None
+    deadweight_min: Decimal | None = None
+    deadweight_max: Decimal | None = None
+    draft_max: Decimal | None = None
+    contact_available: bool | None = None
+    profile_status_code: str | None = None
+    risk_level: str | None = None
+    certificate_risk_available: bool | None = None
+    water_level: int | None = Field(default=None, ge=1, le=4)
+    water_levels: str | None = None
+    water_system_name: str | None = None
+    reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
+    include_boundary: bool = True
+    boundary_precision: str = Field(default="low", pattern="^(low|medium)$")
+
+class VesselPositionWaterSystemVesselsQuery(VesselPositionWaterSystemSituationQuery):
+    water_system_code: str | None = None
+    query_snapshot_id: str | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+class VesselAisWaterSystemSituationQuery(BaseModel):
+    keyword: str | None = None
+    ship_type_code: str | None = None
+    deadweight_min: Decimal | None = None
+    deadweight_max: Decimal | None = None
+    draft_max: Decimal | None = None
+    contact_available: bool | None = None
+    profile_status_code: str | None = None
+    risk_level: str | None = None
+    certificate_risk_available: bool | None = None
+    water_level: int | None = Field(default=None, ge=1, le=4)
+    water_levels: str | None = None
+    water_system_name: str | None = None
+    reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
+    include_boundary: bool = True
+    boundary_precision: str = Field(default="low", pattern="^(low|medium)$")
+
+    def to_internal_query(self) -> VesselPositionWaterSystemSituationQuery:
+        return VesselPositionWaterSystemSituationQuery(**self.model_dump())
+
+class VesselAisWaterSystemVesselsQuery(VesselAisWaterSystemSituationQuery):
+    water_system_code: str | None = None
+    query_snapshot_id: str | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+    def to_internal_query(self) -> VesselPositionWaterSystemVesselsQuery:
+        return VesselPositionWaterSystemVesselsQuery(**self.model_dump())
+
+class VesselAisWaterSystemBoundaryQuery(BaseModel):
+    water_system_code: str | None = None
+    water_system_codes: str | None = None
+    water_system_name: str | None = None
+    water_level: int | None = Field(default=None, ge=1, le=4)
+    water_levels: str | None = None
+    precision: str = Field(default="low", pattern="^(low|medium|high)$")
+
 class VesselAisSnapshotQuery(BaseModel):
     snapshot_id: str | None = None
     page: int = Field(default=1, ge=1)
@@ -152,6 +212,8 @@ class VesselPositionMonitorItemResponse(VesselListItemResponse):
     source_index: str | None = None
     freshness_level: str = "UNKNOWN"
     match_status_code: str = "MATCHED_PROFILE"
+    risk_level: str | None = None
+    certificate_risk_available: bool | None = None
 
 class VesselPositionMonitorSummary(BaseModel):
     matched_profile_count: int
@@ -274,6 +336,116 @@ class VesselAisCityBoundaryResponse(BaseModel):
     precision: str = "low"
     total: int = 0
     items: list[VesselAisCityBoundaryItemResponse] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
+
+class VesselPositionWaterSystemSituationItemResponse(BaseModel):
+    water_system_code: str | None = None
+    water_system_name: str
+    water_level: int | None = None
+    water_level_name: str | None = None
+    feature_type_code: str | None = None
+    feature_type_name: str | None = None
+    hydrology_period_code: str | None = None
+    hydrology_period_name: str | None = None
+    salinity_type_code: str | None = None
+    salinity_type_name: str | None = None
+    water_boundary_type_code: str | None = None
+    water_boundary_type_name: str | None = None
+    center_longitude: Decimal | None = None
+    center_latitude: Decimal | None = None
+    heat_center_longitude: Decimal | None = None
+    heat_center_latitude: Decimal | None = None
+    boundary_paths: list[list[list[float]]] | None = None
+    has_boundary: bool = False
+    boundary_precision: str | None = None
+    positioned_count: int
+    contactable_position_count: int
+    total_deadweight_ton: Decimal | None = None
+    ship_type_distribution: list[VesselShipTypeDistributionItemResponse] = Field(default_factory=list)
+    stale_position_count: int = 0
+    certificate_risk_count: int = 0
+    high_risk_count: int = 0
+    unmatched_mmsi_count: int = 0
+    invalid_position_count: int = 0
+    freshness_distribution: dict[str, int] = Field(default_factory=dict)
+    boundary_status_code: str = "UNKNOWN"
+    latest_position_time: datetime | None = None
+    mmsi_count: int = 0
+    matched_position_count: int = 0
+    unpositioned_count: int = 0
+    is_partial: bool = False
+    error_message: str | None = None
+
+class VesselPositionWaterSystemSituationSummary(BaseModel):
+    matched_profile_count: int
+    scanned_profile_count: int = 0
+    unscanned_profile_count: int = 0
+    queried_mmsi_count: int
+    matched_position_count: int
+    unmatched_mmsi_count: int = 0
+    unpositioned_count: int
+    invalid_position_count: int = 0
+    unknown_water_system_count: int = 0
+    positioned_count: int
+    stale_position_count: int
+    contactable_position_count: int
+    certificate_risk_count: int
+    high_risk_count: int = 0
+    water_system_count: int
+    boundary_water_system_count: int = 0
+    missing_boundary_water_system_count: int = 0
+    query_snapshot_id: str | None = None
+    snapshot_status_code: str = "READY"
+    snapshot_expires_at: datetime | None = None
+    refresh_required: bool = False
+    coverage_rate: Decimal | None = None
+    freshness_distribution: dict[str, int] = Field(default_factory=dict)
+    source_indices: list[str] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
+    failed_batch_count: int = 0
+    failed_batches: list[dict[str, Any]] = Field(default_factory=list)
+    is_partial: bool = False
+    error_message: str | None = None
+
+class VesselPositionWaterSystemSituationResponse(BaseModel):
+    source_status: str
+    source_status_name: str
+    generated_at: datetime
+    message: str | None = None
+    cache_status: str = "MISS"
+    cache_generated_at: datetime | None = None
+    is_stale_cache: bool = False
+    snapshot_backend: str = "memory"
+    cache_backend_note: str | None = None
+    summary: VesselPositionWaterSystemSituationSummary
+    water_systems: list[VesselPositionWaterSystemSituationItemResponse] = Field(default_factory=list)
+
+class VesselPositionWaterSystemVesselsResponse(PageResponse[VesselPositionMonitorItemResponse]):
+    query_snapshot_id: str | None = None
+    snapshot_hit: bool = False
+    refresh_required: bool = False
+    snapshot_status_code: str | None = None
+    is_partial: bool = False
+    error_message: str | None = None
+
+class VesselAisWaterSystemBoundaryItemResponse(BaseModel):
+    water_system_code: str
+    water_system_name: str
+    water_level: int
+    water_level_name: str
+    boundary_paths: list[list[list[float]]] = Field(default_factory=list)
+    has_boundary: bool = False
+    boundary_precision: str = "low"
+    boundary_status_code: str = "UNKNOWN"
+    center_longitude: Decimal | None = None
+    center_latitude: Decimal | None = None
+
+class VesselAisWaterSystemBoundaryResponse(BaseModel):
+    generated_at: datetime
+    boundary_version_id: int | None = None
+    precision: str = "low"
+    total: int = 0
+    items: list[VesselAisWaterSystemBoundaryItemResponse] = Field(default_factory=list)
     uncertainty_notes: list[str] = Field(default_factory=list)
 
 class VesselAisSnapshotResponse(BaseModel):
