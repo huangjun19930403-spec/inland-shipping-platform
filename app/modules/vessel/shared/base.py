@@ -332,6 +332,9 @@ class _WaterSystemBoundary:
     hydrology_period_code: str
     salinity_type_code: str
     water_boundary_type_code: str
+    navigation_category_code: str | None
+    navigation_scope_code: str | None
+    ais_situation_scope: str | None
     center_longitude: Decimal | None
     center_latitude: Decimal | None
     shape_area_degree: Decimal | None
@@ -692,12 +695,13 @@ def _source_status_name(code: str) -> str:
 def _water_level_name(level: int | None) -> str | None:
     if level is None:
         return None
-    return {1: "一级水系", 2: "二级水系", 3: "三级水系", 4: "四级水系"}.get(level, f"{level}级水系")
+    return {0: "待补边界", 1: "一级水系", 2: "二级水系", 3: "三级水系", 4: "四级水系"}.get(level, f"{level}级水系")
 
 
 def _water_feature_type_name(code: str | None) -> str | None:
     return {
         "RIVER": "河流",
+        "CANAL": "运河/航道",
         "LAKE": "湖泊",
         "RESERVOIR": "水库",
         "OTHER": "其他水域",
@@ -720,6 +724,26 @@ def _water_boundary_type_name(code: str | None) -> str | None:
         "STANDARD": "标准边界",
         "OTHER": "其他",
     }.get(code or "OTHER")
+
+
+def _water_navigation_category_name(code: str | None) -> str | None:
+    return {
+        "MAIN_RIVER": "骨干河流",
+        "TRIBUTARY": "重要支流",
+        "CANAL": "运河/航道",
+        "LAKE": "湖区水域",
+        "DELTA_NETWORK": "三角洲水网",
+    }.get(code or "")
+
+
+def _water_navigation_scope_name(code: str | None) -> str | None:
+    return {
+        "CORE": "核心航运水系",
+        "IMPORTANT": "重要航运水系",
+        "WATER_AREA": "重要湖区水域",
+        "REVIEW": "复核保留",
+        "MISSING": "待补边界",
+    }.get(code or "")
 
 
 def _ais_freshness_level(age_minutes: int | None) -> str:

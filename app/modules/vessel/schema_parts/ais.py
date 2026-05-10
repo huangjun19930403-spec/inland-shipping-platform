@@ -351,6 +351,10 @@ class VesselPositionWaterSystemSituationItemResponse(BaseModel):
     salinity_type_name: str | None = None
     water_boundary_type_code: str | None = None
     water_boundary_type_name: str | None = None
+    navigation_category_code: str | None = None
+    navigation_category_name: str | None = None
+    navigation_scope_code: str | None = None
+    navigation_scope_name: str | None = None
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
     heat_center_longitude: Decimal | None = None
@@ -433,6 +437,10 @@ class VesselAisWaterSystemBoundaryItemResponse(BaseModel):
     water_system_name: str
     water_level: int
     water_level_name: str
+    navigation_category_code: str | None = None
+    navigation_category_name: str | None = None
+    navigation_scope_code: str | None = None
+    navigation_scope_name: str | None = None
     boundary_paths: list[list[list[float]]] = Field(default_factory=list)
     has_boundary: bool = False
     boundary_precision: str = "low"

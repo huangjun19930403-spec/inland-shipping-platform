@@ -73,6 +73,7 @@ logger = logging.getLogger(__name__)
 
 
 WATER_LEVEL_LABELS = {
+    0: "待补边界",
     1: "一级水系",
     2: "二级水系",
     3: "三级水系",
@@ -80,6 +81,7 @@ WATER_LEVEL_LABELS = {
 }
 WATER_FEATURE_TYPE_LABELS = {
     "RIVER": "河流",
+    "CANAL": "运河/航道",
     "LAKE": "湖泊",
     "RESERVOIR": "水库",
     "OTHER": "其他水域",
@@ -106,6 +108,40 @@ WATER_GEOMETRY_STATUS_LABELS = {
     "MISSING": "缺少边界",
     "INVALID": "边界异常",
     "UNKNOWN": "未知",
+}
+WATER_NAVIGATION_CATEGORY_LABELS = {
+    "MAIN_RIVER": "骨干河流",
+    "TRIBUTARY": "重要支流",
+    "CANAL": "运河/航道",
+    "LAKE": "湖区水域",
+    "DELTA_NETWORK": "三角洲水网",
+}
+WATER_NAVIGATION_SCOPE_LABELS = {
+    "CORE": "核心航运水系",
+    "IMPORTANT": "重要航运水系",
+    "WATER_AREA": "重要湖区水域",
+    "REVIEW": "复核保留",
+    "MISSING": "待补边界",
+}
+WATER_AIS_SCOPE_LABELS = {
+    "INCLUDED": "参与态势",
+    "EXCLUDED": "暂不参与",
+}
+WATER_MATCH_LEVEL_LABELS = {
+    "EXACT": "精确匹配",
+    "ALIAS": "别名匹配",
+    "SAFE_CONTAINS": "安全包含",
+    "MISSING": "未命中",
+}
+WATER_MATCH_CONFIDENCE_LABELS = {
+    "HIGH": "高",
+    "MEDIUM": "中",
+    "LOW": "低",
+}
+WATER_GEOMETRY_UNION_LABELS = {
+    "SINGLE_SOURCE": "单要素",
+    "MULTIPART_MERGED": "多要素合并",
+    "MISSING": "缺少边界",
 }
 
 
@@ -204,6 +240,34 @@ def _water_geometry_status_name(code: str | None) -> str:
     return WATER_GEOMETRY_STATUS_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
+def _water_navigation_category_name(code: str | None) -> str | None:
+    return WATER_NAVIGATION_CATEGORY_LABELS.get(code or "")
+
+
+def _water_navigation_scope_name(code: str | None) -> str | None:
+    return WATER_NAVIGATION_SCOPE_LABELS.get(code or "")
+
+
+def _water_ais_scope_name(code: str | None) -> str | None:
+    return WATER_AIS_SCOPE_LABELS.get(code or "")
+
+
+def _water_match_level_name(code: str | None) -> str | None:
+    return WATER_MATCH_LEVEL_LABELS.get(code or "")
+
+
+def _water_match_confidence_name(code: str | None) -> str | None:
+    return WATER_MATCH_CONFIDENCE_LABELS.get(code or "")
+
+
+def _water_geometry_union_status_name(code: str | None) -> str | None:
+    return WATER_GEOMETRY_UNION_LABELS.get(code or "")
+
+
+def _source_level_names(levels: list[int] | None) -> list[str]:
+    return [_water_level_name(level) for level in levels or []]
+
+
 def _boundary_paths_by_precision(boundary: WaterSystemBoundary | None, precision: str) -> list[list[list[float]]]:
     if boundary is None:
         return []
@@ -223,6 +287,8 @@ def _to_water_system_response(
         id=row.id,
         water_system_code=row.water_system_code,
         water_system_name=row.water_system_name,
+        standard_name=row.standard_name,
+        display_name=row.display_name,
         water_level=row.water_level,
         water_level_name=_water_level_name(row.water_level),
         feature_type_code=row.feature_type_code,
@@ -233,6 +299,26 @@ def _to_water_system_response(
         salinity_type_name=_water_salinity_name(row.salinity_type_code),
         water_boundary_type_code=row.water_boundary_type_code,
         water_boundary_type_name=_water_boundary_type_name(row.water_boundary_type_code),
+        navigation_category_code=row.navigation_category_code,
+        navigation_category_name=_water_navigation_category_name(row.navigation_category_code),
+        navigation_scope_code=row.navigation_scope_code,
+        navigation_scope_name=_water_navigation_scope_name(row.navigation_scope_code),
+        ais_situation_scope=row.ais_situation_scope,
+        ais_situation_scope_name=_water_ais_scope_name(row.ais_situation_scope),
+        display_priority=row.display_priority,
+        match_level_code=row.match_level_code,
+        match_level_name=_water_match_level_name(row.match_level_code),
+        match_confidence_code=row.match_confidence_code,
+        match_confidence_name=_water_match_confidence_name(row.match_confidence_code),
+        review_required=row.review_required,
+        source_feature_count=row.source_feature_count,
+        source_levels=row.source_levels or [],
+        source_level_names=_source_level_names(row.source_levels),
+        source_layer_names=row.source_layer_names or [],
+        source_names=row.source_names or [],
+        geometry_union_status=row.geometry_union_status,
+        geometry_union_status_name=_water_geometry_union_status_name(row.geometry_union_status),
+        business_remark=row.business_remark,
         source_remark=row.source_remark,
         source_layer_name=row.source_layer_name,
         source_version=row.source_version,
@@ -272,6 +358,10 @@ def _to_water_boundary_response(
         water_system_name=row.water_system_name,
         water_level=row.water_level,
         water_level_name=_water_level_name(row.water_level),
+        navigation_category_code=row.navigation_category_code,
+        navigation_category_name=_water_navigation_category_name(row.navigation_category_code),
+        navigation_scope_code=row.navigation_scope_code,
+        navigation_scope_name=_water_navigation_scope_name(row.navigation_scope_code),
         precision=precision,
         boundary_paths=paths,
         has_boundary=bool(paths),
@@ -491,6 +581,13 @@ class WaterSystemService:
                 .group_by(WaterSystem.water_level)
             )
         ).all()
+        scope_rows = (
+            await self.db.execute(
+                select(WaterSystem.navigation_scope_code, func.count())
+                .where(WaterSystem.is_enabled.is_(True))
+                .group_by(WaterSystem.navigation_scope_code)
+            )
+        ).all()
         version_row = await self.db.scalar(
             select(WaterSystem.source_version)
             .where(WaterSystem.is_enabled.is_(True))
@@ -503,6 +600,7 @@ class WaterSystemService:
             boundary_count=boundary_count,
             enabled_count=enabled_count,
             level_counts={str(level): int(count) for level, count in level_rows},
+            navigation_scope_counts={str(scope or "UNKNOWN"): int(count) for scope, count in scope_rows},
             current_source_version=version_row,
         )
 
@@ -514,6 +612,9 @@ class WaterSystemService:
         feature_type_code: str | None,
         hydrology_period_code: str | None,
         salinity_type_code: str | None,
+        navigation_category_code: str | None,
+        navigation_scope_code: str | None,
+        ais_situation_scope: str | None,
         geometry_status_code: str | None,
         page: int,
         page_size: int,
@@ -538,6 +639,8 @@ class WaterSystemService:
                 or_(
                     WaterSystem.water_system_code.ilike(like_value),
                     WaterSystem.water_system_name.ilike(like_value),
+                    WaterSystem.standard_name.ilike(like_value),
+                    WaterSystem.display_name.ilike(like_value),
                     WaterSystem.source_remark.ilike(like_value),
                 )
             )
@@ -549,13 +652,19 @@ class WaterSystemService:
             stmt = stmt.where(WaterSystem.hydrology_period_code == hydrology_period_code)
         if salinity_type_code:
             stmt = stmt.where(WaterSystem.salinity_type_code == salinity_type_code)
+        if navigation_category_code:
+            stmt = stmt.where(WaterSystem.navigation_category_code == navigation_category_code)
+        if navigation_scope_code:
+            stmt = stmt.where(WaterSystem.navigation_scope_code == navigation_scope_code)
+        if ais_situation_scope:
+            stmt = stmt.where(WaterSystem.ais_situation_scope == ais_situation_scope)
         if geometry_status_code:
             stmt = stmt.where(WaterSystemBoundary.geometry_status_code == geometry_status_code)
 
         total = int((await self.db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar_one())
         rows = (
             await self.db.execute(
-                stmt.order_by(WaterSystem.water_level.asc(), WaterSystem.sort_order.asc(), WaterSystem.id.asc())
+                stmt.order_by(WaterSystem.display_priority.asc(), WaterSystem.sort_order.asc(), WaterSystem.id.asc())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )

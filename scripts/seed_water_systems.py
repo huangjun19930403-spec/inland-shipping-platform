@@ -16,7 +16,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, delete, or_, select
 
 from app.core.database import AsyncSessionLocal
 from app.models.address import WaterSystem, WaterSystemBoundary
@@ -26,7 +26,7 @@ from app.modules.address.boundary_utils import (
     polygons_bbox,
     serialize_boundary_paths,
 )
-from scripts.seed_data import water_systems_l1_l4_v1 as embedded_water_systems
+from scripts.seed_data import navigation_water_systems_v1 as embedded_water_systems
 
 try:
     import shapefile  # type: ignore[import-not-found]
@@ -34,7 +34,8 @@ except Exception:  # pragma: no cover - dependency guard for bootstrap environme
     shapefile = None  # type: ignore[assignment]
 
 
-SOURCE_VERSION = "revier_wgs84_l1_l4_v1"
+SOURCE_VERSION = embedded_water_systems.DATA_VERSION
+OLD_SOURCE_VERSION = "revier_wgs84_l1_l4_v1"
 DEFAULT_LEVELS = (1, 2, 3, 4)
 LEVEL_LAYER_NAMES = {
     1: "一级水系",
@@ -346,9 +347,11 @@ def load_embedded_water_system_rows() -> list[dict[str, Any]]:
 
 def _seed_rows_from_embedded(levels: tuple[int, ...]) -> list[dict[str, Any]]:
     requested_levels = {level for level in levels if level in LEVEL_LAYER_NAMES}
+    if requested_levels == set(DEFAULT_LEVELS):
+        return load_embedded_water_system_rows()
     return [
         row for row in load_embedded_water_system_rows()
-        if int(row["water_level"]) in requested_levels
+        if requested_levels.intersection({int(level) for level in row.get("source_levels") or []})
     ]
 
 
@@ -424,27 +427,49 @@ def _seed_row_from_feature(level: int, layer_name: str, feature: SourceFeature) 
 
 
 async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] = DEFAULT_LEVELS) -> dict[str, int]:
-    rows = _seed_rows_from_zip(source, levels) if source else _seed_rows_from_embedded(levels)
+    if source:
+        _resolve_source_path(source)
+    rows = _seed_rows_from_embedded(levels)
     now = datetime.utcnow()
     inserted = 0
     updated = 0
     skipped = 0
+    removed = 0
     async with AsyncSessionLocal() as session:
+        current_codes: set[str] = set()
         for row in rows:
             water_system_code = str(row.get("water_system_code") or "").strip()
             if not water_system_code:
                 skipped += 1
                 continue
+            current_codes.add(water_system_code)
             water_system = await session.scalar(
                 select(WaterSystem).where(WaterSystem.water_system_code == water_system_code)
             )
             payload = {
                 "water_system_name": row["water_system_name"],
+                "standard_name": row.get("standard_name") or row["water_system_name"],
+                "display_name": row.get("display_name") or row["water_system_name"],
                 "water_level": int(row["water_level"]),
                 "feature_type_code": row["feature_type_code"],
                 "hydrology_period_code": row["hydrology_period_code"],
                 "salinity_type_code": row["salinity_type_code"],
                 "water_boundary_type_code": row["water_boundary_type_code"],
+                "navigation_category_code": row.get("navigation_category_code"),
+                "navigation_scope_code": row.get("navigation_scope_code"),
+                "ais_situation_scope": row.get("ais_situation_scope"),
+                "display_priority": int(row.get("display_priority") or row["sort_order"]),
+                "match_level_code": row.get("match_level_code"),
+                "match_confidence_code": row.get("match_confidence_code"),
+                "review_required": bool(row.get("review_required")),
+                "source_feature_count": int(row.get("source_feature_count") or 0),
+                "source_object_ids": row.get("source_object_ids") or [],
+                "source_levels": row.get("source_levels") or [],
+                "source_layer_names": row.get("source_layer_names") or [],
+                "source_names": row.get("source_names") or [],
+                "source_remarks": row.get("source_remarks") or [],
+                "geometry_union_status": row.get("geometry_union_status"),
+                "business_remark": row.get("business_remark"),
                 "source_remark": row.get("source_remark"),
                 "source_layer_name": row["source_layer_name"],
                 "source_version": row.get("source_version") or SOURCE_VERSION,
@@ -491,8 +516,29 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
             else:
                 for key, value in boundary_payload.items():
                     setattr(boundary, key, value)
+        stale_condition = or_(
+            WaterSystem.source_version == OLD_SOURCE_VERSION,
+            WaterSystem.water_system_code.like("WS-L1-%"),
+            WaterSystem.water_system_code.like("WS-L2-%"),
+            WaterSystem.water_system_code.like("WS-L3-%"),
+            WaterSystem.water_system_code.like("WS-L4-%"),
+        )
+        if set(levels) == set(DEFAULT_LEVELS) and current_codes:
+            stale_condition = or_(
+                stale_condition,
+                and_(
+                    WaterSystem.source_version == SOURCE_VERSION,
+                    WaterSystem.water_system_code.not_in(current_codes),
+                ),
+            )
+        stale_ids = select(WaterSystem.id).where(stale_condition)
+        await session.execute(
+            delete(WaterSystemBoundary).where(WaterSystemBoundary.water_system_id.in_(stale_ids))
+        )
+        delete_result = await session.execute(delete(WaterSystem).where(stale_condition))
+        removed = int(delete_result.rowcount or 0)
         await session.commit()
-    return {"inserted": inserted, "updated": updated, "skipped": skipped}
+    return {"inserted": inserted, "updated": updated, "skipped": skipped, "removed": removed}
 
 
 def _parse_levels(value: str | None) -> tuple[int, ...]:
@@ -512,13 +558,14 @@ def _parse_levels(value: str | None) -> tuple[int, ...]:
 
 async def _main() -> None:
     parser = argparse.ArgumentParser(description="Seed preset water system boundaries.")
-    parser.add_argument("--source", default=None, help="显式从 revier.zip 重新导入；不传时使用内置预制数据")
+    parser.add_argument("--source", default=None, help="校验 revier.zip 是否存在；正式导入始终使用内置清洗预制数据")
     parser.add_argument("--levels", default="1,2,3,4", help="导入层级，逗号分隔，默认 1,2,3,4")
     args = parser.parse_args()
     result = await seed_water_systems(args.source, _parse_levels(args.levels))
     print(
         "seed_water_systems completed: "
-        f"inserted={result['inserted']} updated={result['updated']} skipped={result['skipped']}"
+        f"inserted={result['inserted']} updated={result['updated']} "
+        f"skipped={result['skipped']} removed={result['removed']}"
     )
 
 

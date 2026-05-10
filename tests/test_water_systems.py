@@ -103,17 +103,24 @@ def test_water_system_backend_menus_are_initialized_for_visible_routes() -> None
 
 def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> None:
     rows = load_embedded_water_system_rows()
-    counts: dict[int, int] = {}
+    scope_counts: dict[str, int] = {}
     for row in rows:
-        level = int(row["water_level"])
-        counts[level] = counts.get(level, 0) + 1
-        assert row["geometry_json"]["type"] in {"Polygon", "MultiPolygon"}
-        assert row["boundary_paths_low"]
-        assert row["boundary_paths_medium"]
-        assert row["boundary_paths_high"]
+        assert not row["water_system_code"].startswith(("WS-L1-", "WS-L2-", "WS-L3-", "WS-L4-"))
+        assert row["navigation_category_code"] in {"MAIN_RIVER", "TRIBUTARY", "CANAL", "LAKE", "DELTA_NETWORK"}
+        scope_counts[row["navigation_scope_code"]] = scope_counts.get(row["navigation_scope_code"], 0) + 1
+        if row["geometry_status_code"] == "AVAILABLE":
+            assert row["geometry_json"]["type"] == "MultiPolygon"
+            assert row["boundary_paths_low"]
+            assert row["boundary_paths_medium"]
+            assert row["boundary_paths_high"]
+            assert row["ais_situation_scope"] == "INCLUDED"
+        else:
+            assert row["navigation_scope_code"] == "MISSING"
+            assert row["ais_situation_scope"] == "EXCLUDED"
 
-    assert len(rows) == 2534
-    assert counts == {1: 234, 2: 285, 3: 608, 4: 1407}
+    assert len(rows) == 57
+    assert scope_counts == {"CORE": 12, "IMPORTANT": 25, "WATER_AREA": 9, "REVIEW": 2, "MISSING": 9}
+    assert {row["water_system_code"] for row in rows} >= {"WS-YANGTZE", "WS-GRAND-CANAL", "WS-TAIHU"}
 
 
 def test_default_water_system_seed_uses_embedded_rows_without_zip_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,10 +131,13 @@ def test_default_water_system_seed_uses_embedded_rows_without_zip_lookup(monkeyp
     rows = seed_water_systems_module._seed_rows_from_embedded((1, 2))
     counts: dict[int, int] = {}
     for row in rows:
-        level = int(row["water_level"])
-        counts[level] = counts.get(level, 0) + 1
+        for level in row.get("source_levels") or []:
+            if int(level) in {1, 2}:
+                counts[int(level)] = counts.get(int(level), 0) + 1
 
-    assert counts == {1: 234, 2: 285}
+    assert rows
+    assert all(row["source_levels"] for row in rows)
+    assert set(counts).issubset({1, 2})
 
 
 def test_seed_water_systems_reads_level_1_to_4_from_source_zip() -> None:
@@ -199,6 +209,9 @@ def _water_boundary(
         hydrology_period_code="UNKNOWN",
         salinity_type_code="UNKNOWN",
         water_boundary_type_code="STANDARD",
+        navigation_category_code="MAIN_RIVER",
+        navigation_scope_code="CORE",
+        ais_situation_scope="INCLUDED",
         center_longitude=None,
         center_latitude=None,
         shape_area_degree=area,

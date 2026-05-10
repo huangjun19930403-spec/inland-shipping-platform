@@ -65,10 +65,13 @@ class AdminRegionBoundaryResponse(BaseModel):
 
 class WaterSystemQuery(BaseModel):
     keyword: str | None = None
-    water_level: int | None = Field(default=None, ge=1, le=4)
+    water_level: int | None = Field(default=None, ge=0, le=4)
     feature_type_code: str | None = None
     hydrology_period_code: str | None = None
     salinity_type_code: str | None = None
+    navigation_category_code: str | None = None
+    navigation_scope_code: str | None = None
+    ais_situation_scope: str | None = None
     geometry_status_code: str | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=500)
@@ -79,6 +82,7 @@ class WaterSystemSummaryResponse(BaseModel):
     boundary_count: int
     enabled_count: int
     level_counts: dict[str, int] = Field(default_factory=dict)
+    navigation_scope_counts: dict[str, int] = Field(default_factory=dict)
     current_source_version: str | None = None
 
 
@@ -86,6 +90,8 @@ class WaterSystemResponse(BaseModel):
     id: int
     water_system_code: str
     water_system_name: str
+    standard_name: str | None = None
+    display_name: str | None = None
     water_level: int
     water_level_name: str
     feature_type_code: str
@@ -96,6 +102,26 @@ class WaterSystemResponse(BaseModel):
     salinity_type_name: str
     water_boundary_type_code: str
     water_boundary_type_name: str
+    navigation_category_code: str | None = None
+    navigation_category_name: str | None = None
+    navigation_scope_code: str | None = None
+    navigation_scope_name: str | None = None
+    ais_situation_scope: str | None = None
+    ais_situation_scope_name: str | None = None
+    display_priority: int = 0
+    match_level_code: str | None = None
+    match_level_name: str | None = None
+    match_confidence_code: str | None = None
+    match_confidence_name: str | None = None
+    review_required: bool = False
+    source_feature_count: int = 0
+    source_levels: list[int] = Field(default_factory=list)
+    source_level_names: list[str] = Field(default_factory=list)
+    source_layer_names: list[str] = Field(default_factory=list)
+    source_names: list[str] = Field(default_factory=list)
+    geometry_union_status: str | None = None
+    geometry_union_status_name: str | None = None
+    business_remark: str | None = None
     source_remark: str | None
     source_layer_name: str
     source_version: str
@@ -120,6 +146,10 @@ class WaterSystemBoundaryResponse(BaseModel):
     water_system_name: str
     water_level: int
     water_level_name: str
+    navigation_category_code: str | None = None
+    navigation_category_name: str | None = None
+    navigation_scope_code: str | None = None
+    navigation_scope_name: str | None = None
     precision: str
     boundary_paths: list[list[list[float]]] = Field(default_factory=list)
     has_boundary: bool = False

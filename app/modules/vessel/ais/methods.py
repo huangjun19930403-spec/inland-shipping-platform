@@ -849,6 +849,10 @@ class VesselAisMixin:
                     water_system_name=boundary.name,
                     water_level=boundary.level,
                     water_level_name=_water_level_name(boundary.level) or "",
+                    navigation_category_code=boundary.navigation_category_code,
+                    navigation_category_name=_water_navigation_category_name(boundary.navigation_category_code),
+                    navigation_scope_code=boundary.navigation_scope_code,
+                    navigation_scope_name=_water_navigation_scope_name(boundary.navigation_scope_code),
                     boundary_paths=_serialize_boundary_paths(paths) or [],
                     has_boundary=bool(paths),
                     boundary_precision=precision,
@@ -1642,7 +1646,7 @@ class VesselAisMixin:
                     levels.add(int(text))
                 except ValueError:
                     continue
-        return {item for item in levels if item in {1, 2, 3, 4}} or {1, 2}
+        return {item for item in levels if item in {1, 2, 3, 4}} or {1, 2, 3, 4}
 
     def _filter_water_boundaries(
         self,
@@ -1781,6 +1785,10 @@ class VesselAisMixin:
             salinity_type_name=_water_salinity_name(boundary.salinity_type_code),
             water_boundary_type_code=boundary.water_boundary_type_code,
             water_boundary_type_name=_water_boundary_type_name(boundary.water_boundary_type_code),
+            navigation_category_code=boundary.navigation_category_code,
+            navigation_category_name=_water_navigation_category_name(boundary.navigation_category_code),
+            navigation_scope_code=boundary.navigation_scope_code,
+            navigation_scope_name=_water_navigation_scope_name(boundary.navigation_scope_code),
             center_longitude=boundary.center_longitude,
             center_latitude=boundary.center_latitude,
             heat_center_longitude=heat_longitude,
@@ -2036,6 +2044,7 @@ class VesselAisMixin:
                     WaterSystemBoundary.is_current.is_(True),
                     WaterSystemBoundary.geometry_status_code == "AVAILABLE",
                     WaterSystem.is_enabled.is_(True),
+                    WaterSystem.ais_situation_scope == "INCLUDED",
                 )
             )
         ).all()
@@ -2062,6 +2071,9 @@ class VesselAisMixin:
                     hydrology_period_code=water_system.hydrology_period_code,
                     salinity_type_code=water_system.salinity_type_code,
                     water_boundary_type_code=water_system.water_boundary_type_code,
+                    navigation_category_code=water_system.navigation_category_code,
+                    navigation_scope_code=water_system.navigation_scope_code,
+                    ais_situation_scope=water_system.ais_situation_scope,
                     center_longitude=_to_decimal(boundary.center_longitude),
                     center_latitude=_to_decimal(boundary.center_latitude),
                     shape_area_degree=_to_decimal(boundary.source_shape_area_degree),
