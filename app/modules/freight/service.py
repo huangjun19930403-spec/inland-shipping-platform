@@ -1854,6 +1854,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     runtime=runtime,
                     progress_callback=callback,
                 )
+                if hasattr(client, "assign_segment_uids"):
+                    client.assign_segment_uids(segments, preserve_existing=True)
                 timings["AI_DETAIL_REQUEST_COUNT"] = len(detail_metrics)
                 timings["AI_DETAIL_EVIDENCE_LINE_COUNTS"] = [int(item.get("evidence_line_count") or 0) for item in detail_metrics]
                 timings["AI_DETAIL_BATCH_METRICS"] = detail_metrics
@@ -1875,6 +1877,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                         repair_records.append({"stage": "detail", **repair_raw})
                         semantic_map = repaired_map
                         segments = repaired_segments
+                        if hasattr(client, "assign_segment_uids"):
+                            client.assign_segment_uids(segments, preserve_existing=True)
                         validator = FreightSemanticValidator(indexed_text)
                         semantic_warnings.extend(validator.validate_semantic_map(semantic_map))
                         semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
@@ -1919,6 +1923,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     patch_semantic_map_with_gate_result(semantic_map, final_gate)
                 mark_timing("AI_REVIEW")
 
+                if hasattr(client, "assign_segment_uids"):
+                    client.assign_segment_uids(segments, preserve_existing=True)
                 accepted_segments, ignored_segments, quality_warnings = _prepare_segments(batch.raw_text, segments)
                 final_match_results = await matcher.match_segments(accepted_segments)
                 mark_timing("MATCHING")

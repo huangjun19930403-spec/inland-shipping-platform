@@ -37,7 +37,10 @@ from app.integrations.config_keys import (
 )
 from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
 from app.modules.freight.ai_evidence_gate import (
+    CROSS_CLUE_REVIEW_MERGE,
     GateIssue,
+    GateSeverity,
+    add_segment_gate_issue,
     apply_segment_evidence_gate,
     evidence_clue_schema_hint,
     evidence_detail_schema_hint,
@@ -327,6 +330,7 @@ class FreightSemanticMapPayloadSchema(BaseModel):
 
 class FreightSegmentSchema(BaseModel):
     clue_temp_id: str | int | None = None
+    segment_uid: str | None = Field(default=None, description="本地候选稳定身份，复核/修复回写必须保留")
     segment_index: int | None = None
     context_block_id: str | int | None = None
     semantic_role_code: str | None = Field(default="ROUTE", description="ROUTE/CONTEXT/IGNORED")
@@ -1008,7 +1012,12 @@ class DashScopeQwenFreightParserClient:
         return payload
 
     @staticmethod
-    def _segments_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _segments_from_payload(
+        payload: dict[str, Any],
+        *,
+        preserve_segment_uid: bool = False,
+        generate_missing_uid: bool = True,
+    ) -> list[dict[str, Any]]:
         raw_segments = payload.get("segments") or payload.get("candidates") or []
         if not isinstance(raw_segments, list):
             raise ValidationError("通义千问返回 JSON 中 segments 必须是数组")
@@ -1017,7 +1026,41 @@ class DashScopeQwenFreightParserClient:
             raise ValidationError("通义千问未抽取到候选货源")
         for index, item in enumerate(segments, start=1):
             item["segment_index"] = int(item.get("segment_index") or index)
+            clue_ref = _normalize_clue_ref(item.get("clue_temp_id") or index)
+            if clue_ref:
+                item["clue_temp_id"] = clue_ref
             item["availability_status_code"] = str(item.get("availability_status_code") or "UNKNOWN").upper()
+        if generate_missing_uid:
+            DashScopeQwenFreightParserClient.assign_segment_uids(segments, preserve_existing=preserve_segment_uid)
+        return segments
+
+    @staticmethod
+    def assign_segment_uids(segments: list[dict[str, Any]], *, preserve_existing: bool = False) -> list[dict[str, Any]]:
+        """Attach stable local identities for review/repair merges.
+
+        AI-provided segment_index is not globally reliable in WeChat batches. The
+        uid is generated locally from clue_temp_id plus the ordinal within that
+        clue and is the only key strong review may use for write-back.
+        """
+
+        counters: dict[str, int] = {}
+        seen: set[str] = set()
+        for index, item in enumerate(segments, start=1):
+            if not isinstance(item, dict):
+                continue
+            clue_ref = _normalize_clue_ref(item.get("clue_temp_id") or index) or f"C{index}"
+            item["clue_temp_id"] = clue_ref
+            existing_uid = str(item.get("segment_uid") or "").strip()
+            if preserve_existing and existing_uid and existing_uid not in seen:
+                seen.add(existing_uid)
+                continue
+            counters[clue_ref] = counters.get(clue_ref, 0) + 1
+            uid = f"{clue_ref}:S{counters[clue_ref]}"
+            while uid in seen:
+                counters[clue_ref] += 1
+                uid = f"{clue_ref}:S{counters[clue_ref]}"
+            item["segment_uid"] = uid
+            seen.add(uid)
         return segments
 
     @staticmethod
@@ -1255,7 +1298,9 @@ class DashScopeQwenFreightParserClient:
                 "content": (
                     "你是内河航运微信群货源复核助手。只输出 JSON。"
                     "请复核输入 segments 的字段完整性、吨位归类、可发状态、上下文继承和证据来源。"
-                    "不得新增原文中不存在的货源，不得新增输入以外的 clue_temp_id；只能修正输入 segment 的字段、清空无证据字段，或把上下文-only/空线索标记为 is_freight_candidate=false。"
+                    "必须逐条保留输入 segment_uid；segment_uid 是唯一回写键。不得新增原文中不存在的货源，不得新增输入以外的 clue_temp_id。"
+                    "复核输出视为 patch：只能修正输入 segment 的业务字段、清空无证据字段、补 field_evidence、更新状态和复核原因。"
+                    "不得改写 clue_temp_id、segment_uid、segment_index、context_block_id、line_refs、raw_text；如果发现结构身份不对，只标记 REVIEW_REQUIRED 并说明原因。"
                     "当前只提供风险候选相关 evidence_lines、route_clues、context_blocks、context_notes；不得凭完整原文记忆补字段。"
                     "每个非空核心字段必须保留或补齐 field_evidence；缺证据、WEAK_INFERRED 或 UNKNOWN 的字段必须 REVIEW_REQUIRED，不能作为顶层字段自动确认。"
                     "必须核对 context_blocks 的 route_clue_ids：只有作用域明确、无 CONTACT_SCOPE_CONFLICT/CONTEXT_BLOCK_CONFLICT/MULTI_CONTACT_BLOCK 风险时，公共联系人、电话、装卸备注才可继承到该 block 覆盖的 segment。"
@@ -1273,6 +1318,7 @@ class DashScopeQwenFreightParserClient:
                 "role": "user",
                 "content": (
                     "请复核这些低置信度候选：\n"
+                    "每条返回 segment 必须包含原输入 segment_uid；缺少或重复 segment_uid 的复核结果会被系统丢弃。\n"
                     f"JSON 输出结构：{json.dumps(_json_schema_hint(), ensure_ascii=False)}\n\n"
                     f"{json.dumps(evidence_payload, ensure_ascii=False)}"
                 ),
@@ -1336,6 +1382,7 @@ class DashScopeQwenFreightParserClient:
         progress_percent: int = 66,
     ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         runtime = runtime or await self._runtime()
+        self.assign_segment_uids(segments, preserve_existing=True)
         repair_payload, raw = await self._call_json(
             model=runtime["review_model"],
             api_key=runtime["api_key"],
@@ -1359,7 +1406,7 @@ class DashScopeQwenFreightParserClient:
             payload_with_segments = {"segments": repair_payload.get("segments") or []}
             payload_with_segments, _ = _preclean_parse_payload_numbers(payload_with_segments)
             validated = FreightParsePayloadSchema.model_validate(payload_with_segments)
-            repaired_segments = self._segments_from_payload(validated.model_dump(exclude_none=True))
+            repaired_segments = self._segments_from_payload(validated.model_dump(exclude_none=True), preserve_segment_uid=True)
         return repaired_semantic, repaired_segments, {"raw_response": raw, "repair_payload": repair_payload}
 
     async def _call_dashscope_stream(
@@ -1590,6 +1637,7 @@ class DashScopeQwenFreightParserClient:
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, int, list[dict[str, Any]]]:
         runtime = runtime or await self._runtime()
         threshold = float(runtime["review_threshold"])
+        self.assign_segment_uids(segments, preserve_existing=True)
         review_targets = [item for item in segments if _segment_needs_strong_review(item, confidence_threshold=threshold)]
         if not review_targets:
             return [], None, 0, []
@@ -1636,7 +1684,11 @@ class DashScopeQwenFreightParserClient:
             )
             review_payload, _ = _preclean_parse_payload_numbers(review_payload)
             review_validated = FreightParsePayloadSchema.model_validate(review_payload)
-            reviewed = self._segments_from_payload(review_validated.model_dump(exclude_none=True))
+            reviewed = self._segments_from_payload(
+                review_validated.model_dump(exclude_none=True),
+                preserve_segment_uid=True,
+                generate_missing_uid=False,
+            )
             return reviewed, review_raw, 0, [evidence_metrics]
         except Exception as exc:  # noqa: BLE001
             for item in review_targets:
@@ -1646,35 +1698,118 @@ class DashScopeQwenFreightParserClient:
             return [], {"error": str(exc)}, len(review_targets), [evidence_metrics]
 
     def merge_review_results(self, segments: list[dict[str, Any]], review_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        reviewed_by_exact: dict[tuple[str, str], dict[str, Any]] = {}
-        reviewed_by_raw: dict[tuple[str, str], dict[str, Any]] = {}
-        reviewed_by_segment_index: dict[str, dict[str, Any]] = {}
-        reviewed_by_clue: dict[str, list[dict[str, Any]]] = {}
-        for index, item in enumerate(review_results, start=1):
-            clue_ref = _normalize_clue_ref(item.get("clue_temp_id"))
-            segment_index = str(item.get("segment_index") or index)
-            raw_text = str(item.get("raw_text") or "")
-            if clue_ref:
-                reviewed_by_clue.setdefault(clue_ref, []).append(item)
-                if segment_index:
-                    reviewed_by_exact[(clue_ref, segment_index)] = item
-                if raw_text:
-                    reviewed_by_raw[(clue_ref, raw_text)] = item
-            if segment_index:
-                reviewed_by_segment_index[segment_index] = item
+        self.assign_segment_uids(segments, preserve_existing=True)
+        if not review_results:
+            return segments
+
+        structural_fields = {"segment_uid", "clue_temp_id", "segment_index", "context_block_id", "line_refs", "line_refs_json", "raw_text"}
+        allowed_patch_fields = {
+            "semantic_role_code",
+            "route_intent_code",
+            "field_evidence",
+            "context_summary",
+            "inherited_context",
+            "is_freight_candidate",
+            "drop_reason",
+            "cargo_title",
+            "cargo_description",
+            "commodity_name",
+            "origin_text",
+            "destination_text",
+            "origin_match_level_code",
+            "destination_match_level_code",
+            "raw_tonnage_text",
+            "estimated_tonnage",
+            "min_tonnage",
+            "max_tonnage",
+            "quantity_description",
+            "vessel_description",
+            "tonnage_decision",
+            "tonnage_candidates",
+            "unit_price",
+            "total_price",
+            "price_unit",
+            "settlement_method_code",
+            "loading_time_from",
+            "loading_time_to",
+            "expired_at",
+            "publisher_org_name",
+            "contact_name",
+            "contact_phone",
+            "contact_wechat",
+            "availability_status_code",
+            "manual_review_reason",
+            "ai_review_status_code",
+            "ai_review_reason",
+            "ai_review_json",
+            "confidence_score",
+            "evidence",
+            "needs_strong_review",
+        }
+        original_by_uid = {str(item.get("segment_uid")): item for item in segments if item.get("segment_uid")}
+        patches_by_uid: dict[str, dict[str, Any]] = {}
+        dropped_review_count = 0
+
+        def mark(segment: dict[str, Any], message: str) -> None:
+            add_segment_gate_issue(
+                segment,
+                GateIssue(
+                    code=CROSS_CLUE_REVIEW_MERGE,
+                    severity=GateSeverity.REVIEW_REQUIRED,
+                    clue_ref=_normalize_clue_ref(segment.get("clue_temp_id")),
+                    field_name="segment_uid",
+                    message=message,
+                ),
+            )
+            segment["availability_status_code"] = "UNKNOWN"
+            segment["needs_strong_review"] = True
+
+        for item in review_results:
+            uid = str(item.get("segment_uid") or "").strip()
+            original = original_by_uid.get(uid)
+            if not uid or original is None:
+                dropped_review_count += 1
+                continue
+            if uid in patches_by_uid:
+                dropped_review_count += 1
+                mark(original, f"强复核返回重复 segment_uid={uid}，已丢弃重复补丁。")
+                continue
+
+            mismatch_reasons: list[str] = []
+            patch_clue_ref = _normalize_clue_ref(item.get("clue_temp_id"))
+            original_clue_ref = _normalize_clue_ref(original.get("clue_temp_id"))
+            if patch_clue_ref and original_clue_ref and patch_clue_ref != original_clue_ref:
+                mismatch_reasons.append(f"clue_temp_id 从 {original_clue_ref} 变为 {patch_clue_ref}")
+            if item.get("raw_text") not in (None, "") and str(item.get("raw_text") or "") != str(original.get("raw_text") or ""):
+                mismatch_reasons.append("raw_text 被复核结果改写")
+            if item.get("line_refs") not in (None, []) and _as_line_refs(item.get("line_refs")) != _as_line_refs(original.get("line_refs")):
+                mismatch_reasons.append("line_refs 被复核结果改写")
+            if item.get("context_block_id") not in (None, "") and str(item.get("context_block_id")) != str(original.get("context_block_id") or ""):
+                mismatch_reasons.append("context_block_id 被复核结果改写")
+            if mismatch_reasons:
+                dropped_review_count += 1
+                mark(original, "强复核补丁身份不匹配，已丢弃：" + "；".join(mismatch_reasons))
+                continue
+
+            patches_by_uid[uid] = {key: copy.deepcopy(value) for key, value in item.items() if key in allowed_patch_fields and key not in structural_fields}
+
+        if dropped_review_count:
+            review_targets = [item for item in segments if item.get("needs_strong_review")]
+            for segment in review_targets or segments:
+                mark(segment, f"强复核有 {dropped_review_count} 条结果缺少有效 segment_uid 或身份不匹配，已按不安全复核处理。")
+
         merged: list[dict[str, Any]] = []
-        for index, item in enumerate(segments, start=1):
-            clue_ref = _normalize_clue_ref(item.get("clue_temp_id"))
-            segment_index = str(item.get("segment_index") or index)
-            raw_text = str(item.get("raw_text") or "")
-            reviewed = None
-            if clue_ref:
-                reviewed = reviewed_by_exact.get((clue_ref, segment_index)) or reviewed_by_raw.get((clue_ref, raw_text))
-                clue_matches = reviewed_by_clue.get(clue_ref) or []
-                if reviewed is None and len(clue_matches) == 1:
-                    reviewed = clue_matches[0]
-            reviewed = reviewed or reviewed_by_segment_index.get(segment_index)
-            merged.append({**item, **(reviewed or {})})
+        for item in segments:
+            uid = str(item.get("segment_uid") or "")
+            patch = patches_by_uid.get(uid)
+            if patch:
+                merged_item = {**item, **patch}
+                for field_name in structural_fields:
+                    if field_name in item:
+                        merged_item[field_name] = item[field_name]
+                merged.append(merged_item)
+            else:
+                merged.append(item)
         return merged
 
     async def _parse_tms(
@@ -1810,6 +1945,7 @@ class DashScopeQwenFreightParserClient:
             final_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
             patch_semantic_map_with_gate_result(semantic_map, final_gate)
 
+        self.assign_segment_uids(segments, preserve_existing=True)
         accepted_segments, ignored_segments, quality_warnings = _prepare_segments(content, segments)
         warnings = [
             *(semantic_map.get("warnings") or []),

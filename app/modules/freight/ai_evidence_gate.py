@@ -24,6 +24,9 @@ CONTEXT_BLOCK_UNSAFE = "CONTEXT_BLOCK_UNSAFE"
 FORMAL_TONNAGE_MISSING = "FORMAL_TONNAGE_MISSING"
 DIRTY_TONNAGE_DECISION = "DIRTY_TONNAGE_DECISION"
 NON_FORMAL_ROUTE_NOT_READY = "NON_FORMAL_ROUTE_NOT_READY"
+CROSS_CLUE_REVIEW_MERGE = "CROSS_CLUE_REVIEW_MERGE"
+FIELD_EVIDENCE_CROSS_CLUE = "FIELD_EVIDENCE_CROSS_CLUE"
+BATCH_ROUTE_COLLAPSE = "BATCH_ROUTE_COLLAPSE"
 
 SAFE_SOURCE_TYPES = {"LOCAL_LINE", "EXPLICIT_SHARED"}
 UNSAFE_SOURCE_TYPES = {"WEAK_INFERRED", "UNKNOWN"}
@@ -210,6 +213,15 @@ def context_blocks_from(semantic_map: dict[str, Any]) -> list[dict[str, Any]]:
     return [block for block in semantic_map.get("context_blocks") or [] if isinstance(block, dict)]
 
 
+def route_clue_by_ref(semantic_map: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    clues: dict[str, dict[str, Any]] = {}
+    for clue in route_clues_from(semantic_map):
+        clue_ref = normalize_clue_ref(clue.get("clue_temp_id") or clue.get("segment_index"))
+        if clue_ref:
+            clues[clue_ref] = clue
+    return clues
+
+
 def is_non_formal_route(segment: dict[str, Any]) -> bool:
     code = str(segment.get("route_intent_code") or segment.get("intent_code") or "").strip().upper()
     return code in NON_FORMAL_ROUTE_INTENTS
@@ -245,6 +257,42 @@ def field_line_refs(segment: dict[str, Any], field_name: str) -> list[str]:
     if not evidence:
         return as_line_refs(segment.get("line_refs"))
     return as_line_refs(evidence.get("line_refs") or evidence.get("evidence_line_refs"))
+
+
+def safe_shared_line_refs_for_field(semantic_map: dict[str, Any], clue_ref: str | None, field_name: str) -> set[str]:
+    if not clue_ref:
+        return set()
+    wanted_note_types = {
+        "commodity_name": {"COMMODITY"},
+        "raw_tonnage_text": {"TONNAGE"},
+        "unit_price": {"PRICE"},
+        "total_price": {"PRICE"},
+    }.get(field_name, set())
+    wanted_block_fields = {
+        "commodity_name": {"shared_commodity_text"},
+        "raw_tonnage_text": {"shared_tonnage_text"},
+        "unit_price": {"shared_price_text"},
+        "total_price": {"shared_price_text"},
+    }.get(field_name, set())
+    refs: set[str] = set()
+    for note in context_notes_from(semantic_map):
+        scope_type = str(note.get("scope_type_code") or note.get("scope_type") or "UNKNOWN").upper()
+        if scope_type not in SAFE_SOURCE_TYPES:
+            continue
+        if clue_ref not in as_clue_refs(note.get("applies_to")):
+            continue
+        note_type = str(note.get("context_type_code") or note.get("type") or "OTHER").upper()
+        if note_type in wanted_note_types:
+            refs.update(as_line_refs(note.get("line_refs")))
+    for block in context_blocks_from(semantic_map):
+        scope_type = str(block.get("scope_type_code") or block.get("scope_type") or "UNKNOWN").upper()
+        if scope_type not in SAFE_SOURCE_TYPES:
+            continue
+        if clue_ref not in as_clue_refs(block.get("route_clue_ids") or block.get("applies_to")):
+            continue
+        if any(block.get(field) for field in wanted_block_fields):
+            refs.update(as_line_refs(block.get("line_refs")))
+    return refs
 
 
 def move_unsafe_value_to_suggestion(segment: dict[str, Any], field_name: str) -> None:
@@ -557,6 +605,105 @@ def validate_tonnage_decision(
     return issues
 
 
+def validate_segment_identity(
+    indexed_text: Any,
+    semantic_map: dict[str, Any],
+    segment: dict[str, Any],
+    *,
+    clue_ref: str | None,
+) -> list[GateIssue]:
+    issues: list[GateIssue] = []
+    if not clue_ref:
+        issues.append(
+            GateIssue(
+                code=CROSS_CLUE_REVIEW_MERGE,
+                severity=GateSeverity.REVIEW_REQUIRED,
+                message="候选缺少 clue_temp_id，无法证明属于哪条 route_clue。",
+                field_name="clue_temp_id",
+            )
+        )
+        return issues
+
+    clue = route_clue_by_ref(semantic_map).get(clue_ref)
+    if clue is None:
+        issues.append(
+            GateIssue(
+                code=CROSS_CLUE_REVIEW_MERGE,
+                severity=GateSeverity.REPAIR_REQUIRED,
+                clue_ref=clue_ref,
+                field_name="clue_temp_id",
+                message=f"候选引用的 route_clue {clue_ref} 不存在，疑似复核结果串线。",
+            )
+        )
+        return issues
+
+    clue_line_refs = set(as_line_refs(clue.get("line_refs")))
+    segment_line_refs = set(as_line_refs(segment.get("line_refs") or segment.get("line_refs_json")))
+    if segment_line_refs and clue_line_refs and not segment_line_refs.issubset(clue_line_refs):
+        issues.append(
+            GateIssue(
+                code=CROSS_CLUE_REVIEW_MERGE,
+                severity=GateSeverity.REPAIR_REQUIRED,
+                clue_ref=clue_ref,
+                field_name="line_refs",
+                line_refs=sorted(segment_line_refs),
+                message="候选 line_refs 不属于其 route_clue，疑似强复核或修复阶段跨线索覆盖。",
+            )
+        )
+
+    raw_text = segment.get("raw_text")
+    refs = as_line_refs(segment.get("line_refs") or segment.get("line_refs_json"))
+    if raw_text and not text_supported_by_lines(indexed_text, raw_text, refs):
+        issues.append(
+            GateIssue(
+                code=CROSS_CLUE_REVIEW_MERGE,
+                severity=GateSeverity.REPAIR_REQUIRED,
+                clue_ref=clue_ref,
+                field_name="raw_text",
+                line_refs=refs,
+                message="候选 raw_text 无法从自身 line_refs 追溯，疑似候选身份污染。",
+            )
+        )
+    return issues
+
+
+def validate_field_evidence_ownership(
+    semantic_map: dict[str, Any],
+    segment: dict[str, Any],
+    *,
+    clue_ref: str | None,
+    field_name: str,
+) -> list[GateIssue]:
+    issues: list[GateIssue] = []
+    evidence = field_evidence(segment, field_name)
+    if evidence is None:
+        return issues
+    refs = set(field_line_refs(segment, field_name))
+    if not refs:
+        return issues
+    clue = route_clue_by_ref(semantic_map).get(clue_ref or "")
+    clue_refs = set(as_line_refs(clue.get("line_refs"))) if clue else set()
+    source_type = field_source_type(segment, field_name)
+    if source_type == "LOCAL_LINE":
+        allowed_refs = clue_refs
+    elif source_type == "EXPLICIT_SHARED":
+        allowed_refs = clue_refs | safe_shared_line_refs_for_field(semantic_map, clue_ref, field_name)
+    else:
+        return issues
+    if allowed_refs and not refs.issubset(allowed_refs):
+        issues.append(
+            GateIssue(
+                code=FIELD_EVIDENCE_CROSS_CLUE,
+                severity=GateSeverity.REPAIR_REQUIRED,
+                clue_ref=clue_ref,
+                field_name=field_name,
+                line_refs=sorted(refs),
+                message=f"{field_name} 的证据行不属于当前 route_clue 或显式共享上下文，疑似跨线索继承。",
+            )
+        )
+    return issues
+
+
 def validate_route_points(segment: dict[str, Any], *, clue_ref: str | None) -> list[GateIssue]:
     issues: list[GateIssue] = []
     origin = compact_text(segment.get("origin_text"))
@@ -587,6 +734,74 @@ def validate_route_points(segment: dict[str, Any], *, clue_ref: str | None) -> l
     return issues
 
 
+def detect_batch_route_collapse(semantic_map: dict[str, Any], segments: list[dict[str, Any]]) -> list[GateIssue]:
+    route_clues = route_clues_from(semantic_map)
+    candidate_segments = [
+        segment
+        for segment in segments
+        if isinstance(segment, dict)
+        and segment.get("is_freight_candidate") is not False
+        and not segment.get("drop_reason")
+    ]
+    if len(candidate_segments) < 4 or len(route_clues) < 4:
+        return []
+
+    clue_route_keys = {
+        normalize_clue_ref(clue.get("clue_temp_id") or clue.get("segment_index")): (
+            tuple(as_line_refs(clue.get("line_refs"))),
+            compact_text(clue.get("raw_text")),
+        )
+        for clue in route_clues
+        if isinstance(clue, dict)
+    }
+    distinct_clue_routes = {
+        key
+        for key in clue_route_keys.values()
+        if key and (key[0] or key[1])
+    }
+    if len(distinct_clue_routes) < 4:
+        return []
+
+    def duplicate_count(values: list[Any]) -> tuple[Any, int]:
+        counts: dict[Any, int] = {}
+        for value in values:
+            if not value:
+                continue
+            counts[value] = counts.get(value, 0) + 1
+        if not counts:
+            return None, 0
+        return max(counts.items(), key=lambda item: item[1])
+
+    raw_key, raw_count = duplicate_count([compact_text(segment.get("raw_text")) for segment in candidate_segments])
+    line_key, line_count = duplicate_count(
+        [tuple(as_line_refs(segment.get("line_refs") or segment.get("line_refs_json"))) for segment in candidate_segments]
+    )
+    route_key, route_count = duplicate_count(
+        [
+            (
+                compact_text(segment.get("origin_text")),
+                compact_text(segment.get("destination_text")),
+                compact_text(segment.get("commodity_name")),
+            )
+            for segment in candidate_segments
+        ]
+    )
+    threshold = max(3, int(len(candidate_segments) * 0.7))
+    if max(raw_count, line_count, route_count) < threshold:
+        return []
+    duplicated = raw_key if raw_count >= line_count and raw_count >= route_count else line_key if line_count >= route_count else route_key
+    return [
+        GateIssue(
+            code=BATCH_ROUTE_COLLAPSE,
+            severity=GateSeverity.REPAIR_REQUIRED,
+            message=(
+                f"批次中 {max(raw_count, line_count, route_count)}/{len(candidate_segments)} 条候选异常共享同一路线证据 "
+                f"{duplicated!r}，但语义图包含 {len(distinct_clue_routes)} 条不同路线，疑似整批候选被单条复核结果覆盖。"
+            ),
+        )
+    ]
+
+
 def apply_segment_evidence_gate(
     indexed_text: Any,
     semantic_map: dict[str, Any],
@@ -599,9 +814,11 @@ def apply_segment_evidence_gate(
     issues: list[GateIssue] = []
     semantic_result = validate_semantic_map_contract(indexed_text, semantic_map)
     issues.extend(semantic_result.issues)
+    batch_issues = detect_batch_route_collapse(semantic_map, segments)
+    issues.extend(batch_issues)
     global_segment_issues = [
         issue
-        for issue in semantic_result.issues
+        for issue in [*semantic_result.issues, *batch_issues]
         if issue.severity in {GateSeverity.REVIEW_REQUIRED, GateSeverity.REPAIR_REQUIRED}
     ]
 
@@ -624,6 +841,7 @@ def apply_segment_evidence_gate(
             )
             for issue in global_segment_issues
         ]
+        segment_issues.extend(validate_segment_identity(indexed_text, semantic_map, segment, clue_ref=clue_ref))
         segment_issues.extend(validate_route_points(segment, clue_ref=clue_ref))
         segment_issues.extend(validate_field_traceability(indexed_text, segment, clue_ref=clue_ref, field_name="origin_text", required=True))
         segment_issues.extend(validate_field_traceability(indexed_text, segment, clue_ref=clue_ref, field_name="destination_text", required=True))
@@ -631,6 +849,8 @@ def apply_segment_evidence_gate(
         segment_issues.extend(
             validate_field_traceability(indexed_text, segment, clue_ref=clue_ref, field_name="raw_tonnage_text", required=item_requires_tonnage)
         )
+        for field_name in ("origin_text", "destination_text", "commodity_name", "raw_tonnage_text"):
+            segment_issues.extend(validate_field_evidence_ownership(semantic_map, segment, clue_ref=clue_ref, field_name=field_name))
         segment_issues.extend(
             validate_tonnage_decision(indexed_text, segment, clue_ref=clue_ref, formal_requires_tonnage=item_requires_tonnage)
         )
@@ -801,6 +1021,7 @@ def evidence_detail_schema_hint() -> dict[str, Any]:
         "segments": [
             {
                 "clue_temp_id": "C1",
+                "segment_uid": "C1:S1",
                 "segment_index": 1,
                 "context_block_id": "B1",
                 "semantic_role_code": "ROUTE",
@@ -899,6 +1120,7 @@ def repair_prompt_payload(
         "task": "REPAIR_WECHAT_FREIGHT_SEMANTIC_OUTPUT",
         "rules": [
             "只根据 indexed_text、semantic_map、segments 和 issues 修复，不得编造原文没有的信息。",
+            "必须保留每个输入 segment 的 segment_uid；如拆分新增 segment，segment_uid 使用原 clue_temp_id 下新的 S 序号。",
             "一行多目的地必须展开 route_clues 或 segments。",
             "货品、吨位、价格、联系人只有 LOCAL_LINE 或 EXPLICIT_SHARED 才能自动继承。",
             "WEAK_INFERRED、UNKNOWN 或证据不完整字段必须 REVIEW_REQUIRED，且不要写入可直接确认的顶层字段。",

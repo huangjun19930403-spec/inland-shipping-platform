@@ -36,7 +36,10 @@ from app.modules.dictionary.service import CodeSequenceService
 from app.modules.freight.ai_evidence_gate import (
     COMMODITY_SCOPE_UNSAFE,
     CONTEXT_BLOCK_UNSAFE,
+    BATCH_ROUTE_COLLAPSE,
+    CROSS_CLUE_REVIEW_MERGE,
     DUPLICATE_ROUTE_POINT,
+    FIELD_EVIDENCE_CROSS_CLUE,
     FIELD_EVIDENCE_MISSING,
     FORMAL_TONNAGE_MISSING,
     LOW_ROUTE_RECALL,
@@ -507,6 +510,188 @@ def test_evidence_gate_marks_missing_field_evidence() -> None:
 
     assert FIELD_EVIDENCE_MISSING in result.issue_codes
     assert segments[0]["availability_status_code"] == "UNKNOWN"
+
+
+def test_evidence_gate_flags_cross_clue_field_evidence() -> None:
+    indexed = FreightTextIndexer().index("南京到芜湖动力煤1000吨\n太仓到无锡黄沙2000吨")
+    semantic_map = {
+        "route_clues": [
+            {"clue_temp_id": "C1", "line_refs": ["L1"], "raw_text": "南京到芜湖动力煤1000吨"},
+            {"clue_temp_id": "C2", "line_refs": ["L2"], "raw_text": "太仓到无锡黄沙2000吨"},
+        ]
+    }
+    segments = [
+        {
+            "clue_temp_id": "C1",
+            "line_refs": ["L1"],
+            "raw_text": "南京到芜湖动力煤1000吨",
+            "origin_text": "太仓",
+            "destination_text": "无锡",
+            "commodity_name": "黄沙",
+            "raw_tonnage_text": "2000吨",
+            "availability_status_code": "READY",
+            "field_evidence": {
+                "origin_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "太仓"},
+                "destination_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "无锡"},
+                "commodity_name": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "黄沙"},
+                "raw_tonnage_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "2000吨"},
+            },
+            "tonnage_decision": {
+                "status_code": "PASS",
+                "selected_text": "2000吨",
+                "source_type_code": "LOCAL_LINE",
+                "line_refs": ["L2"],
+                "belongs_to_current_segment": True,
+            },
+        }
+    ]
+
+    result = apply_segment_evidence_gate(indexed, semantic_map, segments)
+
+    assert FIELD_EVIDENCE_CROSS_CLUE in result.issue_codes
+    assert segments[0]["availability_status_code"] == "UNKNOWN"
+
+
+def test_evidence_gate_flags_batch_route_collapse() -> None:
+    lines = [
+        "南通芦泾港码头一长兴小浦尾渣1200吨",
+        "马鞍山——灌云 铁粉 1180吨",
+        "南通华能——德清 石膏",
+        "兴化——张家港 钢渣450吨",
+        "常州—上海 600左右线材",
+    ]
+    indexed = FreightTextIndexer().index("\n".join(lines))
+    semantic_map = {
+        "route_clues": [
+            {"clue_temp_id": f"C{index}", "line_refs": [f"L{index}"], "raw_text": line}
+            for index, line in enumerate(lines, start=1)
+        ]
+    }
+    segments = [
+        {
+            "clue_temp_id": f"C{index}",
+            "segment_uid": f"C{index}:S1",
+            "line_refs": ["L2"],
+            "raw_text": lines[1],
+            "origin_text": "马鞍山",
+            "destination_text": "灌云",
+            "commodity_name": "铁粉",
+            "raw_tonnage_text": "1180吨",
+            "availability_status_code": "READY",
+            "field_evidence": {
+                "origin_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "马鞍山"},
+                "destination_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "灌云"},
+                "commodity_name": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "铁粉"},
+                "raw_tonnage_text": {"source_type_code": "LOCAL_LINE", "line_refs": ["L2"], "evidence_text": "1180吨"},
+            },
+            "tonnage_decision": {
+                "status_code": "PASS",
+                "selected_text": "1180吨",
+                "source_type_code": "LOCAL_LINE",
+                "line_refs": ["L2"],
+                "belongs_to_current_segment": True,
+            },
+        }
+        for index in range(1, 6)
+    ]
+
+    result = apply_segment_evidence_gate(indexed, semantic_map, segments)
+
+    assert BATCH_ROUTE_COLLAPSE in result.issue_codes
+    assert all(segment["availability_status_code"] == "UNKNOWN" for segment in segments)
+
+
+def test_review_merge_requires_segment_uid_and_preserves_original_identity() -> None:
+    client = DashScopeQwenFreightParserClient(runtime_config=SimpleNamespace())
+    segments = [
+        {
+            "clue_temp_id": "C1",
+            "segment_uid": "C1:S1",
+            "segment_index": 1,
+            "line_refs": ["L1"],
+            "raw_text": "南通到长兴尾渣1200吨",
+            "origin_text": "南通",
+            "destination_text": "长兴",
+            "commodity_name": "尾渣",
+            "availability_status_code": "UNKNOWN",
+            "needs_strong_review": True,
+        },
+        {
+            "clue_temp_id": "C18",
+            "segment_uid": "C18:S1",
+            "segment_index": 1,
+            "line_refs": ["L42"],
+            "raw_text": "12号武汉-连云港钢结构，需45米仓口",
+            "origin_text": "武汉",
+            "destination_text": "连云港",
+            "commodity_name": "钢结构",
+            "availability_status_code": "UNKNOWN",
+            "needs_strong_review": True,
+        },
+    ]
+    review_results = [
+        {
+            "clue_temp_id": "C18",
+            "segment_index": 1,
+            "line_refs": ["L42"],
+            "raw_text": "12号武汉-连云港钢结构，需45米仓口",
+            "origin_text": "武汉",
+            "destination_text": "连云港",
+            "commodity_name": "钢结构",
+            "ai_review_status_code": "PASS",
+        }
+    ]
+
+    merged = client.merge_review_results(segments, review_results)
+
+    assert merged[0]["clue_temp_id"] == "C1"
+    assert merged[0]["line_refs"] == ["L1"]
+    assert merged[0]["origin_text"] == "南通"
+    assert CROSS_CLUE_REVIEW_MERGE in {
+        issue["code"]
+        for issue in merged[0]["ai_review_json"]["field_quality_gate"]["issues"]
+    }
+
+
+def test_review_merge_discards_cross_clue_patch_for_existing_uid() -> None:
+    client = DashScopeQwenFreightParserClient(runtime_config=SimpleNamespace())
+    segments = [
+        {
+            "clue_temp_id": "C1",
+            "segment_uid": "C1:S1",
+            "segment_index": 1,
+            "line_refs": ["L1"],
+            "raw_text": "南通到长兴尾渣1200吨",
+            "origin_text": "南通",
+            "destination_text": "长兴",
+            "commodity_name": "尾渣",
+            "availability_status_code": "UNKNOWN",
+            "needs_strong_review": True,
+        }
+    ]
+    review_results = [
+        {
+            "segment_uid": "C1:S1",
+            "clue_temp_id": "C18",
+            "segment_index": 1,
+            "line_refs": ["L42"],
+            "raw_text": "12号武汉-连云港钢结构，需45米仓口",
+            "origin_text": "武汉",
+            "destination_text": "连云港",
+            "commodity_name": "钢结构",
+            "ai_review_status_code": "PASS",
+        }
+    ]
+
+    merged = client.merge_review_results(segments, review_results)
+
+    assert merged[0]["clue_temp_id"] == "C1"
+    assert merged[0]["origin_text"] == "南通"
+    assert merged[0]["destination_text"] == "长兴"
+    assert CROSS_CLUE_REVIEW_MERGE in {
+        issue["code"]
+        for issue in merged[0]["ai_review_json"]["field_quality_gate"]["issues"]
+    }
 
 
 def test_user_multi_contact_sample_preserves_seventeen_clues_and_contact_scopes() -> None:
