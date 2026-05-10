@@ -134,6 +134,12 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
     assert {row["water_system_code"] for row in rows} >= {"WS-YANGTZE", "WS-GRAND-CANAL", "WS-TAIHU", "WS-FUCHUN-RIVER", "WS-BAIYANGDIAN"}
     assert by_code["WS-YANGTZE"]["water_system_name"] == "长江干线"
     assert by_code["WS-XIJIANG"]["water_system_name"] == "西江航运干线"
+    assert Decimal("113") < Decimal(str(by_code["WS-YANGTZE"]["display_center_longitude"])) < Decimal("116")
+    assert Decimal("29") < Decimal(str(by_code["WS-YANGTZE"]["display_center_latitude"])) < Decimal("32")
+    assert Decimal("125") < Decimal(str(by_name["松花江"]["display_center_longitude"])) < Decimal("128")
+    assert Decimal("45") < Decimal(str(by_name["松花江"]["display_center_latitude"])) < Decimal("47")
+    assert Decimal("119") < Decimal(str(by_name["太湖"]["display_center_longitude"])) < Decimal("121")
+    assert Decimal("30") < Decimal(str(by_name["太湖"]["display_center_latitude"])) < Decimal("32")
     assert by_name["富春江"]["parent_water_system_code"] == "WS-QIANTANG-RIVER"
     assert by_name["富春江"]["ais_situation_scope"] == "INCLUDED"
     assert "富春江水库" not in by_name["富春江"]["source_names"]
