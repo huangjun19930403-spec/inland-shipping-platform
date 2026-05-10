@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, TypeVar
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.vessel import (
@@ -86,13 +86,12 @@ class VesselRepository:
             stmt = stmt.order_by(model.id.asc())  # type: ignore[attr-defined]
         return list((await self.db.execute(stmt)).scalars().all())
 
-    async def replace_many_by_profile(
+    async def create_many_by_profile(
         self,
         model: type[T],
         vessel_id: int,
         rows: list[dict[str, Any]],
     ) -> list[T]:
-        await self.db.execute(delete(model).where(model.vessel_profile_id == vessel_id))  # type: ignore[attr-defined]
         entities: list[T] = []
         for item in rows:
             entity = model(vessel_profile_id=vessel_id, **item)  # type: ignore[call-arg]
@@ -219,11 +218,6 @@ class VesselRepository:
         await self.db.flush()
         await self.db.refresh(entity)
         return entity
-
-    async def delete_person_certificate(self, person_certificate_id: int) -> None:
-        await self.db.execute(
-            delete(VesselPersonCertificate).where(VesselPersonCertificate.id == person_certificate_id)
-        )
 
     async def create_person_certificate_file(self, data: dict[str, Any]) -> VesselPersonCertificateFile:
         entity = VesselPersonCertificateFile(**data)

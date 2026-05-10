@@ -498,6 +498,9 @@ class VesselDataQualityIssue(Base, TimestampMixin):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     resolved_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_rechecked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_recheck_status_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_recheck_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class VesselProfileSummary(Base):
@@ -983,6 +986,26 @@ class VesselRiskSignal(Base, TimestampMixin):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
+class VesselGovernanceSyncBatch(Base, TimestampMixin):
+    __tablename__ = "vessel_governance_sync_batch"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_no: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    trigger_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="MANUAL", index=True)
+    triggered_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="RUNNING", index=True)
+    source_rules_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    rule_result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    affected_scope_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    touched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_task_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reopened_task_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class VesselGovernanceTask(Base, TimestampMixin):
     __tablename__ = "vessel_governance_task"
     __table_args__ = (
@@ -1001,6 +1024,8 @@ class VesselGovernanceTask(Base, TimestampMixin):
     priority_code: Mapped[str] = mapped_column(String(32), nullable=False, default="MEDIUM", index=True)
     status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="OPEN", index=True)
     vessel_profile_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("vessel_profile.id"), nullable=True, index=True)
+    source_batch_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("vessel_governance_sync_batch.id"), nullable=True, index=True)
+    source_rule_code: Mapped[str | None] = mapped_column(String(96), nullable=True, index=True)
     source_object_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_object_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source_status_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -1010,6 +1035,7 @@ class VesselGovernanceTask(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     evidence_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_trace_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    generation_reason_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     impact_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     confidence_level: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
     coverage_rate: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
@@ -1094,6 +1120,28 @@ class VesselControllerEvidence(Base, TimestampMixin):
     void_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
+class VesselControllerConclusion(Base, TimestampMixin):
+    __tablename__ = "vessel_controller_conclusion"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    vessel_profile_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True)
+    conclusion_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="CANDIDATE", index=True)
+    party_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    controller_role_code: Mapped[str] = mapped_column(String(64), nullable=False, default="ACTUAL_CONTROLLER")
+    confidence_level: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    evidence_ids_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    evidence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    conflict_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effective_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 class VesselAffiliationEvidence(Base, TimestampMixin):
     __tablename__ = "vessel_affiliation_evidence"
 
@@ -1122,3 +1170,50 @@ class VesselAffiliationEvidence(Base, TimestampMixin):
     voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     void_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class VesselRelationEvidenceAttachment(Base):
+    __tablename__ = "vessel_relation_evidence_attachment"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    vessel_profile_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True)
+    evidence_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    evidence_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    storage_file_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("storage_file.id"), nullable=False, index=True)
+    file_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    uploaded_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    __table_args__ = (
+        Index("ix_vessel_relation_evidence_attachment_object", "evidence_type_code", "evidence_id"),
+        Index("ux_vessel_relation_evidence_attachment_file", "evidence_type_code", "evidence_id", "storage_file_id", unique=True),
+    )
+
+
+class VesselAffiliationConclusion(Base, TimestampMixin):
+    __tablename__ = "vessel_affiliation_conclusion"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    vessel_profile_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("vessel_profile.id"), nullable=False, index=True)
+    conclusion_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="CANDIDATE", index=True)
+    affiliation_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN")
+    subject_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    confidence_level: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    evidence_ids_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    evidence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    conflict_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effective_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    voided_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

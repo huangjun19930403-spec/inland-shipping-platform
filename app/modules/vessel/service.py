@@ -34,6 +34,7 @@ from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.dictionary import StdDict, StdDictItem
 from app.models.vessel import (
     VesselAffiliationEvidence,
+    VesselAffiliationConclusion,
     VesselAisCitySnapshotItem,
     VesselAisSnapshot,
     VesselBuildInfo,
@@ -45,8 +46,10 @@ from app.models.vessel import (
     VesselChangeEvent,
     VesselContact,
     VesselControllerEvidence,
+    VesselControllerConclusion,
     VesselCrewAssignment,
     VesselDataQualityIssue,
+    VesselGovernanceTask,
     VesselIdentifierHistory,
     VesselIdentityLink,
     VesselNameHistory,
@@ -63,6 +66,7 @@ from app.models.vessel import (
     VesselRecognitionAdoptionRecord,
     VesselRecognitionFieldDiff,
     VesselRegistrationInfo,
+    VesselRelationEvidenceAttachment,
     VesselRiskSignal,
 )
 from app.modules.dictionary.service import CodeSequenceService
@@ -79,6 +83,11 @@ from app.modules.address.geometry import normalize_boundary_geometry
 from app.modules.storage.service import FileStorageService
 from app.modules.system.runtime_config import RuntimeConfigService
 from app.modules.vessel.repository import VesselRepository
+from app.modules.vessel.services.compliance_rules import (
+    compliance_risk_action_label,
+    compliance_risk_action_path,
+    compliance_risk_required_fields,
+)
 from app.modules.vessel.schemas import (
     PageResponse,
     VesselAisSituationCardResponse,
@@ -99,9 +108,14 @@ from app.modules.vessel.schemas import (
     VesselAssetPageResponse,
     VesselAssetListItemResponse,
     VesselAssetSummaryResponse,
+    VesselSummaryRefreshBatchRequest,
+    VesselSummaryRefreshBatchResponse,
+    VesselSummaryRefreshBatchItemResponse,
+    VesselSummaryRefreshDiffResponse,
     VesselCertificateRequirementRuleResponse,
     VesselComplianceRiskResponse,
     VesselControllerEvidenceResponse,
+    VesselEvidenceConclusionRefResponse,
     VesselListItemResponse,
     VesselNameHistoryResponse,
     VesselOperatorResponse,
@@ -146,8 +160,16 @@ from app.modules.vessel.schemas import (
     VesselQualityIssueVesselSummary,
     VesselRecognitionQueueItemResponse,
     VesselRegistrationResponse,
+    VesselRecommendedAction,
+    VesselRelationConclusionConflictResolveRequest,
+    VesselRelationConclusionSummaryResponse,
+    VesselRelationEvidenceAttachmentResponse,
+    VesselControllerConclusionResponse,
+    VesselAffiliationConclusionResponse,
+    VesselQualityIssueRecheckResponse,
     VesselRiskSignalResponse,
     VesselRiskSignalVesselSummary,
+    VesselWorkbenchItemResponse,
 )
 
 try:  # Redis is optional for local development; memory cache remains the fallback.
@@ -190,6 +212,15 @@ LABEL_DICTS = [
     "VESSEL_RULE_SCOPE_TYPE",
     "VESSEL_CONTROLLER_ROLE",
     "VESSEL_AFFILIATION_TYPE",
+    "VESSEL_EVIDENCE_VERIFIED_STATUS",
+    "VESSEL_GOVERNANCE_TASK_TYPE",
+    "VESSEL_GOVERNANCE_TASK_STATUS",
+    "VESSEL_GOVERNANCE_PRIORITY",
+    "VESSEL_BLACKLIST_LIST_TYPE",
+    "VESSEL_BLACKLIST_SIGNAL_TYPE",
+    "VESSEL_BLACKLIST_SIGNAL_STATUS",
+    "VESSEL_RELATION_CONCLUSION_STATUS",
+    "VESSEL_GOVERNANCE_SYNC_STATUS",
 ]
 
 
@@ -1125,6 +1156,82 @@ class VesselService:
         await self.db.commit()
         return (await self._build_asset_items([profile]))[0]
 
+    async def refresh_vessel_summaries_batch(self, body: VesselSummaryRefreshBatchRequest) -> VesselSummaryRefreshBatchResponse:
+        seen: set[int] = set()
+        vessel_ids = [int(vessel_id) for vessel_id in body.vessel_ids if not (int(vessel_id) in seen or seen.add(int(vessel_id)))]
+        results: list[VesselSummaryRefreshBatchItemResponse] = []
+        for vessel_id in vessel_ids:
+            ship_name: str | None = None
+            try:
+                profile = await self._require_profile(vessel_id)
+                before = (await self._build_asset_items([profile]))[0]
+                ship_name = before.ship_name
+                after = await self.refresh_vessel_summary(vessel_id)
+                diff = self._summary_refresh_diff(before, after)
+                failure_reason = after.refresh_error or None
+                results.append(
+                    VesselSummaryRefreshBatchItemResponse(
+                        vessel_id=vessel_id,
+                        ship_name=after.ship_name,
+                        success=failure_reason is None,
+                        summary_diff=diff,
+                        refresh_failure_reason=failure_reason,
+                        item=after,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                await self.db.rollback()
+                results.append(
+                    VesselSummaryRefreshBatchItemResponse(
+                        vessel_id=vessel_id,
+                        ship_name=ship_name,
+                        success=False,
+                        refresh_failure_reason=str(exc)[:1000],
+                    )
+                )
+        success_count = sum(1 for item in results if item.success)
+        return VesselSummaryRefreshBatchResponse(
+            total=len(results),
+            success_count=success_count,
+            failed_count=len(results) - success_count,
+            items=results,
+        )
+
+    def _summary_refresh_diff(
+        self,
+        before: VesselAssetListItemResponse,
+        after: VesselAssetListItemResponse,
+    ) -> list[VesselSummaryRefreshDiffResponse]:
+        fields = [
+            ("summary_status_code", "摘要状态"),
+            ("data_quality_level", "数据质量"),
+            ("risk_level", "风险等级"),
+            ("ais_freshness_level", "AIS 新鲜度"),
+            ("quality_issue_count", "质量问题数"),
+            ("certificate_missing_count", "缺失证书数"),
+            ("certificate_expiring_count", "临期证书数"),
+            ("certificate_expired_count", "过期证书数"),
+            ("coverage_rate", "覆盖率"),
+            ("refresh_error", "失败原因"),
+        ]
+        diffs: list[VesselSummaryRefreshDiffResponse] = []
+        for field_name, label in fields:
+            old_value = getattr(before, field_name, None)
+            new_value = getattr(after, field_name, None)
+            if old_value == new_value:
+                continue
+            diffs.append(
+                VesselSummaryRefreshDiffResponse(
+                    field_name=field_name,
+                    before=None if old_value is None else str(old_value),
+                    after=None if new_value is None else str(new_value),
+                    message=f"{label}从 {old_value if old_value not in (None, '') else '-'} 变为 {new_value if new_value not in (None, '') else '-'}",
+                )
+            )
+        if not diffs:
+            diffs.append(VesselSummaryRefreshDiffResponse(field_name="summary", message="摘要刷新完成，核心指标暂无变化。"))
+        return diffs
+
     async def _refresh_summary_best_effort(self, vessel_id: int) -> None:
         try:
             profile = await self._require_profile(vessel_id)
@@ -1439,6 +1546,25 @@ class VesselService:
                         summary_status_code="MISSING",
                         summary_status_name=label_map.get("VESSEL_SUMMARY_STATUS", {}).get("MISSING"),
                         evidence_updated_at=item.updated_at,
+                        explain_reason=notes[0],
+                        next_actions=self._asset_next_actions(
+                            item.id,
+                            summary_status_code="MISSING",
+                            quality_issue_count=quality_count,
+                            risk_level="UNKNOWN",
+                            ais_freshness_level="UNKNOWN",
+                            subject_consistency_level="UNKNOWN",
+                        ),
+                        evidence_gaps=self._asset_evidence_gaps(
+                            summary_status_code="MISSING",
+                            quality_issue_count=quality_count,
+                            certificate_missing_count=0,
+                            certificate_expired_count=0,
+                            ais_freshness_level="UNKNOWN",
+                            subject_consistency_level="UNKNOWN",
+                        ),
+                        source_object_anchor=f"VESSEL_PROFILE:{item.id}",
+                        workbench_group="ASSET",
                     )
                 )
                 continue
@@ -1501,9 +1627,143 @@ class VesselService:
                     source_updated_at=summary.source_updated_at,
                     refresh_error=summary.refresh_error,
                     evidence_updated_at=summary.refreshed_at or summary.source_updated_at or item.updated_at,
+                    explain_reason=self._asset_explain_reason(summary_status_code, uncertainty_notes, summary),
+                    next_actions=self._asset_next_actions(
+                        item.id,
+                        summary_status_code=summary_status_code,
+                        quality_issue_count=summary.quality_issue_count,
+                        risk_level=summary.risk_level,
+                        ais_freshness_level=summary.ais_freshness_level,
+                        subject_consistency_level=summary.subject_consistency_level,
+                    ),
+                    evidence_gaps=self._asset_evidence_gaps(
+                        summary_status_code=summary_status_code,
+                        quality_issue_count=summary.quality_issue_count,
+                        certificate_missing_count=summary.certificate_missing_count,
+                        certificate_expired_count=summary.certificate_expired_count,
+                        ais_freshness_level=summary.ais_freshness_level,
+                        subject_consistency_level=summary.subject_consistency_level,
+                    ),
+                    source_object_anchor=f"VESSEL_PROFILE:{item.id}",
+                    workbench_group="ASSET",
                 )
             )
         return items
+
+    @staticmethod
+    def _asset_explain_reason(summary_status_code: str, uncertainty_notes: list[str], summary: VesselProfileSummary) -> str | None:
+        if uncertainty_notes:
+            return uncertainty_notes[0]
+        if summary.quality_issue_count:
+            return f"当前存在 {summary.quality_issue_count} 条未关闭质量问题。"
+        if summary.risk_level in {"HIGH", "MEDIUM", "UNKNOWN"}:
+            return f"合规风险等级为 {summary.risk_level}，需要查看风险证据和缺口。"
+        if summary_status_code in {"MISSING", "STALE", "FAILED", "PARTIAL"}:
+            return "资产摘要不可直接作为高可信结论使用，需要刷新或补齐来源。"
+        return None
+
+    def _asset_next_actions(
+        self,
+        vessel_id: int,
+        *,
+        summary_status_code: str,
+        quality_issue_count: int,
+        risk_level: str,
+        ais_freshness_level: str,
+        subject_consistency_level: str,
+    ) -> list[VesselRecommendedAction]:
+        actions: list[VesselRecommendedAction] = []
+        if quality_issue_count:
+            actions.append(
+                VesselRecommendedAction(
+                    action_type="OPEN_QUALITY",
+                    label="处理质量问题",
+                    target_path="/vessels/quality",
+                    target_object_type="VESSEL_PROFILE",
+                    target_object_id=str(vessel_id),
+                    source_object_anchor=f"VESSEL_PROFILE:{vessel_id}",
+                    workbench_group="QUALITY",
+                    payload={"vessel_id": vessel_id, "status_code": "OPEN"},
+                    description="查看该船未关闭质量问题，修复后重新校验。",
+                )
+            )
+        if risk_level in {"HIGH", "MEDIUM", "UNKNOWN"}:
+            actions.append(
+                VesselRecommendedAction(
+                    action_type="OPEN_COMPLIANCE",
+                    label="查看合规证明链",
+                    target_path=f"/vessels/{vessel_id}/compliance",
+                    target_object_type="VESSEL_PROFILE",
+                    target_object_id=str(vessel_id),
+                    source_object_anchor=f"VESSEL_PROFILE:{vessel_id}",
+                    workbench_group="RISK",
+                    description="查看风险信号、证据缺口和复核入口。",
+                )
+            )
+        if subject_consistency_level in {"LOW", "UNKNOWN"}:
+            actions.append(
+                VesselRecommendedAction(
+                    action_type="OPEN_RELATIONS",
+                    label="补齐主体结论",
+                    target_path=f"/vessels/{vessel_id}/relations",
+                    target_object_type="VESSEL_PROFILE",
+                    target_object_id=str(vessel_id),
+                    source_object_anchor=f"VESSEL_PROFILE:{vessel_id}",
+                    workbench_group="EVIDENCE",
+                    description="主体关系与证据结论统一在主体关系页维护。",
+                )
+            )
+        if ais_freshness_level in {"STALE", "EXPIRED", "UNKNOWN"}:
+            actions.append(
+                VesselRecommendedAction(
+                    action_type="OPEN_AIS",
+                    label="核对 AIS",
+                    target_path="/vessels/ais-situation",
+                    target_object_type="VESSEL_PROFILE",
+                    target_object_id=str(vessel_id),
+                    source_object_anchor=f"VESSEL_PROFILE:{vessel_id}",
+                    workbench_group="AIS",
+                    payload={"vessel_id": vessel_id},
+                    description="核对 AIS 最新位置、MMSI 映射和轨迹可用性。",
+                )
+            )
+        if summary_status_code in {"MISSING", "STALE", "FAILED", "PARTIAL"}:
+            actions.append(
+                VesselRecommendedAction(
+                    action_type="REFRESH_SUMMARY",
+                    label="刷新摘要",
+                    target_path=f"/vessels/{vessel_id}/profile-card",
+                    target_object_type="VESSEL_PROFILE",
+                    target_object_id=str(vessel_id),
+                    source_object_anchor=f"VESSEL_PROFILE:{vessel_id}",
+                    workbench_group="ASSET",
+                    description="摘要会重算质量、主体、证书和 AIS 可信状态；失败时需查看错误原因。",
+                )
+            )
+        return actions[:3]
+
+    @staticmethod
+    def _asset_evidence_gaps(
+        *,
+        summary_status_code: str,
+        quality_issue_count: int,
+        certificate_missing_count: int,
+        certificate_expired_count: int,
+        ais_freshness_level: str,
+        subject_consistency_level: str,
+    ) -> list[str]:
+        gaps: list[str] = []
+        if summary_status_code in {"MISSING", "STALE", "FAILED", "PARTIAL"}:
+            gaps.append("资产摘要")
+        if quality_issue_count:
+            gaps.append("质量问题重新校验")
+        if subject_consistency_level in {"LOW", "UNKNOWN"}:
+            gaps.append("主体关系结论")
+        if certificate_missing_count or certificate_expired_count:
+            gaps.append("证书有效证据")
+        if ais_freshness_level in {"STALE", "EXPIRED", "UNKNOWN"}:
+            gaps.append("AIS 最新观测")
+        return gaps
 
     async def _upsert_vessel_summary(self, profile: VesselProfile) -> VesselProfileSummary:
         now = datetime.utcnow()
@@ -2268,6 +2528,17 @@ class VesselService:
             data_availability_status="AVAILABLE" if summary is not None and summary.latest_position_time else "UNKNOWN",
         )
         ais_card = trajectory_card.model_copy(update={"deprecated_alias": True})
+        pending_work_items = self._profile_pending_work_items(
+            vessel_id=vessel_id,
+            active_issue_count=len(active_issues),
+            high_issue_count=severity_counts.get("HIGH", 0),
+            active_risk_count=len(formal_risk_signals),
+            pending_controller_count=pending_controller_count,
+            pending_affiliation_count=pending_affiliation_count,
+            ocr_pending_count=recognition_metrics["pending_diff_count"],
+            ais_freshness_level=summary.ais_freshness_level if summary is not None else "UNKNOWN",
+            summary_status_code=summary_status,
+        )
 
         return VesselProfileCardResponse(
             vessel_id=vessel_id,
@@ -2413,7 +2684,124 @@ class VesselService:
                 source_codes=["CANDIDATE_ANALYSIS"],
                 uncertainty_notes=["候选资源适配分析将在 Round 8 接入"],
             ),
+            pending_work_items=pending_work_items,
         )
+
+    def _profile_pending_work_items(
+        self,
+        *,
+        vessel_id: int,
+        active_issue_count: int,
+        high_issue_count: int,
+        active_risk_count: int,
+        pending_controller_count: int,
+        pending_affiliation_count: int,
+        ocr_pending_count: int,
+        ais_freshness_level: str,
+        summary_status_code: str,
+    ) -> list[VesselWorkbenchItemResponse]:
+        specs: list[tuple[str, str, int, str, str, dict[str, Any], str, str, list[str]]] = []
+        if active_issue_count:
+            specs.append((
+                "profile_quality_issues",
+                "质量问题待处理",
+                active_issue_count,
+                "HIGH" if high_issue_count else "MEDIUM",
+                "/vessels/quality",
+                {"vessel_id": vessel_id, "status_code": "OPEN"},
+                "该船存在未关闭质量问题，需修复源字段后重新校验。",
+                "QUALITY",
+                ["源字段", "重新校验记录"],
+            ))
+        if active_risk_count:
+            specs.append((
+                "profile_risk_signals",
+                "合规风险待处理",
+                active_risk_count,
+                "HIGH",
+                f"/vessels/{vessel_id}/compliance",
+                {},
+                "该船存在正式风险信号，需要按推荐动作补证、修复或复核。",
+                "RISK",
+                ["风险证据", "证明链缺口", "复核意见"],
+            ))
+        relation_pending = pending_controller_count + pending_affiliation_count
+        if relation_pending:
+            specs.append((
+                "profile_relation_evidence",
+                "主体证据待审核",
+                relation_pending,
+                "MEDIUM",
+                f"/vessels/{vessel_id}/relations",
+                {"tab": "controller" if pending_controller_count else "affiliation"},
+                "控制人/挂靠证据审核后会进入候选结论，人工确认后才成为当前结论。",
+                "EVIDENCE",
+                ["证据审核意见", "候选结论确认"],
+            ))
+        if ocr_pending_count:
+            specs.append((
+                "profile_ocr_pending",
+                "OCR 字段待确认",
+                ocr_pending_count,
+                "MEDIUM",
+                "/vessels/recognitions",
+                {"vessel_id": vessel_id},
+                "OCR 字段差异需要人工采纳或跳过，才会沉淀为可信档案字段。",
+                "OCR",
+                ["识别字段", "采纳/跳过原因"],
+            ))
+        if ais_freshness_level in {"STALE", "EXPIRED", "UNKNOWN"}:
+            specs.append((
+                "profile_ais_gap",
+                "AIS 观测需核对",
+                1,
+                "MEDIUM",
+                "/vessels/ais-situation",
+                {"vessel_id": vessel_id},
+                "AIS 新鲜度不足会影响轨迹态势、空间分析和候选分析可信度。",
+                "AIS",
+                ["MMSI 映射", "最新 AIS 点位"],
+            ))
+        if summary_status_code in {"MISSING", "STALE", "FAILED", "PARTIAL"}:
+            specs.append((
+                "profile_summary_refresh",
+                "资产摘要需刷新",
+                1,
+                "LOW",
+                f"/vessels/{vessel_id}/profile-card",
+                {},
+                "资产摘要需要重算后才能反映最新质量、主体、合规和 AIS 可信状态。",
+                "ASSET",
+                ["摘要刷新结果"],
+            ))
+        return [
+            VesselWorkbenchItemResponse(
+                code=code,
+                title=title,
+                count=count,
+                priority_code=priority,
+                target_path=target_path,
+                target_query=query,
+                explain_reason=reason,
+                evidence_gaps=gaps,
+                source_object_anchor=f"VESSEL_PROFILE:{vessel_id}",
+                workbench_group=group,
+                recommended_actions=[
+                    VesselRecommendedAction(
+                        action_type="DRILLDOWN",
+                        label="进入处理",
+                        target_path=target_path,
+                        target_object_type="VESSEL_PROFILE",
+                        target_object_id=str(vessel_id),
+                        source_object_anchor=f"VESSEL_PROFILE:{vessel_id}",
+                        workbench_group=group,
+                        payload=query,
+                        description=reason,
+                    )
+                ],
+            )
+            for code, title, count, priority, target_path, query, reason, group, gaps in specs
+        ]
 
     def _paginate_evidence_items(
         self,
@@ -2425,8 +2813,54 @@ class VesselService:
         start = (page - 1) * page_size
         return items[start : start + page_size]
 
-    def _relation_evidence_item(self, section: str, object_type: str, row: Any, title: str) -> VesselProfileCardEvidenceItem:
+    def _relation_evidence_item(
+        self,
+        section: str,
+        object_type: str,
+        row: Any,
+        title: str,
+        *,
+        conclusion_refs: list[Any] | None = None,
+    ) -> VesselProfileCardEvidenceItem:
         status_code = self._relation_status_code(row)
+        evidence_json = getattr(row, "evidence_json", None)
+        evidence_payload = evidence_json if isinstance(evidence_json, dict) else {}
+        missing_fields: list[str] = []
+        if isinstance(row, VesselControllerEvidence):
+            missing_fields = self._controller_evidence_missing_fields(row)
+        elif isinstance(row, VesselAffiliationEvidence):
+            missing_fields = self._affiliation_evidence_missing_fields(row)
+        attachment_refs = evidence_payload.get("attachment_refs")
+        if not isinstance(attachment_refs, list):
+            attachment_refs = []
+        relation_payload: dict[str, Any] = {}
+        if isinstance(row, VesselControllerEvidence):
+            relation_payload = {
+                "party_name": row.party_name,
+                "controller_role_code": row.controller_role_code,
+                "confidence_level": row.confidence_level,
+                "controller_certificate_type": self._json_path_value(evidence_payload, "controller_identity.certificate_type"),
+                "controller_certificate_no": self._json_path_value(evidence_payload, "controller_identity.certificate_no"),
+                "contact_phone": self._json_path_value(evidence_payload, "contact.phone"),
+                "owner_relationship": self._json_path_value(evidence_payload, "relationship.owner_relationship"),
+                "operator_relationship": self._json_path_value(evidence_payload, "relationship.operator_relationship"),
+                "confirmation_source": self._json_path_value(evidence_payload, "confirmation.source"),
+                "confirmation_method": self._json_path_value(evidence_payload, "confirmation.method"),
+            }
+        elif isinstance(row, VesselAffiliationEvidence):
+            relation_payload = {
+                "affiliation_type_code": row.affiliation_type_code,
+                "subject_name": row.subject_name,
+                "counterparty_name": row.counterparty_name,
+                "confidence_level": row.confidence_level,
+                "affiliation_company": self._json_path_value(evidence_payload, "affiliation_contract.affiliation_company"),
+                "actual_shipowner": self._json_path_value(evidence_payload, "affiliation_contract.actual_shipowner"),
+                "agreement_start": self._json_path_value(evidence_payload, "affiliation_contract.agreement_start"),
+                "agreement_end": self._json_path_value(evidence_payload, "affiliation_contract.agreement_end"),
+                "certificate_operator": self._json_path_value(evidence_payload, "operation_qualification.certificate_operator"),
+                "transport_permit_relation": self._json_path_value(evidence_payload, "operation_qualification.transport_permit_relation"),
+                "business_contact": self._json_path_value(evidence_payload, "contact.business_contact"),
+            }
         return VesselProfileCardEvidenceItem(
             id=f"{object_type}:{row.id}",
             section=section,
@@ -2438,16 +2872,49 @@ class VesselService:
             created_at=getattr(row, "created_at", None),
             updated_at=getattr(row, "updated_at", None),
             payload={
+                **relation_payload,
                 "start_date": getattr(row, "start_date", None),
                 "end_date": getattr(row, "end_date", None),
+                "effective_from": getattr(row, "effective_from", None),
+                "effective_to": getattr(row, "effective_to", None),
                 "is_current": getattr(row, "is_current", None),
                 "is_primary": getattr(row, "is_primary", None),
                 "revision": getattr(row, "revision", None),
                 "verified_status_code": getattr(row, "verified_status_code", None),
+                "verified_at": getattr(row, "verified_at", None),
+                "verified_by": getattr(row, "verified_by", None),
+                "audit_task_id": getattr(row, "audit_task_id", None),
+                "evidence_summary": getattr(row, "evidence_summary", None),
+                "evidence_json": evidence_payload,
                 "voided_at": getattr(row, "voided_at", None),
                 "void_reason": getattr(row, "void_reason", None),
             },
+            evidence_completeness=self._evidence_completeness(missing_fields) if missing_fields or object_type in {"VESSEL_CONTROLLER_EVIDENCE", "VESSEL_AFFILIATION_EVIDENCE"} else None,
+            missing_required_fields=missing_fields,
+            attachment_refs=attachment_refs,
+            audit_history=self._profile_evidence_audit_history(row),
+            conclusion_refs=[ref.model_dump(mode="json") if hasattr(ref, "model_dump") else _jsonable(ref) for ref in (conclusion_refs or [])],
         )
+
+    @staticmethod
+    def _profile_evidence_audit_history(row: Any) -> list[dict[str, Any]]:
+        history: list[dict[str, Any]] = []
+        audit_task_id = getattr(row, "audit_task_id", None)
+        verified_status_code = getattr(row, "verified_status_code", None)
+        if audit_task_id:
+            history.append({"label": "审核任务", "value": audit_task_id})
+        if verified_status_code:
+            history.append({"label": "审核状态", "value": verified_status_code})
+        verified_at = getattr(row, "verified_at", None)
+        if verified_at:
+            history.append({"label": "审核时间", "value": _jsonable(verified_at)})
+        verified_by = getattr(row, "verified_by", None)
+        if verified_by:
+            history.append({"label": "审核人", "value": verified_by})
+        revision = getattr(row, "revision", None)
+        if revision is not None:
+            history.append({"label": "版本", "value": revision})
+        return history
 
     async def get_profile_card_evidence(self, vessel_id: int, query: Any) -> VesselProfileCardEvidenceResponse:
         profile = await self._require_profile(vessel_id)
@@ -2549,10 +3016,29 @@ class VesselService:
                     .order_by(VesselAffiliationEvidence.voided_at.asc().nullsfirst(), VesselAffiliationEvidence.updated_at.desc())
                 )
             ).all()
+            label_map = await _load_label_map(self.db)
+            controller_refs = await self._controller_evidence_ref_map(vessel_id, label_map)
+            affiliation_refs = await self._affiliation_evidence_ref_map(vessel_id, label_map)
             for row in controller_rows:
-                items.append(self._relation_evidence_item(section, "VESSEL_CONTROLLER_EVIDENCE", row, f"实际控制人证据：{row.party_name}"))
+                items.append(
+                    self._relation_evidence_item(
+                        section,
+                        "VESSEL_CONTROLLER_EVIDENCE",
+                        row,
+                        f"实际控制人证据：{row.party_name}",
+                        conclusion_refs=controller_refs.get(row.id, []),
+                    )
+                )
             for row in affiliation_rows:
-                items.append(self._relation_evidence_item(section, "VESSEL_AFFILIATION_EVIDENCE", row, f"挂靠关系证据：{row.affiliation_type_code}"))
+                items.append(
+                    self._relation_evidence_item(
+                        section,
+                        "VESSEL_AFFILIATION_EVIDENCE",
+                        row,
+                        f"挂靠关系证据：{row.affiliation_type_code}",
+                        conclusion_refs=affiliation_refs.get(row.id, []),
+                    )
+                )
             if not controller_rows:
                 notes.append("暂无实际控制人证据，相关风险保持不可计算或待补证")
             if not affiliation_rows:
@@ -2623,52 +3109,11 @@ class VesselService:
             for row in await self.db.scalars(
                 select(VesselControllerEvidence).where(VesselControllerEvidence.vessel_profile_id == vessel_id)
             ):
-                items.append(
-                    VesselProfileCardEvidenceItem(
-                        id=f"controller_evidence:{row.id}",
-                        section=section,
-                        object_type="VESSEL_CONTROLLER_EVIDENCE",
-                        object_id=str(row.id),
-                        title=f"实际控制人证据：{row.party_name}",
-                        status_code=row.status_code,
-                        source_code=row.source_type_code,
-                        created_at=row.created_at,
-                        updated_at=row.updated_at,
-                        payload={
-                            "controller_role_code": row.controller_role_code,
-                            "confidence_level": row.confidence_level,
-                            "verified_status_code": row.verified_status_code,
-                            "audit_task_id": row.audit_task_id,
-                            "evidence_summary": row.evidence_summary,
-                            "revision": row.revision,
-                        },
-                    )
-                )
+                items.append(self._relation_evidence_item(section, "VESSEL_CONTROLLER_EVIDENCE", row, f"实际控制人证据：{row.party_name}"))
             for row in await self.db.scalars(
                 select(VesselAffiliationEvidence).where(VesselAffiliationEvidence.vessel_profile_id == vessel_id)
             ):
-                items.append(
-                    VesselProfileCardEvidenceItem(
-                        id=f"affiliation_evidence:{row.id}",
-                        section=section,
-                        object_type="VESSEL_AFFILIATION_EVIDENCE",
-                        object_id=str(row.id),
-                        title=f"挂靠关系证据：{row.affiliation_type_code}",
-                        status_code=row.status_code,
-                        source_code=row.source_type_code,
-                        created_at=row.created_at,
-                        updated_at=row.updated_at,
-                        payload={
-                            "subject_name": row.subject_name,
-                            "counterparty_name": row.counterparty_name,
-                            "confidence_level": row.confidence_level,
-                            "verified_status_code": row.verified_status_code,
-                            "audit_task_id": row.audit_task_id,
-                            "evidence_summary": row.evidence_summary,
-                            "revision": row.revision,
-                        },
-                    )
-                )
+                items.append(self._relation_evidence_item(section, "VESSEL_AFFILIATION_EVIDENCE", row, f"挂靠关系证据：{row.affiliation_type_code}"))
             if signal_rows:
                 notes.append("合规风险证据来自 Round 5 风险信号和补充证据")
             rows = (
@@ -2791,6 +3236,12 @@ class VesselService:
                     )
                 )
 
+        for item in items:
+            if not item.display_fields:
+                item.display_fields = self._profile_evidence_display_fields(item)
+            if not item.recommended_actions:
+                item.recommended_actions = self._profile_evidence_actions(vessel_id, item)
+        await self._attach_profile_relation_files(items)
         items.sort(key=lambda item: item.updated_at or item.created_at or datetime.min, reverse=True)
         source_code = {
             "identity": "VESSEL_PROFILE",
@@ -2809,6 +3260,181 @@ class VesselService:
             source_trace=[self._profile_card_source_trace(source_code, status_code="AVAILABLE" if items else "EMPTY")],
             uncertainty_notes=notes,
         )
+
+    async def _attach_profile_relation_files(self, items: list[VesselProfileCardEvidenceItem]) -> None:
+        grouped: dict[str, list[int]] = defaultdict(list)
+        for item in items:
+            if item.object_type not in {"VESSEL_CONTROLLER_EVIDENCE", "VESSEL_AFFILIATION_EVIDENCE"}:
+                continue
+            try:
+                grouped[item.object_type].append(int(item.object_id or 0))
+            except (TypeError, ValueError):
+                continue
+        attachment_maps: dict[str, dict[int, list[VesselRelationEvidenceAttachmentResponse]]] = {}
+        for evidence_type, ids in grouped.items():
+            attachment_maps[evidence_type] = await self._relation_evidence_attachment_map(evidence_type, ids)
+        for item in items:
+            if item.object_type not in attachment_maps:
+                continue
+            try:
+                evidence_id = int(item.object_id or 0)
+            except (TypeError, ValueError):
+                continue
+            attachments = attachment_maps[item.object_type].get(evidence_id, [])
+            if attachments:
+                item.attachment_refs = [attachment.model_dump(mode="json") for attachment in attachments]
+
+    @staticmethod
+    def _profile_evidence_display_fields(item: VesselProfileCardEvidenceItem) -> list[dict[str, Any]]:
+        payload = item.payload or {}
+        templates: dict[str, list[tuple[str, str]]] = {
+            "VESSEL_PROFILE": [
+                ("船名", "ship_name"),
+                ("MMSI", "current_mmsi"),
+                ("船型", "ship_type_code"),
+                ("档案状态", "profile_status_code"),
+            ],
+            "QUALITY_ISSUE": [
+                ("对象", "affected_object_type"),
+                ("对象 ID", "affected_object_id"),
+                ("影响范围", "impact_scope"),
+                ("关闭证据", "resolved_evidence"),
+            ],
+            "VESSEL_RISK_SIGNAL": [
+                ("风险类型", "risk_type_code"),
+                ("风险等级", "risk_level"),
+                ("规则", "rule_code"),
+                ("不确定性", "uncertainty_notes"),
+            ],
+            "VESSEL_CERTIFICATE": [
+                ("证书类型", "certificate_type_code"),
+                ("证书号", "certificate_no"),
+                ("签发机构", "issuing_authority"),
+                ("有效期至", "valid_to"),
+            ],
+            "VESSEL_CONTROLLER_EVIDENCE": [
+                ("控制人", "party_name"),
+                ("控制人角色", "controller_role_code"),
+                ("可信度", "confidence_level"),
+                ("审核状态", "verified_status_code"),
+                ("证件类型", "controller_certificate_type"),
+                ("证件号", "controller_certificate_no"),
+                ("联系方式", "contact_phone"),
+                ("与所有人关系", "owner_relationship"),
+                ("与经营人关系", "operator_relationship"),
+                ("确认来源", "confirmation_source"),
+                ("确认方式", "confirmation_method"),
+                ("有效期开始", "effective_from"),
+                ("有效期结束", "effective_to"),
+                ("证据摘要", "evidence_summary"),
+            ],
+            "VESSEL_AFFILIATION_EVIDENCE": [
+                ("挂靠类型", "affiliation_type_code"),
+                ("主体", "subject_name"),
+                ("相对方", "counterparty_name"),
+                ("挂靠公司", "affiliation_company"),
+                ("实际船东", "actual_shipowner"),
+                ("协议开始", "agreement_start"),
+                ("协议结束", "agreement_end"),
+                ("证书经营主体", "certificate_operator"),
+                ("营运证关系", "transport_permit_relation"),
+                ("业务联系人", "business_contact"),
+                ("可信度", "confidence_level"),
+                ("证据摘要", "evidence_summary"),
+            ],
+            "RECOGNITION_FIELD_DIFF": [
+                ("字段", "field_name"),
+                ("当前值", "current_value_text"),
+                ("识别值", "recognized_value_text"),
+                ("置信度", "confidence_score"),
+            ],
+            "RECOGNITION_ADOPTION": [
+                ("识别记录", "recognition_id"),
+                ("采纳字段", "adopted_fields"),
+                ("跳过字段", "skipped_fields"),
+                ("原因", "reason"),
+            ],
+            "AIS_SUMMARY": [
+                ("最新时间", "latest_position_time"),
+                ("城市", "latest_city_name"),
+                ("新鲜度", "summary_status_code"),
+                ("不可用原因", "ais_unavailable_reason"),
+            ],
+        }
+        keys = templates.get(item.object_type)
+        if keys is None:
+            keys = [(key, key) for key in list(payload)[:5]]
+        fields: list[dict[str, Any]] = []
+        for label, key in keys:
+            value = payload.get(key)
+            if value is not None and value != "":
+                fields.append({"label": label, "value": value})
+        return fields
+
+    @staticmethod
+    def _profile_evidence_actions(vessel_id: int, item: VesselProfileCardEvidenceItem) -> list[VesselRecommendedAction]:
+        if item.object_type == "QUALITY_ISSUE":
+            return [
+                VesselRecommendedAction(
+                    action_type="OPEN_QUALITY",
+                    label="处理质量问题",
+                    target_path=f"/vessels/quality?quality_issue_id={item.object_id}&vessel_id={vessel_id}",
+                    target_object_type=item.object_type,
+                    target_object_id=item.object_id,
+                    source_object_anchor=f"{item.object_type}:{item.object_id}",
+                    workbench_group="QUALITY",
+                )
+            ]
+        if item.object_type == "VESSEL_RISK_SIGNAL":
+            return [
+                VesselRecommendedAction(
+                    action_type="OPEN_RISK",
+                    label="处理风险",
+                    target_path=f"/vessels/{vessel_id}/compliance?risk_signal_id={item.object_id}",
+                    target_object_type=item.object_type,
+                    target_object_id=item.object_id,
+                    source_object_anchor=f"{item.object_type}:{item.object_id}",
+                    workbench_group="RISK",
+                )
+            ]
+        if item.object_type in {"VESSEL_CONTROLLER_EVIDENCE", "VESSEL_AFFILIATION_EVIDENCE"}:
+            tab = "controller" if item.object_type == "VESSEL_CONTROLLER_EVIDENCE" else "affiliation"
+            return [
+                VesselRecommendedAction(
+                    action_type="OPEN_RELATION_EVIDENCE",
+                    label="查看主体证据",
+                    target_path=f"/vessels/{vessel_id}/relations?tab={tab}&evidence_id={item.object_id}",
+                    target_object_type=item.object_type,
+                    target_object_id=item.object_id,
+                    source_object_anchor=f"{item.object_type}:{item.object_id}",
+                    workbench_group="EVIDENCE",
+                )
+            ]
+        if item.object_type == "VESSEL_CERTIFICATE":
+            return [
+                VesselRecommendedAction(
+                    action_type="OPEN_CERTIFICATE",
+                    label="维护证书",
+                    target_path=f"/vessels/{vessel_id}/edit?tab=certificates&certificate_id={item.object_id}",
+                    target_object_type=item.object_type,
+                    target_object_id=item.object_id,
+                    source_object_anchor=f"{item.object_type}:{item.object_id}",
+                    workbench_group="RISK",
+                )
+            ]
+        if item.object_type == "RECOGNITION_FIELD_DIFF":
+            return [
+                VesselRecommendedAction(
+                    action_type="OPEN_OCR",
+                    label="确认 OCR 字段",
+                    target_path=f"/vessels/recognitions?vessel_id={vessel_id}&field_diff_id={item.object_id}",
+                    target_object_type=item.object_type,
+                    target_object_id=item.object_id,
+                    source_object_anchor=f"{item.object_type}:{item.object_id}",
+                    workbench_group="OCR",
+                )
+            ]
+        return []
 
     async def position_monitor(self, query) -> VesselPositionMonitorResponse:
         generated_at = datetime.utcnow()
@@ -3422,7 +4048,7 @@ class VesselService:
                 "current_mmsi": payload.mmsi,
                 "profile_status_code": "ACTIVE",
                 "identity_status_code": "UNLINKED",
-                "source_type_code": "MANUAL",
+                "source_type_code": payload.source_type_code,
                 "audit_status": "PENDING",
             }
         )
@@ -4131,7 +4757,7 @@ class VesselService:
         response.change_event_id = event_id
         return response
 
-    async def delete_person_certificate(
+    async def void_person_certificate(
         self,
         vessel_id: int,
         person_certificate_id: int,
@@ -4761,7 +5387,7 @@ class VesselService:
         )
         await self._copy_singletons(vessel_id, new_profile.id)
         await self._copy_history(vessel_id, new_profile.id)
-        await self.repo.replace_many_by_profile(
+        await self.repo.create_many_by_profile(
             VesselOwnerPeriod,
             new_profile.id,
             [
@@ -5571,7 +6197,6 @@ class VesselService:
             raise NotFoundError("VesselCertificateImageRecognition", recognition_id)
         accepted = self._normalize_recognition_payload(recognition.candidate_payload_json or {})
         rows = await self._certificate_recognition_diff_rows(vessel_id, cert, recognition, accepted)
-        await self.db.commit()
         return [VesselRecognitionFieldDiffResponse(**_row_dict(row)) for row in rows]
 
     async def adopt_certificate_recognition(
@@ -5597,8 +6222,6 @@ class VesselService:
         accepted = self._normalize_recognition_payload(payload.accepted_payload_json or recognition.candidate_payload_json or {})
         if not accepted:
             raise ValidationError("没有可确认的识别结果")
-        if not await self._recognition_review_diff_rows("VESSEL_CERTIFICATE_IMAGE_RECOGNITION", recognition_id):
-            raise ConflictError("请先获取 OCR 字段差异再提交采纳", code="OCR_DIFF_REQUIRED")
         diff_rows = await self._certificate_recognition_diff_rows(vessel_id, cert, recognition, accepted)
         before_cert = _row_dict(cert)
         requested_fields = set(getattr(payload, "adopt_fields", None) or [])
@@ -5698,7 +6321,6 @@ class VesselService:
             raise NotFoundError("VesselPersonCertificateImageRecognition", recognition_id)
         accepted = self._normalize_recognition_payload(recognition.candidate_payload_json or {})
         rows = await self._person_certificate_recognition_diff_rows(vessel_id, cert, recognition, accepted)
-        await self.db.commit()
         return [VesselRecognitionFieldDiffResponse(**_row_dict(row)) for row in rows]
 
     async def adopt_person_certificate_recognition(
@@ -5723,8 +6345,6 @@ class VesselService:
         accepted = self._normalize_recognition_payload(payload.accepted_payload_json or recognition.candidate_payload_json or {})
         if not accepted:
             raise ValidationError("没有可确认的识别结果")
-        if not await self._recognition_review_diff_rows("PERSON_CERTIFICATE_IMAGE_RECOGNITION", recognition_id):
-            raise ConflictError("请先获取 OCR 字段差异再提交采纳", code="OCR_DIFF_REQUIRED")
         diff_rows = await self._person_certificate_recognition_diff_rows(vessel_id, cert, recognition, accepted)
         before = _row_dict(cert)
         requested_fields = set(getattr(payload, "adopt_fields", None) or [])
@@ -5799,7 +6419,6 @@ class VesselService:
             raise NotFoundError("VesselOwnerDocumentImageRecognition", recognition_id)
         accepted = self._normalize_recognition_payload(recognition.candidate_payload_json or {})
         rows = await self._owner_document_recognition_diff_rows(vessel_id, owner, recognition, accepted)
-        await self.db.commit()
         return [VesselRecognitionFieldDiffResponse(**_row_dict(row)) for row in rows]
 
     async def adopt_owner_document_recognition(
@@ -5829,8 +6448,6 @@ class VesselService:
         accepted = self._normalize_recognition_payload(payload.accepted_payload_json or recognition.candidate_payload_json or {})
         if not accepted:
             raise ValidationError("没有可确认的识别结果")
-        if not await self._recognition_review_diff_rows("OWNER_DOCUMENT_IMAGE_RECOGNITION", recognition_id):
-            raise ConflictError("请先获取 OCR 字段差异再提交采纳", code="OCR_DIFF_REQUIRED")
         diff_rows = await self._owner_document_recognition_diff_rows(vessel_id, owner, recognition, accepted)
         before = _row_dict(owner)
         updates: dict[str, Any] = {}
@@ -7940,9 +8557,25 @@ class VesselService:
         ).scalars().all()
         label_map = await _load_label_map(self.db)
         profiles = await self._profiles_by_ids([row.vessel_profile_id for row in rows if row.vessel_profile_id])
+        task_by_issue_id: dict[str, VesselGovernanceTask] = {}
+        if rows:
+            issue_ids = [str(row.id) for row in rows]
+            task_rows = (
+                await self.db.scalars(
+                    select(VesselGovernanceTask)
+                    .where(
+                        VesselGovernanceTask.source_object_type == "VESSEL_DATA_QUALITY_ISSUE",
+                        VesselGovernanceTask.source_object_id.in_(issue_ids),
+                    )
+                    .order_by(VesselGovernanceTask.updated_at.desc(), VesselGovernanceTask.id.desc())
+                )
+            ).all()
+            for task in task_rows:
+                task_by_issue_id.setdefault(task.source_object_id, task)
         items: list[VesselQualityIssueListItemResponse] = []
         for row in rows:
             profile = profiles.get(row.vessel_profile_id) if row.vessel_profile_id else None
+            task = task_by_issue_id.get(str(row.id))
             vessel_summary = None
             if profile is not None:
                 vessel_summary = VesselQualityIssueVesselSummary(
@@ -7959,9 +8592,95 @@ class VesselService:
                     issue_type_name=label_map.get("VESSEL_QUALITY_ISSUE_TYPE", {}).get(row.issue_type_code),
                     status_name=label_map.get("VESSEL_QUALITY_ISSUE_STATUS", {}).get(row.status_code),
                     vessel=vessel_summary,
+                    governance_task_id=task.id if task else None,
+                    governance_task_no=task.task_no if task else None,
+                    governance_task_status_code=task.status_code if task else None,
+                    governance_task_assigned_to=task.assigned_to if task else None,
+                    action_path=self._quality_issue_action_path(row),
+                    field_anchor=row.field_name,
+                    recommended_actions=self._quality_issue_actions(row),
+                    next_actions=self._quality_issue_actions(row),
+                    explain_reason=self._quality_issue_explain_reason(row),
+                    evidence_gaps=self._quality_issue_evidence_gaps(row),
+                    source_object_anchor=f"VESSEL_DATA_QUALITY_ISSUE:{row.id}",
+                    workbench_group="QUALITY",
+                    verification_status_code=row.last_recheck_status_code or ("PASSED" if row.status_code == "RESOLVED" else "WAITING_RECHECK"),
+                    verification_message=(
+                        row.last_recheck_message
+                        or ("问题已关闭，最近一次校验通过。" if row.status_code == "RESOLVED" else "请修复字段并重新计算资产摘要；问题关闭后对应任务才能关闭。")
+                    ),
                 )
             )
         return PageResponse(total=int(total or 0), page=query.page, page_size=query.page_size, items=items)
+
+    async def recheck_quality_issue(
+        self,
+        issue_id: int,
+        *,
+        operator_id: int | None = None,
+        commit: bool = True,
+        close_tasks: bool = True,
+    ) -> VesselQualityIssueRecheckResponse:
+        issue = await self.db.get(VesselDataQualityIssue, issue_id)
+        if issue is None:
+            raise NotFoundError("VesselDataQualityIssue", issue_id)
+        now = datetime.utcnow()
+        profile: VesselProfile | None = None
+        if issue.vessel_profile_id is not None:
+            profile = await self.db.get(VesselProfile, issue.vessel_profile_id)
+            if profile is not None:
+                await self._upsert_vessel_summary(profile)
+                await self.db.flush()
+                await self.db.refresh(issue)
+        resolved = issue.status_code == "RESOLVED"
+        issue.last_rechecked_at = now
+        issue.last_recheck_status_code = "PASSED" if resolved else "FAILED"
+        if resolved:
+            issue.last_recheck_message = "重新校验通过，质量问题已自动关闭。"
+        elif profile is None:
+            issue.last_recheck_message = "该质量问题缺少可重算的船舶档案上下文，需补齐来源对象后再校验。"
+        else:
+            issue.last_recheck_message = "重新校验仍命中，请继续修复源字段或证据。"
+        latest_task: VesselGovernanceTask | None = None
+        task_rows = (
+            await self.db.scalars(
+                select(VesselGovernanceTask)
+                .where(
+                    VesselGovernanceTask.source_object_type == "VESSEL_DATA_QUALITY_ISSUE",
+                    VesselGovernanceTask.source_object_id == str(issue.id),
+                )
+                .order_by(VesselGovernanceTask.updated_at.desc(), VesselGovernanceTask.id.desc())
+            )
+        ).all()
+        if task_rows:
+            latest_task = task_rows[0]
+        if resolved and close_tasks:
+            for task in task_rows:
+                if task.status_code in {"OPEN", "ASSIGNED", "IN_PROGRESS", "REOPENED"}:
+                    task.status_code = "RESOLVED"
+                    task.resolved_at = now
+                    task.resolved_by = operator_id
+                    task.resolution_reason = "质量问题重新校验通过，任务自动关闭"
+                    task.resolution_evidence_json = {"quality_issue_recheck": "PASSED", "issue_id": issue.id}
+                    task.revision = int(task.revision or 1) + 1
+                    task.updated_at = now
+                    latest_task = task
+        await self.db.flush()
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(issue)
+            if latest_task is not None:
+                await self.db.refresh(latest_task)
+        return VesselQualityIssueRecheckResponse(
+            issue_id=issue.id,
+            status_code=issue.status_code,
+            recheck_status_code=issue.last_recheck_status_code or ("PASSED" if resolved else "FAILED"),
+            recheck_message=issue.last_recheck_message or "",
+            resolved=resolved,
+            rechecked_at=issue.last_rechecked_at or now,
+            governance_task_id=latest_task.id if latest_task else None,
+            governance_task_status_code=latest_task.status_code if latest_task else None,
+        )
 
     async def list_compliance_risks(self, query: Any) -> PageResponse[VesselRiskSignalResponse]:
         stmt = select(VesselRiskSignal).join(VesselProfile, VesselProfile.id == VesselRiskSignal.vessel_profile_id)
@@ -8133,6 +8852,10 @@ class VesselService:
         self._ensure_revision(row, payload.revision)
         if payload.status_code in COMPLIANCE_CLOSED_STATUSES and not payload.resolution_reason:
             raise ValidationError("关闭风险必须填写处理原因")
+        if payload.status_code in COMPLIANCE_CLOSED_STATUSES:
+            resolution_type = (payload.evidence_json or {}).get("resolution_type")
+            if resolution_type not in {"DATA_RECHECK_PASSED", "FALSE_POSITIVE", "REVIEW_CONFIRMED"}:
+                raise ValidationError("关闭风险必须声明 resolution_type：DATA_RECHECK_PASSED / FALSE_POSITIVE / REVIEW_CONFIRMED")
         before = _row_dict(row)
         row.status_code = payload.status_code
         row.resolution_reason = payload.resolution_reason
@@ -8166,7 +8889,20 @@ class VesselService:
             )
         ).all()
         label_map = await _load_label_map(self.db)
-        return [self._controller_evidence_response(row, label_map) for row in rows]
+        conclusion_refs = await self._controller_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map(
+            "VESSEL_CONTROLLER_EVIDENCE",
+            [row.id for row in rows],
+        )
+        return [
+            self._controller_evidence_response(
+                row,
+                label_map,
+                conclusion_refs.get(row.id, []),
+                attachment_map.get(row.id, []),
+            )
+            for row in rows
+        ]
 
     async def create_controller_evidence(self, vessel_id: int, payload: Any, *, operator_id: int | None = None) -> VesselControllerEvidenceResponse:
         await self._require_profile(vessel_id)
@@ -8182,10 +8918,14 @@ class VesselService:
             after=_row_dict(row),
         )
         await self._add_change_event(vessel_id, "CREATE_CONTROLLER_EVIDENCE", "新增实际控制人证据", None, _row_dict(row), operator_id, object_type="vessel_controller_evidence", object_id=row.id)
+        await self.rebuild_relation_conclusion_candidates(vessel_id, operator_id=operator_id, commit=False)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
         await self.db.refresh(row)
-        return self._controller_evidence_response(row, await _load_label_map(self.db))
+        label_map = await _load_label_map(self.db)
+        conclusion_refs = await self._controller_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map("VESSEL_CONTROLLER_EVIDENCE", [row.id])
+        return self._controller_evidence_response(row, label_map, conclusion_refs.get(row.id, []), attachment_map.get(row.id, []))
 
     async def update_controller_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselControllerEvidenceResponse:
         row = await self._require_evidence_row(VesselControllerEvidence, vessel_id, evidence_id)
@@ -8209,10 +8949,14 @@ class VesselService:
             after=_row_dict(row),
         )
         await self._add_change_event(vessel_id, "UPDATE_CONTROLLER_EVIDENCE", "更新实际控制人证据", before, _row_dict(row), operator_id, object_type="vessel_controller_evidence", object_id=row.id, reason=reason)
+        await self.rebuild_relation_conclusion_candidates(vessel_id, operator_id=operator_id, commit=False)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
         await self.db.refresh(row)
-        return self._controller_evidence_response(row, await _load_label_map(self.db))
+        label_map = await _load_label_map(self.db)
+        conclusion_refs = await self._controller_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map("VESSEL_CONTROLLER_EVIDENCE", [row.id])
+        return self._controller_evidence_response(row, label_map, conclusion_refs.get(row.id, []), attachment_map.get(row.id, []))
 
     async def void_controller_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselControllerEvidenceResponse:
         row = await self._require_evidence_row(VesselControllerEvidence, vessel_id, evidence_id)
@@ -8227,10 +8971,14 @@ class VesselService:
         row.revision = int(row.revision or 1) + 1
         row.updated_at = datetime.utcnow()
         await self._add_change_event(vessel_id, "VOID_CONTROLLER_EVIDENCE", "作废实际控制人证据", before, _row_dict(row), operator_id, object_type="vessel_controller_evidence", object_id=row.id, reason=row.void_reason)
+        await self.rebuild_relation_conclusion_candidates(vessel_id, operator_id=operator_id, commit=False)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
         await self.db.refresh(row)
-        return self._controller_evidence_response(row, await _load_label_map(self.db))
+        label_map = await _load_label_map(self.db)
+        conclusion_refs = await self._controller_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map("VESSEL_CONTROLLER_EVIDENCE", [row.id])
+        return self._controller_evidence_response(row, label_map, conclusion_refs.get(row.id, []), attachment_map.get(row.id, []))
 
     async def list_affiliation_evidence(self, vessel_id: int) -> list[VesselAffiliationEvidenceResponse]:
         await self._require_profile(vessel_id)
@@ -8242,7 +8990,20 @@ class VesselService:
             )
         ).all()
         label_map = await _load_label_map(self.db)
-        return [self._affiliation_evidence_response(row, label_map) for row in rows]
+        conclusion_refs = await self._affiliation_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map(
+            "VESSEL_AFFILIATION_EVIDENCE",
+            [row.id for row in rows],
+        )
+        return [
+            self._affiliation_evidence_response(
+                row,
+                label_map,
+                conclusion_refs.get(row.id, []),
+                attachment_map.get(row.id, []),
+            )
+            for row in rows
+        ]
 
     async def create_affiliation_evidence(self, vessel_id: int, payload: Any, *, operator_id: int | None = None) -> VesselAffiliationEvidenceResponse:
         await self._require_profile(vessel_id)
@@ -8260,10 +9021,14 @@ class VesselService:
             after=_row_dict(row),
         )
         await self._add_change_event(vessel_id, "CREATE_AFFILIATION_EVIDENCE", "新增挂靠关系证据", None, _row_dict(row), operator_id, object_type="vessel_affiliation_evidence", object_id=row.id)
+        await self.rebuild_relation_conclusion_candidates(vessel_id, operator_id=operator_id, commit=False)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
         await self.db.refresh(row)
-        return self._affiliation_evidence_response(row, await _load_label_map(self.db))
+        label_map = await _load_label_map(self.db)
+        conclusion_refs = await self._affiliation_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map("VESSEL_AFFILIATION_EVIDENCE", [row.id])
+        return self._affiliation_evidence_response(row, label_map, conclusion_refs.get(row.id, []), attachment_map.get(row.id, []))
 
     async def update_affiliation_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselAffiliationEvidenceResponse:
         row = await self._require_evidence_row(VesselAffiliationEvidence, vessel_id, evidence_id)
@@ -8288,10 +9053,14 @@ class VesselService:
             after=_row_dict(row),
         )
         await self._add_change_event(vessel_id, "UPDATE_AFFILIATION_EVIDENCE", "更新挂靠关系证据", before, _row_dict(row), operator_id, object_type="vessel_affiliation_evidence", object_id=row.id, reason=reason)
+        await self.rebuild_relation_conclusion_candidates(vessel_id, operator_id=operator_id, commit=False)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
         await self.db.refresh(row)
-        return self._affiliation_evidence_response(row, await _load_label_map(self.db))
+        label_map = await _load_label_map(self.db)
+        conclusion_refs = await self._affiliation_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map("VESSEL_AFFILIATION_EVIDENCE", [row.id])
+        return self._affiliation_evidence_response(row, label_map, conclusion_refs.get(row.id, []), attachment_map.get(row.id, []))
 
     async def void_affiliation_evidence(self, vessel_id: int, evidence_id: int, payload: Any, *, operator_id: int | None = None) -> VesselAffiliationEvidenceResponse:
         row = await self._require_evidence_row(VesselAffiliationEvidence, vessel_id, evidence_id)
@@ -8306,10 +9075,361 @@ class VesselService:
         row.revision = int(row.revision or 1) + 1
         row.updated_at = datetime.utcnow()
         await self._add_change_event(vessel_id, "VOID_AFFILIATION_EVIDENCE", "作废挂靠关系证据", before, _row_dict(row), operator_id, object_type="vessel_affiliation_evidence", object_id=row.id, reason=row.void_reason)
+        await self.rebuild_relation_conclusion_candidates(vessel_id, operator_id=operator_id, commit=False)
         await self.db.commit()
         await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
         await self.db.refresh(row)
-        return self._affiliation_evidence_response(row, await _load_label_map(self.db))
+        label_map = await _load_label_map(self.db)
+        conclusion_refs = await self._affiliation_evidence_ref_map(vessel_id, label_map)
+        attachment_map = await self._relation_evidence_attachment_map("VESSEL_AFFILIATION_EVIDENCE", [row.id])
+        return self._affiliation_evidence_response(row, label_map, conclusion_refs.get(row.id, []), attachment_map.get(row.id, []))
+
+    async def list_relation_conclusions(self, vessel_id: int) -> VesselRelationConclusionSummaryResponse:
+        await self._require_profile(vessel_id)
+        label_map = await _load_label_map(self.db)
+        controller_rows = (
+            await self.db.scalars(
+                select(VesselControllerConclusion)
+                .where(VesselControllerConclusion.vessel_profile_id == vessel_id)
+                .order_by(VesselControllerConclusion.conclusion_status_code.asc(), VesselControllerConclusion.updated_at.desc())
+            )
+        ).all()
+        affiliation_rows = (
+            await self.db.scalars(
+                select(VesselAffiliationConclusion)
+                .where(VesselAffiliationConclusion.vessel_profile_id == vessel_id)
+                .order_by(VesselAffiliationConclusion.conclusion_status_code.asc(), VesselAffiliationConclusion.updated_at.desc())
+            )
+        ).all()
+        return VesselRelationConclusionSummaryResponse(
+            vessel_profile_id=vessel_id,
+            controller_conclusions=[self._controller_conclusion_response(row, label_map) for row in controller_rows],
+            affiliation_conclusions=[self._affiliation_conclusion_response(row, label_map) for row in affiliation_rows],
+        )
+
+    async def upload_relation_evidence_attachment(
+        self,
+        vessel_id: int,
+        evidence_type: str,
+        evidence_id: int,
+        file: UploadFile,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselRelationEvidenceAttachmentResponse:
+        evidence_type_code = self._normalize_relation_evidence_type(evidence_type)
+        await self._require_relation_evidence(vessel_id, evidence_type_code, evidence_id)
+        storage_file = await FileStorageService(self.db).upload_file(
+            file=file,
+            object_prefix=f"vessels/{vessel_id}/relation-evidence/{evidence_type_code.lower()}/{evidence_id}",
+            uploaded_by=operator_id,
+        )
+        now = datetime.utcnow()
+        row = VesselRelationEvidenceAttachment(
+            vessel_profile_id=vessel_id,
+            evidence_type_code=evidence_type_code,
+            evidence_id=evidence_id,
+            storage_file_id=storage_file.id,
+            file_name=storage_file.original_file_name,
+            content_type=storage_file.content_type,
+            file_size=storage_file.file_size,
+            uploaded_by=operator_id,
+            uploaded_at=now,
+            created_at=now,
+        )
+        self.db.add(row)
+        await self.db.flush()
+        await self._add_change_event(
+            vessel_id,
+            "UPLOAD_RELATION_EVIDENCE_ATTACHMENT",
+            "上传主体证据附件",
+            None,
+            _row_dict(row),
+            operator_id,
+            object_type="vessel_relation_evidence_attachment",
+            object_id=row.id,
+        )
+        await self.db.commit()
+        await self.db.refresh(row)
+        return self._relation_evidence_attachment_response(row)
+
+    async def void_relation_evidence_attachment(
+        self,
+        vessel_id: int,
+        evidence_type: str,
+        evidence_id: int,
+        attachment_id: int,
+        *,
+        reason: str | None = None,
+        operator_id: int | None = None,
+    ) -> VesselRelationEvidenceAttachmentResponse:
+        evidence_type_code = self._normalize_relation_evidence_type(evidence_type)
+        await self._require_relation_evidence(vessel_id, evidence_type_code, evidence_id)
+        row = await self.db.get(VesselRelationEvidenceAttachment, attachment_id)
+        if row is None or row.vessel_profile_id != vessel_id or row.evidence_type_code != evidence_type_code or row.evidence_id != evidence_id:
+            raise NotFoundError("VesselRelationEvidenceAttachment", attachment_id)
+        if row.voided_at is None:
+            before = _row_dict(row)
+            row.voided_at = datetime.utcnow()
+            row.voided_by = operator_id
+            row.void_reason = reason or "前端主体证据附件作废"
+            await self._add_change_event(
+                vessel_id,
+                "VOID_RELATION_EVIDENCE_ATTACHMENT",
+                "作废主体证据附件",
+                before,
+                _row_dict(row),
+                operator_id,
+                object_type="vessel_relation_evidence_attachment",
+                object_id=row.id,
+                reason=row.void_reason,
+            )
+            await self.db.commit()
+            await self.db.refresh(row)
+        return self._relation_evidence_attachment_response(row)
+
+    async def resolve_relation_conclusion_conflict(
+        self,
+        vessel_id: int,
+        conclusion_type: str,
+        conclusion_id: int,
+        payload: Any,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselRelationConclusionSummaryResponse:
+        model = self._relation_conclusion_model(conclusion_type)
+        row = await self._require_conclusion_row(model, vessel_id, conclusion_id)
+        accepted_id = getattr(payload, "accepted_conclusion_id", None)
+        target_status = getattr(payload, "mark_unaccepted_as", None) or "CONFLICTED"
+        if target_status not in {"CONFLICTED", "STALE_NEEDS_REVIEW"}:
+            raise ValidationError("未采信结论只能标记为 CONFLICTED 或 STALE_NEEDS_REVIEW")
+        reason = getattr(payload, "conflict_reason", None) or "人工处理冲突结论"
+        now = datetime.utcnow()
+        rows = (
+            await self.db.scalars(
+                select(model).where(
+                    model.vessel_profile_id == vessel_id,
+                    model.voided_at.is_(None),
+                    model.conclusion_status_code.in_(["CANDIDATE", "CONFLICTED", "STALE_NEEDS_REVIEW", "CURRENT"]),
+                )
+            )
+        ).all()
+        accepted_row = None
+        if accepted_id is not None:
+            accepted_row = next((item for item in rows if item.id == int(accepted_id)), None)
+            if accepted_row is None:
+                raise NotFoundError(model.__name__, accepted_id)
+        elif row.conclusion_status_code == "CURRENT":
+            accepted_row = row
+        before = [_row_dict(item) for item in rows]
+        for item in rows:
+            if accepted_row is not None and item.id == accepted_row.id:
+                item.conclusion_status_code = "CURRENT"
+                item.confirmed_at = now
+                item.confirmed_by = operator_id
+                item.conflict_reason = reason
+            elif item.id == row.id or item.conclusion_status_code in {"CANDIDATE", "CONFLICTED", "STALE_NEEDS_REVIEW"}:
+                item.conclusion_status_code = target_status
+                item.conflict_reason = reason
+            item.revision = int(item.revision or 1) + 1
+            item.updated_at = now
+        await self._add_change_event(
+            vessel_id,
+            "RESOLVE_RELATION_CONCLUSION_CONFLICT",
+            "处理主体结论冲突",
+            before,
+            [_row_dict(item) for item in rows],
+            operator_id,
+            object_type="vessel_relation_conclusion",
+            object_id=conclusion_id,
+            reason=reason,
+        )
+        await self.db.commit()
+        await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        return await self.list_relation_conclusions(vessel_id)
+
+    async def rebuild_relation_conclusion_candidates(
+        self,
+        vessel_id: int,
+        *,
+        operator_id: int | None = None,
+        commit: bool = True,
+    ) -> VesselRelationConclusionSummaryResponse:
+        await self._require_profile(vessel_id)
+        now = datetime.utcnow()
+        await self._mark_stale_relation_conclusions(vessel_id, now=now, operator_id=operator_id)
+        controller_rows = (
+            await self.db.scalars(
+                select(VesselControllerEvidence).where(
+                    VesselControllerEvidence.vessel_profile_id == vessel_id,
+                    VesselControllerEvidence.status_code == "ACTIVE",
+                    VesselControllerEvidence.voided_at.is_(None),
+                    VesselControllerEvidence.verified_status_code == "APPROVED",
+                    or_(VesselControllerEvidence.effective_to.is_(None), VesselControllerEvidence.effective_to >= date.today()),
+                )
+            )
+        ).all()
+        affiliation_rows = (
+            await self.db.scalars(
+                select(VesselAffiliationEvidence).where(
+                    VesselAffiliationEvidence.vessel_profile_id == vessel_id,
+                    VesselAffiliationEvidence.status_code == "ACTIVE",
+                    VesselAffiliationEvidence.voided_at.is_(None),
+                    VesselAffiliationEvidence.verified_status_code == "APPROVED",
+                    or_(VesselAffiliationEvidence.effective_to.is_(None), VesselAffiliationEvidence.effective_to >= date.today()),
+                )
+            )
+        ).all()
+        await self._sync_controller_conclusion_candidates(vessel_id, controller_rows, now=now)
+        await self._sync_affiliation_conclusion_candidates(vessel_id, affiliation_rows, now=now)
+        await self.db.flush()
+        if commit:
+            await self._add_change_event(
+                vessel_id,
+                "REBUILD_RELATION_CONCLUSIONS",
+                "重建主体关系候选结论",
+                None,
+                {"controller_evidence_count": len(controller_rows), "affiliation_evidence_count": len(affiliation_rows)},
+                operator_id,
+                object_type="vessel_relation_conclusion",
+                object_id=vessel_id,
+            )
+            await self.db.commit()
+            await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        return await self.list_relation_conclusions(vessel_id)
+
+    async def confirm_controller_conclusion(
+        self,
+        vessel_id: int,
+        conclusion_id: int,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselControllerConclusionResponse:
+        await self._require_profile(vessel_id)
+        row = await self.db.get(VesselControllerConclusion, conclusion_id)
+        if row is None or row.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselControllerConclusion", conclusion_id)
+        if row.conclusion_status_code in {"VOIDED", "EXPIRED"}:
+            raise ValidationError("已作废或已过期的控制人结论不能确认为当前结论")
+        now = datetime.utcnow()
+        currents = (
+            await self.db.scalars(
+                select(VesselControllerConclusion).where(
+                    VesselControllerConclusion.vessel_profile_id == vessel_id,
+                    VesselControllerConclusion.conclusion_status_code == "CURRENT",
+                    VesselControllerConclusion.id != row.id,
+                    VesselControllerConclusion.voided_at.is_(None),
+                )
+            )
+        ).all()
+        for current in currents:
+            current.conclusion_status_code = "STALE_NEEDS_REVIEW"
+            current.conflict_reason = "已由新的人工确认结论取代"
+            current.revision = int(current.revision or 1) + 1
+            current.updated_at = now
+        row.conclusion_status_code = "CURRENT"
+        row.confirmed_at = now
+        row.confirmed_by = operator_id
+        row.voided_at = None
+        row.voided_by = None
+        row.void_reason = None
+        row.revision = int(row.revision or 1) + 1
+        row.updated_at = now
+        await self._add_change_event(vessel_id, "CONFIRM_CONTROLLER_CONCLUSION", "确认当前实际控制人", None, _row_dict(row), operator_id, object_type="vessel_controller_conclusion", object_id=row.id)
+        await self.db.commit()
+        await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
+        return self._controller_conclusion_response(row, await _load_label_map(self.db))
+
+    async def confirm_affiliation_conclusion(
+        self,
+        vessel_id: int,
+        conclusion_id: int,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselAffiliationConclusionResponse:
+        await self._require_profile(vessel_id)
+        row = await self.db.get(VesselAffiliationConclusion, conclusion_id)
+        if row is None or row.vessel_profile_id != vessel_id:
+            raise NotFoundError("VesselAffiliationConclusion", conclusion_id)
+        if row.conclusion_status_code in {"VOIDED", "EXPIRED"}:
+            raise ValidationError("已作废或已过期的挂靠/授权结论不能确认为当前结论")
+        now = datetime.utcnow()
+        currents = (
+            await self.db.scalars(
+                select(VesselAffiliationConclusion).where(
+                    VesselAffiliationConclusion.vessel_profile_id == vessel_id,
+                    VesselAffiliationConclusion.conclusion_status_code == "CURRENT",
+                    VesselAffiliationConclusion.id != row.id,
+                    VesselAffiliationConclusion.voided_at.is_(None),
+                )
+            )
+        ).all()
+        for current in currents:
+            current.conclusion_status_code = "STALE_NEEDS_REVIEW"
+            current.conflict_reason = "已由新的人工确认结论取代"
+            current.revision = int(current.revision or 1) + 1
+            current.updated_at = now
+        row.conclusion_status_code = "CURRENT"
+        row.confirmed_at = now
+        row.confirmed_by = operator_id
+        row.voided_at = None
+        row.voided_by = None
+        row.void_reason = None
+        row.revision = int(row.revision or 1) + 1
+        row.updated_at = now
+        await self._add_change_event(vessel_id, "CONFIRM_AFFILIATION_CONCLUSION", "确认当前挂靠/授权关系", None, _row_dict(row), operator_id, object_type="vessel_affiliation_conclusion", object_id=row.id)
+        await self.db.commit()
+        await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
+        return self._affiliation_conclusion_response(row, await _load_label_map(self.db))
+
+    async def void_controller_conclusion(
+        self,
+        vessel_id: int,
+        conclusion_id: int,
+        payload: Any,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselControllerConclusionResponse:
+        row = await self._require_conclusion_row(VesselControllerConclusion, vessel_id, conclusion_id)
+        self._ensure_revision(row, getattr(payload, "revision", None))
+        before = _row_dict(row)
+        now = datetime.utcnow()
+        row.conclusion_status_code = "VOIDED"
+        row.voided_at = now
+        row.voided_by = operator_id
+        row.void_reason = getattr(payload, "reason", None) or "主体关系结论作废"
+        row.revision = int(row.revision or 1) + 1
+        row.updated_at = now
+        await self._add_change_event(vessel_id, "VOID_CONTROLLER_CONCLUSION", "作废实际控制人结论", before, _row_dict(row), operator_id, object_type="vessel_controller_conclusion", object_id=row.id, reason=row.void_reason)
+        await self.db.commit()
+        await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
+        return self._controller_conclusion_response(row, await _load_label_map(self.db))
+
+    async def void_affiliation_conclusion(
+        self,
+        vessel_id: int,
+        conclusion_id: int,
+        payload: Any,
+        *,
+        operator_id: int | None = None,
+    ) -> VesselAffiliationConclusionResponse:
+        row = await self._require_conclusion_row(VesselAffiliationConclusion, vessel_id, conclusion_id)
+        self._ensure_revision(row, getattr(payload, "revision", None))
+        before = _row_dict(row)
+        now = datetime.utcnow()
+        row.conclusion_status_code = "VOIDED"
+        row.voided_at = now
+        row.voided_by = operator_id
+        row.void_reason = getattr(payload, "reason", None) or "主体关系结论作废"
+        row.revision = int(row.revision or 1) + 1
+        row.updated_at = now
+        await self._add_change_event(vessel_id, "VOID_AFFILIATION_CONCLUSION", "作废挂靠/授权结论", before, _row_dict(row), operator_id, object_type="vessel_affiliation_conclusion", object_id=row.id, reason=row.void_reason)
+        await self.db.commit()
+        await self._refresh_compliance_risk_best_effort(vessel_id, operator_id=operator_id)
+        await self.db.refresh(row)
+        return self._affiliation_conclusion_response(row, await _load_label_map(self.db))
 
     async def list_recognition_queue(self, query: Any) -> PageResponse[VesselRecognitionQueueItemResponse]:
         rows: list[tuple[str, Any]] = []
@@ -8410,7 +9530,164 @@ class VesselService:
             status_name=label_map.get("VESSEL_RISK_SIGNAL_STATUS", {}).get(row.status_code),
             confidence_level_name=label_map.get("VESSEL_CONFIDENCE_LEVEL", {}).get(row.confidence_level),
             vessel=self._vessel_signal_summary(profile, label_map),
+            recommended_actions=self._risk_signal_actions(row),
+            next_actions=self._risk_signal_actions(row),
+            explain_reason=self._risk_signal_explain_reason(row),
+            evidence_gaps=self._risk_signal_evidence_gaps(row),
+            source_object_anchor=f"VESSEL_RISK_SIGNAL:{row.id}",
+            workbench_group="RISK",
+            verification_status_code="WAITING_RECHECK" if row.status_code in COMPLIANCE_ACTIVE_STATUSES else "PASSED",
+            verification_message=(
+                "风险仍处于命中状态，请按推荐动作补证、修复或提交复核。"
+                if row.status_code in COMPLIANCE_ACTIVE_STATUSES
+                else "风险已关闭或已缓释。"
+            ),
+            proof_chain=self._risk_signal_proof_chain(row),
+            missing_evidence=self._risk_signal_evidence_gaps(row),
+            review_action_path=f"/vessels/{row.vessel_profile_id}/compliance?risk_signal_id={row.id}&review=1",
+            validation_entrypoint="POST /api/v1/vessels/{vessel_id}/compliance-risk/refresh",
         )
+
+    def _quality_issue_action_path(self, row: VesselDataQualityIssue) -> str | None:
+        if row.vessel_profile_id:
+            suffix = f"?quality_issue_id={row.id}"
+            if row.field_name:
+                suffix = f"{suffix}&field={row.field_name}"
+            return f"/vessels/{row.vessel_profile_id}/edit{suffix}"
+        return f"/vessels/quality?quality_issue_id={row.id}"
+
+    def _quality_issue_actions(self, row: VesselDataQualityIssue) -> list[VesselRecommendedAction]:
+        target_path = self._quality_issue_action_path(row)
+        if target_path is None:
+            return []
+        label = "定位字段并修复"
+        description = "修复源数据后重新计算资产摘要，系统校验通过才关闭问题。"
+        if row.issue_type_code == "AIS_UNMATCHED":
+            label = "核对 MMSI 与 AIS 映射"
+            description = "核对 MMSI、AIS 最新快照和未匹配来源，重新扫描后自动关闭。"
+        return [
+            VesselRecommendedAction(
+                action_type="FIX_SOURCE",
+                label=label,
+                target_path=target_path,
+                target_object_type="VESSEL_DATA_QUALITY_ISSUE",
+                target_object_id=str(row.id),
+                required_fields=[row.field_name] if row.field_name else [],
+                source_object_anchor=f"VESSEL_DATA_QUALITY_ISSUE:{row.id}",
+                workbench_group="QUALITY",
+                description=description,
+            )
+        ]
+
+    @staticmethod
+    def _quality_issue_explain_reason(row: VesselDataQualityIssue) -> str:
+        parts = [f"{row.issue_type_code} 命中 {row.affected_object_type}:{row.affected_object_id}"]
+        if row.field_name:
+            parts.append(f"字段 {row.field_name} 需要修复或补证")
+        if row.evidence_source:
+            parts.append(f"来源 {row.evidence_source}")
+        return "，".join(parts) + "。"
+
+    @staticmethod
+    def _quality_issue_evidence_gaps(row: VesselDataQualityIssue) -> list[str]:
+        gaps: list[str] = []
+        if row.field_name:
+            gaps.append(row.field_name)
+        if row.issue_type_code == "AIS_UNMATCHED":
+            gaps.extend(["MMSI 与 AIS 映射", "AIS 最新快照"])
+        elif row.issue_type_code == "MMSI_CONFLICT":
+            gaps.extend(["冲突船舶核对", "MMSI 当前有效性"])
+        elif row.issue_type_code == "PRIMARY_RELATION_MISSING":
+            gaps.extend(["主所有方/经营方", "主体关系结论"])
+        else:
+            gaps.append("重新校验通过记录")
+        return list(dict.fromkeys(gaps))
+
+    def _risk_signal_actions(self, row: VesselRiskSignal) -> list[VesselRecommendedAction]:
+        target_path = self._risk_signal_action_path(row)
+        actions = [
+            VesselRecommendedAction(
+                action_type="FIX_OR_REVIEW_RISK",
+                label=self._risk_signal_action_label(row),
+                target_path=target_path,
+                target_object_type="VESSEL_RISK_SIGNAL",
+                target_object_id=str(row.id),
+                required_fields=self._risk_signal_required_fields(row),
+                source_object_anchor=f"VESSEL_RISK_SIGNAL:{row.id}",
+                workbench_group="RISK",
+                description="由后端规则给出风险修复入口；前端不再根据 risk_type_code 字符串猜跳转。",
+            )
+        ]
+        if row.status_code in COMPLIANCE_ACTIVE_STATUSES:
+            actions.append(
+                VesselRecommendedAction(
+                    action_type="SUBMIT_REVIEW",
+                    label="提交风险复核",
+                    target_path=f"/vessels/{row.vessel_profile_id}/compliance?risk_signal_id={row.id}&review=1",
+                    target_object_type="VESSEL_RISK_SIGNAL",
+                    target_object_id=str(row.id),
+                    source_object_anchor=f"VESSEL_RISK_SIGNAL:{row.id}",
+                    workbench_group="RISK",
+                    description="当数据暂无法修复、规则误报或需人工认定时，走风险复核链路。",
+                )
+            )
+        return actions
+
+    @staticmethod
+    def _risk_signal_action_path(row: VesselRiskSignal) -> str:
+        return compliance_risk_action_path(row)
+
+    @staticmethod
+    def _risk_signal_action_label(row: VesselRiskSignal) -> str:
+        return compliance_risk_action_label(row)
+
+    @staticmethod
+    def _risk_signal_required_fields(row: VesselRiskSignal) -> list[str]:
+        return compliance_risk_required_fields(row)
+
+    def _risk_signal_evidence_gaps(self, row: VesselRiskSignal) -> list[str]:
+        required = self._risk_signal_required_fields(row)
+        if required:
+            return required
+        if row.risk_level == "UNKNOWN":
+            return ["风险判定证据", "人工复核意见"]
+        return ["风险重算结果"]
+
+    @staticmethod
+    def _risk_signal_explain_reason(row: VesselRiskSignal) -> str:
+        notes = row.uncertainty_notes_json or []
+        note_text = "；".join(str(item) for item in notes[:2]) if isinstance(notes, list) else str(notes)
+        rule = row.rule_code or row.risk_type_code
+        if note_text:
+            return f"规则 {rule} 命中：{note_text}"
+        return f"规则 {rule} 命中，风险等级 {row.risk_level}，需按推荐动作补证、修复或复核。"
+
+    def _risk_signal_proof_chain(self, row: VesselRiskSignal) -> list[dict[str, Any]]:
+        evidence = row.evidence_json or {}
+        gaps = self._risk_signal_evidence_gaps(row)
+        return [
+            {
+                "step_code": "RULE_HIT",
+                "step_name": "规则命中",
+                "status_code": "HIT",
+                "message": self._risk_signal_explain_reason(row),
+                "payload": {"risk_type_code": row.risk_type_code, "rule_code": row.rule_code, "risk_level": row.risk_level},
+            },
+            {
+                "step_code": "EVIDENCE",
+                "step_name": "证据材料",
+                "status_code": "MISSING" if gaps else "READY",
+                "message": "仍缺少：" + "、".join(gaps) if gaps else "已有证据可支撑复核",
+                "payload": evidence,
+            },
+            {
+                "step_code": "VALIDATION",
+                "step_name": "验收方式",
+                "status_code": "WAITING_RECHECK" if row.status_code in COMPLIANCE_ACTIVE_STATUSES else "PASSED",
+                "message": "修复后重新执行合规风险刷新；误报或人工认定关闭需走审核中心。",
+                "payload": {"review_action_path": f"/vessels/{row.vessel_profile_id}/compliance?risk_signal_id={row.id}&review=1"},
+            },
+        ]
 
     def _compliance_rule_response(
         self,
@@ -8431,27 +9708,526 @@ class VesselService:
         self,
         row: VesselControllerEvidence,
         label_map: dict[str, dict[str, str]],
+        conclusion_refs: list[VesselEvidenceConclusionRefResponse] | None = None,
+        attachments: list[VesselRelationEvidenceAttachmentResponse] | None = None,
     ) -> VesselControllerEvidenceResponse:
+        missing_fields = self._controller_evidence_missing_fields(row)
         return VesselControllerEvidenceResponse(
             **_row_dict(row),
             controller_role_name=label_map.get("VESSEL_CONTROLLER_ROLE", {}).get(row.controller_role_code),
             confidence_level_name=label_map.get("VESSEL_CONFIDENCE_LEVEL", {}).get(row.confidence_level),
             source_type_name=label_map.get("SOURCE_TYPE", {}).get(row.source_type_code),
             verified_status_name=label_map.get("VESSEL_EVIDENCE_VERIFIED_STATUS", {}).get(row.verified_status_code),
+            conclusion_refs=conclusion_refs or [],
+            evidence_completeness=self._evidence_completeness(missing_fields),
+            missing_required_fields=missing_fields,
+            attachments=attachments or [],
         )
 
     def _affiliation_evidence_response(
         self,
         row: VesselAffiliationEvidence,
         label_map: dict[str, dict[str, str]],
+        conclusion_refs: list[VesselEvidenceConclusionRefResponse] | None = None,
+        attachments: list[VesselRelationEvidenceAttachmentResponse] | None = None,
     ) -> VesselAffiliationEvidenceResponse:
+        missing_fields = self._affiliation_evidence_missing_fields(row)
         return VesselAffiliationEvidenceResponse(
             **_row_dict(row),
             affiliation_type_name=label_map.get("VESSEL_AFFILIATION_TYPE", {}).get(row.affiliation_type_code),
             confidence_level_name=label_map.get("VESSEL_CONFIDENCE_LEVEL", {}).get(row.confidence_level),
             source_type_name=label_map.get("SOURCE_TYPE", {}).get(row.source_type_code),
             verified_status_name=label_map.get("VESSEL_EVIDENCE_VERIFIED_STATUS", {}).get(row.verified_status_code),
+            conclusion_refs=conclusion_refs or [],
+            evidence_completeness=self._evidence_completeness(missing_fields),
+            missing_required_fields=missing_fields,
+            attachments=attachments or [],
         )
+
+    @staticmethod
+    def _relation_evidence_attachment_response(row: VesselRelationEvidenceAttachment) -> VesselRelationEvidenceAttachmentResponse:
+        return VesselRelationEvidenceAttachmentResponse(
+            **_row_dict(row),
+            download_url=f"/api/v1/files/{row.storage_file_id}/content",
+        )
+
+    async def _relation_evidence_attachment_map(
+        self,
+        evidence_type_code: str,
+        evidence_ids: list[int],
+        *,
+        include_voided: bool = False,
+    ) -> dict[int, list[VesselRelationEvidenceAttachmentResponse]]:
+        if not evidence_ids:
+            return {}
+        stmt = select(VesselRelationEvidenceAttachment).where(
+            VesselRelationEvidenceAttachment.evidence_type_code == evidence_type_code,
+            VesselRelationEvidenceAttachment.evidence_id.in_(evidence_ids),
+        )
+        if not include_voided:
+            stmt = stmt.where(VesselRelationEvidenceAttachment.voided_at.is_(None))
+        rows = (await self.db.scalars(stmt.order_by(VesselRelationEvidenceAttachment.created_at.desc()))).all()
+        result: dict[int, list[VesselRelationEvidenceAttachmentResponse]] = defaultdict(list)
+        for row in rows:
+            result[int(row.evidence_id)].append(self._relation_evidence_attachment_response(row))
+        return result
+
+    @staticmethod
+    def _normalize_relation_evidence_type(value: str) -> str:
+        normalized = (value or "").upper().replace("-", "_")
+        aliases = {
+            "CONTROLLER": "VESSEL_CONTROLLER_EVIDENCE",
+            "VESSEL_CONTROLLER_EVIDENCE": "VESSEL_CONTROLLER_EVIDENCE",
+            "AFFILIATION": "VESSEL_AFFILIATION_EVIDENCE",
+            "VESSEL_AFFILIATION_EVIDENCE": "VESSEL_AFFILIATION_EVIDENCE",
+        }
+        if normalized not in aliases:
+            raise ValidationError("主体证据类型必须是 controller 或 affiliation")
+        return aliases[normalized]
+
+    async def _require_relation_evidence(self, vessel_id: int, evidence_type_code: str, evidence_id: int) -> Any:
+        if evidence_type_code == "VESSEL_CONTROLLER_EVIDENCE":
+            return await self._require_evidence_row(VesselControllerEvidence, vessel_id, evidence_id)
+        if evidence_type_code == "VESSEL_AFFILIATION_EVIDENCE":
+            return await self._require_evidence_row(VesselAffiliationEvidence, vessel_id, evidence_id)
+        raise ValidationError("不支持的主体证据类型")
+
+    @staticmethod
+    def _relation_conclusion_model(conclusion_type: str) -> type[Any]:
+        normalized = (conclusion_type or "").upper().replace("-", "_")
+        if normalized in {"CONTROLLER", "VESSEL_CONTROLLER_CONCLUSION"}:
+            return VesselControllerConclusion
+        if normalized in {"AFFILIATION", "VESSEL_AFFILIATION_CONCLUSION"}:
+            return VesselAffiliationConclusion
+        raise ValidationError("主体结论类型必须是 controller 或 affiliation")
+
+    async def _controller_evidence_ref_map(
+        self,
+        vessel_id: int,
+        label_map: dict[str, dict[str, str]],
+    ) -> dict[int, list[VesselEvidenceConclusionRefResponse]]:
+        rows = (
+            await self.db.scalars(
+                select(VesselControllerConclusion).where(
+                    VesselControllerConclusion.vessel_profile_id == vessel_id,
+                    VesselControllerConclusion.voided_at.is_(None),
+                )
+            )
+        ).all()
+        refs: dict[int, list[VesselEvidenceConclusionRefResponse]] = defaultdict(list)
+        for row in rows:
+            ref = VesselEvidenceConclusionRefResponse(
+                conclusion_id=row.id,
+                conclusion_type="CONTROLLER",
+                conclusion_status_code=row.conclusion_status_code,
+                conclusion_status_name=label_map.get("VESSEL_RELATION_CONCLUSION_STATUS", {}).get(row.conclusion_status_code),
+                role=row.conclusion_status_code,
+                display_name=row.party_name,
+                effective_from=row.effective_from,
+                effective_to=row.effective_to,
+            )
+            for evidence_id in self._conclusion_evidence_ids(row.evidence_ids_json):
+                refs[evidence_id].append(ref)
+        return refs
+
+    async def _affiliation_evidence_ref_map(
+        self,
+        vessel_id: int,
+        label_map: dict[str, dict[str, str]],
+    ) -> dict[int, list[VesselEvidenceConclusionRefResponse]]:
+        rows = (
+            await self.db.scalars(
+                select(VesselAffiliationConclusion).where(
+                    VesselAffiliationConclusion.vessel_profile_id == vessel_id,
+                    VesselAffiliationConclusion.voided_at.is_(None),
+                )
+            )
+        ).all()
+        refs: dict[int, list[VesselEvidenceConclusionRefResponse]] = defaultdict(list)
+        for row in rows:
+            display_name = " / ".join(part for part in (row.subject_name, row.counterparty_name) if part) or row.affiliation_type_code
+            ref = VesselEvidenceConclusionRefResponse(
+                conclusion_id=row.id,
+                conclusion_type="AFFILIATION",
+                conclusion_status_code=row.conclusion_status_code,
+                conclusion_status_name=label_map.get("VESSEL_RELATION_CONCLUSION_STATUS", {}).get(row.conclusion_status_code),
+                role=row.conclusion_status_code,
+                display_name=display_name,
+                effective_from=row.effective_from,
+                effective_to=row.effective_to,
+            )
+            for evidence_id in self._conclusion_evidence_ids(row.evidence_ids_json):
+                refs[evidence_id].append(ref)
+        return refs
+
+    @staticmethod
+    def _conclusion_evidence_ids(value: Any) -> list[int]:
+        if not isinstance(value, list):
+            return []
+        ids: list[int] = []
+        for item in value:
+            try:
+                ids.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return ids
+
+    @staticmethod
+    def _json_path_value(payload: dict[str, Any] | None, path: str) -> Any:
+        current: Any = payload
+        for part in path.split("."):
+            if not isinstance(current, dict):
+                return None
+            current = current.get(part)
+        return current
+
+    @classmethod
+    def _missing_json_paths(cls, payload: dict[str, Any] | None, specs: list[tuple[str, str]]) -> list[str]:
+        missing: list[str] = []
+        for path, label in specs:
+            value = cls._json_path_value(payload, path)
+            if value is None or value == "" or value == []:
+                missing.append(label)
+        return missing
+
+    @staticmethod
+    def _evidence_completeness(missing_fields: list[str]) -> str:
+        if not missing_fields:
+            return "COMPLETE"
+        if any(item.startswith("必填：") for item in missing_fields):
+            return "MISSING_REQUIRED"
+        return "PARTIAL"
+
+    def _controller_evidence_missing_fields(self, row: VesselControllerEvidence) -> list[str]:
+        missing: list[str] = []
+        if not row.party_name:
+            missing.append("必填：实际控制人姓名/公司")
+        if not row.evidence_summary:
+            missing.append("必填：证据摘要")
+        payload = row.evidence_json if isinstance(row.evidence_json, dict) else {}
+        missing.extend(
+            self._missing_json_paths(
+                payload,
+                [
+                    ("confirmation.source", "必填：确认来源"),
+                    ("confirmation.method", "必填：确认方式"),
+                    ("controller_identity.certificate_type", "证件类型"),
+                    ("controller_identity.certificate_no", "证件号"),
+                    ("contact.phone", "联系方式"),
+                    ("relationship.owner_relationship", "与所有人关系"),
+                    ("relationship.operator_relationship", "与经营人关系"),
+                    ("confirmation.confirmed_at", "确认时间"),
+                    ("confirmation.confirmed_by", "确认人"),
+                ],
+            )
+        )
+        if row.effective_from is None:
+            missing.append("证据有效期开始")
+        return list(dict.fromkeys(missing))
+
+    def _affiliation_evidence_missing_fields(self, row: VesselAffiliationEvidence) -> list[str]:
+        missing: list[str] = []
+        if not row.subject_name:
+            missing.append("必填：主体")
+        if not row.counterparty_name:
+            missing.append("必填：相对方")
+        if not row.evidence_summary:
+            missing.append("必填：证据摘要")
+        payload = row.evidence_json if isinstance(row.evidence_json, dict) else {}
+        missing.extend(
+            self._missing_json_paths(
+                payload,
+                [
+                    ("affiliation_contract.affiliation_company", "必填：挂靠公司"),
+                    ("affiliation_contract.actual_shipowner", "必填：实际船东"),
+                    ("affiliation_contract.agreement_start", "协议开始时间"),
+                    ("affiliation_contract.agreement_end", "协议结束时间"),
+                    ("operation_qualification.certificate_operator", "证书经营主体"),
+                    ("operation_qualification.transport_permit_relation", "营运证关系"),
+                    ("contact.business_contact", "业务联系人"),
+                    ("confirmation.source", "确认来源"),
+                    ("confirmation.method", "确认方式"),
+                    ("confirmation.confirmed_at", "确认时间"),
+                ],
+            )
+        )
+        if row.effective_from is None:
+            missing.append("证据有效期开始")
+        return list(dict.fromkeys(missing))
+
+    def _controller_conclusion_response(
+        self,
+        row: VesselControllerConclusion,
+        label_map: dict[str, dict[str, str]],
+    ) -> VesselControllerConclusionResponse:
+        return VesselControllerConclusionResponse(
+            **_row_dict(row),
+            conclusion_status_name=label_map.get("VESSEL_RELATION_CONCLUSION_STATUS", {}).get(row.conclusion_status_code),
+            controller_role_name=label_map.get("VESSEL_CONTROLLER_ROLE", {}).get(row.controller_role_code),
+            confidence_level_name=label_map.get("VESSEL_CONFIDENCE_LEVEL", {}).get(row.confidence_level),
+        )
+
+    def _affiliation_conclusion_response(
+        self,
+        row: VesselAffiliationConclusion,
+        label_map: dict[str, dict[str, str]],
+    ) -> VesselAffiliationConclusionResponse:
+        return VesselAffiliationConclusionResponse(
+            **_row_dict(row),
+            conclusion_status_name=label_map.get("VESSEL_RELATION_CONCLUSION_STATUS", {}).get(row.conclusion_status_code),
+            affiliation_type_name=label_map.get("VESSEL_AFFILIATION_TYPE", {}).get(row.affiliation_type_code),
+            confidence_level_name=label_map.get("VESSEL_CONFIDENCE_LEVEL", {}).get(row.confidence_level),
+        )
+
+    async def _require_conclusion_row(
+        self,
+        model: type[Any],
+        vessel_id: int,
+        conclusion_id: int,
+    ) -> Any:
+        await self._require_profile(vessel_id)
+        row = await self.db.get(model, conclusion_id)
+        if row is None or row.vessel_profile_id != vessel_id:
+            raise NotFoundError(model.__name__, conclusion_id)
+        return row
+
+    async def _mark_stale_relation_conclusions(
+        self,
+        vessel_id: int,
+        *,
+        now: datetime,
+        operator_id: int | None = None,
+    ) -> None:
+        today = date.today()
+        controller_rows = (
+            await self.db.scalars(
+                select(VesselControllerConclusion).where(
+                    VesselControllerConclusion.vessel_profile_id == vessel_id,
+                    VesselControllerConclusion.conclusion_status_code == "CURRENT",
+                    VesselControllerConclusion.voided_at.is_(None),
+                )
+            )
+        ).all()
+        affiliation_rows = (
+            await self.db.scalars(
+                select(VesselAffiliationConclusion).where(
+                    VesselAffiliationConclusion.vessel_profile_id == vessel_id,
+                    VesselAffiliationConclusion.conclusion_status_code == "CURRENT",
+                    VesselAffiliationConclusion.voided_at.is_(None),
+                )
+            )
+        ).all()
+        for row in controller_rows:
+            if row.effective_to and row.effective_to < today:
+                row.conclusion_status_code = "EXPIRED"
+                row.conflict_reason = "结论有效期已过"
+            elif not await self._controller_conclusion_evidence_current(row):
+                row.conclusion_status_code = "STALE_NEEDS_REVIEW"
+                row.conflict_reason = "引用证据已作废、过期或不再通过审核"
+            else:
+                continue
+            row.revision = int(row.revision or 1) + 1
+            row.updated_at = now
+        for row in affiliation_rows:
+            if row.effective_to and row.effective_to < today:
+                row.conclusion_status_code = "EXPIRED"
+                row.conflict_reason = "结论有效期已过"
+            elif not await self._affiliation_conclusion_evidence_current(row):
+                row.conclusion_status_code = "STALE_NEEDS_REVIEW"
+                row.conflict_reason = "引用证据已作废、过期或不再通过审核"
+            else:
+                continue
+            row.revision = int(row.revision or 1) + 1
+            row.updated_at = now
+
+    async def _controller_conclusion_evidence_current(self, row: VesselControllerConclusion) -> bool:
+        ids = [int(value) for value in (row.evidence_ids_json or []) if str(value).isdigit()]
+        if not ids:
+            return False
+        today = date.today()
+        count = int(
+            await self.db.scalar(
+                select(func.count(VesselControllerEvidence.id)).where(
+                    VesselControllerEvidence.id.in_(ids),
+                    VesselControllerEvidence.vessel_profile_id == row.vessel_profile_id,
+                    VesselControllerEvidence.status_code == "ACTIVE",
+                    VesselControllerEvidence.voided_at.is_(None),
+                    VesselControllerEvidence.verified_status_code == "APPROVED",
+                    or_(VesselControllerEvidence.effective_to.is_(None), VesselControllerEvidence.effective_to >= today),
+                )
+            )
+            or 0
+        )
+        return count == len(ids)
+
+    async def _affiliation_conclusion_evidence_current(self, row: VesselAffiliationConclusion) -> bool:
+        ids = [int(value) for value in (row.evidence_ids_json or []) if str(value).isdigit()]
+        if not ids:
+            return False
+        today = date.today()
+        count = int(
+            await self.db.scalar(
+                select(func.count(VesselAffiliationEvidence.id)).where(
+                    VesselAffiliationEvidence.id.in_(ids),
+                    VesselAffiliationEvidence.vessel_profile_id == row.vessel_profile_id,
+                    VesselAffiliationEvidence.status_code == "ACTIVE",
+                    VesselAffiliationEvidence.voided_at.is_(None),
+                    VesselAffiliationEvidence.verified_status_code == "APPROVED",
+                    or_(VesselAffiliationEvidence.effective_to.is_(None), VesselAffiliationEvidence.effective_to >= today),
+                )
+            )
+            or 0
+        )
+        return count == len(ids)
+
+    async def _sync_controller_conclusion_candidates(
+        self,
+        vessel_id: int,
+        evidence_rows: list[VesselControllerEvidence],
+        *,
+        now: datetime,
+    ) -> None:
+        groups: dict[str, list[VesselControllerEvidence]] = defaultdict(list)
+        for row in evidence_rows:
+            key = _normalized_text(row.party_name)
+            if key:
+                groups[key].append(row)
+        conflict = len(groups) > 1
+        for rows in groups.values():
+            sample = rows[0]
+            status = "CONFLICTED" if conflict else "CANDIDATE"
+            current = await self.db.scalar(
+                select(VesselControllerConclusion).where(
+                    VesselControllerConclusion.vessel_profile_id == vessel_id,
+                    VesselControllerConclusion.party_name == sample.party_name,
+                    VesselControllerConclusion.conclusion_status_code == "CURRENT",
+                    VesselControllerConclusion.voided_at.is_(None),
+                )
+            )
+            target = current or await self.db.scalar(
+                select(VesselControllerConclusion)
+                .where(
+                    VesselControllerConclusion.vessel_profile_id == vessel_id,
+                    VesselControllerConclusion.party_name == sample.party_name,
+                    VesselControllerConclusion.conclusion_status_code.in_(("CANDIDATE", "CONFLICTED", "STALE_NEEDS_REVIEW")),
+                    VesselControllerConclusion.voided_at.is_(None),
+                )
+                .order_by(VesselControllerConclusion.updated_at.desc(), VesselControllerConclusion.id.desc())
+                .limit(1)
+            )
+            payload = {
+                "controller_role_code": sample.controller_role_code or "ACTUAL_CONTROLLER",
+                "confidence_level": self._max_confidence(row.confidence_level for row in rows),
+                "evidence_ids_json": [row.id for row in rows],
+                "evidence_count": len(rows),
+                "conflict_reason": "存在多组已审核控制人证据，请人工确认当前实际控制人" if conflict else None,
+                "effective_from": self._min_date(row.effective_from for row in rows),
+                "effective_to": self._max_date(row.effective_to for row in rows),
+            }
+            if target is None:
+                self.db.add(
+                    VesselControllerConclusion(
+                        vessel_profile_id=vessel_id,
+                        conclusion_status_code=status,
+                        party_name=sample.party_name,
+                        created_at=now,
+                        updated_at=now,
+                        **payload,
+                    )
+                )
+            elif target.conclusion_status_code != "CURRENT":
+                for key, value in payload.items():
+                    setattr(target, key, value)
+                target.conclusion_status_code = status
+                target.updated_at = now
+                target.revision = int(target.revision or 1) + 1
+            else:
+                for key, value in payload.items():
+                    setattr(target, key, value)
+                target.updated_at = now
+                target.revision = int(target.revision or 1) + 1
+
+    async def _sync_affiliation_conclusion_candidates(
+        self,
+        vessel_id: int,
+        evidence_rows: list[VesselAffiliationEvidence],
+        *,
+        now: datetime,
+    ) -> None:
+        groups: dict[tuple[str, str, str], list[VesselAffiliationEvidence]] = defaultdict(list)
+        for row in evidence_rows:
+            key = (row.affiliation_type_code or "UNKNOWN", _normalized_text(row.subject_name), _normalized_text(row.counterparty_name))
+            groups[key].append(row)
+        conflict = len(groups) > 1
+        for rows in groups.values():
+            sample = rows[0]
+            status = "CONFLICTED" if conflict else "CANDIDATE"
+            target = await self.db.scalar(
+                select(VesselAffiliationConclusion)
+                .where(
+                    VesselAffiliationConclusion.vessel_profile_id == vessel_id,
+                    VesselAffiliationConclusion.affiliation_type_code == sample.affiliation_type_code,
+                    VesselAffiliationConclusion.subject_name.is_(None)
+                    if sample.subject_name is None
+                    else VesselAffiliationConclusion.subject_name == sample.subject_name,
+                    VesselAffiliationConclusion.counterparty_name.is_(None)
+                    if sample.counterparty_name is None
+                    else VesselAffiliationConclusion.counterparty_name == sample.counterparty_name,
+                    VesselAffiliationConclusion.conclusion_status_code.in_(("CURRENT", "CANDIDATE", "CONFLICTED", "STALE_NEEDS_REVIEW")),
+                    VesselAffiliationConclusion.voided_at.is_(None),
+                )
+                .order_by(VesselAffiliationConclusion.conclusion_status_code.desc(), VesselAffiliationConclusion.updated_at.desc())
+                .limit(1)
+            )
+            payload = {
+                "confidence_level": self._max_confidence(row.confidence_level for row in rows),
+                "evidence_ids_json": [row.id for row in rows],
+                "evidence_count": len(rows),
+                "conflict_reason": "存在多组已审核挂靠/授权证据，请人工确认当前关系" if conflict else None,
+                "effective_from": self._min_date(row.effective_from for row in rows),
+                "effective_to": self._max_date(row.effective_to for row in rows),
+            }
+            if target is None:
+                self.db.add(
+                    VesselAffiliationConclusion(
+                        vessel_profile_id=vessel_id,
+                        conclusion_status_code=status,
+                        affiliation_type_code=sample.affiliation_type_code,
+                        subject_name=sample.subject_name,
+                        counterparty_name=sample.counterparty_name,
+                        created_at=now,
+                        updated_at=now,
+                        **payload,
+                    )
+                )
+            elif target.conclusion_status_code != "CURRENT":
+                for key, value in payload.items():
+                    setattr(target, key, value)
+                target.conclusion_status_code = status
+                target.updated_at = now
+                target.revision = int(target.revision or 1) + 1
+            else:
+                for key, value in payload.items():
+                    setattr(target, key, value)
+                target.updated_at = now
+                target.revision = int(target.revision or 1) + 1
+
+    @staticmethod
+    def _max_confidence(values: Any) -> str:
+        levels = [value for value in values if value]
+        if not levels:
+            return "UNKNOWN"
+        return max(levels, key=lambda value: {"UNKNOWN": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}.get(value, 0))
+
+    @staticmethod
+    def _min_date(values: Any) -> date | None:
+        items = [value for value in values if value is not None]
+        return min(items) if items else None
+
+    @staticmethod
+    def _max_date(values: Any) -> date | None:
+        items = [value for value in values if value is not None]
+        return max(items) if items else None
 
     async def _create_evidence_audit_task_if_needed(
         self,
@@ -8594,6 +10370,24 @@ class VesselService:
             uncertainty_notes=notes,
             rule_summary=rule_summary,
             signals=[self._risk_signal_response(row, label_map, profiles.get(vessel_id)) for row in signals],
+            proof_chain=[
+                {
+                    "step_code": "RULE_COVERAGE",
+                    "step_name": "规则覆盖",
+                    "status_code": status_code,
+                    "message": "证书规则、主体结论、OCR 和名单信号共同形成合规判断。",
+                    "payload": {"rule_count": len(rules), "context_gap": context_gap},
+                },
+                {
+                    "step_code": "OPEN_RISK",
+                    "step_name": "未闭合风险",
+                    "status_code": "OPEN" if signals else "CLEAR",
+                    "message": f"当前未闭合风险 {len(signals)} 条，高风险 {high_count} 条。",
+                    "payload": {"risk_signal_ids": [row.id for row in signals]},
+                },
+            ],
+            missing_evidence=list(dict.fromkeys([gap for row in signals for gap in self._risk_signal_evidence_gaps(row)])),
+            review_action_path=f"/vessels/{vessel_id}/compliance?review=1",
         )
 
     async def _active_certificate_rules(self, profile: VesselProfile) -> list[VesselCertificateRequirementRule]:
@@ -8724,36 +10518,34 @@ class VesselService:
 
         controller_count = int(
             await self.db.scalar(
-                select(func.count(VesselControllerEvidence.id)).where(
-                    VesselControllerEvidence.vessel_profile_id == profile.id,
-                    VesselControllerEvidence.voided_at.is_(None),
-                    VesselControllerEvidence.status_code == "ACTIVE",
-                    VesselControllerEvidence.verified_status_code == "APPROVED",
-                    VesselControllerEvidence.confidence_level.in_(["HIGH", "MEDIUM"]),
+                select(func.count(VesselControllerConclusion.id)).where(
+                    VesselControllerConclusion.vessel_profile_id == profile.id,
+                    VesselControllerConclusion.voided_at.is_(None),
+                    VesselControllerConclusion.conclusion_status_code == "CURRENT",
+                    or_(VesselControllerConclusion.effective_to.is_(None), VesselControllerConclusion.effective_to >= today),
                 )
             )
             or 0
         )
         if not controller_count:
-            risks.append(self._risk_payload(profile.id, "CONTROLLER_UNKNOWN", "UNKNOWN", None, "controller_missing", {}, ["实际控制人证据不足"]))
+            risks.append(self._risk_payload(profile.id, "CONTROLLER_UNKNOWN", "UNKNOWN", None, "controller_missing", {}, ["未确认当前实际控制人结论"]))
 
         owner_is_person = owner is not None and getattr(owner, "party_type_code", None) == "PERSON"
         operator_is_company = operator is not None and getattr(operator, "party_type_code", None) == "COMPANY"
         if owner_is_person and operator_is_company:
             affiliation_count = int(
                 await self.db.scalar(
-                    select(func.count(VesselAffiliationEvidence.id)).where(
-                        VesselAffiliationEvidence.vessel_profile_id == profile.id,
-                        VesselAffiliationEvidence.voided_at.is_(None),
-                        VesselAffiliationEvidence.status_code == "ACTIVE",
-                        VesselAffiliationEvidence.verified_status_code == "APPROVED",
-                        VesselAffiliationEvidence.confidence_level.in_(["HIGH", "MEDIUM"]),
+                    select(func.count(VesselAffiliationConclusion.id)).where(
+                        VesselAffiliationConclusion.vessel_profile_id == profile.id,
+                        VesselAffiliationConclusion.voided_at.is_(None),
+                        VesselAffiliationConclusion.conclusion_status_code == "CURRENT",
+                        or_(VesselAffiliationConclusion.effective_to.is_(None), VesselAffiliationConclusion.effective_to >= today),
                     )
                 )
                 or 0
             )
             if not affiliation_count:
-                risks.append(self._risk_payload(profile.id, "AFFILIATION_UNCLEAR", "UNKNOWN", None, "affiliation_missing", {"owner_id": owner.id, "operator_id": operator.id}, ["个人所有方 + 公司经营方缺少挂靠/授权证据"]))
+                risks.append(self._risk_payload(profile.id, "AFFILIATION_UNCLEAR", "UNKNOWN", None, "affiliation_missing", {"owner_id": owner.id, "operator_id": operator.id}, ["个人所有方 + 公司经营方缺少当前挂靠/授权结论"]))
 
         low_diff_count = int(
             await self.db.scalar(

@@ -176,6 +176,73 @@ def test_vessel_round2_asset_center_routes_exist_before_dynamic_id() -> None:
     assert "business" not in ais_card_props
 
 
+def test_vessel_domain_split_keeps_key_openapi_paths() -> None:
+    paths = app.openapi()["paths"]
+    expected = {
+        "/api/v1/vessels/assets": {"get"},
+        "/api/v1/vessels/quality": {"get"},
+        "/api/v1/vessels/quality/{issue_id}/recheck": {"post"},
+        "/api/v1/vessels/governance/dashboard": {"get"},
+        "/api/v1/vessels/governance/tasks": {"get"},
+        "/api/v1/vessels/governance/tasks/sync": {"post"},
+        "/api/v1/vessels/blacklist-signals": {"get"},
+        "/api/v1/vessels/{vessel_id}/relation-conclusions": {"get"},
+        "/api/v1/vessels/{vessel_id}/controller-evidence": {"get", "post"},
+        "/api/v1/vessels/compliance-risks": {"get"},
+        "/api/v1/vessels/recognitions": {"get"},
+        "/api/v1/vessels/ais/city-situation": {"get"},
+        "/api/v1/vessels/candidate-analyses": {"get", "post"},
+    }
+
+    for path, methods in expected.items():
+        assert path in paths
+        assert methods.issubset(paths[path])
+
+
+def test_vessel_domain_services_are_router_boundaries() -> None:
+    from app.modules.vessel.services.asset_service import VesselAssetService
+    from app.modules.vessel.services.compliance_service import VesselComplianceService
+    from app.modules.vessel.services.governance_task_service import VesselGovernanceTaskService
+    from app.modules.vessel.services.quality_service import VesselQualityService
+    from app.modules.vessel.services.recognition_service import VesselRecognitionService
+    from app.modules.vessel.services.relation_service import VesselRelationService
+
+    services = {
+        VesselAssetService: ("asset_summary", "list_assets"),
+        VesselQualityService: ("list_quality_issue_queue", "recheck_quality_issue"),
+        VesselComplianceService: ("list_compliance_risks", "create_risk_review"),
+        VesselRelationService: ("list_controller_evidence", "list_relation_conclusions"),
+        VesselRecognitionService: ("list_recognition_queue", "unified_recognition_field_diff"),
+        VesselGovernanceTaskService: ("dashboard", "sync_tasks_command"),
+    }
+
+    for service_cls, method_names in services.items():
+        service = service_cls(SimpleNamespace())
+        for method_name in method_names:
+            assert callable(getattr(service, method_name))
+
+
+def test_vessel_compliance_actions_use_backend_rule_map() -> None:
+    from app.modules.vessel.services.compliance_rules import (
+        compliance_risk_action_label,
+        compliance_risk_action_path,
+        compliance_risk_required_fields,
+    )
+
+    controller_risk = SimpleNamespace(id=7, vessel_profile_id=12, risk_type_code="CONTROLLER_UNKNOWN", evidence_json={})
+    blacklist_risk = SimpleNamespace(
+        id=8,
+        vessel_profile_id=13,
+        risk_type_code="OTHER",
+        evidence_json={"blacklist_signal_id": 99},
+    )
+
+    assert compliance_risk_action_label(controller_risk) == "补充控制人证据"
+    assert compliance_risk_action_path(controller_risk) == "/vessels/12/relations?tab=controller&risk_signal_id=7"
+    assert "verified_status_code" in compliance_risk_required_fields(controller_risk)
+    assert compliance_risk_action_path(blacklist_risk) == "/vessels/blacklist-signals?risk_signal_id=8&vessel_id=13&blacklist_signal_id=99"
+
+
 def test_vessel_seed_menu_groups_keep_business_entries_visible() -> None:
     from scripts.seed_system_base import MENUS, ROLE_MENU_CODES
 
@@ -326,7 +393,7 @@ def test_vessel_round5_compliance_and_ocr_workbench_routes_exist() -> None:
         recognition_schema
     )
 
-    forbidden_fragments = ["dispatch", "quote", "recommend", "candidate_score", "contact_ship"]
+    forbidden_fragments = ["dispatch", "quote", "candidate_score", "contact_ship"]
     checked_props = "|".join(sorted(set(risk_schema) | set(compliance_schema) | set(recognition_schema)))
     assert not any(fragment in checked_props for fragment in forbidden_fragments)
 

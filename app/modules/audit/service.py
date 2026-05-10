@@ -300,6 +300,7 @@ class AuditTaskService:
                 "object_code": task_response.object_code,
                 "object_name": task_response.object_name,
             }
+        bridge_context = await self._vessel_bridge_context(task)
         return AuditTaskDetailResponse(
             task=task_response,
             object_summary=summary,
@@ -309,6 +310,7 @@ class AuditTaskService:
             snapshot_summary=summary,
             records=[_to_record_response(item) for item in rows],
             available_actions=["ASSIGN", "APPROVE", "REJECT", "CANCEL"] if task.audit_status not in _FINAL_STATUSES else [],
+            **bridge_context,
         )
 
     async def assign_task(self, task_id: int, assignee_user_id: int, operator_user_id: int) -> None:
@@ -422,9 +424,21 @@ class AuditTaskService:
                 "created_at": now,
             }
         )
+        bridge_result = None
         if target_status in {"APPROVED", "REJECTED"}:
             await self._sync_target_audit_status(task, target_status, operator_user_id, now)
+            bridge_result = await self._sync_vessel_bridge_after_audit(
+                task,
+                target_status=target_status,
+                operator_user_id=operator_user_id,
+                audited_at=now,
+            )
         await self.db.commit()
+        if bridge_result is not None and bridge_result.vessel_id is not None:
+            await self._refresh_vessel_bridge_compliance(
+                bridge_result.vessel_id,
+                operator_user_id=operator_user_id,
+            )
 
     async def _sync_target_audit_status(
         self,
@@ -457,6 +471,36 @@ class AuditTaskService:
             target.auditor_id = operator_user_id
         if hasattr(target, "audited_at"):
             target.audited_at = audited_at
+
+    async def _sync_vessel_bridge_after_audit(
+        self,
+        task,
+        *,
+        target_status: str,
+        operator_user_id: int,
+        audited_at: datetime,
+    ):
+        from app.modules.vessel.audit_bridge_service import VesselAuditBridgeService
+
+        return await VesselAuditBridgeService(self.db).sync_after_audit(
+            task,
+            target_status=target_status,
+            operator_user_id=operator_user_id,
+            audited_at=audited_at,
+        )
+
+    async def _refresh_vessel_bridge_compliance(self, vessel_id: int, *, operator_user_id: int) -> None:
+        from app.modules.vessel.audit_bridge_service import VesselAuditBridgeService
+
+        await VesselAuditBridgeService(self.db).refresh_compliance_best_effort(
+            vessel_id,
+            operator_user_id=operator_user_id,
+        )
+
+    async def _vessel_bridge_context(self, task) -> dict[str, Any]:
+        from app.modules.vessel.audit_bridge_service import VesselAuditBridgeService
+
+        return await VesselAuditBridgeService(self.db).detail_context(task)
 
     async def get_pending_count(self, assignee_user_id: int | None = None) -> AuditPendingCountResponse:
         count = await self.task_repo.get_pending_count(assignee_user_id)

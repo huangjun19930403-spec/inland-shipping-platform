@@ -137,6 +137,10 @@ class AuditTaskDetailResponse(BaseModel):
     snapshot_summary: dict[str, Any] = Field(default_factory=dict)
     records: list[AuditRecordResponse]
     available_actions: list[str] = Field(default_factory=list)
+    related_governance_task_id: int | None = None
+    related_object_path: str | None = None
+    business_sync_status_code: str | None = None
+    business_sync_message: str | None = None
 
 
 class AuditPendingCountResponse(BaseModel):
