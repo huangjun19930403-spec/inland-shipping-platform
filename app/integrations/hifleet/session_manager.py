@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
+import hashlib
 import json
 import logging
 import random
@@ -16,11 +18,14 @@ from app.core.exceptions import InternalError, ValidationError
 from app.integrations.config_keys import (
     HIFLEET_BASE_URL,
     HIFLEET_CHECK_LOGIN_URL,
+    HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS,
     HIFLEET_CONFIG_PROFILE,
     HIFLEET_ENABLED,
+    HIFLEET_LOGOUT_URL,
     HIFLEET_LOGIN_URL,
     HIFLEET_PASSWORD,
     HIFLEET_RELOGIN_CHECK_ENABLED,
+    HIFLEET_SESSION_IDLE_LOGOUT_SECONDS,
     HIFLEET_TIMEOUT_SECONDS,
     HIFLEET_USERNAME,
 )
@@ -30,6 +35,20 @@ if TYPE_CHECKING:
     from app.modules.system.runtime_config import RuntimeConfigService
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _SharedHifleetSessionState:
+    login_task: Optional[asyncio.Task[None]] = None
+    login_state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    logged_in: bool = False
+    last_check_at: Optional[datetime] = None
+    backoff_until: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+
+
+_SHARED_STATE_LOCK = asyncio.Lock()
+_SHARED_SESSION_STATES: dict[str, _SharedHifleetSessionState] = {}
 
 
 class HifleetSessionManager:
@@ -57,15 +76,14 @@ class HifleetSessionManager:
         self._login_failure_backoff_seconds = max(1.0, login_failure_backoff_seconds)
         self._check_login_cooldown_seconds = max(1.0, check_login_cooldown_seconds)
         self._max_retries = max(0, max_retries)
-        self._login_task: Optional[asyncio.Task[None]] = None
-        self._login_state_lock = asyncio.Lock()
-        self._logged_in = False
-        self._last_check_at: Optional[datetime] = None
-        self._backoff_until: Optional[datetime] = None
+        self._current_state_key: str | None = None
 
     async def _client(self) -> httpx.AsyncClient:
+        client_name = "hifleet-session"
+        if self._transport is None:
+            client_name = f"hifleet-session:{await self._session_key()}"
         return await get_shared_http_client(
-            "hifleet-session",
+            client_name,
             follow_redirects=True,
             transport=self._transport,
             headers={
@@ -101,6 +119,16 @@ class HifleetSessionManager:
             )
             return (value or "").strip()
         return (settings.HIFLEET_LOGIN_URL or "").strip()
+
+    async def _logout_url(self) -> str:
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_value(
+                HIFLEET_LOGOUT_URL,
+                settings.HIFLEET_LOGOUT_URL or "",
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return (value or "").strip()
+        return (settings.HIFLEET_LOGOUT_URL or "").strip()
 
     async def _check_login_url(self) -> str:
         if self._runtime_config is not None:
@@ -144,6 +172,28 @@ class HifleetSessionManager:
             )
         return float(settings.HIFLEET_TIMEOUT_SECONDS or settings.ROUTE_GEOMETRY_TIMEOUT_SECONDS or 8.0)
 
+    async def _runtime_check_login_cooldown_seconds(self) -> float:
+        default_value = float(settings.HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS or self._check_login_cooldown_seconds)
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_float(
+                HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS,
+                default_value,
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return max(1.0, float(value))
+        return max(1.0, default_value)
+
+    async def _idle_logout_seconds(self) -> float:
+        default_value = float(settings.HIFLEET_SESSION_IDLE_LOGOUT_SECONDS or 0)
+        if self._runtime_config is not None:
+            value = await self._runtime_config.get_float(
+                HIFLEET_SESSION_IDLE_LOGOUT_SECONDS,
+                default_value,
+                profile_code=HIFLEET_CONFIG_PROFILE,
+            )
+            return max(0.0, float(value))
+        return max(0.0, default_value)
+
     async def _relogin_check_enabled(self) -> bool:
         if self._runtime_config is not None:
             return await self._runtime_config.get_bool(
@@ -175,6 +225,33 @@ class HifleetSessionManager:
             raise ValidationError("未配置 AMMS 登录校验地址")
         if not (username and password):
             raise ValidationError("未配置 AMMS 登录账号或密码，当前路径服务不可用")
+
+    async def _session_key(self) -> str:
+        password_fingerprint = hashlib.sha1((await self._password()).encode("utf-8")).hexdigest()
+        raw = "|".join(
+            [
+                await self._base_url(),
+                await self._login_url(),
+                await self._check_login_url(),
+                await self._username(),
+                password_fingerprint,
+            ]
+        )
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    async def _state(self) -> _SharedHifleetSessionState:
+        key = await self._session_key()
+        self._current_state_key = key
+        existing = _SHARED_SESSION_STATES.get(key)
+        if existing is not None:
+            return existing
+        async with _SHARED_STATE_LOCK:
+            existing = _SHARED_SESSION_STATES.get(key)
+            if existing is not None:
+                return existing
+            state = _SharedHifleetSessionState()
+            _SHARED_SESSION_STATES[key] = state
+            return state
 
     async def _url(self, endpoint: str) -> str:
         if endpoint.startswith("http://") or endpoint.startswith("https://"):
@@ -270,6 +347,7 @@ class HifleetSessionManager:
         return self._decode_response_json(response, context)
 
     async def _login_once(self) -> None:
+        state = await self._state()
         await self._check_basic_config()
         login_url = await self._login_url()
         username = await self._username()
@@ -291,57 +369,100 @@ class HifleetSessionManager:
         if str(payload.get("flag")) != "1":
             msg = payload.get("msg") or payload.get("message") or payload
             raise ValidationError(f"AMMS 登录失败: {msg}")
-        self._logged_in = True
-        self._last_check_at = datetime.utcnow()
-        self._backoff_until = None
+        state.logged_in = True
+        state.last_check_at = datetime.utcnow()
+        state.last_used_at = state.last_check_at
+        state.backoff_until = None
 
-    async def _run_login(self) -> None:
+    async def _run_login(self, state: _SharedHifleetSessionState) -> None:
         try:
             await self._login_once()
         except Exception:
-            self._logged_in = False
-            self._backoff_until = datetime.utcnow() + timedelta(seconds=self._login_failure_backoff_seconds)
+            state.logged_in = False
+            state.backoff_until = datetime.utcnow() + timedelta(seconds=self._login_failure_backoff_seconds)
             raise
 
     async def _ensure_singleflight_login(self) -> None:
+        state = await self._state()
         now = datetime.utcnow()
-        if self._backoff_until and now < self._backoff_until:
-            remaining = int((self._backoff_until - now).total_seconds())
+        if state.backoff_until and now < state.backoff_until:
+            remaining = int((state.backoff_until - now).total_seconds())
             raise ValidationError(f"AMMS 登录退避中，请 {remaining} 秒后重试")
 
-        async with self._login_state_lock:
-            if self._login_task is None or self._login_task.done():
-                self._login_task = asyncio.create_task(self._run_login())
-            task = self._login_task
+        async with state.login_state_lock:
+            if state.login_task is None or state.login_task.done():
+                state.login_task = asyncio.create_task(self._run_login(state))
+            task = state.login_task
 
         await task
 
+    async def _logout_idle_session(self, state: _SharedHifleetSessionState) -> None:
+        logout_url = await self._logout_url()
+        if logout_url:
+            try:
+                await self._get_json(await self._url(logout_url), context="退出登录")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[HifleetSessionManager] idle logout request failed: %s", exc)
+        try:
+            client = await self._client()
+            client.cookies.clear()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[HifleetSessionManager] clear idle cookies failed: %s", exc)
+        state.logged_in = False
+        state.last_check_at = None
+        state.last_used_at = None
+
+    async def _logout_if_idle(self, state: _SharedHifleetSessionState) -> None:
+        idle_seconds = await self._idle_logout_seconds()
+        if idle_seconds <= 0 or not state.logged_in or state.last_used_at is None:
+            return
+        now = datetime.utcnow()
+        if (now - state.last_used_at).total_seconds() < idle_seconds:
+            return
+        async with state.login_state_lock:
+            if not state.logged_in or state.last_used_at is None:
+                return
+            if (datetime.utcnow() - state.last_used_at).total_seconds() < idle_seconds:
+                return
+            await self._logout_idle_session(state)
+
+    async def _mark_used(self) -> None:
+        state = await self._state()
+        state.last_used_at = datetime.utcnow()
+
     async def check_session(self) -> bool:
+        state = await self._state()
         await self._check_basic_config()
-        if not self._logged_in:
+        if not state.logged_in:
             return False
         if not await self._relogin_check_enabled():
             return True
 
         now = datetime.utcnow()
-        if self._last_check_at and (now - self._last_check_at).total_seconds() < self._check_login_cooldown_seconds:
+        cooldown_seconds = await self._runtime_check_login_cooldown_seconds()
+        if state.last_check_at and (now - state.last_check_at).total_seconds() < cooldown_seconds:
             return True
 
         check_login_url = await self._check_login_url()
         payload = await self._get_json(await self._url(check_login_url), context="登录态校验")
-        self._last_check_at = now
+        state.last_check_at = now
         if str(payload.get("status")) == "0":
-            self._logged_in = False
+            state.logged_in = False
             return False
         return True
 
     async def ensure_session(self, *, force_login: bool = False) -> None:
+        state = await self._state()
         await self._check_basic_config()
         if force_login:
-            self._logged_in = False
+            state.logged_in = False
+            state.backoff_until = None
 
-        if not self._logged_in:
+        await self._logout_if_idle(state)
+
+        if not state.logged_in:
             await self._ensure_singleflight_login()
+            await self._mark_used()
             return
 
         try:
@@ -352,7 +473,15 @@ class HifleetSessionManager:
 
         if not alive:
             await self._ensure_singleflight_login()
+        await self._mark_used()
 
     def invalidate(self) -> None:
-        self._logged_in = False
-        self._last_check_at = None
+        keys = [self._current_state_key] if self._current_state_key else list(_SHARED_SESSION_STATES)
+        for key in keys:
+            if not key:
+                continue
+            state = _SHARED_SESSION_STATES.get(key)
+            if state is None:
+                continue
+            state.logged_in = False
+            state.last_check_at = None

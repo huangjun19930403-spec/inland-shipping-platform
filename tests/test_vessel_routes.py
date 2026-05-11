@@ -10,6 +10,7 @@ from main import app
 from app.core.exceptions import AppException, ConflictError, ValidationError
 from app.models.vessel import VesselProfileSummary, VesselRecognitionFieldDiff
 from app.models.vessel import VesselAisSnapshot, VesselAisCitySnapshotItem, VesselLatestPositionSnapshot
+from app.tasks import vessel_position_tasks
 from app.modules.vessel import service as vessel_service_module
 from app.modules.vessel.ais.methods import _public_ais_error_message
 from app.modules.vessel.ais.service import VesselAisService
@@ -37,6 +38,11 @@ from app.modules.vessel.schemas import (
     VesselPositionCitySituationQuery,
     VesselPositionCitySituationResponse,
     VesselPositionCitySituationSummary,
+    VesselPositionCityVesselsResponse,
+    VesselPositionWaterSystemSituationQuery,
+    VesselPositionWaterSystemSituationResponse,
+    VesselPositionWaterSystemSituationSummary,
+    VesselPositionWaterSystemVesselsResponse,
 )
 
 
@@ -889,6 +895,316 @@ async def test_vessel_city_situation_uses_realtime_cache_before_live_query() -> 
 
 
 @pytest.mark.asyncio
+async def test_vessel_water_system_situation_uses_response_cache_before_live_query() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    generated_at = datetime(2026, 5, 10, 8, 0, 0)
+    cached_response = VesselPositionWaterSystemSituationResponse(
+        source_status="AVAILABLE",
+        source_status_name="可用",
+        generated_at=generated_at,
+        cache_status="MISS",
+        cache_generated_at=generated_at,
+        snapshot_backend="redis",
+        summary=VesselPositionWaterSystemSituationSummary(
+            matched_profile_count=3,
+            scanned_profile_count=3,
+            queried_mmsi_count=3,
+            matched_position_count=3,
+            unpositioned_count=0,
+            positioned_count=3,
+            stale_position_count=0,
+            contactable_position_count=3,
+            certificate_risk_count=0,
+            water_system_count=2,
+            query_snapshot_id="redis-water-ais",
+            snapshot_status_code="READY",
+            snapshot_expires_at=generated_at + timedelta(days=365),
+            is_partial=False,
+        ),
+        water_systems=[],
+    )
+
+    async def cache_backend() -> str:
+        events.append("backend")
+        return "redis"
+
+    async def cached(_cache_key: str):
+        events.append("cache-read")
+        return cached_response, "redis"
+
+    async def live_limits():
+        raise AssertionError("water system situation should not load live ES limits when a cache is available")
+
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._get_water_system_situation_response_cache = cached  # type: ignore[method-assign]
+    service._ais_runtime_limits = live_limits  # type: ignore[method-assign]
+
+    result = await service.position_water_system_situation(
+        VesselPositionWaterSystemSituationQuery(reported_within_minutes=1600, include_boundary=False)
+    )
+
+    assert result.cache_status == "HIT"
+    assert result.summary.query_snapshot_id == "redis-water-ais"
+    assert events == ["backend", "cache-read"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_water_system_situation_stores_response_cache_on_miss() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+
+    async def cache_backend() -> str:
+        events.append("backend")
+        return "memory"
+
+    async def no_cached(_cache_key: str):
+        events.append("cache-read")
+        return None
+
+    async def limits() -> dict[str, int]:
+        events.append("limits")
+        return {"profile_limit": 2000, "es_batch_size": 500, "es_max_concurrency": 4, "unmatched_scan_limit": 1000}
+
+    async def profile_count(_query) -> int:
+        events.append("count")
+        return 1
+
+    async def profiles(_query, limit: int | None = None):
+        events.append(f"profiles:{limit}")
+        return [SimpleNamespace(id=1, current_mmsi="413000001")]
+
+    async def realtime_host() -> str:
+        events.append("realtime-host")
+        return "http://localhost:9200"
+
+    async def positions_for_profiles(*args, **kwargs):
+        events.append("positions")
+        return SimpleNamespace(
+            items=[],
+            unmatched_positions=[],
+            invalid_positions=[],
+            partial=False,
+            error_message=None,
+            queried_mmsi_count=1,
+            matched_position_count=0,
+            unpositioned_count=1,
+            invalid_position_count=0,
+            unknown_city_count=0,
+            source_indices=["ship_positions"],
+            failed_batch_count=0,
+            failed_batches=[],
+        )
+
+    async def risk_by_profile(_ids):
+        return {}
+
+    async def boundaries():
+        return []
+
+    async def store_snapshot(*args, **kwargs) -> str:
+        events.append("snapshot")
+        return "water-snapshot"
+
+    async def store_response_cache(*args, **kwargs) -> None:
+        events.append("response-cache")
+
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._get_water_system_situation_response_cache = no_cached  # type: ignore[method-assign]
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
+    service._position_monitor_profiles = profiles  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._position_monitor_items_for_profiles = positions_for_profiles  # type: ignore[method-assign]
+    service._compliance_risk_by_profile = risk_by_profile  # type: ignore[method-assign]
+    service._summary_risk_level_by_profile = risk_by_profile  # type: ignore[method-assign]
+    service._water_system_boundaries = boundaries  # type: ignore[method-assign]
+    service._store_city_situation_snapshot = store_snapshot  # type: ignore[method-assign]
+    service._store_water_system_situation_response_cache = store_response_cache  # type: ignore[method-assign]
+
+    result = await service.position_water_system_situation(
+        VesselPositionWaterSystemSituationQuery(reported_within_minutes=1440, include_boundary=False, include_empty_water_systems=False)
+    )
+
+    assert result.cache_status == "MISS"
+    assert result.summary.query_snapshot_id == "water-snapshot"
+    assert events == [
+        "backend",
+        "cache-read",
+        "limits",
+        "count",
+        "profiles:2000",
+        "realtime-host",
+        "positions",
+        "snapshot",
+        "response-cache",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vessel_water_system_situation_force_refresh_skips_response_cache() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+
+    async def cache_backend() -> str:
+        events.append("backend")
+        return "memory"
+
+    async def fail_cached(_cache_key: str):
+        raise AssertionError("force refresh should not read the water system response cache")
+
+    async def limits() -> dict[str, int]:
+        events.append("limits")
+        return {"profile_limit": 2000, "es_batch_size": 500, "es_max_concurrency": 4, "unmatched_scan_limit": 1000}
+
+    async def profile_count(_query) -> int:
+        events.append("count")
+        return 0
+
+    async def profiles(_query, limit: int | None = None):
+        events.append(f"profiles:{limit}")
+        return []
+
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._get_water_system_situation_response_cache = fail_cached  # type: ignore[method-assign]
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
+    service._position_monitor_profiles = profiles  # type: ignore[method-assign]
+
+    query = VesselPositionWaterSystemSituationQuery(reported_within_minutes=1440, include_boundary=False, include_empty_water_systems=False)
+    object.__setattr__(query, "force_refresh", True)
+    result = await service.position_water_system_situation(query)
+
+    assert result.source_status == "EMPTY"
+    assert result.cache_status == "MISS"
+    assert events == ["backend", "limits", "count", "profiles:2000"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_water_system_precompute_uses_default_fast_query(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    drilldowns: list[object] = []
+    generated_at = datetime(2026, 5, 11, 8, 0, 0)
+
+    class FakeSessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeVesselService:
+        def __init__(self, db) -> None:
+            captured["db"] = db
+
+        async def position_water_system_situation(self, query):
+            captured["query"] = query
+            return SimpleNamespace(
+                source_status="AVAILABLE",
+                generated_at=generated_at,
+                summary=SimpleNamespace(
+                    positioned_count=8,
+                    water_system_count=2,
+                    query_snapshot_id="water-snapshot",
+                    is_partial=False,
+                ),
+                water_systems=[
+                    SimpleNamespace(positioned_count=8, water_system_code="WS_YANGTZE", water_system_name="长江干线")
+                ],
+                snapshot_backend="memory",
+            )
+
+        async def position_water_system_vessels(self, query):
+            drilldowns.append(query)
+            return SimpleNamespace(total=8, items=[])
+
+    monkeypatch.setattr(vessel_position_tasks, "AsyncSessionLocal", lambda: FakeSessionContext())
+    monkeypatch.setattr(vessel_position_tasks, "VesselService", FakeVesselService)
+
+    result = await vessel_position_tasks._precompute_water_system_situation()
+    query = captured["query"]
+
+    assert result == {
+        "source_status": "AVAILABLE",
+        "generated_at": generated_at.isoformat(),
+        "positioned_count": 8,
+        "water_system_count": 2,
+        "drilldown_count": 1,
+        "is_partial": False,
+        "snapshot_backend": "memory",
+    }
+    assert query.include_boundary is False
+    assert query.include_empty_water_systems is False
+    assert query.water_levels == "1,2,3,4,5,6,7"
+    assert getattr(query, "force_refresh") is True
+    assert len(drilldowns) == 1
+    assert drilldowns[0].water_system_code == "WS_YANGTZE"
+    assert drilldowns[0].query_snapshot_id == "water-snapshot"
+    assert drilldowns[0].page_size == 100
+
+
+@pytest.mark.asyncio
+async def test_vessel_city_precompute_uses_default_cache_query_and_drilldown(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    drilldowns: list[object] = []
+    generated_at = datetime(2026, 5, 11, 8, 0, 0)
+
+    class FakeSessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeVesselService:
+        def __init__(self, db) -> None:
+            captured["db"] = db
+
+        async def position_city_situation(self, query):
+            captured["query"] = query
+            return SimpleNamespace(
+                source_status="AVAILABLE",
+                generated_at=generated_at,
+                summary=SimpleNamespace(
+                    positioned_count=6,
+                    city_count=1,
+                    query_snapshot_id="city-snapshot",
+                    is_partial=False,
+                ),
+                cities=[
+                    SimpleNamespace(positioned_count=6, city_code="320500", city_name="苏州市")
+                ],
+                snapshot_backend="memory",
+            )
+
+        async def position_city_vessels(self, query):
+            drilldowns.append(query)
+            return SimpleNamespace(total=6, items=[])
+
+    monkeypatch.setattr(vessel_position_tasks, "AsyncSessionLocal", lambda: FakeSessionContext())
+    monkeypatch.setattr(vessel_position_tasks, "VesselService", FakeVesselService)
+
+    result = await vessel_position_tasks._precompute_city_situation()
+    query = captured["query"]
+
+    assert result == {
+        "source_status": "AVAILABLE",
+        "generated_at": generated_at.isoformat(),
+        "positioned_count": 6,
+        "city_count": 1,
+        "drilldown_count": 1,
+        "is_partial": False,
+        "snapshot_backend": "memory",
+    }
+    assert query.include_boundary is False
+    assert getattr(query, "force_refresh") is True
+    assert len(drilldowns) == 1
+    assert drilldowns[0].city_code == "320500"
+    assert drilldowns[0].query_snapshot_id == "city-snapshot"
+    assert drilldowns[0].page_size == 100
+
+
+@pytest.mark.asyncio
 async def test_vessel_city_situation_ignores_seed_cache_when_realtime_es_is_configured() -> None:
     service = VesselService.__new__(VesselService)
     events: list[str] = []
@@ -1409,9 +1725,13 @@ def test_vessel_city_situation_marks_boundary_coverage() -> None:
 async def test_vessel_round6_city_vessels_requires_live_snapshot() -> None:
     service = VesselService.__new__(VesselService)
 
+    async def no_cached(_cache_key):
+        return None
+
     async def missing_snapshot(_snapshot_id):
         return None
 
+    service._get_city_vessels_response_cache = no_cached  # type: ignore[method-assign]
     service._get_city_situation_snapshot = missing_snapshot  # type: ignore[method-assign]
     query = SimpleNamespace(
         query_snapshot_id="expired",
@@ -1428,6 +1748,86 @@ async def test_vessel_round6_city_vessels_requires_live_snapshot() -> None:
     assert result.refresh_required is True
     assert result.snapshot_status_code == "EXPIRED"
     assert result.error_message == "SNAPSHOT_EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_vessel_city_vessels_uses_drilldown_cache_before_snapshot() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    cached_response = VesselPositionCityVesselsResponse(
+        total=1,
+        page=1,
+        page_size=20,
+        items=[],
+        query_snapshot_id="city-snapshot",
+        snapshot_hit=True,
+        is_partial=False,
+    )
+
+    async def cached(_cache_key):
+        events.append("cache-read")
+        return cached_response, "redis"
+
+    async def fail_snapshot(_snapshot_id):
+        raise AssertionError("cached city drilldown should not read the full situation snapshot")
+
+    service._get_city_vessels_response_cache = cached  # type: ignore[method-assign]
+    service._get_city_situation_snapshot = fail_snapshot  # type: ignore[method-assign]
+
+    result = await service.position_city_vessels(
+        SimpleNamespace(
+            query_snapshot_id="city-snapshot",
+            city_code="320500",
+            city_name=None,
+            page=1,
+            page_size=20,
+            reported_within_minutes=1440,
+        )
+    )
+
+    assert result.total == 1
+    assert result.snapshot_hit is True
+    assert events == ["cache-read"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_water_system_vessels_uses_drilldown_cache_before_snapshot() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    cached_response = VesselPositionWaterSystemVesselsResponse(
+        total=1,
+        page=1,
+        page_size=20,
+        items=[],
+        query_snapshot_id="water-snapshot",
+        snapshot_hit=True,
+        is_partial=False,
+    )
+
+    async def cached(_cache_key):
+        events.append("cache-read")
+        return cached_response, "redis"
+
+    async def fail_snapshot(_snapshot_id):
+        raise AssertionError("cached water drilldown should not read the full situation snapshot")
+
+    service._get_water_system_vessels_response_cache = cached  # type: ignore[method-assign]
+    service._get_city_situation_snapshot = fail_snapshot  # type: ignore[method-assign]
+
+    result = await service.position_water_system_vessels(
+        SimpleNamespace(
+            query_snapshot_id="water-snapshot",
+            water_system_code="WS_YANGTZE",
+            water_system_name=None,
+            page=1,
+            page_size=20,
+            reported_within_minutes=1440,
+        )
+    )
+
+    assert result.total == 1
+    assert result.snapshot_hit is True
+    assert events == ["cache-read"]
 
 
 def test_vessel_city_resolution_uses_grid_candidates_when_available() -> None:
@@ -1452,3 +1852,22 @@ def test_vessel_city_resolution_uses_grid_candidates_when_available() -> None:
 
     assert resolved.city_code == "320500"
     assert resolved.current_city_source == CURRENT_CITY_SOURCE_ADMIN_BOUNDARY
+
+
+def test_vessel_precompute_worker_ready_queues_analysis_tasks(monkeypatch) -> None:
+    queued: list[tuple[str, str | None]] = []
+
+    class FakeTask:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def apply_async(self, *, queue: str | None = None):
+            queued.append((self.name, queue))
+
+    monkeypatch.setattr(vessel_position_tasks.settings, "VESSEL_SITUATION_PRECOMPUTE_ON_WORKER_START", True)
+    monkeypatch.setattr(vessel_position_tasks, "precompute_city_situation_task", FakeTask("city"))
+    monkeypatch.setattr(vessel_position_tasks, "precompute_water_system_situation_task", FakeTask("water"))
+
+    vessel_position_tasks.precompute_situations_on_worker_ready()
+
+    assert queued == [("city", "analysis"), ("water", "analysis")]

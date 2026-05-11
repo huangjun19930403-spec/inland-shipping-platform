@@ -21,10 +21,14 @@ from app.modules.analysis.schemas import (
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowMapItem,
+    FlowRouteCachePrecomputeRequest,
+    FlowRouteCachePrecomputeResponse,
     FreightAnalysisOverviewResponse,
     HeatMapItem,
     PageResponse,
     PriceAnalysisOverviewResponse,
+    QuoteRouteEstimateRequest,
+    QuoteRouteEstimateResponse,
     RegionAnalysisQuery,
     RegionAnalysisOverviewResponse,
     RegionSupplyDemandAnalysisResponse,
@@ -35,7 +39,7 @@ from app.modules.analysis.schemas import (
     VesselRiskAnalysisResponse,
     VesselTrajectoryAnalysisResponse,
 )
-from app.modules.analysis.service import AnalysisDashboardService
+from app.modules.analysis.service import AnalysisDashboardService, QuoteRouteEstimateService
 
 router = APIRouter()
 
@@ -338,6 +342,33 @@ async def get_flow_map(
     return await service.flow_overview(query.date_from, query.date_to)
 
 
+@router.post("/flows/route-cache/precompute", response_model=FlowRouteCachePrecomputeResponse)
+async def precompute_flow_route_cache(
+    payload: FlowRouteCachePrecomputeRequest,
+    current_user=Depends(get_current_user),
+):
+    _ = current_user
+    from app.tasks.analysis_tasks import precompute_flow_route_cache_task
+
+    async_result = precompute_flow_route_cache_task.apply_async(
+        args=(
+            payload.date_from.isoformat() if payload.date_from else None,
+            payload.date_to.isoformat() if payload.date_to else None,
+            payload.flow_types,
+            payload.limit,
+            payload.force_refresh,
+        ),
+        queue="analysis",
+    )
+    return FlowRouteCachePrecomputeResponse(
+        status_code="QUEUED",
+        message="已提交 AMMS 流向轨迹缓存生成任务",
+        celery_task_id=async_result.id,
+        date_from=payload.date_from,
+        date_to=payload.date_to,
+    )
+
+
 @router.get("/prices/overview", response_model=PriceAnalysisOverviewResponse)
 async def get_price_analysis_overview(
     query: AnalysisDateRangeQuery = Depends(),
@@ -347,6 +378,17 @@ async def get_price_analysis_overview(
     _ = current_user
     service = AnalysisDashboardService(db)
     return await service.price_overview(query.date_from, query.date_to)
+
+
+@router.post("/quote-simulator/route-estimate", response_model=QuoteRouteEstimateResponse)
+async def estimate_quote_route(
+    body: QuoteRouteEstimateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = QuoteRouteEstimateService(db)
+    return await service.estimate_route(body)
 
 
 @router.get("/jobs", response_model=PageResponse[AnalysisJobRunResponse])

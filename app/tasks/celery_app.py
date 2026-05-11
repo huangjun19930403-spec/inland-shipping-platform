@@ -47,6 +47,8 @@ celery_app.conf.update(
         "vessel.recognize_person_certificate_image": {"queue": "vessel_ai"},
         "vessel.recognize_owner_document_image": {"queue": "vessel_ai"},
         "vessel.precompute_city_situation": {"queue": "analysis"},
+        "vessel.precompute_water_system_situation": {"queue": "analysis"},
+        "analysis.precompute_flow_route_cache": {"queue": "analysis"},
     },
 )
 
@@ -59,5 +61,14 @@ celery_app.conf.beat_schedule = {
     "vessel-city-situation-precompute": {
         "task": "vessel.precompute_city_situation",
         "schedule": max(30, int(settings.VESSEL_CITY_SITUATION_PRECOMPUTE_SECONDS or 60)),
+    },
+    "vessel-water-system-situation-precompute": {
+        "task": "vessel.precompute_water_system_situation",
+        "schedule": max(30, int(settings.VESSEL_WATER_SYSTEM_SITUATION_PRECOMPUTE_SECONDS or 60)),
+    },
+    "analysis-flow-route-cache-precompute": {
+        "task": "analysis.precompute_flow_route_cache",
+        "schedule": max(60, int(settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_SECONDS or 300)),
+        "args": (None, None, ["freight", "ship"], settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_LIMIT, False),
     },
 }

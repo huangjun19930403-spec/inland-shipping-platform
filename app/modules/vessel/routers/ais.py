@@ -207,11 +207,14 @@ async def get_vessel_ais_city_boundaries(
 @router.get("/ais/water-system-situation", response_model=VesselPositionWaterSystemSituationResponse)
 async def get_vessel_ais_water_system_situation(
     query: VesselAisWaterSystemSituationQuery = Depends(),
+    force_refresh: bool = Query(False, include_in_schema=False),
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselAisService(db).position_water_system_situation(query.to_internal_query())
+    internal_query = query.to_internal_query()
+    object.__setattr__(internal_query, "force_refresh", force_refresh)
+    return await VesselAisService(db).position_water_system_situation(internal_query)
 
 
 @router.get("/ais/water-system-vessels", response_model=VesselPositionWaterSystemVesselsResponse)

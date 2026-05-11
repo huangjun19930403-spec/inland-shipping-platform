@@ -23,6 +23,26 @@ class AnalysisDateRangeQuery(BaseModel):
     date_to: date | None = None
 
 
+class FlowRouteCachePrecomputeRequest(AnalysisDateRangeQuery):
+    flow_types: list[str] = Field(default_factory=lambda: ["freight", "ship"])
+    limit: int = Field(default=20, ge=1, le=80)
+    force_refresh: bool = False
+
+
+class FlowRouteCachePrecomputeResponse(BaseModel):
+    status_code: str
+    message: str
+    celery_task_id: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    total_count: int = 0
+    cached_count: int = 0
+    generated_count: int = 0
+    pending_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+
+
 class RegionAnalysisQuery(AnalysisDateRangeQuery):
     include_boundary: bool = False
     boundary_precision: str = Field(default="low", pattern="^(low|medium)$")
@@ -80,6 +100,14 @@ class FlowMapItem(BaseModel):
     tonnage: float | None = None
     avg_unit_price: float | None = None
     commodity_name: str | None = None
+    geometry_json: dict | None = None
+    geometry_source: str | None = None
+    route_status_code: str | None = None
+    route_cache_status: str | None = None
+    route_generated_at: datetime | None = None
+    route_distance_km: float | None = None
+    route_point_count: int | None = None
+    route_not_computable_reasons: list[str] = Field(default_factory=list)
 
 
 class HeatMapItem(BaseModel):
@@ -224,6 +252,36 @@ class RegionSupplyDemandAnalysisResponse(BaseModel):
     tension_distribution: list[ChartPoint]
     not_computable_distribution: list[ChartPoint]
     source_status: list[MetricEvidence] = Field(default_factory=list)
+
+
+class QuoteRouteEstimateRequest(BaseModel):
+    origin_node_id: int
+    destination_node_id: int
+    provider_code: str | None = Field(default="auto", pattern="^(auto|hifleet|AUTO|HIFLEET)$")
+
+
+class QuoteRouteEstimateNode(BaseModel):
+    id: int
+    code: str
+    name: str
+    node_type_code: str
+    city_code: str
+    city_name: str | None = None
+    longitude: float | None = None
+    latitude: float | None = None
+
+
+class QuoteRouteEstimateResponse(BaseModel):
+    status_code: str
+    origin_node: QuoteRouteEstimateNode | None = None
+    destination_node: QuoteRouteEstimateNode | None = None
+    distance_km: float | None = None
+    geometry_json: dict | None = None
+    geometry_source: str | None = None
+    provider_trace_id: str | None = None
+    point_count: int | None = None
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    generated_at: datetime
 
 
 class AnalysisJobRunQuery(BaseModel):

@@ -265,12 +265,16 @@ CURRENT_CITY_SOURCE_UNKNOWN = "UNKNOWN"
 CURRENT_CITY_SOURCE_INVALID_POSITION = "INVALID_POSITION"
 CITY_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_GRID_CELL_SIZE_DEGREES = 1.0
+WATER_SYSTEM_GRID_CELL_SIZE_DEGREES = 0.1
 UNKNOWN_WATER_SYSTEM_CODE = "UNKNOWN"
 UNKNOWN_WATER_SYSTEM_NAME = "未知水系"
 CURRENT_WATER_SYSTEM_SOURCE_BOUNDARY = "WATER_SYSTEM_BOUNDARY"
 CURRENT_WATER_SYSTEM_SOURCE_NEAR_BOUNDARY = "NEAR_BOUNDARY"
 WATER_SYSTEM_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_SITUATION_CACHE_KEY_PREFIX = "vessel:city_situation:response:"
+WATER_SYSTEM_SITUATION_CACHE_KEY_PREFIX = "vessel:water_system_situation:response:"
+CITY_SITUATION_VESSELS_CACHE_KEY_PREFIX = "vessel:city_situation:vessels:"
+WATER_SYSTEM_SITUATION_VESSELS_CACHE_KEY_PREFIX = "vessel:water_system_situation:vessels:"
 CITY_SITUATION_SNAPSHOT_KEY_PREFIX = "vessel:city_situation:snapshot:"
 CITY_SITUATION_SNAPSHOT_TTL_SECONDS = settings.VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS
 CITY_SITUATION_SNAPSHOT_MAX_SIZE = 20
@@ -406,10 +410,31 @@ class _CitySituationResponseCacheEntry:
     response: VesselPositionCitySituationResponse
 
 
+@dataclass(slots=True)
+class _WaterSystemSituationResponseCacheEntry:
+    expires_at: datetime
+    response: VesselPositionWaterSystemSituationResponse
+
+
+@dataclass(slots=True)
+class _CitySituationVesselsResponseCacheEntry:
+    expires_at: datetime
+    response: VesselPositionCityVesselsResponse
+
+
+@dataclass(slots=True)
+class _WaterSystemSituationVesselsResponseCacheEntry:
+    expires_at: datetime
+    response: VesselPositionWaterSystemVesselsResponse
+
+
 _CITY_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
 _WATER_SYSTEM_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
 _CITY_SITUATION_SNAPSHOTS: dict[str, _CitySituationSnapshot] = {}
 _CITY_SITUATION_RESPONSE_CACHE: dict[str, _CitySituationResponseCacheEntry] = {}
+_WATER_SYSTEM_SITUATION_RESPONSE_CACHE: dict[str, _WaterSystemSituationResponseCacheEntry] = {}
+_CITY_SITUATION_VESSELS_RESPONSE_CACHE: dict[str, _CitySituationVesselsResponseCacheEntry] = {}
+_WATER_SYSTEM_SITUATION_VESSELS_RESPONSE_CACHE: dict[str, _WaterSystemSituationVesselsResponseCacheEntry] = {}
 _CITY_SITUATION_REDIS_CLIENT: Any | None = None
 
 
@@ -587,6 +612,10 @@ def _city_situation_cache_ttl() -> int:
     return max(5, int(settings.VESSEL_CITY_SITUATION_CACHE_TTL_SECONDS or 60))
 
 
+def _water_system_situation_cache_ttl() -> int:
+    return max(5, int(settings.VESSEL_WATER_SYSTEM_SITUATION_CACHE_TTL_SECONDS or 60))
+
+
 def _city_snapshot_ttl() -> int:
     return max(30, int(settings.VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS or CITY_SITUATION_SNAPSHOT_TTL_SECONDS))
 
@@ -612,10 +641,23 @@ def _safe_int(value: Any, default: int, *, minimum: int = 1, maximum: int | None
 
 
 def _city_situation_query_cache_key(query: Any) -> str:
-    payload = query.model_dump(mode="json") if hasattr(query, "model_dump") else dict(query)
+    if hasattr(query, "model_dump"):
+        payload = query.model_dump(mode="json")
+    elif isinstance(query, dict):
+        payload = dict(query)
+    else:
+        payload = {key: value for key, value in vars(query).items() if not key.startswith("_")}
     payload.pop("force_refresh", None)
     normalized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+
+def _water_system_situation_query_cache_key(query: Any) -> str:
+    return _city_situation_query_cache_key(query)
+
+
+def _situation_vessels_query_cache_key(query: Any) -> str:
+    return _city_situation_query_cache_key(query)
 
 
 def _money(value: Any) -> Decimal | None:
@@ -912,6 +954,42 @@ def _build_city_boundary_grid(boundaries: list[_CityBoundary]) -> dict[tuple[int
         min_x, min_y, max_x, max_y = boundary.bbox
         for x_index in _grid_range(min_x, max_x):
             for y_index in _grid_range(min_y, max_y):
+                grid[(x_index, y_index)].append(boundary)
+    return dict(grid)
+
+
+def _water_grid_range(min_value: float, max_value: float) -> range:
+    import math
+
+    start = math.floor(min_value / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES)
+    end = math.floor(max_value / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES)
+    return range(start, end + 1)
+
+
+def _water_grid_key(longitude: float, latitude: float) -> tuple[int, int]:
+    import math
+
+    return (
+        math.floor(longitude / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES),
+        math.floor(latitude / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES),
+    )
+
+
+def _water_neighbor_grid_keys(longitude: float, latitude: float, radius_cells: int = 1) -> list[tuple[int, int]]:
+    x_index, y_index = _water_grid_key(longitude, latitude)
+    return [
+        (x_index + dx, y_index + dy)
+        for dx in range(-radius_cells, radius_cells + 1)
+        for dy in range(-radius_cells, radius_cells + 1)
+    ]
+
+
+def _build_water_system_boundary_grid(boundaries: list[_WaterSystemBoundary]) -> dict[tuple[int, int], list[_WaterSystemBoundary]]:
+    grid: dict[tuple[int, int], list[_WaterSystemBoundary]] = defaultdict(list)
+    for boundary in boundaries:
+        min_x, min_y, max_x, max_y = boundary.bbox
+        for x_index in _water_grid_range(min_x, max_x):
+            for y_index in _water_grid_range(min_y, max_y):
                 grid[(x_index, y_index)].append(boundary)
     return dict(grid)
 

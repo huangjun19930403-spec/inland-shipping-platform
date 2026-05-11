@@ -8,7 +8,7 @@ import pytest
 
 from main import app
 from app.modules.vessel.ais.service import VesselAisService
-from app.modules.vessel.service import _WaterSystemBoundary, _build_city_boundary_grid
+from app.modules.vessel.service import _WaterSystemBoundary, _build_water_system_boundary_grid
 from scripts import seed_water_systems as seed_water_systems_module
 from scripts.seed_system_base import MENUS, ROLE_MENU_CODES
 from scripts.seed_water_systems import (
@@ -73,25 +73,14 @@ def test_water_system_backend_menus_are_initialized_for_visible_routes() -> None
         "visible_flag": 1,
         "status_code": "ACTIVE",
     }
-    assert menu_by_code["VESSEL_WATER_SYSTEM_SITUATION"] == {
-        "menu_code": "VESSEL_WATER_SYSTEM_SITUATION",
-        "menu_name": "水系态势",
-        "menu_type_code": "MENU",
-        "parent_code": "VESSEL_ANALYSIS_GROUP",
-        "route_path": "/vessels/water-system-situation",
-        "component_path": "modules/vessel/pages/VesselWaterSystemSituationPage",
-        "icon": "MapLocation",
-        "sort_order": 2,
-        "visible_flag": 1,
-        "status_code": "ACTIVE",
-    }
-    assert menu_by_code["VESSEL_NODE_ROUTE_ANALYSIS"]["sort_order"] == 3
+    assert "VESSEL_WATER_SYSTEM_SITUATION" not in menu_by_code
+    assert menu_by_code["VESSEL_NODE_ROUTE_ANALYSIS"]["sort_order"] == 2
 
     assert "ADDRESS_WATER_SYSTEMS" in ROLE_MENU_CODES["DATA_STEWARD"]
     assert "ADDRESS_WATER_SYSTEMS" in ROLE_MENU_CODES["OPS_ANALYST"]
     assert "ADDRESS_WATER_SYSTEMS" in ROLE_MENU_CODES["BUSINESS_INPUTTER"]
-    assert "VESSEL_WATER_SYSTEM_SITUATION" in ROLE_MENU_CODES["DATA_STEWARD"]
-    assert "VESSEL_WATER_SYSTEM_SITUATION" in ROLE_MENU_CODES["OPS_ANALYST"]
+    assert "VESSEL_WATER_SYSTEM_SITUATION" not in ROLE_MENU_CODES["DATA_STEWARD"]
+    assert "VESSEL_WATER_SYSTEM_SITUATION" not in ROLE_MENU_CODES["OPS_ANALYST"]
 
     for role_code, menu_codes in ROLE_MENU_CODES.items():
         visible_codes = set(menu_codes)
@@ -230,7 +219,7 @@ def test_water_system_match_selects_smallest_area_per_level_and_respects_filter(
     big = _water_boundary("big", 1, Decimal("10"), 0, 0, 4, 4)
     small = _water_boundary("small", 1, Decimal("1"), 0, 0, 2, 2)
     canal = _water_boundary("canal", 4, Decimal("3"), 0, 0, 3, 3, category="CANAL")
-    grid_index = _build_city_boundary_grid([big, small, canal])
+    grid_index = _build_water_system_boundary_grid([big, small, canal])
 
     matches = service._resolve_current_water_systems_from_boundaries(
         Decimal("1"),
@@ -265,7 +254,7 @@ def test_water_system_match_uses_near_boundary_fallback() -> None:
         Decimal("116.014"),
         Decimal("29.005"),
         [boundary],
-        _build_city_boundary_grid([boundary]),
+        _build_water_system_boundary_grid([boundary]),
     )
 
     assert [match.water_system_code for match in matches] == ["lake"]

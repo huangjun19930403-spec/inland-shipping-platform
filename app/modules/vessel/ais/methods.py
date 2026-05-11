@@ -181,6 +181,156 @@ class VesselAisMixin:
             response=response.model_copy(deep=True),
         )
 
+    async def _get_water_system_situation_response_cache(
+        self,
+        cache_key: str,
+    ) -> tuple[VesselPositionWaterSystemSituationResponse, str] | None:
+        now = datetime.utcnow()
+        shared_required = _city_shared_cache_required()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                payload = await redis_client.get(WATER_SYSTEM_SITUATION_CACHE_KEY_PREFIX + cache_key) if redis_client else None
+                if payload:
+                    return VesselPositionWaterSystemSituationResponse.model_validate_json(payload), "redis"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("water system situation redis cache read failed: %s", exc)
+            if shared_required:
+                return None
+        if shared_required:
+            return None
+        cached = _WATER_SYSTEM_SITUATION_RESPONSE_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        if cached.expires_at <= now:
+            _WATER_SYSTEM_SITUATION_RESPONSE_CACHE.pop(cache_key, None)
+            return None
+        return cached.response.model_copy(deep=True), "memory"
+
+    async def _store_water_system_situation_response_cache(
+        self,
+        cache_key: str,
+        response: VesselPositionWaterSystemSituationResponse,
+    ) -> None:
+        ttl = _water_system_situation_cache_ttl()
+        shared_required = _city_shared_cache_required()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                if redis_client is not None:
+                    await redis_client.setex(WATER_SYSTEM_SITUATION_CACHE_KEY_PREFIX + cache_key, ttl, response.model_dump_json())
+                    return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("water system situation redis cache write failed: %s", exc)
+            if shared_required:
+                return
+        if shared_required:
+            return
+        _WATER_SYSTEM_SITUATION_RESPONSE_CACHE[cache_key] = _WaterSystemSituationResponseCacheEntry(
+            expires_at=datetime.utcnow() + timedelta(seconds=ttl),
+            response=response.model_copy(deep=True),
+        )
+
+    async def _get_city_vessels_response_cache(
+        self,
+        cache_key: str,
+    ) -> tuple[VesselPositionCityVesselsResponse, str] | None:
+        now = datetime.utcnow()
+        shared_required = _city_shared_cache_required()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                payload = await redis_client.get(CITY_SITUATION_VESSELS_CACHE_KEY_PREFIX + cache_key) if redis_client else None
+                if payload:
+                    return VesselPositionCityVesselsResponse.model_validate_json(payload), "redis"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("city situation vessels redis cache read failed: %s", exc)
+            if shared_required:
+                return None
+        if shared_required:
+            return None
+        cached = _CITY_SITUATION_VESSELS_RESPONSE_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        if cached.expires_at <= now:
+            _CITY_SITUATION_VESSELS_RESPONSE_CACHE.pop(cache_key, None)
+            return None
+        return cached.response.model_copy(deep=True), "memory"
+
+    async def _store_city_vessels_response_cache(
+        self,
+        cache_key: str,
+        response: VesselPositionCityVesselsResponse,
+    ) -> None:
+        ttl = _city_snapshot_ttl()
+        shared_required = _city_shared_cache_required()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                if redis_client is not None:
+                    await redis_client.setex(CITY_SITUATION_VESSELS_CACHE_KEY_PREFIX + cache_key, ttl, response.model_dump_json())
+                    return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("city situation vessels redis cache write failed: %s", exc)
+            if shared_required:
+                return
+        if shared_required:
+            return
+        _CITY_SITUATION_VESSELS_RESPONSE_CACHE[cache_key] = _CitySituationVesselsResponseCacheEntry(
+            expires_at=datetime.utcnow() + timedelta(seconds=ttl),
+            response=response.model_copy(deep=True),
+        )
+
+    async def _get_water_system_vessels_response_cache(
+        self,
+        cache_key: str,
+    ) -> tuple[VesselPositionWaterSystemVesselsResponse, str] | None:
+        now = datetime.utcnow()
+        shared_required = _city_shared_cache_required()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                payload = await redis_client.get(WATER_SYSTEM_SITUATION_VESSELS_CACHE_KEY_PREFIX + cache_key) if redis_client else None
+                if payload:
+                    return VesselPositionWaterSystemVesselsResponse.model_validate_json(payload), "redis"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("water system situation vessels redis cache read failed: %s", exc)
+            if shared_required:
+                return None
+        if shared_required:
+            return None
+        cached = _WATER_SYSTEM_SITUATION_VESSELS_RESPONSE_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        if cached.expires_at <= now:
+            _WATER_SYSTEM_SITUATION_VESSELS_RESPONSE_CACHE.pop(cache_key, None)
+            return None
+        return cached.response.model_copy(deep=True), "memory"
+
+    async def _store_water_system_vessels_response_cache(
+        self,
+        cache_key: str,
+        response: VesselPositionWaterSystemVesselsResponse,
+    ) -> None:
+        ttl = _city_snapshot_ttl()
+        shared_required = _city_shared_cache_required()
+        if await self._city_cache_backend() == "redis":
+            try:
+                redis_client = await self._city_redis()
+                if redis_client is not None:
+                    await redis_client.setex(WATER_SYSTEM_SITUATION_VESSELS_CACHE_KEY_PREFIX + cache_key, ttl, response.model_dump_json())
+                    return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("water system situation vessels redis cache write failed: %s", exc)
+            if shared_required:
+                return
+        if shared_required:
+            return
+        _WATER_SYSTEM_SITUATION_VESSELS_RESPONSE_CACHE[cache_key] = _WaterSystemSituationVesselsResponseCacheEntry(
+            expires_at=datetime.utcnow() + timedelta(seconds=ttl),
+            response=response.model_copy(deep=True),
+        )
+
     async def _city_situation_allows_seed_snapshot(self) -> bool:
         return not bool(await self._realtime_es_host())
 
@@ -504,8 +654,6 @@ class VesselAisMixin:
         return response
 
     async def position_city_vessels(self, query) -> VesselPositionCityVesselsResponse:
-        snapshot = await self._get_city_situation_snapshot(query.query_snapshot_id)
-        snapshot_hit = snapshot is not None
         if not query.query_snapshot_id:
             return VesselPositionCityVesselsResponse(
                 total=0,
@@ -519,6 +667,16 @@ class VesselAisMixin:
                 is_partial=False,
                 error_message="城市下钻必须带 query_snapshot_id，请先刷新 AIS 城市态势",
             )
+        cache_key = _situation_vessels_query_cache_key(query)
+        cached = await self._get_city_vessels_response_cache(cache_key)
+        if cached is not None:
+            cached_response, _cache_backend = cached
+            return cached_response.model_copy(
+                update={"snapshot_hit": True, "refresh_required": False},
+                deep=True,
+            )
+        snapshot = await self._get_city_situation_snapshot(query.query_snapshot_id)
+        snapshot_hit = snapshot is not None
         if not snapshot or snapshot.refresh_required or snapshot.status_code == "EXPIRED":
             return VesselPositionCityVesselsResponse(
                 total=0,
@@ -544,7 +702,7 @@ class VesselAisMixin:
             if self._city_matches(item, city_code=query.city_code, city_name=query.city_name)
         ]
         start = (query.page - 1) * query.page_size
-        return VesselPositionCityVesselsResponse(
+        response = VesselPositionCityVesselsResponse(
             total=len(filtered),
             page=query.page,
             page_size=query.page_size,
@@ -556,6 +714,8 @@ class VesselAisMixin:
             is_partial=partial,
             error_message=error_message,
         )
+        await self._store_city_vessels_response_cache(cache_key, response)
+        return response
 
     async def ais_city_boundaries(self, query) -> VesselAisCityBoundaryResponse:
         precision = getattr(query, "precision", "low") or "low"
@@ -596,7 +756,23 @@ class VesselAisMixin:
 
     async def position_water_system_situation(self, query) -> VesselPositionWaterSystemSituationResponse:
         generated_at = datetime.utcnow()
+        cache_key = _water_system_situation_query_cache_key(query)
         cache_backend = await self._city_cache_backend()
+        force_refresh = bool(getattr(query, "force_refresh", False))
+        if not force_refresh:
+            cached = await self._get_water_system_situation_response_cache(cache_key)
+            if cached is not None:
+                cached_response, cache_backend = cached
+                return cached_response.model_copy(
+                    update={
+                        "cache_status": "HIT",
+                        "cache_generated_at": cached_response.generated_at,
+                        "is_stale_cache": False,
+                        "snapshot_backend": cache_backend,
+                        "cache_backend_note": "memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
+                    },
+                    deep=True,
+                )
         levels = self._water_system_query_levels(query)
         navigation_scope_codes = self._water_system_query_code_set(query, "navigation_scope_codes")
         navigation_category_codes = self._water_system_query_code_set(query, "navigation_category_codes")
@@ -639,6 +815,9 @@ class VesselAisMixin:
                 source_status_name=_source_status_name("EMPTY"),
                 generated_at=generated_at,
                 message="未匹配到符合条件的船舶档案",
+                cache_status="MISS",
+                cache_generated_at=generated_at,
+                is_stale_cache=False,
                 snapshot_backend=cache_backend,
                 cache_backend_note="memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
                 summary=VesselPositionWaterSystemSituationSummary(
@@ -690,6 +869,9 @@ class VesselAisMixin:
                 source_status_name=_source_status_name("UNCONFIGURED"),
                 generated_at=generated_at,
                 message="实时 ES 未配置，暂无水系态势",
+                cache_status="MISS",
+                cache_generated_at=generated_at,
+                is_stale_cache=False,
                 snapshot_backend=cache_backend,
                 cache_backend_note="memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
                 summary=VesselPositionWaterSystemSituationSummary(
@@ -778,11 +960,14 @@ class VesselAisMixin:
             uncertainty_notes.append(f"实时 ES 来源索引：{', '.join(result.source_indices[:5])}")
         snapshot_expires_at = generated_at + timedelta(seconds=_city_snapshot_ttl())
         response_status = "PARTIAL" if partial and water_systems else ("ERROR" if partial and not water_systems else ("AVAILABLE" if water_systems else "EMPTY"))
-        return VesselPositionWaterSystemSituationResponse(
+        response = VesselPositionWaterSystemSituationResponse(
             source_status=response_status,
             source_status_name=_source_status_name(response_status),
             generated_at=generated_at,
             message=error_message if partial else (None if water_systems else "实时 ES 暂无符合筛选条件的水系态势"),
+            cache_status="MISS",
+            cache_generated_at=generated_at,
+            is_stale_cache=False,
             snapshot_backend=cache_backend,
             cache_backend_note="memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
             summary=VesselPositionWaterSystemSituationSummary(
@@ -818,10 +1003,10 @@ class VesselAisMixin:
             ),
             water_systems=water_systems,
         )
+        await self._store_water_system_situation_response_cache(cache_key, response)
+        return response
 
     async def position_water_system_vessels(self, query) -> VesselPositionWaterSystemVesselsResponse:
-        snapshot = await self._get_city_situation_snapshot(query.query_snapshot_id)
-        snapshot_hit = snapshot is not None
         if not query.query_snapshot_id:
             return VesselPositionWaterSystemVesselsResponse(
                 total=0,
@@ -835,6 +1020,16 @@ class VesselAisMixin:
                 is_partial=False,
                 error_message="水系下钻必须带 query_snapshot_id，请先刷新 AIS 水系态势",
             )
+        cache_key = _situation_vessels_query_cache_key(query)
+        cached = await self._get_water_system_vessels_response_cache(cache_key)
+        if cached is not None:
+            cached_response, _cache_backend = cached
+            return cached_response.model_copy(
+                update={"snapshot_hit": True, "refresh_required": False},
+                deep=True,
+            )
+        snapshot = await self._get_city_situation_snapshot(query.query_snapshot_id)
+        snapshot_hit = snapshot is not None
         if not snapshot or snapshot.refresh_required or snapshot.status_code == "EXPIRED":
             return VesselPositionWaterSystemVesselsResponse(
                 total=0,
@@ -891,7 +1086,7 @@ class VesselAisMixin:
             for item, match in matched_items
         ]
         start = (query.page - 1) * query.page_size
-        return VesselPositionWaterSystemVesselsResponse(
+        response = VesselPositionWaterSystemVesselsResponse(
             total=len(enriched),
             page=query.page,
             page_size=query.page_size,
@@ -903,6 +1098,8 @@ class VesselAisMixin:
             is_partial=snapshot.partial,
             error_message=snapshot.error_message,
         )
+        await self._store_water_system_vessels_response_cache(cache_key, response)
+        return response
 
     async def ais_water_system_boundaries(self, query) -> VesselAisWaterSystemBoundaryResponse:
         precision = getattr(query, "precision", "low") or "low"
@@ -1736,7 +1933,7 @@ class VesselAisMixin:
                     levels.add(int(text))
                 except ValueError:
                     continue
-        return {item for item in levels if item in {1, 2, 3, 4}} or {1, 2, 3, 4}
+        return {item for item in levels if item in {1, 2, 3, 4, 5, 6, 7}} or {1, 2, 3, 4}
 
     def _water_system_query_code_set(self, query, attr_name: str) -> set[str]:
         raw = getattr(query, attr_name, None)
@@ -1785,12 +1982,14 @@ class VesselAisMixin:
         grouped: dict[str, list[VesselPositionMonitorItemResponse]] = defaultdict(list)
         unmatched_items: list[VesselPositionMonitorItemResponse] = []
         grid_index = _WATER_SYSTEM_BOUNDARY_CACHE.get("grid_index") or {}
+        allowed_codes = set(boundary_by_code.keys())
         for item in items:
             matches = self._resolve_current_water_systems_from_boundaries(
                 _to_decimal(item.longitude),
                 _to_decimal(item.latitude),
                 boundaries,
                 grid_index,
+                allowed_codes,
             )
             if not matches:
                 unmatched_items.append(item)
@@ -2219,7 +2418,7 @@ class VesselAisMixin:
             )
         _WATER_SYSTEM_BOUNDARY_CACHE["loaded_at"] = now
         _WATER_SYSTEM_BOUNDARY_CACHE["boundaries"] = boundaries
-        _WATER_SYSTEM_BOUNDARY_CACHE["grid_index"] = _build_city_boundary_grid(boundaries)  # type: ignore[arg-type]
+        _WATER_SYSTEM_BOUNDARY_CACHE["grid_index"] = _build_water_system_boundary_grid(boundaries)
         return boundaries
 
     def _paths_from_stored_boundary(self, value: Any) -> list[list[tuple[float, float]]]:
@@ -2322,15 +2521,17 @@ class VesselAisMixin:
         latitude: Decimal | None,
         boundaries: list[_WaterSystemBoundary],
         grid_index: dict[tuple[int, int], list[_WaterSystemBoundary]] | None = None,
+        allowed_codes: set[str] | None = None,
     ) -> list[_ResolvedWaterSystem]:
         if not self._valid_longitude_latitude(longitude, latitude):
             return []
         lon = float(longitude)
         lat = float(latitude)
         if grid_index:
-            allowed_codes = {boundary.code for boundary in boundaries}
+            if allowed_codes is None:
+                allowed_codes = {boundary.code for boundary in boundaries}
             candidates = [
-                boundary for boundary in grid_index.get(_grid_key(lon, lat), [])
+                boundary for boundary in grid_index.get(_water_grid_key(lon, lat), [])
                 if boundary.code in allowed_codes
             ]
         else:
@@ -2342,7 +2543,16 @@ class VesselAisMixin:
         ]
         if not matches:
             near_matches: list[tuple[_WaterSystemBoundary, Decimal]] = []
-            for boundary in boundaries:
+            near_candidates = boundaries
+            if grid_index:
+                candidates_by_code: dict[str, _WaterSystemBoundary] = {}
+                for key in _water_neighbor_grid_keys(lon, lat):
+                    for boundary in grid_index.get(key, []):
+                        if allowed_codes is not None and boundary.code not in allowed_codes:
+                            continue
+                        candidates_by_code.setdefault(boundary.code, boundary)
+                near_candidates = list(candidates_by_code.values())
+            for boundary in near_candidates:
                 if not self._expanded_water_bbox_contains(boundary.bbox, lon, lat, 0.06):
                     continue
                 distance_m = self._water_boundary_distance_m(lon, lat, boundary)

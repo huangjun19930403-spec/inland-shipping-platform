@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+import hashlib
+import json
+import math
 from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.core.exceptions import NotFoundError, ValidationError
-from app.models.address import AdminRegion, AdminRegionBoundary, Region, TransportNode
+from app.core.config import settings
+from app.core.exceptions import AppException, NotFoundError, ValidationError
+from app.integrations.hifleet.client import HifleetRouteClient
+from app.integrations.http.route_geometry_types import RouteGeometryQuery
+from app.models.address import AdminRegion, AdminRegionBoundary, Region, TransportNode, TransportNodeBusinessCategory
 from app.models.analysis import (
     AnalysisJobDefinition,
     AnalysisJobRun,
@@ -53,12 +60,16 @@ from app.modules.analysis.schemas import (
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowMapItem,
+    FlowRouteCachePrecomputeResponse,
     FreightAnalysisOverviewResponse,
     HeatMapItem,
     MetricCard,
     MetricEvidence,
     PageResponse,
     PriceAnalysisOverviewResponse,
+    QuoteRouteEstimateNode,
+    QuoteRouteEstimateRequest,
+    QuoteRouteEstimateResponse,
     RegionSupplyDemandAnalysisResponse,
     RegionAnalysisOverviewResponse,
     ShipAnalysisOverviewResponse,
@@ -68,6 +79,19 @@ from app.modules.analysis.schemas import (
     VesselRiskAnalysisResponse,
     VesselTrajectoryAnalysisResponse,
 )
+from app.modules.system.runtime_config import RuntimeConfigService
+
+try:  # Redis is optional locally; memory cache remains the fallback.
+    from redis.asyncio import Redis
+except Exception:  # pragma: no cover - optional dependency guard
+    Redis = None  # type: ignore[assignment]
+
+
+_FLOW_ROUTE_GEOMETRY_CACHE_TTL_SECONDS = settings.ANALYSIS_FLOW_ROUTE_CACHE_TTL_SECONDS
+_FLOW_ROUTE_GEOMETRY_FAILURE_CACHE_TTL_SECONDS = settings.ANALYSIS_FLOW_ROUTE_FAILURE_CACHE_TTL_SECONDS
+_FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX = "analysis:flow_route_geometry:"
+_FLOW_ROUTE_GEOMETRY_CACHE: dict[str, tuple[datetime, dict[str, Any]]] = {}
+_FLOW_ROUTE_GEOMETRY_REDIS_CLIENT: Any | None = None
 
 
 def _num(value: Any) -> float:
@@ -196,9 +220,438 @@ def _status_name(status_code: str) -> str:
     }.get(status_code, status_code)
 
 
+def _to_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _node_snapshot(node: TransportNode | None) -> QuoteRouteEstimateNode | None:
+    if node is None:
+        return None
+    return QuoteRouteEstimateNode(
+        id=int(node.id),
+        code=node.code,
+        name=node.name,
+        node_type_code=node.node_type_code,
+        city_code=node.city_code,
+        city_name=getattr(node, "city_name", None),
+        longitude=_to_optional_float(node.longitude),
+        latitude=_to_optional_float(node.latitude),
+    )
+
+
+def _line_string_points(geometry: dict | None) -> list[tuple[float, float]]:
+    if not isinstance(geometry, dict) or geometry.get("type") != "LineString":
+        return []
+    points: list[tuple[float, float]] = []
+    for item in geometry.get("coordinates") or []:
+        if not isinstance(item, list | tuple) or len(item) < 2:
+            continue
+        lon = _to_optional_float(item[0])
+        lat = _to_optional_float(item[1])
+        if lon is None or lat is None:
+            continue
+        if -180 <= lon <= 180 and -90 <= lat <= 90:
+            point = (lon, lat)
+            if not points or points[-1] != point:
+                points.append(point)
+    return points
+
+
+def _haversine_distance_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    radius_km = 6371.0088
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lon = math.radians(lon2 - lon1)
+    a = math.sin(delta_lat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+    return radius_km * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _line_length_km(points: list[tuple[float, float]]) -> float | None:
+    if len(points) < 2:
+        return None
+    distance = 0.0
+    for index in range(len(points) - 1):
+        start = points[index]
+        end = points[index + 1]
+        distance += _haversine_distance_km(start[0], start[1], end[0], end[1])
+    return round(distance, 3)
+
+
+def _safe_reason(exc: Exception) -> str:
+    if isinstance(exc, AppException):
+        text = exc.message
+    else:
+        text = str(exc)
+    return (text or "AMMS 航线测算失败").replace("HiFleet", "AMMS").replace("HIFLEET", "AMMS").replace("\r", " ").replace("\n", " ").strip()[:180]
+
+
+def _valid_flow_coordinate(lon: float | None, lat: float | None) -> bool:
+    return lon is not None and lat is not None and -180 <= lon <= 180 and -90 <= lat <= 90
+
+
+def _flow_route_geometry_cache_key(item: FlowMapItem, segment_type: str) -> str:
+    raw = "|".join(
+        [
+            segment_type,
+            str(item.origin_id or ""),
+            str(item.destination_id or ""),
+            f"{float(item.origin_longitude or 0):.6f}",
+            f"{float(item.origin_latitude or 0):.6f}",
+            f"{float(item.destination_longitude or 0):.6f}",
+            f"{float(item.destination_latitude or 0):.6f}",
+        ]
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _flow_route_geometry_cache_backend_setting() -> str:
+    return (settings.ANALYSIS_FLOW_ROUTE_CACHE_BACKEND or "redis").strip().lower()
+
+
+async def _flow_route_geometry_redis() -> Any | None:
+    global _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT
+    if _flow_route_geometry_cache_backend_setting() != "redis" or Redis is None:
+        return None
+    if _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT is None:
+        _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT = Redis.from_url(
+            settings.CELERY_BROKER_URL,
+            encoding="utf-8",
+            decode_responses=True,
+        )
+    return _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT
+
+
+def _restore_flow_route_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    restored = dict(payload)
+    generated_at = restored.get("route_generated_at")
+    if isinstance(generated_at, str):
+        try:
+            restored["route_generated_at"] = datetime.fromisoformat(generated_at)
+        except ValueError:
+            restored["route_generated_at"] = None
+    return restored
+
+
+def _serialize_flow_route_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    serializable = dict(payload)
+    generated_at = serializable.get("route_generated_at")
+    if isinstance(generated_at, datetime):
+        serializable["route_generated_at"] = generated_at.isoformat()
+    return serializable
+
+
+async def _flow_route_geometry_cache_get(cache_key: str) -> dict[str, Any] | None:
+    cached = _FLOW_ROUTE_GEOMETRY_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, payload = cached
+        if expires_at > datetime.now(UTC):
+            return dict(payload)
+        _FLOW_ROUTE_GEOMETRY_CACHE.pop(cache_key, None)
+    redis_client = await _flow_route_geometry_redis()
+    if redis_client is None:
+        return None
+    try:
+        cached_payload = await redis_client.get(_FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX + cache_key)
+    except Exception:
+        return None
+    if not cached_payload:
+        return None
+    try:
+        payload = _restore_flow_route_payload(json.loads(cached_payload))
+    except Exception:
+        return None
+    ttl = _FLOW_ROUTE_GEOMETRY_CACHE_TTL_SECONDS
+    _FLOW_ROUTE_GEOMETRY_CACHE[cache_key] = (datetime.now(UTC) + timedelta(seconds=min(ttl, 300)), dict(payload))
+    return payload
+
+
+async def _flow_route_geometry_cache_set(cache_key: str, payload: dict[str, Any]) -> None:
+    status = str(payload.get("route_status_code") or "").upper()
+    ttl = _FLOW_ROUTE_GEOMETRY_CACHE_TTL_SECONDS if status == "READY" else _FLOW_ROUTE_GEOMETRY_FAILURE_CACHE_TTL_SECONDS
+    _FLOW_ROUTE_GEOMETRY_CACHE[cache_key] = (datetime.now(UTC) + timedelta(seconds=ttl), dict(payload))
+    redis_client = await _flow_route_geometry_redis()
+    if redis_client is None:
+        return
+    try:
+        await redis_client.setex(
+            _FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX + cache_key,
+            ttl,
+            json.dumps(_serialize_flow_route_payload(payload), ensure_ascii=False, default=str),
+        )
+    except Exception:
+        return
+
+
+async def _flow_route_geometry_cache_delete(cache_key: str) -> None:
+    _FLOW_ROUTE_GEOMETRY_CACHE.pop(cache_key, None)
+    redis_client = await _flow_route_geometry_redis()
+    if redis_client is None:
+        return
+    try:
+        await redis_client.delete(_FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX + cache_key)
+    except Exception:
+        return
+
+
+class QuoteRouteEstimateService:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+        self.runtime_config = RuntimeConfigService(db)
+
+    async def _get_node(self, node_id: int) -> TransportNode | None:
+        return await self.db.scalar(
+            select(TransportNode).where(TransportNode.id == node_id, TransportNode.deleted_at.is_(None))
+        )
+
+    async def _category_codes(self, node_id: int) -> set[str]:
+        rows = (
+            await self.db.execute(
+                select(TransportNodeBusinessCategory.business_category_code).where(
+                    TransportNodeBusinessCategory.node_id == node_id
+                )
+            )
+        ).scalars().all()
+        return {str(row) for row in rows}
+
+    def _route_client(self) -> HifleetRouteClient:
+        return HifleetRouteClient(runtime_config=self.runtime_config)
+
+    @staticmethod
+    def _node_validation_reasons(node: TransportNode | None, *, role: str) -> list[str]:
+        if node is None:
+            return [f"{role}节点不存在"]
+        reasons: list[str] = []
+        if node.status != 1:
+            reasons.append(f"{role}节点未启用")
+        if _to_optional_float(node.longitude) is None or _to_optional_float(node.latitude) is None:
+            reasons.append(f"{role}节点缺少经纬度")
+        return reasons
+
+    @staticmethod
+    def _response(
+        status_code: str,
+        origin_node: TransportNode | None,
+        destination_node: TransportNode | None,
+        *,
+        reasons: list[str] | None = None,
+        distance_km: float | None = None,
+        geometry_json: dict | None = None,
+        geometry_source: str | None = None,
+        provider_trace_id: str | None = None,
+        point_count: int | None = None,
+    ) -> QuoteRouteEstimateResponse:
+        return QuoteRouteEstimateResponse(
+            status_code=status_code,
+            origin_node=_node_snapshot(origin_node),
+            destination_node=_node_snapshot(destination_node),
+            distance_km=round(distance_km, 3) if distance_km is not None else None,
+            geometry_json=geometry_json,
+            geometry_source=geometry_source,
+            provider_trace_id=provider_trace_id,
+            point_count=point_count,
+            not_computable_reasons=reasons or [],
+            generated_at=datetime.now(UTC),
+        )
+
+    async def estimate_route(self, payload: QuoteRouteEstimateRequest) -> QuoteRouteEstimateResponse:
+        origin = await self._get_node(payload.origin_node_id)
+        destination = await self._get_node(payload.destination_node_id)
+        reasons: list[str] = []
+        reasons.extend(self._node_validation_reasons(origin, role="装货"))
+        reasons.extend(self._node_validation_reasons(destination, role="卸货"))
+
+        if origin is not None and destination is not None and origin.id == destination.id:
+            reasons.append("装货节点和卸货节点不能相同")
+
+        if origin is not None:
+            origin_categories = await self._category_codes(origin.id)
+            if "LOADING" not in origin_categories:
+                reasons.append("装货节点未配置装货业务类别")
+        if destination is not None:
+            destination_categories = await self._category_codes(destination.id)
+            if "UNLOADING" not in destination_categories:
+                reasons.append("卸货节点未配置卸货业务类别")
+
+        if reasons:
+            return self._response("NOT_COMPUTABLE", origin, destination, reasons=reasons)
+
+        assert origin is not None and destination is not None
+        origin_lon = float(origin.longitude)
+        origin_lat = float(origin.latitude)
+        destination_lon = float(destination.longitude)
+        destination_lat = float(destination.latitude)
+
+        try:
+            result = await self._route_client().generate(
+                RouteGeometryQuery(
+                    origin_lon=origin_lon,
+                    origin_lat=origin_lat,
+                    dest_lon=destination_lon,
+                    dest_lat=destination_lat,
+                    transport_mode="WATER",
+                    segment_type="QUOTE_SIMULATOR",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            reason = _safe_reason(exc)
+            status = "NOT_COMPUTABLE" if "未配置" in reason else "FAILED"
+            return self._response(status, origin, destination, reasons=[reason])
+
+        points = _line_string_points(result.geometry)
+        distance_km = result.distance_km if result.distance_km is not None else _line_length_km(points)
+        if len(points) < 2 or distance_km is None:
+            return self._response("FAILED", origin, destination, reasons=["AMMS 返回轨迹为空或无法计算距离"])
+
+        return self._response(
+            "READY",
+            origin,
+            destination,
+            distance_km=distance_km,
+            geometry_json=result.geometry,
+            geometry_source=str(result.source or "hifleet").upper(),
+            provider_trace_id=result.provider_trace_id,
+            point_count=len(points),
+        )
+
+
 class AnalysisDashboardService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self.runtime_config = RuntimeConfigService(db)
+
+    def _route_client(self) -> HifleetRouteClient:
+        return HifleetRouteClient(runtime_config=self.runtime_config)
+
+    async def _flow_route_geometry_payload(
+        self,
+        item: FlowMapItem,
+        *,
+        segment_type: str,
+        client: HifleetRouteClient,
+        generate_missing: bool,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        origin_lon = _to_optional_float(item.origin_longitude)
+        origin_lat = _to_optional_float(item.origin_latitude)
+        destination_lon = _to_optional_float(item.destination_longitude)
+        destination_lat = _to_optional_float(item.destination_latitude)
+        if not (
+            _valid_flow_coordinate(origin_lon, origin_lat)
+            and _valid_flow_coordinate(destination_lon, destination_lat)
+        ):
+            return {
+                "route_status_code": "NOT_COMPUTABLE",
+                "route_cache_status": "SKIPPED",
+                "geometry_source": "AMMS",
+                "route_not_computable_reasons": ["起终点经纬度不完整，无法生成 AMMS 轨迹"],
+            }
+        if origin_lon == destination_lon and origin_lat == destination_lat:
+            return {
+                "route_status_code": "NOT_COMPUTABLE",
+                "route_cache_status": "SKIPPED",
+                "geometry_source": "AMMS",
+                "route_not_computable_reasons": ["起终点坐标相同，无法生成 AMMS 轨迹"],
+            }
+
+        cache_key = _flow_route_geometry_cache_key(item, segment_type)
+        if force_refresh:
+            await _flow_route_geometry_cache_delete(cache_key)
+        cached = await _flow_route_geometry_cache_get(cache_key)
+        if cached is not None:
+            cached["route_cache_status"] = "HIT"
+            return cached
+
+        if not generate_missing:
+            return {
+                "route_status_code": "PENDING",
+                "route_cache_status": "MISS",
+                "geometry_source": "AMMS",
+                "route_not_computable_reasons": ["AMMS 轨迹缓存尚未生成"],
+            }
+
+        assert origin_lon is not None and origin_lat is not None and destination_lon is not None and destination_lat is not None
+        try:
+            result = await client.generate(
+                RouteGeometryQuery(
+                    origin_lon=origin_lon,
+                    origin_lat=origin_lat,
+                    dest_lon=destination_lon,
+                    dest_lat=destination_lat,
+                    transport_mode="WATER",
+                    segment_type=segment_type,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            reason = _safe_reason(exc)
+            payload = {
+                "route_status_code": "NOT_COMPUTABLE" if "未配置" in reason else "FAILED",
+                "route_cache_status": "FAILED",
+                "geometry_source": "AMMS",
+                "route_generated_at": datetime.now(UTC),
+                "route_not_computable_reasons": [reason],
+            }
+            await _flow_route_geometry_cache_set(cache_key, payload)
+            return payload
+
+        points = _line_string_points(result.geometry)
+        distance_km = result.distance_km if result.distance_km is not None else _line_length_km(points)
+        if len(points) < 2:
+            payload = {
+                "route_status_code": "FAILED",
+                "route_cache_status": "FAILED",
+                "geometry_source": "AMMS",
+                "route_generated_at": datetime.now(UTC),
+                "route_not_computable_reasons": ["AMMS 返回轨迹为空"],
+            }
+            await _flow_route_geometry_cache_set(cache_key, payload)
+            return payload
+
+        payload = {
+            "geometry_json": result.geometry,
+            "geometry_source": "AMMS",
+            "route_status_code": "READY",
+            "route_cache_status": "GENERATED",
+            "route_generated_at": datetime.now(UTC),
+            "route_distance_km": round(distance_km, 3) if distance_km is not None else None,
+            "route_point_count": len(points),
+            "route_not_computable_reasons": [],
+        }
+        await _flow_route_geometry_cache_set(cache_key, payload)
+        return payload
+
+    async def _attach_flow_route_geometries(
+        self,
+        items: list[FlowMapItem],
+        *,
+        segment_type: str,
+        generate_missing: bool = False,
+        force_refresh: bool = False,
+    ) -> list[FlowMapItem]:
+        if not items:
+            return items
+        client = self._route_client()
+        payloads = await asyncio.gather(
+            *(
+                self._flow_route_geometry_payload(
+                    item,
+                    segment_type=segment_type,
+                    client=client,
+                    generate_missing=generate_missing,
+                    force_refresh=force_refresh,
+                )
+                for item in items
+            )
+        )
+        return [
+            item.model_copy(update=payload, deep=True) if payload else item
+            for item, payload in zip(items, payloads, strict=False)
+        ]
 
     async def _date_range(self, date_from: date | None, date_to: date | None) -> tuple[date, date]:
         latest = await self.db.scalar(select(func.max(FactFreightDaily.stat_date)))
@@ -457,7 +910,15 @@ class AnalysisDashboardService:
             for row in rows
         ]
 
-    async def freight_hot_routes(self, start: date, end: date, limit: int = 10) -> list[FlowMapItem]:
+    async def freight_hot_routes(
+        self,
+        start: date,
+        end: date,
+        limit: int = 10,
+        *,
+        route_geometry_mode: str = "cache",
+        force_refresh_routes: bool = False,
+    ) -> list[FlowMapItem]:
         origin = aliased(TransportNode)
         destination = aliased(TransportNode)
         origin_city = aliased(AdminRegion)
@@ -507,7 +968,7 @@ class AnalysisDashboardService:
                 .limit(limit)
             )
         ).all()
-        return [
+        items = [
             FlowMapItem(
                 origin_id=row[0],
                 origin_name=row[1] or row[8] or row[10] or "未知起点",
@@ -525,6 +986,14 @@ class AnalysisDashboardService:
             )
             for row in rows
         ]
+        if route_geometry_mode == "none":
+            return items
+        return await self._attach_flow_route_geometries(
+            items,
+            segment_type="ANALYSIS_FREIGHT_FLOW_MAP",
+            generate_missing=route_geometry_mode == "generate",
+            force_refresh=force_refresh_routes,
+        )
 
     async def ship_overview(self, date_from: date | None, date_to: date | None) -> ShipAnalysisOverviewResponse:
         start, end = await self._date_range(date_from, date_to)
@@ -611,7 +1080,15 @@ class AnalysisDashboardService:
         ).all()
         return [ChartPoint(name=row[0].strftime("%m-%d"), date=row[0], value=int(_num(row[1]))) for row in rows]
 
-    async def ship_flow_map(self, start: date, end: date, limit: int = 30) -> list[FlowMapItem]:
+    async def ship_flow_map(
+        self,
+        start: date,
+        end: date,
+        limit: int = 30,
+        *,
+        route_geometry_mode: str = "cache",
+        force_refresh_routes: bool = False,
+    ) -> list[FlowMapItem]:
         origin = aliased(TransportNode)
         destination = aliased(TransportNode)
         rows = (
@@ -637,7 +1114,7 @@ class AnalysisDashboardService:
                 .limit(limit)
             )
         ).all()
-        return [
+        items = [
             FlowMapItem(
                 origin_id=row[0],
                 origin_name=row[1],
@@ -654,6 +1131,14 @@ class AnalysisDashboardService:
             )
             for row in rows
         ]
+        if route_geometry_mode == "none":
+            return items
+        return await self._attach_flow_route_geometries(
+            items,
+            segment_type="ANALYSIS_SHIP_FLOW_MAP",
+            generate_missing=route_geometry_mode == "generate",
+            force_refresh=force_refresh_routes,
+        )
 
     async def region_overview(
         self,
@@ -811,6 +1296,73 @@ class AnalysisDashboardService:
             ],
             freight_flows=freight_flows,
             ship_flows=ship_flows,
+        )
+
+    @staticmethod
+    def _flow_route_cache_counts(items: list[FlowMapItem]) -> dict[str, int]:
+        counts = {
+            "total_count": len(items),
+            "cached_count": 0,
+            "generated_count": 0,
+            "pending_count": 0,
+            "failed_count": 0,
+            "skipped_count": 0,
+        }
+        for item in items:
+            cache_status = str(item.route_cache_status or "").upper()
+            status = str(item.route_status_code or "").upper()
+            if cache_status == "HIT":
+                counts["cached_count"] += 1
+            elif cache_status == "GENERATED":
+                counts["generated_count"] += 1
+            elif cache_status == "SKIPPED":
+                counts["skipped_count"] += 1
+            elif status == "PENDING" or cache_status == "MISS":
+                counts["pending_count"] += 1
+            elif status in {"FAILED", "NOT_COMPUTABLE"} or cache_status == "FAILED":
+                counts["failed_count"] += 1
+        return counts
+
+    async def precompute_flow_route_cache(
+        self,
+        date_from: date | None,
+        date_to: date | None,
+        *,
+        flow_types: list[str] | None = None,
+        limit: int = 20,
+        force_refresh: bool = False,
+    ) -> FlowRouteCachePrecomputeResponse:
+        start, end = await self._date_range(date_from, date_to)
+        normalized_types = {str(item).strip().lower() for item in (flow_types or ["freight", "ship"]) if item}
+        limit = max(1, min(80, int(limit or 20)))
+        all_items: list[FlowMapItem] = []
+        if "freight" in normalized_types:
+            all_items.extend(
+                await self.freight_hot_routes(
+                    start,
+                    end,
+                    limit,
+                    route_geometry_mode="generate",
+                    force_refresh_routes=force_refresh,
+                )
+            )
+        if "ship" in normalized_types:
+            all_items.extend(
+                await self.ship_flow_map(
+                    start,
+                    end,
+                    limit,
+                    route_geometry_mode="generate",
+                    force_refresh_routes=force_refresh,
+                )
+            )
+        counts = self._flow_route_cache_counts(all_items)
+        return FlowRouteCachePrecomputeResponse(
+            status_code="SUCCESS",
+            message="AMMS 流向轨迹缓存已生成",
+            date_from=start,
+            date_to=end,
+            **counts,
         )
 
     async def price_overview(self, date_from: date | None, date_to: date | None) -> PriceAnalysisOverviewResponse:

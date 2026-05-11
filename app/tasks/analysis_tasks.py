@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from threading import Thread
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from celery.signals import worker_ready
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.analysis import AnalysisJobDefinition, AnalysisJobRun
 from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
+from app.modules.analysis.service import AnalysisDashboardService
 from app.modules.analysis.statistics import AnalysisStatisticsService
 from app.tasks.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_date(value: str | date | None) -> date:
@@ -150,3 +156,47 @@ def run_analysis_job(
     options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _run_coro_sync(_run_analysis_job(job_code, date_from, date_to, force_rebuild, options))
+
+
+async def _precompute_flow_route_cache(
+    date_from: str | None,
+    date_to: str | None,
+    flow_types: list[str] | None,
+    limit: int | None,
+    force_refresh: bool,
+) -> dict[str, Any]:
+    async with AsyncSessionLocal() as db:
+        service = AnalysisDashboardService(db)
+        response = await service.precompute_flow_route_cache(
+            date.fromisoformat(date_from) if date_from else None,
+            date.fromisoformat(date_to) if date_to else None,
+            flow_types=flow_types,
+            limit=limit or settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_LIMIT,
+            force_refresh=force_refresh,
+        )
+        return response.model_dump(mode="json")
+
+
+@celery_app.task(name="analysis.precompute_flow_route_cache")
+def precompute_flow_route_cache_task(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    flow_types: list[str] | None = None,
+    limit: int | None = None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    return _run_coro_sync(_precompute_flow_route_cache(date_from, date_to, flow_types, limit, force_refresh))
+
+
+@worker_ready.connect
+def precompute_flow_routes_on_worker_ready(sender=None, **_kwargs) -> None:
+    if not bool(settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_ON_WORKER_START):
+        return
+    try:
+        precompute_flow_route_cache_task.apply_async(
+            args=(None, None, ["freight", "ship"], settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_LIMIT, False),
+            queue="analysis",
+        )
+        logger.info("queued analysis flow route cache precompute task on celery worker ready")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("failed to queue analysis flow route cache precompute task on worker ready: %s", exc)
