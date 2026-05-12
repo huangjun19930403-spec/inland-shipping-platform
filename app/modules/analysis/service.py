@@ -50,9 +50,13 @@ from app.modules.address.boundary_utils import (
     serialize_boundary_paths,
 )
 from app.modules.analysis.schemas import (
+    AnalysisActionBlock,
+    AnalysisContextBlock,
     AnalysisJobRunDetailResponse,
     AnalysisJobRunResponse,
+    AnalysisLineageBlock,
     AnalysisOverviewResponse,
+    AnalysisQualityBlock,
     AnalysisTaskDetailResponse,
     AnalysisTaskResponse,
     AnalysisTaskTriggerRequest,
@@ -673,6 +677,37 @@ class AnalysisDashboardService:
             labels.setdefault(dict_code, {})[item_code] = item_name
         return labels
 
+    @staticmethod
+    def _workbench_meta(
+        start: date,
+        end: date,
+        *,
+        source_tables: list[str],
+        sample_count: int,
+        actions: list[AnalysisActionBlock],
+        data_versions: list[str] | None = None,
+        not_computable_reasons: list[str] | None = None,
+        uncertainty_reasons: list[str] | None = None,
+    ) -> dict[str, Any]:
+        confidence = "HIGH" if sample_count > 0 and not not_computable_reasons else "UNKNOWN"
+        coverage_rate = 100.0 if sample_count > 0 and not not_computable_reasons else 0.0
+        return {
+            "context": AnalysisContextBlock(date_from=start, date_to=end),
+            "lineage": AnalysisLineageBlock(
+                source_tables=source_tables,
+                data_versions=data_versions or ["FORMAL_ANALYSIS_V1"],
+                sample_count=int(sample_count),
+                generated_at=datetime.now(UTC).replace(tzinfo=None),
+            ),
+            "quality": AnalysisQualityBlock(
+                coverage_rate=coverage_rate,
+                confidence_level=confidence,
+                not_computable_reasons=not_computable_reasons or ([] if sample_count > 0 else ["SOURCE_MISSING"]),
+                uncertainty_reasons=uncertainty_reasons or [],
+            ),
+            "actions": actions,
+        }
+
     async def get_overview(self, date_from: date | None, date_to: date | None) -> AnalysisOverviewResponse:
         start, end = await self._date_range(date_from, date_to)
         freight = await self._freight_totals(start, end)
@@ -688,6 +723,16 @@ class AnalysisDashboardService:
         return AnalysisOverviewResponse(
             date_from=start,
             date_to=end,
+            **self._workbench_meta(
+                start,
+                end,
+                source_tables=["fact_freight_daily", "fact_ship_daily", "fact_region_daily"],
+                sample_count=int(freight["freight_count"] + ship["ship_count"]),
+                actions=[
+                    AnalysisActionBlock(action_code="OPEN_FREIGHT_INSIGHT", title="查看货源洞察", target_route="/analysis/freight"),
+                    AnalysisActionBlock(action_code="OPEN_CAPACITY_CENTER", title="查看运力中心", target_route="/analysis/ships"),
+                ],
+            ),
             metrics=[
                 _metric("freight_count", "货源量", freight["freight_count"], "条"),
                 _metric("freight_tonnage", "货源吨位", freight["total_tonnage"], "吨"),
@@ -745,6 +790,17 @@ class AnalysisDashboardService:
         return FreightAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
+            **self._workbench_meta(
+                start,
+                end,
+                source_tables=["freight", "freight_candidate", "fact_freight_daily", "fact_freight_flow_daily"],
+                sample_count=int(totals["freight_count"]),
+                actions=[
+                    AnalysisActionBlock(action_code="OPEN_FREIGHT_LIST", title="查看正式货源", target_route="/freight/list"),
+                    AnalysisActionBlock(action_code="OPEN_FREIGHT_QUALITY", title="处理货源清洗", target_route="/freight/normalization"),
+                ],
+                uncertainty_reasons=["分页列表指标不得替代本接口聚合结果"],
+            ),
             metrics=[
                 _metric("freight_count", "货源量", totals["freight_count"], "条"),
                 _metric("confirmed_count", "确认货源", totals["confirmed_count"], "条"),
@@ -1008,6 +1064,16 @@ class AnalysisDashboardService:
         return ShipAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
+            **self._workbench_meta(
+                start,
+                end,
+                source_tables=["vessel_profile", "fact_ship_daily", "fact_ship_city_daily"],
+                sample_count=int(totals["ship_count"]),
+                actions=[
+                    AnalysisActionBlock(action_code="OPEN_CAPACITY_POOL", title="查看船舶台账", target_route="/vessels/assets"),
+                    AnalysisActionBlock(action_code="OPEN_CANDIDATE_FIT", title="查看船货适配", target_route="/vessels/candidate-analysis"),
+                ],
+            ),
             metrics=[
                 _metric("ship_count", "船舶总量", totals["ship_count"], "艘"),
                 _metric("active_ship_count", "活跃船舶", totals["active_ship_count"], "艘"),
@@ -1169,6 +1235,16 @@ class AnalysisDashboardService:
         return RegionAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
+            **self._workbench_meta(
+                start,
+                end,
+                source_tables=["region", "fact_region_daily", "admin_region_boundary"],
+                sample_count=int(total_freight),
+                actions=[
+                    AnalysisActionBlock(action_code="OPEN_FLOW_ANALYSIS", title="查看区域流向", target_route="/analysis/flows"),
+                    AnalysisActionBlock(action_code="OPEN_ROUTE_LIST", title="查看航线列表", target_route="/route/list"),
+                ],
+            ),
             metrics=[
                 _metric("region_count", "活跃区域", len(rows), "个"),
                 _metric("freight_count", "区域货源", total_freight, "条"),
@@ -1288,6 +1364,17 @@ class AnalysisDashboardService:
         return FlowAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
+            **self._workbench_meta(
+                start,
+                end,
+                source_tables=["fact_freight_flow_daily", "fact_ship_flow_daily", "shipping_route_line_track"],
+                sample_count=len(freight_flows) + len(ship_flows),
+                actions=[
+                    AnalysisActionBlock(action_code="PRECOMPUTE_FLOW_ROUTES", title="生成 AMMS 流向轨迹", target_route="/analysis/flows"),
+                    AnalysisActionBlock(action_code="OPEN_ROUTE_LIST", title="查看航线规划", target_route="/route/list"),
+                ],
+                uncertainty_reasons=["流向地图只使用 READY 轨迹绘制，失败或待生成状态需查看 route_not_computable_reasons"],
+            ),
             metrics=[
                 _metric("freight_flow_count", "货源流向", len(freight_flows), "条"),
                 _metric("ship_flow_count", "船舶流向", len(ship_flows), "条"),
@@ -1390,6 +1477,16 @@ class AnalysisDashboardService:
         return PriceAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
+            **self._workbench_meta(
+                start,
+                end,
+                source_tables=["fact_freight_daily", "fact_freight_price_daily", "fact_freight_commodity_daily"],
+                sample_count=len(price_rows),
+                actions=[
+                    AnalysisActionBlock(action_code="OPEN_QUOTE_SIMULATOR", title="进入智能报价测算", target_route="/analysis/quote-simulator"),
+                    AnalysisActionBlock(action_code="OPEN_FREIGHT_LIST", title="查看有价货源", target_route="/freight/list"),
+                ],
+            ),
             metrics=[
                 _metric("avg_unit_price", "平均运价", latest_price, "元/吨"),
                 _metric("priced_routes", "有价线路", len(route_prices), "条"),

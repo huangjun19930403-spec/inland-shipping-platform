@@ -76,6 +76,41 @@ class MetricEvidence(BaseModel):
     extra: dict | None = None
 
 
+class AnalysisContextBlock(BaseModel):
+    date_from: date
+    date_to: date
+    filters: dict = Field(default_factory=dict)
+
+
+class AnalysisLineageBlock(BaseModel):
+    source_tables: list[str] = Field(default_factory=list)
+    data_versions: list[str] = Field(default_factory=list)
+    sample_count: int = 0
+    generated_at: datetime | None = None
+
+
+class AnalysisQualityBlock(BaseModel):
+    coverage_rate: float | None = None
+    confidence_level: str = "UNKNOWN"
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    uncertainty_reasons: list[str] = Field(default_factory=list)
+
+
+class AnalysisActionBlock(BaseModel):
+    action_code: str
+    title: str
+    target_route: str | None = None
+    query: dict = Field(default_factory=dict)
+    disabled_reason: str | None = None
+
+
+class AnalysisWorkbenchMeta(BaseModel):
+    context: AnalysisContextBlock
+    lineage: AnalysisLineageBlock
+    quality: AnalysisQualityBlock
+    actions: list[AnalysisActionBlock] = Field(default_factory=list)
+
+
 class ChartPoint(BaseModel):
     name: str
     value: float | int
@@ -146,14 +181,14 @@ class BoundaryHeatMapItem(BaseModel):
     avg_unit_price: float | None = None
 
 
-class AnalysisOverviewResponse(BaseModel):
+class AnalysisOverviewResponse(AnalysisWorkbenchMeta):
     date_from: date
     date_to: date
     metrics: list[MetricCard]
     recent_jobs: list["AnalysisJobRunResponse"]
 
 
-class FreightAnalysisOverviewResponse(BaseModel):
+class FreightAnalysisOverviewResponse(AnalysisWorkbenchMeta):
     date_from: date
     date_to: date
     metrics: list[MetricCard]
@@ -164,7 +199,7 @@ class FreightAnalysisOverviewResponse(BaseModel):
     hot_routes: list[FlowMapItem]
 
 
-class ShipAnalysisOverviewResponse(BaseModel):
+class ShipAnalysisOverviewResponse(AnalysisWorkbenchMeta):
     date_from: date
     date_to: date
     metrics: list[MetricCard]
@@ -174,7 +209,7 @@ class ShipAnalysisOverviewResponse(BaseModel):
     active_trend: list[ChartPoint]
 
 
-class RegionAnalysisOverviewResponse(BaseModel):
+class RegionAnalysisOverviewResponse(AnalysisWorkbenchMeta):
     date_from: date
     date_to: date
     metrics: list[MetricCard]
@@ -182,7 +217,7 @@ class RegionAnalysisOverviewResponse(BaseModel):
     heat_map: list[BoundaryHeatMapItem]
 
 
-class FlowAnalysisOverviewResponse(BaseModel):
+class FlowAnalysisOverviewResponse(AnalysisWorkbenchMeta):
     date_from: date
     date_to: date
     metrics: list[MetricCard]
@@ -190,7 +225,7 @@ class FlowAnalysisOverviewResponse(BaseModel):
     ship_flows: list[FlowMapItem]
 
 
-class PriceAnalysisOverviewResponse(BaseModel):
+class PriceAnalysisOverviewResponse(AnalysisWorkbenchMeta):
     date_from: date
     date_to: date
     metrics: list[MetricCard]
