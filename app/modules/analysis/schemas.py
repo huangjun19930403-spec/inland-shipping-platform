@@ -106,6 +106,19 @@ class AnalysisActionBlock(BaseModel):
     disabled_reason: str | None = None
 
 
+class AnalysisMapStateBlock(BaseModel):
+    status_code: str
+    provider_code: str = "AMMS"
+    provider_name: str = "AMMS"
+    cache_status: str | None = None
+    last_updated_at: datetime | None = None
+    error_reason: str | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    retry_action: AnalysisActionBlock | None = None
+    business_impact: str
+
+
 class AnalysisWorkbenchMeta(BaseModel):
     context: AnalysisContextBlock
     lineage: AnalysisLineageBlock
@@ -145,6 +158,7 @@ class FlowMapItem(BaseModel):
     route_distance_km: float | None = None
     route_point_count: int | None = None
     route_not_computable_reasons: list[str] = Field(default_factory=list)
+    map_state: AnalysisMapStateBlock | None = None
 
 
 class HeatMapItem(BaseModel):
@@ -318,6 +332,7 @@ class QuoteRouteEstimateResponse(BaseModel):
     provider_trace_id: str | None = None
     point_count: int | None = None
     not_computable_reasons: list[str] = Field(default_factory=list)
+    map_state: AnalysisMapStateBlock
     generated_at: datetime
 
 

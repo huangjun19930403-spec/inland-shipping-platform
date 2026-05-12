@@ -73,10 +73,12 @@ async def test_quote_route_estimate_success_uses_hifleet_distance() -> None:
 
     assert response.status_code == "READY"
     assert response.distance_km == 88.5
-    assert response.geometry_source == "HIFLEET"
+    assert response.geometry_source == "AMMS"
     assert response.provider_trace_id == "hf-quote-1"
     assert response.point_count == 3
     assert response.not_computable_reasons == []
+    assert response.map_state.status_code == "READY"
+    assert response.map_state.provider_code == "AMMS"
 
 
 @pytest.mark.asyncio
@@ -113,6 +115,7 @@ async def test_quote_route_estimate_node_without_coordinate_is_not_computable() 
 
     assert response.status_code == "NOT_COMPUTABLE"
     assert "装货节点缺少经纬度" in response.not_computable_reasons
+    assert response.map_state.missing_fields == ["origin_latitude", "origin_longitude"]
 
 
 @pytest.mark.asyncio
@@ -143,6 +146,9 @@ async def test_quote_route_estimate_hifleet_failure_is_returned_as_failed_reason
     assert response.status_code == "FAILED"
     assert response.distance_km is None
     assert response.not_computable_reasons == ["AMMS getNewRoute 返回失败: no route"]
+    assert response.map_state.error_reason == "AMMS getNewRoute 返回失败: no route"
+    assert response.map_state.retry_action is not None
+    assert response.map_state.retry_action.action_code == "RETRY_ROUTE_GEOMETRY"
 
 
 @pytest.mark.asyncio
@@ -192,6 +198,8 @@ async def test_flow_map_items_use_amms_geometry_without_public_hifleet_label(mon
     assert result[0].geometry_json == {"type": "LineString", "coordinates": [[120.0, 31.0], [120.5, 31.5], [121.0, 32.0]]}
     assert result[0].route_distance_km == 120.25
     assert result[0].route_point_count == 3
+    assert result[0].map_state is not None
+    assert result[0].map_state.status_code == "READY"
 
 
 @pytest.mark.asyncio
@@ -229,6 +237,9 @@ async def test_flow_map_items_fallback_when_amms_is_unavailable(monkeypatch) -> 
     assert result[0].geometry_json is None
     assert result[0].geometry_source == "AMMS"
     assert result[0].route_not_computable_reasons == ["未配置 AMMS 路径服务基础地址"]
+    assert result[0].map_state is not None
+    assert result[0].map_state.status_code == "NOT_COMPUTABLE"
+    assert result[0].map_state.missing_fields == ["AMMS_API_KEY", "AMMS_BASE_URL"]
 
 
 @pytest.mark.asyncio
@@ -268,3 +279,6 @@ async def test_flow_map_items_read_cache_only_without_generating(monkeypatch) ->
     assert result[0].route_status_code == "PENDING"
     assert result[0].route_cache_status == "MISS"
     assert result[0].geometry_json is None
+    assert result[0].map_state is not None
+    assert result[0].map_state.status_code == "PENDING"
+    assert result[0].map_state.retry_action is not None

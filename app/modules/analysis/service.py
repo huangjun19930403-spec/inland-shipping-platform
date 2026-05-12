@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundError, ValidationError
 from app.integrations.hifleet.client import HifleetRouteClient
 from app.integrations.http.route_geometry_types import RouteGeometryQuery
-from app.models.address import AdminRegion, AdminRegionBoundary, Region, TransportNode, TransportNodeBusinessCategory
+from app.models.address import AdminRegion, AdminRegionBoundary, Region, TransportNode
 from app.models.analysis import (
     AnalysisJobDefinition,
     AnalysisJobRun,
@@ -71,9 +71,6 @@ from app.modules.analysis.schemas import (
     MetricEvidence,
     PageResponse,
     PriceAnalysisOverviewResponse,
-    QuoteRouteEstimateNode,
-    QuoteRouteEstimateRequest,
-    QuoteRouteEstimateResponse,
     RegionSupplyDemandAnalysisResponse,
     RegionAnalysisOverviewResponse,
     ShipAnalysisOverviewResponse,
@@ -83,6 +80,8 @@ from app.modules.analysis.schemas import (
     VesselRiskAnalysisResponse,
     VesselTrajectoryAnalysisResponse,
 )
+from app.modules.analysis.map_state import build_map_state_payload, default_retry_action
+from app.modules.analysis.quote_route_service import QuoteRouteEstimateService
 from app.modules.system.runtime_config import RuntimeConfigService
 
 try:  # Redis is optional locally; memory cache remains the fallback.
@@ -233,21 +232,6 @@ def _to_optional_float(value: Any) -> float | None:
         return None
 
 
-def _node_snapshot(node: TransportNode | None) -> QuoteRouteEstimateNode | None:
-    if node is None:
-        return None
-    return QuoteRouteEstimateNode(
-        id=int(node.id),
-        code=node.code,
-        name=node.name,
-        node_type_code=node.node_type_code,
-        city_code=node.city_code,
-        city_name=getattr(node, "city_name", None),
-        longitude=_to_optional_float(node.longitude),
-        latitude=_to_optional_float(node.latitude),
-    )
-
-
 def _line_string_points(geometry: dict | None) -> list[tuple[float, float]]:
     if not isinstance(geometry, dict) or geometry.get("type") != "LineString":
         return []
@@ -312,6 +296,40 @@ def _flow_route_geometry_cache_key(item: FlowMapItem, segment_type: str) -> str:
         ]
     )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _flow_route_action(status_code: str, item: FlowMapItem, segment_type: str) -> AnalysisActionBlock | None:
+    target_route = "/address/nodes" if status_code == "NOT_COMPUTABLE" else "/analysis/flows"
+    return default_retry_action(
+        status_code,
+        target_route=target_route,
+        query={
+            "segment_type": segment_type,
+            "origin_id": item.origin_id,
+            "destination_id": item.destination_id,
+        },
+    )
+
+
+def _flow_map_state_payload(
+    status_code: str,
+    item: FlowMapItem,
+    segment_type: str,
+    *,
+    cache_status: str | None,
+    generated_at: datetime | None = None,
+    reasons: list[str] | None = None,
+    missing_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    return build_map_state_payload(
+        status_code,
+        provider_code="AMMS",
+        cache_status=cache_status,
+        last_updated_at=generated_at,
+        reasons=reasons or [],
+        missing_fields=missing_fields,
+        retry_action=_flow_route_action(status_code, item, segment_type),
+    )
 
 
 def _flow_route_geometry_cache_backend_setting() -> str:
@@ -403,127 +421,6 @@ async def _flow_route_geometry_cache_delete(cache_key: str) -> None:
         return
 
 
-class QuoteRouteEstimateService:
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
-        self.runtime_config = RuntimeConfigService(db)
-
-    async def _get_node(self, node_id: int) -> TransportNode | None:
-        return await self.db.scalar(
-            select(TransportNode).where(TransportNode.id == node_id, TransportNode.deleted_at.is_(None))
-        )
-
-    async def _category_codes(self, node_id: int) -> set[str]:
-        rows = (
-            await self.db.execute(
-                select(TransportNodeBusinessCategory.business_category_code).where(
-                    TransportNodeBusinessCategory.node_id == node_id
-                )
-            )
-        ).scalars().all()
-        return {str(row) for row in rows}
-
-    def _route_client(self) -> HifleetRouteClient:
-        return HifleetRouteClient(runtime_config=self.runtime_config)
-
-    @staticmethod
-    def _node_validation_reasons(node: TransportNode | None, *, role: str) -> list[str]:
-        if node is None:
-            return [f"{role}节点不存在"]
-        reasons: list[str] = []
-        if node.status != 1:
-            reasons.append(f"{role}节点未启用")
-        if _to_optional_float(node.longitude) is None or _to_optional_float(node.latitude) is None:
-            reasons.append(f"{role}节点缺少经纬度")
-        return reasons
-
-    @staticmethod
-    def _response(
-        status_code: str,
-        origin_node: TransportNode | None,
-        destination_node: TransportNode | None,
-        *,
-        reasons: list[str] | None = None,
-        distance_km: float | None = None,
-        geometry_json: dict | None = None,
-        geometry_source: str | None = None,
-        provider_trace_id: str | None = None,
-        point_count: int | None = None,
-    ) -> QuoteRouteEstimateResponse:
-        return QuoteRouteEstimateResponse(
-            status_code=status_code,
-            origin_node=_node_snapshot(origin_node),
-            destination_node=_node_snapshot(destination_node),
-            distance_km=round(distance_km, 3) if distance_km is not None else None,
-            geometry_json=geometry_json,
-            geometry_source=geometry_source,
-            provider_trace_id=provider_trace_id,
-            point_count=point_count,
-            not_computable_reasons=reasons or [],
-            generated_at=datetime.now(UTC),
-        )
-
-    async def estimate_route(self, payload: QuoteRouteEstimateRequest) -> QuoteRouteEstimateResponse:
-        origin = await self._get_node(payload.origin_node_id)
-        destination = await self._get_node(payload.destination_node_id)
-        reasons: list[str] = []
-        reasons.extend(self._node_validation_reasons(origin, role="装货"))
-        reasons.extend(self._node_validation_reasons(destination, role="卸货"))
-
-        if origin is not None and destination is not None and origin.id == destination.id:
-            reasons.append("装货节点和卸货节点不能相同")
-
-        if origin is not None:
-            origin_categories = await self._category_codes(origin.id)
-            if "LOADING" not in origin_categories:
-                reasons.append("装货节点未配置装货业务类别")
-        if destination is not None:
-            destination_categories = await self._category_codes(destination.id)
-            if "UNLOADING" not in destination_categories:
-                reasons.append("卸货节点未配置卸货业务类别")
-
-        if reasons:
-            return self._response("NOT_COMPUTABLE", origin, destination, reasons=reasons)
-
-        assert origin is not None and destination is not None
-        origin_lon = float(origin.longitude)
-        origin_lat = float(origin.latitude)
-        destination_lon = float(destination.longitude)
-        destination_lat = float(destination.latitude)
-
-        try:
-            result = await self._route_client().generate(
-                RouteGeometryQuery(
-                    origin_lon=origin_lon,
-                    origin_lat=origin_lat,
-                    dest_lon=destination_lon,
-                    dest_lat=destination_lat,
-                    transport_mode="WATER",
-                    segment_type="QUOTE_SIMULATOR",
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            reason = _safe_reason(exc)
-            status = "NOT_COMPUTABLE" if "未配置" in reason else "FAILED"
-            return self._response(status, origin, destination, reasons=[reason])
-
-        points = _line_string_points(result.geometry)
-        distance_km = result.distance_km if result.distance_km is not None else _line_length_km(points)
-        if len(points) < 2 or distance_km is None:
-            return self._response("FAILED", origin, destination, reasons=["AMMS 返回轨迹为空或无法计算距离"])
-
-        return self._response(
-            "READY",
-            origin,
-            destination,
-            distance_km=distance_km,
-            geometry_json=result.geometry,
-            geometry_source=str(result.source or "hifleet").upper(),
-            provider_trace_id=result.provider_trace_id,
-            point_count=len(points),
-        )
-
-
 class AnalysisDashboardService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -549,18 +446,36 @@ class AnalysisDashboardService:
             _valid_flow_coordinate(origin_lon, origin_lat)
             and _valid_flow_coordinate(destination_lon, destination_lat)
         ):
+            reasons = ["起终点经纬度不完整，无法生成 AMMS 轨迹"]
             return {
                 "route_status_code": "NOT_COMPUTABLE",
                 "route_cache_status": "SKIPPED",
                 "geometry_source": "AMMS",
-                "route_not_computable_reasons": ["起终点经纬度不完整，无法生成 AMMS 轨迹"],
+                "route_not_computable_reasons": reasons,
+                "map_state": _flow_map_state_payload(
+                    "NOT_COMPUTABLE",
+                    item,
+                    segment_type,
+                    cache_status="SKIPPED",
+                    reasons=reasons,
+                    missing_fields=["origin_longitude", "origin_latitude", "destination_longitude", "destination_latitude"],
+                ),
             }
         if origin_lon == destination_lon and origin_lat == destination_lat:
+            reasons = ["起终点坐标相同，无法生成 AMMS 轨迹"]
             return {
                 "route_status_code": "NOT_COMPUTABLE",
                 "route_cache_status": "SKIPPED",
                 "geometry_source": "AMMS",
-                "route_not_computable_reasons": ["起终点坐标相同，无法生成 AMMS 轨迹"],
+                "route_not_computable_reasons": reasons,
+                "map_state": _flow_map_state_payload(
+                    "NOT_COMPUTABLE",
+                    item,
+                    segment_type,
+                    cache_status="SKIPPED",
+                    reasons=reasons,
+                    missing_fields=["origin_longitude", "origin_latitude", "destination_longitude", "destination_latitude"],
+                ),
             }
 
         cache_key = _flow_route_geometry_cache_key(item, segment_type)
@@ -569,14 +484,31 @@ class AnalysisDashboardService:
         cached = await _flow_route_geometry_cache_get(cache_key)
         if cached is not None:
             cached["route_cache_status"] = "HIT"
+            status = str(cached.get("route_status_code") or "PENDING").upper()
+            cached["map_state"] = _flow_map_state_payload(
+                status,
+                item,
+                segment_type,
+                cache_status="HIT",
+                generated_at=cached.get("route_generated_at"),
+                reasons=_reasons(cached.get("route_not_computable_reasons")),
+            )
             return cached
 
         if not generate_missing:
+            reasons = ["AMMS 轨迹缓存尚未生成"]
             return {
                 "route_status_code": "PENDING",
                 "route_cache_status": "MISS",
                 "geometry_source": "AMMS",
-                "route_not_computable_reasons": ["AMMS 轨迹缓存尚未生成"],
+                "route_not_computable_reasons": reasons,
+                "map_state": _flow_map_state_payload(
+                    "PENDING",
+                    item,
+                    segment_type,
+                    cache_status="MISS",
+                    reasons=reasons,
+                ),
             }
 
         assert origin_lon is not None and origin_lat is not None and destination_lon is not None and destination_lat is not None
@@ -593,12 +525,22 @@ class AnalysisDashboardService:
             )
         except Exception as exc:  # noqa: BLE001
             reason = _safe_reason(exc)
+            status = "NOT_COMPUTABLE" if "未配置" in reason else "FAILED"
+            generated_at = datetime.now(UTC)
             payload = {
-                "route_status_code": "NOT_COMPUTABLE" if "未配置" in reason else "FAILED",
+                "route_status_code": status,
                 "route_cache_status": "FAILED",
                 "geometry_source": "AMMS",
-                "route_generated_at": datetime.now(UTC),
+                "route_generated_at": generated_at,
                 "route_not_computable_reasons": [reason],
+                "map_state": _flow_map_state_payload(
+                    status,
+                    item,
+                    segment_type,
+                    cache_status="FAILED",
+                    generated_at=generated_at,
+                    reasons=[reason],
+                ),
             }
             await _flow_route_geometry_cache_set(cache_key, payload)
             return payload
@@ -606,25 +548,43 @@ class AnalysisDashboardService:
         points = _line_string_points(result.geometry)
         distance_km = result.distance_km if result.distance_km is not None else _line_length_km(points)
         if len(points) < 2:
+            reasons = ["AMMS 返回轨迹为空"]
+            generated_at = datetime.now(UTC)
             payload = {
                 "route_status_code": "FAILED",
                 "route_cache_status": "FAILED",
                 "geometry_source": "AMMS",
-                "route_generated_at": datetime.now(UTC),
-                "route_not_computable_reasons": ["AMMS 返回轨迹为空"],
+                "route_generated_at": generated_at,
+                "route_not_computable_reasons": reasons,
+                "map_state": _flow_map_state_payload(
+                    "FAILED",
+                    item,
+                    segment_type,
+                    cache_status="FAILED",
+                    generated_at=generated_at,
+                    reasons=reasons,
+                ),
             }
             await _flow_route_geometry_cache_set(cache_key, payload)
             return payload
 
+        generated_at = datetime.now(UTC)
         payload = {
             "geometry_json": result.geometry,
             "geometry_source": "AMMS",
             "route_status_code": "READY",
             "route_cache_status": "GENERATED",
-            "route_generated_at": datetime.now(UTC),
+            "route_generated_at": generated_at,
             "route_distance_km": round(distance_km, 3) if distance_km is not None else None,
             "route_point_count": len(points),
             "route_not_computable_reasons": [],
+            "map_state": _flow_map_state_payload(
+                "READY",
+                item,
+                segment_type,
+                cache_status="GENERATED",
+                generated_at=generated_at,
+            ),
         }
         await _flow_route_geometry_cache_set(cache_key, payload)
         return payload
@@ -653,7 +613,7 @@ class AnalysisDashboardService:
             )
         )
         return [
-            item.model_copy(update=payload, deep=True) if payload else item
+            FlowMapItem.model_validate({**item.model_dump(), **payload}) if payload else item
             for item, payload in zip(items, payloads, strict=False)
         ]
 
