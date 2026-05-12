@@ -13,6 +13,7 @@ from scripts import seed_water_systems as seed_water_systems_module
 from scripts.seed_system_base import MENUS, ROLE_MENU_CODES
 from scripts.seed_water_systems import (
     LEVEL_LAYER_NAMES,
+    SOURCE_ASSIGNMENT_AUDIT_PATH,
     _feature_codes,
     _read_layer_features,
     load_embedded_water_system_rows,
@@ -174,9 +175,8 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
     assert all(by_name[name]["navigation_scope_code"] == "MISSING" for name in missing_names)
     assert {"杨林塘", "通榆运河"}.isdisjoint(by_name)
 
-    assignment_path = Path("docs/water_system_source_assignment_v5.jsonl")
-    assert assignment_path.exists()
-    assert sum(1 for _ in assignment_path.open(encoding="utf-8")) == 39431
+    assert SOURCE_ASSIGNMENT_AUDIT_PATH.exists()
+    assert sum(1 for _ in SOURCE_ASSIGNMENT_AUDIT_PATH.open(encoding="utf-8")) == 39431
 
 
 def test_default_water_system_seed_uses_embedded_rows_without_zip_lookup(monkeypatch: pytest.MonkeyPatch) -> None:

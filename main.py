@@ -1,4 +1,4 @@
-"""非 AI 模块化单体后端入口。"""
+"""内河航运数据分析平台后端入口。"""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Non-AI modular monolith backend baseline",
+    description="Inland shipping data analysis platform backend",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,

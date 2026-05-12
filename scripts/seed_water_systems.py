@@ -35,6 +35,7 @@ except Exception:  # pragma: no cover - dependency guard for bootstrap environme
 
 
 SOURCE_VERSION = embedded_water_systems.DATA_VERSION
+SOURCE_ASSIGNMENT_AUDIT_PATH = Path(__file__).resolve().parent / "seed_data" / "water_system_source_assignment_v5.jsonl"
 OLD_SOURCE_VERSIONS = {
     "revier_wgs84_l1_l4_v1",
     "revier_wgs84_navigation_v1",
