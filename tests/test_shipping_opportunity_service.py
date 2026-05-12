@@ -208,7 +208,10 @@ async def test_opportunity_detail_includes_source_quality_route_capacity_and_pri
     cleaning_action = next(item for item in detail.actions if item.action_code == "OPEN_FREIGHT_CLEANING")
     quote_action = next(item for item in detail.actions if item.action_code == "OPEN_QUOTE_SIMULATOR")
     assert cleaning_action.query["keyword"] == "FR-88"
+    assert cleaning_action.enabled is True
     assert quote_action.query["current_quote"] == Decimal("88")
+    assert quote_action.enabled is True
+    assert "commodity_standard_id" in quote_action.required_fields
 
 
 @pytest.mark.asyncio
@@ -243,4 +246,5 @@ async def test_opportunity_detail_explains_not_computable_fields(session: AsyncS
         set(detail.quality.not_computable_reasons)
     )
     disabled = next(item for item in detail.actions if item.action_code == "OPEN_CANDIDATE_VESSELS")
+    assert disabled.enabled is False
     assert disabled.disabled_reason

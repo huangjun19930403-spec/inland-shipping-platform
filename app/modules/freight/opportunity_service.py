@@ -22,9 +22,9 @@ from app.models.freight import (
 )
 from app.models.route import ShippingRoute
 from app.models.vessel import VesselCandidateAnalysis
+from app.modules.freight.opportunity_actions import ShippingOpportunityActionEvaluator
 from app.modules.freight.schemas import (
     PageResponse,
-    ShippingOpportunityActionResponse,
     ShippingOpportunityCapacityEvidenceResponse,
     ShippingOpportunityCleaningIssueResponse,
     ShippingOpportunityContextResponse,
@@ -43,6 +43,7 @@ class ShippingOpportunityService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.action_evaluator = ShippingOpportunityActionEvaluator()
 
     async def list_opportunities(
         self,
@@ -315,7 +316,14 @@ class ShippingOpportunityService:
                 uncertainty_reasons=uncertainty,
                 issue_count=issue_count,
             ),
-            actions=self._actions(row, route_status, capacity_status, pricing_status, missing_reasons, issue_count),
+            actions=self.action_evaluator.evaluate(
+                row,
+                route_status=route_status,
+                capacity_status=capacity_status,
+                pricing_status=pricing_status,
+                missing_reasons=missing_reasons,
+                issue_count=issue_count,
+            ),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -436,71 +444,6 @@ class ShippingOpportunityService:
         if completeness >= 0.6:
             return "MEDIUM"
         return "LOW"
-
-    @staticmethod
-    def _actions(
-        row: Freight,
-        route_status: str,
-        capacity_status: str,
-        pricing_status: str,
-        missing_reasons: list[str],
-        issue_count: int,
-    ) -> list[ShippingOpportunityActionResponse]:
-        actions = [
-            ShippingOpportunityActionResponse(
-                action_code="OPEN_FREIGHT_DETAIL",
-                title="查看货源详情",
-                target_route=f"/freight/detail/{row.id}",
-                query={"freight_id": row.id},
-            )
-        ]
-        if issue_count or missing_reasons or row.origin_match_level_code == "RAW" or row.destination_match_level_code == "RAW":
-            actions.append(
-                ShippingOpportunityActionResponse(
-                    action_code="OPEN_FREIGHT_CLEANING",
-                    title="进入货源清洗",
-                    target_route="/freight/normalization",
-                    query={"freight_id": row.id, "keyword": row.freight_no, "status_code": "PENDING", "reason_codes": missing_reasons},
-                )
-            )
-        actions.append(
-            ShippingOpportunityActionResponse(
-                action_code="OPEN_CANDIDATE_VESSELS",
-                title="船货适配分析",
-                target_route="/vessels/candidate-analysis",
-                query={"context_type_code": "FREIGHT_SAMPLE", "freight_id": row.id},
-                disabled_reason=None if capacity_status != "NOT_COMPUTABLE" else "缺少节点或标准货品，无法计算适配船舶",
-            )
-        )
-        actions.append(
-            ShippingOpportunityActionResponse(
-                action_code="OPEN_QUOTE_SIMULATOR",
-                title="进入报价测算",
-                target_route="/analysis/quote-simulator",
-                query={
-                    "freight_id": row.id,
-                    "origin_node_id": row.origin_node_id,
-                    "destination_node_id": row.destination_node_id,
-                    "commodity_standard_id": row.commodity_standard_id,
-                    "tonnage": row.estimated_tonnage or row.max_tonnage or row.min_tonnage,
-                    "current_quote": row.unit_price,
-                },
-                disabled_reason=None if pricing_status != "NOT_COMPUTABLE" else "缺少起终点或标准货品，无法报价",
-            )
-        )
-        if route_status == "PENDING_ROUTE_MODEL":
-            actions.append(
-                ShippingOpportunityActionResponse(
-                    action_code="OPEN_ROUTE_PLANNING",
-                    title="补齐航线模型",
-                    target_route="/route/list",
-                    query={
-                        "origin_region_id": row.origin_region_id_cache,
-                        "destination_region_id": row.destination_region_id_cache,
-                    },
-                )
-            )
-        return actions
 
     def _source_evidence(self, row: Freight, detail_context: dict[str, Any]) -> ShippingOpportunitySourceEvidenceResponse:
         batch: FreightBatchTask | None = detail_context["batch"]

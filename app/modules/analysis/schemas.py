@@ -101,6 +101,8 @@ class AnalysisActionBlock(BaseModel):
     title: str
     target_route: str | None = None
     query: dict = Field(default_factory=dict)
+    enabled: bool = True
+    required_fields: list[str] = Field(default_factory=list)
     disabled_reason: str | None = None
 
 
