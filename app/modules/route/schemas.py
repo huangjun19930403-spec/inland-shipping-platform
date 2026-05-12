@@ -69,6 +69,8 @@ class RouteResponse(BaseModel):
     line_count: int = 0
     main_line_name: str | None = None
     track_status: str = "NOT_GENERATED"
+    track_error_message: str | None = None
+    track_generated_at: datetime | None = None
 
 
 class RoutePlanResponse(BaseModel):

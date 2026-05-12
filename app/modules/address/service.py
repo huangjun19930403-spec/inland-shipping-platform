@@ -1053,18 +1053,48 @@ class TransportNodeService:
         self.repo = TransportNodeRepository(db)
         self.sequence_service = CodeSequenceService(db)
 
-    async def _resolve_city_region_id(self, city_code: str | None) -> int:
-        if not city_code:
-            raise ValidationError("city_code is required")
-        city = await self.db.scalar(
+    async def _region_by_code_and_level(self, code: str | None, level: int) -> AdminRegion | None:
+        if not code:
+            return None
+        return await self.db.scalar(
             select(AdminRegion).where(
-                AdminRegion.code == city_code,
-                AdminRegion.level == 2,
+                AdminRegion.code == code,
+                AdminRegion.level == level,
                 AdminRegion.status == 1,
             )
         )
+
+    async def _resolve_node_admin_region(
+        self,
+        *,
+        province_code: str | None,
+        city_code: str | None,
+        district_code: str | None = None,
+    ) -> int:
+        if not province_code:
+            raise ValidationError("province_code is required")
+        if not city_code:
+            raise ValidationError("city_code is required")
+
+        province = await self._region_by_code_and_level(province_code, 1)
+        if province is None:
+            raise ValidationError(f"province_code not found in admin regions: {province_code}")
+
+        city = await self._region_by_code_and_level(city_code, 2)
         if city is None:
             raise ValidationError(f"city_code not found in admin regions: {city_code}")
+        if city.province_code != province.code and city.parent_code != province.code:
+            raise ValidationError("province_code 与 city_code 行政区层级不一致")
+
+        if district_code:
+            district = await self._region_by_code_and_level(district_code, 3)
+            if district is None:
+                raise ValidationError(f"district_code not found in admin regions: {district_code}")
+            if district.city_code != city.code and district.parent_code != city.code:
+                raise ValidationError("district_code 与 city_code 行政区层级不一致")
+            if district.province_code and district.province_code != province.code:
+                raise ValidationError("district_code 与 province_code 行政区层级不一致")
+
         return int(city.id)
 
     async def _node_label_context(self, rows: list) -> tuple[DictLabelMap, RegionLabelMap]:
@@ -1106,7 +1136,11 @@ class TransportNodeService:
         data = payload.model_dump(exclude_none=True)
         code = await self.sequence_service.next_code("NODE_CODE")
         data["code"] = code
-        data["city_region_id"] = await self._resolve_city_region_id(payload.city_code)
+        data["city_region_id"] = await self._resolve_node_admin_region(
+            province_code=payload.province_code,
+            city_code=payload.city_code,
+            district_code=payload.district_code,
+        )
         if await self.repo.get_node_by_code(code):
             raise ConflictError(f"node code already exists: {code}")
         entity = await self.repo.create_node(data)
@@ -1118,8 +1152,15 @@ class TransportNodeService:
         updates = payload.model_dump(exclude_none=True)
         if not updates:
             raise ValidationError("no update fields provided")
-        if "city_code" in updates:
-            updates["city_region_id"] = await self._resolve_city_region_id(updates["city_code"])
+        existing = await self.repo.get_node(node_id)
+        if existing is None:
+            raise NotFoundError("TransportNode", node_id)
+        if {"province_code", "city_code", "district_code"} & updates.keys():
+            updates["city_region_id"] = await self._resolve_node_admin_region(
+                province_code=updates.get("province_code", existing.province_code),
+                city_code=updates.get("city_code", existing.city_code),
+                district_code=updates.get("district_code", existing.district_code),
+            )
         entity = await self.repo.update_node(node_id, updates)
         if entity is None:
             raise NotFoundError("TransportNode", node_id)

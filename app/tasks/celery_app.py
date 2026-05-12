@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_ready, worker_shutdown
 
 from app.core.config import settings
+from app.integrations.external_session_registry import ExternalSessionRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def _daily_crontab():
@@ -72,3 +79,22 @@ celery_app.conf.beat_schedule = {
         "args": (None, None, ["freight", "ship"], settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_LIMIT, False),
     },
 }
+
+
+def _run_external_session_coro(coro) -> None:
+    try:
+        asyncio.run(coro)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("external session lifecycle task failed: %s", exc)
+
+
+@worker_ready.connect
+def warmup_external_sessions_on_worker_ready(sender=None, **_kwargs) -> None:
+    _ = sender
+    _run_external_session_coro(ExternalSessionRegistry.warmup("hifleet"))
+
+
+@worker_shutdown.connect
+def shutdown_external_sessions_on_worker_shutdown(sender=None, **_kwargs) -> None:
+    _ = sender
+    _run_external_session_coro(ExternalSessionRegistry.shutdown("hifleet"))

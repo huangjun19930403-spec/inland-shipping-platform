@@ -815,7 +815,7 @@ MENUS = [
     },
     {
         "menu_code": "ROUTE_LIST",
-        "menu_name": "航线规划",
+        "menu_name": "航线列表",
         "menu_type_code": "MENU",
         "parent_code": "ROUTE_ROOT",
         "route_path": "/route/list",

@@ -235,6 +235,19 @@ class HifleetRouteClient:
             )
         return self._session._decode_response_json(response, "getNewRoute")
 
+    async def _invalidate_session(self) -> None:
+        invalidate_async = getattr(self._session, "invalidate_async", None)
+        if callable(invalidate_async):
+            await invalidate_async()
+            return
+        self._session.invalidate()
+
+    def _is_auth_expired_error(self, exc: Exception) -> bool:
+        checker = getattr(self._session, "is_auth_expired_error", None)
+        if callable(checker):
+            return bool(checker(exc))
+        return "登录" in str(exc)
+
     async def generate(self, query: RouteGeometryQuery) -> RouteGeometryResult:
         async with self._semaphore:
             await self._session.ensure_session()
@@ -265,9 +278,8 @@ class HifleetRouteClient:
                         },
                     )
                 except ValidationError as exc:
-                    message = str(exc)
-                    if "登录" in message and attempt < self._max_retries:
-                        self._session.invalidate()
+                    if self._is_auth_expired_error(exc) and attempt < self._max_retries:
+                        await self._invalidate_session()
                         await self._session.ensure_session(force_login=True)
                         last_error = exc
                         continue
@@ -275,7 +287,7 @@ class HifleetRouteClient:
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
                     if attempt < self._max_retries:
-                        self._session.invalidate()
+                        await self._invalidate_session()
                         await self._session.ensure_session(force_login=True)
                         continue
                     raise

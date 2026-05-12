@@ -51,6 +51,12 @@ from app.modules.freight.ai_evidence_gate import (
     should_call_ai_repair,
 )
 from app.modules.freight.ai_semantic_validator import FreightSemanticValidator
+from app.modules.freight.ai_structural_skeleton import (
+    EvidenceSupportMatcher,
+    FreightStructuralSkeletonBuilder,
+    apply_skeleton_to_semantic_map,
+    ensure_segments_for_route_clues,
+)
 from app.modules.freight.ai_text_index import FreightTextIndexer
 from app.modules.freight.master_data_matcher import FreightMasterDataBatchMatcher
 from app.modules.freight.router import router as freight_router
@@ -233,6 +239,44 @@ def test_freight_text_indexer_preserves_lines_and_empty_context() -> None:
     assert indexed.raw_text == raw_text
     assert indexed.line_map == {"L1": "第一行", "L2": "", "L3": "第三行", "L4": ""}
     assert indexed.indexed_text == "L1 第一行\nL2 \nL3 第三行\nL4 "
+
+
+def test_evidence_support_matcher_accepts_spaced_city_and_dash_variants() -> None:
+    assert EvidenceSupportMatcher.supports("南通", "南   通——盐   城  大麦")
+    assert EvidenceSupportMatcher.supports("盐城", "南   通——盐   城  大麦")
+    assert EvidenceSupportMatcher.supports("池州-涟水", "池州一一涟水")
+
+
+def test_structural_skeleton_expands_multi_origin_and_trailing_contact() -> None:
+    raw_text = "池州/铜陵/芜湖/马鞍山一一淮安涟水，沙子/石子，2000吨左右船\n15956651099胡"
+    indexed = FreightTextIndexer().index(raw_text)
+    skeleton = FreightStructuralSkeletonBuilder().build(indexed)
+
+    assert skeleton.coverage_audit["route_unit_count"] == 4
+    assert {
+        (item["origin_text"], item["destination_text"])
+        for item in skeleton.skeleton_units
+    } == {
+        ("池州", "淮安涟水"),
+        ("铜陵", "淮安涟水"),
+        ("芜湖", "淮安涟水"),
+        ("马鞍山", "淮安涟水"),
+    }
+    assert skeleton.context_blocks[0]["shared_contact_phone"] == "15956651099"
+    assert skeleton.context_blocks[0]["shared_contact_name"] == "胡"
+
+
+def test_skeleton_reconciliation_creates_missing_fallback_segments() -> None:
+    raw_text = "南京到芜湖动力煤1000吨\n太仓到无锡黄沙2000吨"
+    indexed = FreightTextIndexer().index(raw_text)
+    skeleton = FreightStructuralSkeletonBuilder().build(indexed)
+    semantic_map = apply_skeleton_to_semantic_map({"route_clues": [], "context_blocks": [], "context_notes": []}, skeleton)
+    segments, warnings = ensure_segments_for_route_clues(semantic_map, [])
+
+    assert len(segments) == 2
+    assert {item["raw_text"] for item in segments} == set(raw_text.splitlines())
+    assert all(item["fallback_generated"] is True for item in segments)
+    assert any("AI_SEGMENT_MISSING" in item for item in warnings)
 
 
 def test_semantic_validator_marks_untraceable_ai_output_for_review() -> None:
@@ -1246,7 +1290,7 @@ async def test_wechat_parse_around_twenty_routes_records_timings_and_heartbeat(s
     assert detail.batch.candidate_count == 20
     assert detail.batch.parse_heartbeat_at is not None
     assert stored is not None
-    assert stored.ai_semantic_map_json["pipeline_version"] == "freight_ai_semantic_pipeline_v2"
+    assert stored.ai_semantic_map_json["pipeline_version"] == "freight_ai_semantic_pipeline_v3"
     assert "MATCHING" in stored.raw_response_json["timings"]
     assert "SAVING" in stored.raw_response_json["timings"]
 
@@ -2241,9 +2285,9 @@ async def test_wechat_parse_low_route_recall_calls_ai_repair_once(monkeypatch: p
 
     parsed = await client.parse(raw_text, source_type_code="WECHAT")
 
-    assert stage_calls.count("AI_SEMANTIC_REPAIR") == 1
-    assert parsed.segments[0]["availability_status_code"] == "READY"
-    assert parsed.raw_response["repair"][0]["stage"] == "semantic"
+    assert stage_calls.count("AI_SEMANTIC_REPAIR") == 0
+    assert parsed.semantic_map["coverage_audit"]["route_unit_count"] == 7
+    assert len(parsed.segments) == 7
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,12 @@ from app.modules.freight.ai_evidence_gate import (
     validate_semantic_map_contract,
 )
 from app.modules.freight.ai_text_index import FreightTextIndexer
+from app.modules.freight.ai_structural_skeleton import (
+    FreightParseBudget,
+    FreightStructuralSkeletonBuilder,
+    apply_skeleton_to_semantic_map,
+    ensure_segments_for_route_clues,
+)
 from app.modules.freight.master_data_matcher import FreightMasterDataBatchMatcher
 from app.modules.freight.repository import (
     FreightAttachmentRepository,
@@ -92,7 +98,23 @@ DISPLAY_DICT_CODES = [
 AI_REVIEW_PASS = "PASS"
 AI_REVIEW_REQUIRED = "REVIEW_REQUIRED"
 AI_REVIEW_MANUAL_ACCEPTED = "MANUAL_ACCEPTED"
-FREIGHT_AI_PIPELINE_VERSION = "freight_ai_semantic_pipeline_v2"
+FREIGHT_AI_PIPELINE_VERSION = "freight_ai_semantic_pipeline_v3"
+
+FREIGHT_STATUS_LABELS = {
+    "DRAFT": "草稿",
+    "PUBLISHED": "已发布",
+    "MATCHING": "匹配中",
+    "EXPIRED": "已过期",
+    "CLOSED": "已关闭",
+}
+
+FREIGHT_STATUS_ACTIONS: dict[str, set[str]] = {
+    "DRAFT": {"PUBLISHED", "CLOSED"},
+    "PUBLISHED": {"MATCHING", "EXPIRED", "CLOSED"},
+    "MATCHING": {"PUBLISHED", "CLOSED"},
+    "EXPIRED": {"PUBLISHED", "CLOSED"},
+    "CLOSED": set(),
+}
 
 
 def _to_decimal_or_none(value: Any) -> Decimal | None:
@@ -1345,6 +1367,10 @@ class FreightNormalizationMixin:
             "destination_district_code": destination.get("district_code"),
             "origin_region_id_cache": origin.get("region_id"),
             "destination_region_id_cache": destination.get("region_id"),
+            "loading_time_from": _parse_optional_datetime(segment.get("loading_time_from")),
+            "loading_time_to": _parse_optional_datetime(segment.get("loading_time_to")),
+            "unloading_time_from": _parse_optional_datetime(segment.get("unloading_time_from")),
+            "unloading_time_to": _parse_optional_datetime(segment.get("unloading_time_to")),
             "publisher_org_name": _first(segment, "publisher_org_name", "shipper", "company"),
             "contact_name": _first(segment, "contact_name", "contact"),
             "contact_phone": _first(segment, "contact_phone", "phone", "mobile"),
@@ -1510,7 +1536,24 @@ class FreightService(FreightNormalizationMixin):
         )
 
     async def change_freight_status(self, freight_id: int, status_code: str) -> None:
-        ok = await self.repo.update_freight_status(freight_id, status_code)
+        target_status = str(status_code or "").strip().upper()
+        if target_status not in FREIGHT_STATUS_LABELS:
+            raise ValidationError(f"不支持的货源状态：{status_code}")
+
+        freight = await self.repo.get_freight_by_id(freight_id)
+        if freight is None:
+            raise NotFoundError("Freight", freight_id)
+        current_status = str(freight.status_code or "").strip().upper()
+        if current_status == target_status:
+            return
+
+        allowed_targets = FREIGHT_STATUS_ACTIONS.get(current_status)
+        if allowed_targets is not None and target_status not in allowed_targets:
+            current_label = FREIGHT_STATUS_LABELS.get(current_status, current_status or "未知")
+            target_label = FREIGHT_STATUS_LABELS.get(target_status, target_status)
+            raise ValidationError(f"当前货源为{current_label}，不能直接变更为{target_label}")
+
+        ok = await self.repo.update_freight_status(freight_id, target_status)
         if not ok:
             raise NotFoundError("Freight", freight_id)
         await self.db.commit()
@@ -1815,17 +1858,35 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             repair_records: list[dict[str, Any]] = []
             if hasattr(client, "parse_semantic_map") and hasattr(client, "complete_candidate_fields"):
                 runtime = await client._runtime()  # noqa: SLF001 - staged orchestration uses the parser runtime contract.
+                runtime.setdefault("budget", FreightParseBudget())
                 indexed_text = FreightTextIndexer().index(batch.raw_text)
-                semantic_map, semantic_raw = await client.parse_semantic_map(
-                    indexed_text,
-                    runtime=runtime,
-                    progress_callback=callback,
-                )
+                skeleton = FreightStructuralSkeletonBuilder().build(indexed_text)
+                mark_timing("SKELETON_BUILD")
+                try:
+                    semantic_map, semantic_raw = await client.parse_semantic_map(
+                        indexed_text,
+                        runtime=runtime,
+                        progress_callback=callback,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    semantic_raw = {"error": str(exc), "fallback": "LOCAL_SKELETON"}
+                    semantic_map = {
+                        "route_clues": [],
+                        "context_blocks": [],
+                        "context_notes": [],
+                        "warnings": [f"AI_SEMANTIC_MAP_FAILED:{exc}"],
+                    }
+                semantic_map = apply_skeleton_to_semantic_map(semantic_map, skeleton)
+                semantic_map["performance_budget"] = runtime["budget"].as_dict() if runtime.get("budget") else {}
                 validator = FreightSemanticValidator(indexed_text)
                 semantic_warnings = validator.validate_semantic_map(semantic_map)
                 semantic_gate = validate_semantic_map_contract(indexed_text, semantic_map)
                 patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
-                if should_call_ai_repair(semantic_gate) and hasattr(client, "repair_semantic_output"):
+                if (
+                    should_call_ai_repair(semantic_gate)
+                    and hasattr(client, "repair_semantic_output")
+                    and len(semantic_map.get("route_clues") or []) <= 8
+                ):
                     try:
                         repaired_map, _, repair_raw = await client.repair_semantic_output(
                             indexed_text,
@@ -1846,6 +1907,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     except Exception as exc:  # noqa: BLE001
                         semantic_map.setdefault("warnings", []).append(f"AI_SEMANTIC_REPAIR_FAILED: {exc}")
                         patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
+                elif should_call_ai_repair(semantic_gate):
+                    semantic_map.setdefault("warnings", []).append("AI_SEMANTIC_REPAIR_SKIPPED_BUDGET: 本地骨架已兜底，跳过整批强模型修复")
                 mark_timing("AI_SEMANTIC_MAP")
 
                 segments, detail_raws, detail_warnings, detail_metrics = await client.complete_candidate_fields(
@@ -1854,6 +1917,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                     runtime=runtime,
                     progress_callback=callback,
                 )
+                segments, skeleton_fallback_warnings = ensure_segments_for_route_clues(semantic_map, segments)
+                detail_warnings.extend(skeleton_fallback_warnings)
                 if hasattr(client, "assign_segment_uids"):
                     client.assign_segment_uids(segments, preserve_existing=True)
                 timings["AI_DETAIL_REQUEST_COUNT"] = len(detail_metrics)
@@ -1862,7 +1927,12 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 semantic_warnings.extend(validator.validate_segments(semantic_map, segments))
                 detail_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
                 patch_semantic_map_with_gate_result(semantic_map, detail_gate)
-                if should_call_ai_repair(detail_gate) and hasattr(client, "repair_semantic_output"):
+                if (
+                    should_call_ai_repair(detail_gate)
+                    and hasattr(client, "repair_semantic_output")
+                    and len(segments) <= 8
+                    and len(detail_gate.issues) <= 16
+                ):
                     try:
                         repaired_map, repaired_segments, repair_raw = await client.repair_semantic_output(
                             indexed_text,
@@ -1893,6 +1963,8 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                                 item.get("manual_review_reason") or item.get("ai_review_reason"),
                                 f"AI 证据修复失败，需人工判断：{exc}",
                             )
+                elif should_call_ai_repair(detail_gate):
+                    semantic_map.setdefault("warnings", []).append("AI_DETAIL_REPAIR_SKIPPED_BUDGET: 候选较多或问题较多，跳过整批强模型修复并进入分块复核")
                 mark_timing("AI_DETAIL")
 
                 await self._update_parse_progress(

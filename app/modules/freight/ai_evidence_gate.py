@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from app.modules.freight.ai_structural_skeleton import EvidenceSupportMatcher
+
 
 LOW_ROUTE_RECALL = "LOW_ROUTE_RECALL"
 PROMPT_SCHEMA_DRIFT = "PROMPT_SCHEMA_DRIFT"
@@ -130,7 +132,7 @@ def as_line_refs(value: Any) -> list[str]:
 
 
 def compact_text(value: Any) -> str:
-    return "".join(str(value or "").split())
+    return EvidenceSupportMatcher.normalize(value)
 
 
 def line_text(indexed_text: Any, line_refs: list[str]) -> str:
@@ -144,12 +146,11 @@ def line_refs_exist(indexed_text: Any, line_refs: list[str]) -> bool:
 
 
 def text_supported_by_lines(indexed_text: Any, text: Any, line_refs: list[str]) -> bool:
-    value = compact_text(text)
-    if not value:
+    if not compact_text(text):
         return True
     if not line_refs_exist(indexed_text, line_refs):
         return False
-    return value in compact_text(line_text(indexed_text, line_refs))
+    return EvidenceSupportMatcher.supports(text, line_text(indexed_text, line_refs))
 
 
 def append_review_reason(segment: dict[str, Any], reason: str) -> None:

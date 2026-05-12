@@ -50,6 +50,13 @@ from app.modules.freight.ai_evidence_gate import (
     validate_semantic_map_contract,
 )
 from app.modules.freight.ai_text_index import FreightIndexedText, FreightTextIndexer
+from app.modules.freight.ai_structural_skeleton import (
+    EvidenceSupportMatcher,
+    FreightParseBudget,
+    FreightStructuralSkeletonBuilder,
+    apply_skeleton_to_semantic_map,
+    ensure_segments_for_route_clues,
+)
 
 if TYPE_CHECKING:
     from app.modules.system.runtime_config import RuntimeConfigService
@@ -149,6 +156,9 @@ class FreightSemanticRouteClueSchema(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     clue_temp_id: str | int | None = None
+    route_unit_id: str | None = None
+    skeleton_id: str | None = None
+    expansion_group_id: str | None = None
     line_refs: list[str | int] = Field(default_factory=list)
     context_block_id: str | int | None = None
     raw_text: str
@@ -330,6 +340,9 @@ class FreightSemanticMapPayloadSchema(BaseModel):
 
 class FreightSegmentSchema(BaseModel):
     clue_temp_id: str | int | None = None
+    route_unit_id: str | None = None
+    skeleton_id: str | None = None
+    expansion_group_id: str | None = None
     segment_uid: str | None = Field(default=None, description="本地候选稳定身份，复核/修复回写必须保留")
     segment_index: int | None = None
     context_block_id: str | int | None = None
@@ -376,6 +389,9 @@ class FreightSegmentSchema(BaseModel):
     confidence_score: float = 0.5
     evidence: list[str] = Field(default_factory=list)
     needs_strong_review: bool = False
+    fallback_generated: bool = False
+    quality_issue_codes: list[str] = Field(default_factory=list)
+    field_support: dict[str, Any] | None = None
 
     @field_validator("origin_match_level_code", "destination_match_level_code", mode="before")
     @classmethod
@@ -420,6 +436,15 @@ class FreightSegmentSchema(BaseModel):
         if value is None:
             return []
         if isinstance(value, dict):
+            return [value]
+        return value
+
+    @field_validator("quality_issue_codes", mode="before")
+    @classmethod
+    def _default_quality_issue_codes(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
             return [value]
         return value
 
@@ -656,20 +681,7 @@ def _support_text(raw_content: str, segment: dict[str, Any]) -> str:
 
 
 def _value_supported(value: Any, support_text: str) -> bool:
-    if value in (None, ""):
-        return True
-    text = str(value).strip()
-    if not text:
-        return True
-    if text in support_text:
-        return True
-    try:
-        number = float(text)
-    except (TypeError, ValueError):
-        return False
-    if number.is_integer() and str(int(number)) in support_text:
-        return True
-    return text.rstrip("0").rstrip(".") in support_text
+    return EvidenceSupportMatcher.supports(value, support_text)
 
 
 def _drop_unsupported_fields(segment: dict[str, Any], raw_content: str) -> list[str]:
@@ -1183,11 +1195,11 @@ class DashScopeQwenFreightParserClient:
             "你是内河航运微信群货源结构化抽取助手。只输出 JSON。"
             "输入 route_clues 已由第一轮完整原文语义地图给出；当前只提供本批 clue 相关 evidence_lines、context_blocks、context_notes。"
             "不得重新切分原文，不得新增 route_clues 之外的货源；只能补全输入中给定 clue_temp_id 的字段。"
-            "每个 segment 必须带回 clue_temp_id、line_refs、context_block_id 和 raw_text；字段必须来自 evidence_lines、route_clues 或关联 context_blocks/context_notes。"
+            "每个 segment 必须带回 clue_temp_id、route_unit_id、line_refs、context_block_id 和 raw_text；字段必须来自 evidence_lines、route_clues 或关联 context_blocks/context_notes。"
             "每个非空核心字段必须写入 field_evidence，包含 value、source_type_code、line_refs、evidence_text、confidence_score。"
             "origin_text/destination_text/commodity_name/raw_tonnage_text 只有 source_type_code 为 LOCAL_LINE 或 EXPLICIT_SHARED 时才能写入顶层字段。"
             "WEAK_INFERRED 或 UNKNOWN 的货品、吨位、地点只放入 ai_review_json.suggested_fields，并把 ai_review_status_code 写 REVIEW_REQUIRED；不能写入顶层字段供自动确认。"
-            "普通 route_clue 输出一个 segment；若第一轮 clue 明确包含多目的地，可输出多个同 clue_temp_id 的 segment，但不能创建新的 clue_temp_id。"
+            "普通 route_clue 输出一个 segment；若输入 route_clue 带 route_unit_id，必须原样带回 route_unit_id。若第一轮 clue 明确包含多目的地，可输出多个同 clue_temp_id 的 segment，但不能创建新的 clue_temp_id。"
             "context_blocks/context_notes 只能用于继承联系人、价格、结算、装卸备注，不能单独输出为 segment。"
             "只有联系人作用域明确、context_block 无风险、且证据行能支撑时，才可继承公共联系人和电话；证据不足填 null 并标记 REVIEW_REQUIRED。"
             "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据当前 evidence package 判断。"
@@ -1241,11 +1253,11 @@ class DashScopeQwenFreightParserClient:
                 "你是内河航运微信群货源结构化抽取助手。只输出 JSON。"
                 "输入 route_clues 已由第一轮 AI 从同一段完整原文语义地图中给出，context_blocks 是公共上下文块，context_notes 是补充上下文。"
                 "不得重新切分原文，不得新增 route_clues 之外的货源；只能补全输入中给定 clue_temp_id 的字段。"
-                "每个 segment 必须带回 clue_temp_id、line_refs、context_block_id 和 raw_text；字段必须来自原文行、第一轮 route_clues 或 context_blocks/context_notes。"
+                "每个 segment 必须带回 clue_temp_id、route_unit_id、line_refs、context_block_id 和 raw_text；字段必须来自原文行、第一轮 route_clues 或 context_blocks/context_notes。"
                 "每个非空核心字段必须写入 field_evidence，包含 value、source_type_code、line_refs、evidence_text、confidence_score。"
                 "origin_text/destination_text/commodity_name/raw_tonnage_text 只有 source_type_code 为 LOCAL_LINE 或 EXPLICIT_SHARED 时才能写入顶层字段。"
                 "WEAK_INFERRED 或 UNKNOWN 的货品、吨位、地点只放入 ai_review_json.suggested_fields，并把 ai_review_status_code 写 REVIEW_REQUIRED。"
-                "普通 route_clue 输出一个 segment；若第一轮 clue 明确包含多目的地，可输出多个同 clue_temp_id 的 segment，但不能创建新的 clue_temp_id。"
+                "普通 route_clue 输出一个 segment；若输入 route_clue 带 route_unit_id，必须原样带回 route_unit_id。若第一轮 clue 明确包含多目的地，可输出多个同 clue_temp_id 的 segment，但不能创建新的 clue_temp_id。"
                 "context_blocks/context_notes 只能用于继承联系人、价格、结算、装卸备注，不能单独输出为 segment。"
                 "每个 segment 必须保留对应 freight_clue 的 context_block_id；只有作用域明确且证据充分时，才可继承同一 context_block 的公共联系人和电话。"
                 "装货地、卸货地、货品、吨位、价格、联系人、结算、装卸备注和可发状态都只能依据原文与 clue 上下文判断。"
@@ -1393,6 +1405,7 @@ class DashScopeQwenFreightParserClient:
             stage_name="AI 证据修复",
             stage_message="强模型正在修复字段证据和上下文归属",
             progress_percent=progress_percent,
+            total_timeout=runtime["budget"].timeout_for(stage_code) if runtime.get("budget") else None,
         )
         repaired_semantic_payload = repair_payload.get("semantic_map") if isinstance(repair_payload.get("semantic_map"), dict) else None
         repaired_semantic = (
@@ -1490,8 +1503,9 @@ class DashScopeQwenFreightParserClient:
         stage_name: str,
         stage_message: str,
         progress_percent: int,
+        total_timeout: float | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        raw_response = await self._call_dashscope_stream(
+        call = self._call_dashscope_stream(
             model=model,
             api_key=api_key,
             messages=messages,
@@ -1502,6 +1516,10 @@ class DashScopeQwenFreightParserClient:
             stage_message=stage_message,
             progress_percent=progress_percent,
         )
+        try:
+            raw_response = await asyncio.wait_for(call, timeout=total_timeout) if total_timeout else await call
+        except TimeoutError as exc:
+            raise InternalError(f"DashScope SDK 阶段总耗时超出预算，阶段：{stage_name}") from exc
         content = ((raw_response.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         return self._json_from_content(content), raw_response
 
@@ -1529,8 +1547,11 @@ class DashScopeQwenFreightParserClient:
             "timeout": await self._stream_timeout(),
             "detail_batch_size": max(1, min(await self._config_int(FREIGHT_AI_DETAIL_BATCH_SIZE, settings.FREIGHT_AI_DETAIL_BATCH_SIZE), 20)),
             "detail_concurrency": max(1, min(await self._config_int(FREIGHT_AI_DETAIL_CONCURRENCY, settings.FREIGHT_AI_DETAIL_CONCURRENCY), 5)),
+            "review_batch_size": 8,
+            "review_concurrency": 2,
             "review_threshold": max(0.0, min(await self._config_float(FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD, settings.FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD), 1.0)),
             "warn_raw_chars": max(0, await self._config_int(FREIGHT_AI_WARN_RAW_CHARS, settings.FREIGHT_AI_WARN_RAW_CHARS)),
+            "budget": FreightParseBudget(),
         }
 
     async def parse_semantic_map(
@@ -1551,6 +1572,7 @@ class DashScopeQwenFreightParserClient:
             stage_name="AI 语义地图",
             stage_message="AI 正在阅读全文并输出语义地图",
             progress_percent=30,
+            total_timeout=runtime["budget"].timeout_for("AI_SEMANTIC_MAP") if runtime.get("budget") else None,
         )
         compat_flags = self._schema_compat_flags(payload)
         try:
@@ -1593,34 +1615,39 @@ class DashScopeQwenFreightParserClient:
 
         async def run_chunk(chunk_index: int, clues: list[dict[str, Any]]) -> list[dict[str, Any]]:
             async with semaphore:
-                evidence_payload, evidence_metrics = self._build_evidence_payload(indexed_text, semantic_map, clues)
-                evidence_metrics["batch_index"] = chunk_index
-                detail_model = self._detail_model_for_wechat(indexed_text, semantic_map, runtime)
-                evidence_metrics["detail_model"] = detail_model
-                metrics_by_chunk[chunk_index] = evidence_metrics
-                payload, raw = await self._call_json(
-                    model=detail_model,
-                    api_key=runtime["api_key"],
-                    messages=self._detail_messages(evidence_payload),
-                    timeout=runtime["timeout"],
-                    progress_callback=progress_callback,
-                    stage_code="AI_DETAIL",
-                    stage_name="AI 补全字段",
-                    stage_message=f"AI 正在补全候选字段 {chunk_index}/{len(chunks)}",
-                    progress_percent=45 + min(20, int(chunk_index / max(len(chunks), 1) * 20)),
-                )
-                raw_responses.append(raw)
-                payload, _ = _preclean_parse_payload_numbers(payload)
                 try:
+                    evidence_payload, evidence_metrics = self._build_evidence_payload(indexed_text, semantic_map, clues)
+                    evidence_metrics["batch_index"] = chunk_index
+                    detail_model = self._detail_model_for_wechat(indexed_text, semantic_map, runtime)
+                    evidence_metrics["detail_model"] = detail_model
+                    metrics_by_chunk[chunk_index] = evidence_metrics
+                    payload, raw = await self._call_json(
+                        model=detail_model,
+                        api_key=runtime["api_key"],
+                        messages=self._detail_messages(evidence_payload),
+                        timeout=runtime["timeout"],
+                        progress_callback=progress_callback,
+                        stage_code="AI_DETAIL",
+                        stage_name="AI 补全字段",
+                        stage_message=f"AI 正在补全候选字段 {chunk_index}/{len(chunks)}",
+                        progress_percent=45 + min(20, int(chunk_index / max(len(chunks), 1) * 20)),
+                        total_timeout=runtime["budget"].timeout_for("AI_DETAIL") if runtime.get("budget") else None,
+                    )
+                    raw_responses.append(raw)
+                    payload, _ = _preclean_parse_payload_numbers(payload)
                     validated = FreightParsePayloadSchema.model_validate(payload)
+                    data = validated.model_dump(exclude_none=True)
+                    warnings.extend(str(item) for item in data.get("warnings") or [])
+                    return self._segments_from_payload(data)
                 except Exception as exc:
-                    raise ValidationError("通义千问字段补全结构不符合货源解析 schema", detail={"error": str(exc), "payload": payload}) from exc
-                data = validated.model_dump(exclude_none=True)
-                warnings.extend(str(item) for item in data.get("warnings") or [])
-                return self._segments_from_payload(data)
+                    warnings.append(f"AI_DETAIL_CHUNK_FAILED:{chunk_index}: {exc}")
+                    raw_responses.append({"error": str(exc), "batch_index": chunk_index})
+                    return []
 
         chunk_results = await asyncio.gather(*(run_chunk(index, chunk) for index, chunk in enumerate(chunks, start=1)))
         segments = [segment for chunk in chunk_results for segment in chunk]
+        segments, fallback_warnings = ensure_segments_for_route_clues(semantic_map, segments)
+        warnings.extend(fallback_warnings)
         segments, context_block_warnings = _apply_context_blocks_to_segments(segments, semantic_map.get("context_blocks") or [])
         warnings.extend(context_block_warnings)
         metrics = [metrics_by_chunk[index] for index in sorted(metrics_by_chunk)]
@@ -1648,62 +1675,98 @@ class DashScopeQwenFreightParserClient:
             for clue_ref in [_normalize_clue_ref(clue.get("clue_temp_id") or clue.get("segment_index"))]
             if clue_ref
         }
-        review_clues: list[dict[str, Any]] = []
-        for target in review_targets:
-            clue_ref = _normalize_clue_ref(target.get("clue_temp_id") or target.get("segment_index"))
-            clue = clue_by_id.get(clue_ref or "")
-            if clue is not None:
-                review_clues.append(clue)
-            else:
-                review_clues.append(
-                    {
-                        "clue_temp_id": clue_ref,
-                        "line_refs": target.get("line_refs") or target.get("line_refs_json") or [],
-                        "raw_text": target.get("raw_text") or "",
-                        "context_block_id": target.get("context_block_id"),
-                    }
+        batch_size = max(1, min(int(runtime.get("review_batch_size") or 8), 20))
+        chunks = [review_targets[index : index + batch_size] for index in range(0, len(review_targets), batch_size)]
+        semaphore = asyncio.Semaphore(max(1, min(int(runtime.get("review_concurrency") or 2), 5)))
+        all_reviewed: list[dict[str, Any]] = []
+        raw_chunks: list[dict[str, Any]] = []
+        metrics: list[dict[str, Any]] = []
+        failed_count = 0
+
+        async def run_review_chunk(chunk_index: int, targets: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+            async with semaphore:
+                review_clues: list[dict[str, Any]] = []
+                for target in targets:
+                    clue_ref = _normalize_clue_ref(target.get("clue_temp_id") or target.get("segment_index"))
+                    clue = clue_by_id.get(clue_ref or "")
+                    if clue is not None:
+                        review_clues.append(clue)
+                    else:
+                        review_clues.append(
+                            {
+                                "clue_temp_id": clue_ref,
+                                "line_refs": target.get("line_refs") or target.get("line_refs_json") or [],
+                                "raw_text": target.get("raw_text") or "",
+                                "context_block_id": target.get("context_block_id"),
+                            }
+                        )
+                evidence_payload, evidence_metrics = self._build_evidence_payload(
+                    indexed_text,
+                    semantic_map,
+                    review_clues,
+                    segments=targets,
                 )
-        evidence_payload, evidence_metrics = self._build_evidence_payload(
-            indexed_text,
-            semantic_map,
-            review_clues,
-            segments=review_targets,
-        )
-        evidence_metrics["batch_index"] = 1
-        try:
-            review_payload, review_raw = await self._call_json(
-                model=runtime["review_model"],
-                api_key=runtime["api_key"],
-                messages=self._review_messages(evidence_payload),
-                timeout=runtime["timeout"],
-                progress_callback=progress_callback,
-                stage_code="AI_REVIEW",
-                stage_name="AI 强复核",
-                stage_message="强模型正在复核风险候选",
-                progress_percent=76,
-            )
-            review_payload, _ = _preclean_parse_payload_numbers(review_payload)
-            review_validated = FreightParsePayloadSchema.model_validate(review_payload)
-            reviewed = self._segments_from_payload(
-                review_validated.model_dump(exclude_none=True),
-                preserve_segment_uid=True,
-                generate_missing_uid=False,
-            )
-            return reviewed, review_raw, 0, [evidence_metrics]
-        except Exception as exc:  # noqa: BLE001
-            for item in review_targets:
-                item["availability_status_code"] = "UNKNOWN"
-                item["manual_review_reason"] = f"强模型复核失败，需人工判断：{exc}"
-                item["needs_strong_review"] = True
-            return [], {"error": str(exc)}, len(review_targets), [evidence_metrics]
+                evidence_metrics["batch_index"] = chunk_index
+                evidence_metrics["review_chunk_size"] = len(targets)
+                metrics.append(evidence_metrics)
+                try:
+                    review_payload, review_raw = await self._call_json(
+                        model=runtime["review_model"],
+                        api_key=runtime["api_key"],
+                        messages=self._review_messages(evidence_payload),
+                        timeout=runtime["timeout"],
+                        progress_callback=progress_callback,
+                        stage_code="AI_REVIEW",
+                        stage_name="AI 强复核",
+                        stage_message=f"强模型正在复核风险候选 {chunk_index}/{len(chunks)}",
+                        progress_percent=76,
+                        total_timeout=runtime["budget"].timeout_for("AI_REVIEW") if runtime.get("budget") else None,
+                    )
+                    raw_chunks.append({"batch_index": chunk_index, "raw_response": review_raw})
+                    review_payload, _ = _preclean_parse_payload_numbers(review_payload)
+                    review_validated = FreightParsePayloadSchema.model_validate(review_payload)
+                    reviewed = self._segments_from_payload(
+                        review_validated.model_dump(exclude_none=True),
+                        preserve_segment_uid=True,
+                        generate_missing_uid=False,
+                    )
+                    return reviewed, 0
+                except Exception as exc:  # noqa: BLE001
+                    for item in targets:
+                        item["availability_status_code"] = "UNKNOWN"
+                        item["manual_review_reason"] = f"强模型复核分块失败，需人工判断：{exc}"
+                        item["needs_strong_review"] = True
+                    raw_chunks.append({"batch_index": chunk_index, "error": str(exc)})
+                    return [], len(targets)
+
+        results = await asyncio.gather(*(run_review_chunk(index, chunk) for index, chunk in enumerate(chunks, start=1)))
+        for reviewed, failed in results:
+            all_reviewed.extend(reviewed)
+            failed_count += failed
+        review_raw = {"chunks": raw_chunks, "chunk_count": len(chunks)} if raw_chunks else None
+        return all_reviewed, review_raw, failed_count, sorted(metrics, key=lambda item: int(item.get("batch_index") or 0))
 
     def merge_review_results(self, segments: list[dict[str, Any]], review_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self.assign_segment_uids(segments, preserve_existing=True)
         if not review_results:
             return segments
 
-        structural_fields = {"segment_uid", "clue_temp_id", "segment_index", "context_block_id", "line_refs", "line_refs_json", "raw_text"}
+        structural_fields = {
+            "segment_uid",
+            "clue_temp_id",
+            "route_unit_id",
+            "skeleton_id",
+            "expansion_group_id",
+            "segment_index",
+            "context_block_id",
+            "line_refs",
+            "line_refs_json",
+            "raw_text",
+        }
         allowed_patch_fields = {
+            "route_unit_id",
+            "skeleton_id",
+            "expansion_group_id",
             "semantic_role_code",
             "route_intent_code",
             "field_evidence",
@@ -1745,6 +1808,9 @@ class DashScopeQwenFreightParserClient:
             "confidence_score",
             "evidence",
             "needs_strong_review",
+            "fallback_generated",
+            "quality_issue_codes",
+            "field_support",
         }
         original_by_uid = {str(item.get("segment_uid")): item for item in segments if item.get("segment_uid")}
         patches_by_uid: dict[str, dict[str, Any]] = {}
@@ -1866,17 +1932,25 @@ class DashScopeQwenFreightParserClient:
             return await self._parse_tms(content, runtime=runtime, progress_callback=progress_callback)
 
         indexed_text = FreightTextIndexer().index(raw_content or "")
+        skeleton = FreightStructuralSkeletonBuilder().build(indexed_text)
         repair_records: list[dict[str, Any]] = []
-        semantic_map, semantic_raw = await self.parse_semantic_map(
-            indexed_text,
-            runtime=runtime,
-            progress_callback=progress_callback,
-        )
+        try:
+            semantic_map, semantic_raw = await self.parse_semantic_map(
+                indexed_text,
+                runtime=runtime,
+                progress_callback=progress_callback,
+            )
+        except Exception as exc:  # noqa: BLE001
+            semantic_raw = {"error": str(exc), "fallback": "LOCAL_SKELETON"}
+            semantic_map = {"route_clues": [], "context_blocks": [], "context_notes": [], "warnings": [f"AI_SEMANTIC_MAP_FAILED:{exc}"]}
+        semantic_map = apply_skeleton_to_semantic_map(semantic_map, skeleton)
+        if runtime.get("budget"):
+            semantic_map["performance_budget"] = runtime["budget"].as_dict()
         semantic_validator = FreightSemanticValidator(indexed_text)
         semantic_validator.validate_semantic_map(semantic_map)
         semantic_gate = validate_semantic_map_contract(indexed_text, semantic_map)
         patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
-        if should_call_ai_repair(semantic_gate):
+        if should_call_ai_repair(semantic_gate) and len(semantic_map.get("route_clues") or []) <= 8:
             try:
                 repaired_map, _, repair_raw = await self.repair_semantic_output(
                     indexed_text,
@@ -1897,6 +1971,8 @@ class DashScopeQwenFreightParserClient:
             except Exception as exc:  # noqa: BLE001
                 semantic_map.setdefault("warnings", []).append(f"AI_SEMANTIC_REPAIR_FAILED: {exc}")
                 patch_semantic_map_with_gate_result(semantic_map, semantic_gate)
+        elif should_call_ai_repair(semantic_gate):
+            semantic_map.setdefault("warnings", []).append("AI_SEMANTIC_REPAIR_SKIPPED_BUDGET: 本地骨架已兜底，跳过整批强模型修复")
         segments, detail_raws, detail_warnings, detail_metrics = await self.complete_candidate_fields(
             indexed_text,
             semantic_map,
@@ -1906,7 +1982,7 @@ class DashScopeQwenFreightParserClient:
         semantic_warnings = semantic_validator.validate_segments(semantic_map, segments)
         detail_gate = apply_segment_evidence_gate(indexed_text, semantic_map, segments, formal_requires_tonnage=True)
         patch_semantic_map_with_gate_result(semantic_map, detail_gate)
-        if should_call_ai_repair(detail_gate):
+        if should_call_ai_repair(detail_gate) and len(segments) <= 8 and len(detail_gate.issues) <= 16:
             try:
                 repaired_map, repaired_segments, repair_raw = await self.repair_semantic_output(
                     indexed_text,
@@ -1932,6 +2008,8 @@ class DashScopeQwenFreightParserClient:
                     item["availability_status_code"] = "UNKNOWN"
                     item["needs_strong_review"] = True
                     _append_review_reason(item, f"AI 证据修复失败，需人工判断：{exc}")
+        elif should_call_ai_repair(detail_gate):
+            semantic_map.setdefault("warnings", []).append("AI_DETAIL_REPAIR_SKIPPED_BUDGET: 候选较多或问题较多，跳过整批强模型修复并进入分块复核")
         review_results, review_raw, review_failed_count, review_metrics = await self.review_risky_segments(
             indexed_text,
             semantic_map,

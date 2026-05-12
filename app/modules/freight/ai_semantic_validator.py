@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.modules.freight.ai_structural_skeleton import EvidenceSupportMatcher
 from app.modules.freight.ai_text_index import FreightIndexedText
 
 CONTACT_SCOPE_CONFLICT = "CONTACT_SCOPE_CONFLICT"
@@ -74,7 +75,7 @@ def _as_line_refs(value: Any) -> list[str]:
 
 
 def _compact_text(value: Any) -> str:
-    return "".join(str(value or "").split())
+    return EvidenceSupportMatcher.normalize(value)
 
 
 def _append_warning(item: dict[str, Any], warning: str) -> None:

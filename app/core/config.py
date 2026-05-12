@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./inland_shipping.db"
     CELERY_BROKER_URL: str = "redis://127.0.0.1:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://127.0.0.1:6379/1"
+    EXTERNAL_SESSION_REDIS_URL: str = ""
     ANALYSIS_CELERY_EAGER: bool = False
     ANALYSIS_DEFAULT_DAILY_CRON: str = "20 2 * * *"
     VESSEL_CITY_SITUATION_CACHE_BACKEND: str = "redis"  # redis / memory(local only)
@@ -96,6 +97,11 @@ class Settings(BaseSettings):
     HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS: float = 180.0
     HIFLEET_SESSION_IDLE_LOGOUT_SECONDS: float = 1800.0
     HIFLEET_RELOGIN_CHECK_ENABLED: bool = True
+    HIFLEET_SESSION_WARMUP_ON_START: bool = True
+    HIFLEET_SESSION_LOGOUT_ON_SHUTDOWN: bool = True
+    HIFLEET_SESSION_LOCK_TTL_SECONDS: int = 45
+    HIFLEET_SESSION_COOKIE_TTL_SECONDS: int = 86400
+    HIFLEET_DUPLICATE_LOGIN_RECOVERY_ENABLED: bool = True
 
     # 通义千问 / 阿里云百炼 DashScope
     AI_PROVIDER: str = "DASHSCOPE_QWEN"

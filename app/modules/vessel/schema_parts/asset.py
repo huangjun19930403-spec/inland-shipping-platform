@@ -9,6 +9,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.modules.vessel.schema_parts.base import *  # noqa: F401,F403
+from app.modules.vessel.schema_parts.base import _validate_mmsi
 from app.modules.vessel.schema_parts.recognition import *  # noqa: F401,F403
 from app.modules.vessel.schema_parts.relation import *  # noqa: F401,F403
 

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 import uuid
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,7 @@ from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.logging import get_logger, setup_logging
+from app.integrations.external_session_registry import ExternalSessionRegistry
 from app.integrations.http import close_shared_http_clients
 
 setup_logging()
@@ -23,7 +25,13 @@ logger = get_logger("backend.main")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("backend starting")
+    hifleet_warmup_task = asyncio.create_task(ExternalSessionRegistry.warmup("hifleet"))
     yield
+    if not hifleet_warmup_task.done():
+        hifleet_warmup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await hifleet_warmup_task
+    await ExternalSessionRegistry.shutdown("hifleet")
     await close_shared_http_clients()
     logger.info("backend stopped")
 

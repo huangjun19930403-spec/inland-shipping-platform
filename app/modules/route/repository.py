@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.route import (
@@ -59,6 +59,147 @@ class ShippingRouteRepository:
             )
         ).scalars().all()
         return list(rows), total
+
+    async def list_routes_with_stats(
+        self,
+        *,
+        keyword: str | None,
+        origin_region_id: int | None,
+        destination_region_id: int | None,
+        transport_org_type_code: str | None,
+        plan_type_code: str | None,
+        has_plan: bool | None,
+        has_main_line: bool | None,
+        track_status: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[tuple[ShippingRoute, int, int, str | None, str, str | None, Any | None]], int]:
+        plan_count_sq = (
+            select(func.count(ShippingRoutePlan.id))
+            .where(ShippingRoutePlan.route_id == ShippingRoute.id)
+            .correlate(ShippingRoute)
+            .scalar_subquery()
+        )
+        line_count_sq = (
+            select(func.count(ShippingRouteLine.id))
+            .select_from(ShippingRouteLine)
+            .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
+            .where(ShippingRoutePlan.route_id == ShippingRoute.id)
+            .correlate(ShippingRoute)
+            .scalar_subquery()
+        )
+        main_line_name_sq = (
+            select(ShippingRouteLine.line_name)
+            .select_from(ShippingRouteLine)
+            .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
+            .where(
+                ShippingRoutePlan.route_id == ShippingRoute.id,
+                ShippingRouteLine.line_role_code == "MAIN",
+            )
+            .order_by(ShippingRouteLine.priority.asc(), ShippingRouteLine.id.asc())
+            .limit(1)
+            .correlate(ShippingRoute)
+            .scalar_subquery()
+        )
+        status_rank_sq = (
+            select(
+                func.coalesce(
+                    func.max(
+                        case(
+                            (ShippingRouteLine.track_status == "FAILED", 4),
+                            (ShippingRouteLine.track_status == "PARTIAL", 3),
+                            (ShippingRouteLine.track_status == "READY", 2),
+                            else_=1,
+                        )
+                    ),
+                    1,
+                )
+            )
+            .select_from(ShippingRouteLine)
+            .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
+            .where(ShippingRoutePlan.route_id == ShippingRoute.id)
+            .correlate(ShippingRoute)
+            .scalar_subquery()
+        )
+        track_status_expr = case(
+            (status_rank_sq == 4, "FAILED"),
+            (status_rank_sq == 3, "PARTIAL"),
+            (status_rank_sq == 2, "READY"),
+            else_="NOT_GENERATED",
+        )
+        track_generated_at_sq = (
+            select(func.max(ShippingRouteLine.track_generated_at))
+            .select_from(ShippingRouteLine)
+            .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
+            .where(ShippingRoutePlan.route_id == ShippingRoute.id)
+            .correlate(ShippingRoute)
+            .scalar_subquery()
+        )
+        track_error_sq = (
+            select(ShippingRouteLineTrack.error_message)
+            .select_from(ShippingRouteLineTrack)
+            .join(ShippingRouteLine, ShippingRouteLine.id == ShippingRouteLineTrack.line_id)
+            .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
+            .where(
+                ShippingRoutePlan.route_id == ShippingRoute.id,
+                ShippingRouteLineTrack.error_message.is_not(None),
+            )
+            .order_by(ShippingRouteLineTrack.generated_at.desc(), ShippingRouteLineTrack.id.desc())
+            .limit(1)
+            .correlate(ShippingRoute)
+            .scalar_subquery()
+        )
+
+        filters = [ShippingRoute.deleted_at.is_(None)]
+        if keyword:
+            like_value = f"%{keyword.strip()}%"
+            filters.append(
+                or_(
+                    ShippingRoute.code.ilike(like_value),
+                    ShippingRoute.name.ilike(like_value),
+                    ShippingRoute.description.ilike(like_value),
+                )
+            )
+        if origin_region_id is not None:
+            filters.append(ShippingRoute.origin_region_id == origin_region_id)
+        if destination_region_id is not None:
+            filters.append(ShippingRoute.destination_region_id == destination_region_id)
+        if transport_org_type_code:
+            filters.append(ShippingRoute.transport_org_type_code == transport_org_type_code)
+        if plan_type_code:
+            filters.append(
+                select(ShippingRoutePlan.id)
+                .where(
+                    ShippingRoutePlan.route_id == ShippingRoute.id,
+                    ShippingRoutePlan.plan_type_code == plan_type_code,
+                )
+                .exists()
+            )
+        if has_plan is not None:
+            filters.append(plan_count_sq > 0 if has_plan else plan_count_sq == 0)
+        if has_main_line is not None:
+            filters.append(main_line_name_sq.is_not(None) if has_main_line else main_line_name_sq.is_(None))
+        if track_status:
+            filters.append(track_status_expr == track_status)
+
+        count_stmt = select(ShippingRoute.id).where(*filters)
+        total = int((await self.db.execute(select(func.count()).select_from(count_stmt.subquery()))).scalar_one())
+        stmt = (
+            select(
+                ShippingRoute,
+                plan_count_sq.label("plan_count"),
+                line_count_sq.label("line_count"),
+                main_line_name_sq.label("main_line_name"),
+                track_status_expr.label("track_status"),
+                track_error_sq.label("track_error_message"),
+                track_generated_at_sq.label("track_generated_at"),
+            )
+            .where(*filters)
+            .order_by(ShippingRoute.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list((await self.db.execute(stmt)).all()), total
 
     async def create_route(self, data: dict[str, Any]) -> ShippingRoute:
         row = ShippingRoute(**data)

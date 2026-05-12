@@ -93,7 +93,16 @@ def _to_decimal(value) -> Decimal | None:
     return Decimal(str(value))
 
 
-def _to_route_response(entity, *, plan_count: int = 0, line_count: int = 0, main_line_name: str | None = None, track_status: str = "NOT_GENERATED") -> RouteResponse:
+def _to_route_response(
+    entity,
+    *,
+    plan_count: int = 0,
+    line_count: int = 0,
+    main_line_name: str | None = None,
+    track_status: str = "NOT_GENERATED",
+    track_error_message: str | None = None,
+    track_generated_at: datetime | None = None,
+) -> RouteResponse:
     return RouteResponse(
         id=entity.id,
         code=entity.code,
@@ -113,6 +122,8 @@ def _to_route_response(entity, *, plan_count: int = 0, line_count: int = 0, main
         line_count=line_count,
         main_line_name=main_line_name,
         track_status=track_status,
+        track_error_message=track_error_message,
+        track_generated_at=track_generated_at,
     )
 
 
@@ -262,27 +273,20 @@ class ShippingRouteService:
         return len(plans), line_count, main_line_name, best_status
 
     async def list_routes(self, query) -> PageResponse[RouteResponse]:
-        rows, total = await self.route_repo.list_routes(
+        rows, total = await self.route_repo.list_routes_with_stats(
             keyword=query.keyword,
             origin_region_id=query.origin_region_id,
             destination_region_id=query.destination_region_id,
             transport_org_type_code=query.transport_org_type_code,
+            plan_type_code=query.plan_type_code,
+            has_plan=query.has_plan,
+            has_main_line=query.has_main_line,
+            track_status=query.track_status,
             page=query.page,
             page_size=query.page_size,
         )
         responses: list[RouteResponse] = []
-        for row in rows:
-            plan_count, line_count, main_line_name, track_status = await self._route_stats(row.id)
-            if query.has_plan is not None and (plan_count > 0) != query.has_plan:
-                continue
-            if query.has_main_line is not None and bool(main_line_name) != query.has_main_line:
-                continue
-            if query.track_status and track_status != query.track_status:
-                continue
-            if query.plan_type_code:
-                plans = await self.plan_repo.list_all_plans(row.id)
-                if not any(plan.plan_type_code == query.plan_type_code for plan in plans):
-                    continue
+        for row, plan_count, line_count, main_line_name, track_status, track_error_message, track_generated_at in rows:
             responses.append(
                 _to_route_response(
                     row,
@@ -290,6 +294,8 @@ class ShippingRouteService:
                     line_count=line_count,
                     main_line_name=main_line_name,
                     track_status=track_status,
+                    track_error_message=track_error_message,
+                    track_generated_at=track_generated_at,
                 )
             )
         return PageResponse[RouteResponse](total=total, page=query.page, page_size=query.page_size, items=responses)
