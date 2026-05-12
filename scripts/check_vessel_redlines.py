@@ -161,7 +161,7 @@ def main() -> int:
             failures.append("governance tasks must not approve vessel evidence directly; use audit center bridge")
 
     migration_files = sorted((BACKEND / "alembic" / "versions").glob("*.py"))
-    if [path.name for path in migration_files] != ["0001_platform_current_schema.py"]:
+    if [path.name for path in migration_files] != ["001_initial_schema.py"]:
         failures.append(
             "Alembic must remain a single V3 current-state baseline: "
             + ", ".join(path.name for path in migration_files)

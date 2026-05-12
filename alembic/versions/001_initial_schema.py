@@ -1,6 +1,6 @@
-"""platform_current_schema
+"""initial_schema
 
-Revision ID: 0001_platform_current_schema
+Revision ID: 001_initial_schema
 Revises: 
 Create Date: 2026-05-10 14:34:05.623491
 
@@ -19,7 +19,7 @@ def _compile_bigint_sqlite(_type, _compiler, **_kw):
 
 
 # revision identifiers, used by Alembic.
-revision: str = '0001_platform_current_schema'
+revision: str = '001_initial_schema'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -51,6 +51,102 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('admin_region', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_admin_region_parent_code'), ['parent_code'], unique=False)
+
+    op.create_table(
+    'water_system',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('water_system_code', sa.String(length=32), nullable=False),
+    sa.Column('water_system_name', sa.String(length=128), nullable=False),
+    sa.Column('standard_name', sa.String(length=128), nullable=True),
+    sa.Column('display_name', sa.String(length=128), nullable=True),
+    sa.Column('parent_water_system_code', sa.String(length=32), nullable=True),
+    sa.Column('water_level', sa.SmallInteger(), nullable=False),
+    sa.Column('feature_type_code', sa.String(length=32), nullable=False),
+    sa.Column('hydrology_period_code', sa.String(length=32), nullable=False),
+    sa.Column('salinity_type_code', sa.String(length=32), nullable=False),
+    sa.Column('water_boundary_type_code', sa.String(length=32), nullable=False),
+    sa.Column('navigation_category_code', sa.String(length=32), nullable=True),
+    sa.Column('navigation_scope_code', sa.String(length=32), nullable=True),
+    sa.Column('ais_situation_scope', sa.String(length=32), nullable=True),
+    sa.Column('display_priority', sa.Integer(), nullable=False),
+    sa.Column('match_level_code', sa.String(length=32), nullable=True),
+    sa.Column('match_confidence_code', sa.String(length=32), nullable=True),
+    sa.Column('review_required', sa.Boolean(), nullable=False),
+    sa.Column('source_feature_count', sa.Integer(), nullable=False),
+    sa.Column('source_object_ids', sa.JSON(), nullable=True),
+    sa.Column('source_levels', sa.JSON(), nullable=True),
+    sa.Column('source_layer_names', sa.JSON(), nullable=True),
+    sa.Column('source_names', sa.JSON(), nullable=True),
+    sa.Column('source_remarks', sa.JSON(), nullable=True),
+    sa.Column('geometry_union_status', sa.String(length=32), nullable=True),
+    sa.Column('business_remark', sa.String(length=512), nullable=True),
+    sa.Column('display_center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('display_center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('source_remark', sa.String(length=256), nullable=True),
+    sa.Column('source_layer_name', sa.String(length=64), nullable=False),
+    sa.Column('source_version', sa.String(length=64), nullable=False),
+    sa.Column('is_enabled', sa.Boolean(), nullable=False),
+    sa.Column('sort_order', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('water_system_code')
+    )
+    with op.batch_alter_table('water_system', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_water_system_ais_situation_scope'), ['ais_situation_scope'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_feature_type_code'), ['feature_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_geometry_union_status'), ['geometry_union_status'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_hydrology_period_code'), ['hydrology_period_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_is_enabled'), ['is_enabled'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_match_confidence_code'), ['match_confidence_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_match_level_code'), ['match_level_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_navigation_category_code'), ['navigation_category_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_navigation_scope_code'), ['navigation_scope_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_parent_water_system_code'), ['parent_water_system_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_review_required'), ['review_required'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_salinity_type_code'), ['salinity_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_source_layer_name'), ['source_layer_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_source_version'), ['source_version'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_standard_name'), ['standard_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_water_boundary_type_code'), ['water_boundary_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_water_level'), ['water_level'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_water_system_code'), ['water_system_code'], unique=True)
+        batch_op.create_index(batch_op.f('ix_water_system_water_system_name'), ['water_system_name'], unique=False)
+
+    op.create_table(
+    'water_system_boundary',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('water_system_id', sa.BigInteger(), nullable=False),
+    sa.Column('geometry_json', sa.JSON(), nullable=False),
+    sa.Column('boundary_paths_low', sa.JSON(), nullable=True),
+    sa.Column('boundary_paths_medium', sa.JSON(), nullable=True),
+    sa.Column('boundary_paths_high', sa.JSON(), nullable=True),
+    sa.Column('center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('bbox_min_lng', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('bbox_min_lat', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('bbox_max_lng', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('bbox_max_lat', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('source_shape_length_degree', sa.Numeric(precision=24, scale=15), nullable=True),
+    sa.Column('source_shape_area_degree', sa.Numeric(precision=24, scale=15), nullable=True),
+    sa.Column('ring_count', sa.Integer(), nullable=False),
+    sa.Column('point_count', sa.Integer(), nullable=False),
+    sa.Column('geometry_status_code', sa.String(length=32), nullable=False),
+    sa.Column('boundary_quality_code', sa.String(length=32), nullable=False),
+    sa.Column('geometry_coordinate_system_code', sa.String(length=16), nullable=False),
+    sa.Column('boundary_coordinate_system_code', sa.String(length=16), nullable=False),
+    sa.Column('is_current', sa.Boolean(), nullable=False),
+    sa.Column('imported_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['water_system_id'], ['water_system.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('water_system_boundary', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_water_system_boundary_boundary_quality_code'), ['boundary_quality_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_boundary_geometry_status_code'), ['geometry_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_boundary_is_current'), ['is_current'], unique=False)
+        batch_op.create_index(batch_op.f('ix_water_system_boundary_water_system_id'), ['water_system_id'], unique=False)
 
     op.create_table('analysis_bucket_definition',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -446,6 +542,7 @@ def upgrade() -> None:
     sa.Column('route_path', sa.String(length=256), nullable=True),
     sa.Column('component_path', sa.String(length=256), nullable=True),
     sa.Column('icon', sa.String(length=64), nullable=True),
+    sa.Column('permission_code', sa.String(length=128), nullable=True),
     sa.Column('sort_order', sa.Integer(), nullable=False),
     sa.Column('visible_flag', sa.Integer(), nullable=False),
     sa.Column('status_code', sa.String(length=64), nullable=False),
@@ -4414,6 +4511,35 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_analysis_bucket_definition_bucket_code'))
 
     op.drop_table('analysis_bucket_definition')
+    with op.batch_alter_table('water_system_boundary', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_water_system_boundary_water_system_id'))
+        batch_op.drop_index(batch_op.f('ix_water_system_boundary_is_current'))
+        batch_op.drop_index(batch_op.f('ix_water_system_boundary_geometry_status_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_boundary_boundary_quality_code'))
+
+    op.drop_table('water_system_boundary')
+    with op.batch_alter_table('water_system', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_water_system_water_system_name'))
+        batch_op.drop_index(batch_op.f('ix_water_system_water_system_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_water_level'))
+        batch_op.drop_index(batch_op.f('ix_water_system_water_boundary_type_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_standard_name'))
+        batch_op.drop_index(batch_op.f('ix_water_system_source_version'))
+        batch_op.drop_index(batch_op.f('ix_water_system_source_layer_name'))
+        batch_op.drop_index(batch_op.f('ix_water_system_salinity_type_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_review_required'))
+        batch_op.drop_index(batch_op.f('ix_water_system_parent_water_system_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_navigation_scope_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_navigation_category_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_match_level_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_match_confidence_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_is_enabled'))
+        batch_op.drop_index(batch_op.f('ix_water_system_hydrology_period_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_geometry_union_status'))
+        batch_op.drop_index(batch_op.f('ix_water_system_feature_type_code'))
+        batch_op.drop_index(batch_op.f('ix_water_system_ais_situation_scope'))
+
+    op.drop_table('water_system')
     with op.batch_alter_table('admin_region', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_admin_region_parent_code'))
 

@@ -21,6 +21,7 @@
 - P2-business-closure-final-2026-05-10：本轮完成业务人员可见闭环，新增字段级定位 composable、资产台账行展开和批量治理、摘要批量刷新 diff、主体证据附件上传/预览/作废、结论冲突处理、候选分析业务边界提示和候选-节点距离图层。
 - P2-architecture-closure-final-2026-05-10：本轮完成维护边界闭环，新增 `0036_vessel_relation_evidence_attachment.py` 数据保护型迁移，领域 service 删除 `__getattr__` fallback，红线脚本补服务显式方法和 0036+ vessel migration 台账记录检查。
 - P3-clean-baseline-service-split-2026-05-10：本轮按 V3 当前态收束 Alembic 为单一 `0001_platform_current_schema.py`，移除 active 旧补丁链和 legacy `ship_*` 基线风险；seed 补齐船舶画像、质量、合规、识别、AIS、候选和治理样例；`VesselService` 拆成 shared aggregate + asset/certificate/relation/recognition/quality/compliance/ais/profile_card domain methods。
+- P4-production-delete-rebuild-2026-05-12：生产删除式重构分支将 active Alembic 进一步收束为单一 `001_initial_schema.py`，把水系基础表、菜单权限码等补丁迁移并入初始结构，后续只允许围绕生产主线更新单一初始迁移。
 
 ## 全量问题台账
 
@@ -59,7 +60,7 @@
 | P0-3 | GET 自动 sync/commit | 完成 | P0-closure | 红线扫描 |
 | P0-4 | replace/delete 物理删除路径风险 | 完成 | P0-closure | 继续禁止生产页面调用 |
 | P0-5 | vesselLegacy.ts 债务 | 完成 | P1-boundary-cleanup-2026-05-10 | 已迁移识别、资产、详情、所有方转移、系统首页调用并删除 legacy 文件；保留红线扫描禁止新增 import |
-| P0-6 | 表结构增长快、领域未收敛 | 完成 | P0-closure, P2-architecture-closure-final-2026-05-10, P3-clean-baseline-service-split-2026-05-10 | active Alembic 已收束为 `0001_platform_current_schema.py` 单基线，旧补丁链不再参与空库初始化；红线禁止恢复 legacy 表和多版本补丁链 |
+| P0-6 | 表结构增长快、领域未收敛 | 完成 | P0-closure, P2-architecture-closure-final-2026-05-10, P3-clean-baseline-service-split-2026-05-10, P4-production-delete-rebuild-2026-05-12 | active Alembic 已收束为 `001_initial_schema.py` 单基线，旧补丁链不再参与空库初始化；红线禁止恢复 legacy 表和多版本补丁链 |
 | P1-1 | router.py 过大 | 完成 | P1-boundary-cleanup-2026-05-10, P1-domain-split-components-2026-05-10 | 已按资产、质量、合规、主体、治理、AIS、候选、识别拆入领域 router；后续只做小文件内的进一步整理 |
 | P1-2 | schemas.py 过大 | 完成 | P1-boundary-cleanup-2026-05-10, P1-domain-split-components-2026-05-10 | 已按 base、asset、relation、quality、compliance、governance、recognition、ais、candidate、profile_card 拆入领域 schema；后续只做类型归属微调 |
 | P1-3 | 前端大页面单文件过大 | 完成 | P1-boundary-cleanup-2026-05-10, P1-domain-split-components-2026-05-10, P2-service-boundary-components-2026-05-10, P2-workflow-service-completion-2026-05-10, P2-business-closure-final-2026-05-10 | 已拆主体证据 payload 工具、关系结论面板、关系/证据表格、候选远程选择器、候选筛选面板、候选结果/地图、候选解释/标注、编辑页 OCR 差异弹窗、船舶证书台账、文件预览和通用治理动作面板；剩余只做 UI 细粒度优化 |
@@ -69,7 +70,7 @@
 | P2-1 | 船舶中心和审核中心职责交叉 | 完成 | P2-cross-module-closure-2026-05-10, P2-workflow-service-completion-2026-05-10 | 证据审核、风险复核、黑名单解除/作废均走审核中心；治理任务只做提醒、定位和状态镜像 |
 | P2-2 | 船舶中心和分析中心职责交叉 | 完成 | P2-cross-module-closure-2026-05-10, P2-business-closure-final-2026-05-10 | 同 P1-6，候选事实口径已收敛，船舶侧不直接写分析事实 |
 | P2-3 | 货源/节点/航线弱关联 | 完成 | P2-cross-module-closure-2026-05-10, P2-business-closure-final-2026-05-10 | 货源、候选货源、节点、航线可进入候选分析，候选历史可按来源反查，节点/航线/区域/空间快照缺口可跳治理入口 |
-| P2-4 | migration 补丁化 | 完成 | P2-cross-module-closure-2026-05-10, P2-architecture-closure-final-2026-05-10, P3-clean-baseline-service-split-2026-05-10 | 已改为 V3 当前态干净基线，active Alembic 只保留 `0001_platform_current_schema.py`，不再创建或回填 legacy `ship_*` 表 |
+| P2-4 | migration 补丁化 | 完成 | P2-cross-module-closure-2026-05-10, P2-architecture-closure-final-2026-05-10, P3-clean-baseline-service-split-2026-05-10, P4-production-delete-rebuild-2026-05-12 | 已改为 V3 当前态干净基线，active Alembic 只保留 `001_initial_schema.py`，不再创建或回填 legacy `ship_*` 表 |
 | P2-5 | 表和页面先行、业务闭环后补 | 完成 | P0-closure, P1-workflow-2026-05-10, P2-architecture-closure-final-2026-05-10 | 红线要求新增 vessel migration 记录台账；本轮新增表服务于主体证据附件闭环并复用 storage_file |
 
 ## 本轮目标
@@ -79,7 +80,7 @@
 本轮已完成：
 
 - 新增 `useVesselAnchorFocus`，统一处理 `field、quality_issue_id、risk_signal_id、task_id、evidence_id、conclusion_id、blacklist_signal_id、anchor` 深链接定位和高亮。
-- active Alembic 收束为 `0001_platform_current_schema.py`，旧 `0001` 到 `0036` 补丁链退出 active 目录；新基线不包含 legacy `ship_*` 表。
+- active Alembic 收束为 `001_initial_schema.py`，旧补丁链退出 active 目录；新基线不包含 legacy `ship_*` 表，并内置水系基础表和菜单权限码。
 - seed 补齐船舶页面真实调试数据：画像汇总、AIS 快照/点位、质量问题、风险信号、治理任务、识别差异、候选分析、主体证据样例。
 - 新增主体证据附件接口和冲突结论处理接口；主体关系页接入上传、预览、作废、冲突采信。
 - 资产台账增加行展开治理详情、批量刷新摘要、批量质量重校验、批量进入治理任务；摘要刷新展示差异和失败原因。

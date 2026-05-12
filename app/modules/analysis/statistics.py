@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -64,6 +65,27 @@ LOCAL_SAMPLE_VERSION = "LOCAL_SAMPLE"
 VALID_FREIGHT_STATUSES = {"PUBLISHED", "MATCHING", "EXPIRED", "CLOSED"}
 SUCCESS_STATUS = {"status_code": "SUCCESS", "status_name": "成功"}
 ROUND9_VERSION = "ROUND_9_FACT_V1"
+
+
+def _allow_local_sample_analysis() -> bool:
+    """Allow deterministic sample facts only for explicit demo/debug profiles."""
+    seed_profile = (os.getenv("SEED_PROFILE") or "").strip().lower()
+    allow_flag = (os.getenv("ALLOW_LOCAL_SAMPLE_ANALYSIS") or "").strip().lower()
+    return seed_profile == "local-demo" or allow_flag in {"1", "true", "yes", "on"}
+
+
+def _local_sample_disabled(job_code: str, input_rows: int, target_table: str) -> AggregationResult:
+    return AggregationResult(
+        job_code,
+        input_rows,
+        0,
+        0,
+        [target_table],
+        {
+            "source_mode": "NOT_COMPUTABLE",
+            "not_computable_reasons": ["LOCAL_SAMPLE_DISABLED_FOR_PRODUCTION"],
+        },
+    )
 
 
 @dataclass
@@ -712,6 +734,8 @@ class AnalysisStatisticsService:
         if force_rebuild:
             await self._clear(FactShipCityDaily, start, end)
         ships, capacities, _, _, city_by_code, primary_region = await self._ship_context()
+        if not _allow_local_sample_analysis():
+            return _local_sample_disabled("ANALYSIS_SHIP_CITY_DAILY", len(ships), "fact_ship_city_daily")
         city_codes = sorted(city_by_code)
         output = 0
         now = datetime.utcnow()
@@ -753,6 +777,8 @@ class AnalysisStatisticsService:
         if force_rebuild:
             await self._clear(FactShipFlowDaily, start, end)
         ships, capacities, _, _, _, primary_region = await self._ship_context()
+        if not _allow_local_sample_analysis():
+            return _local_sample_disabled("ANALYSIS_SHIP_FLOW_DAILY", len(ships), "fact_ship_flow_daily")
         nodes = list((await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None), TransportNode.status == 1).order_by(TransportNode.id.asc()))).scalars().all())
         if len(nodes) < 2:
             return AggregationResult("ANALYSIS_SHIP_FLOW_DAILY", len(ships), 0, 0, ["fact_ship_flow_daily"], {"source_mode": "LOCAL_SAMPLE"})
