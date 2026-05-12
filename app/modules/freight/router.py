@@ -24,7 +24,6 @@ from app.modules.freight.schemas import (
     FreightContactReplaceRequest,
     FreightContactResponse,
     FreightDetailResponse,
-    FreightListQuery,
     FreightManualCreateRequest,
     FreightNormalizationBulkActionRequest,
     FreightNormalizationBulkActionResponse,
@@ -369,27 +368,6 @@ async def get_shipping_opportunity(
     _ = current_user
     service = ShippingOpportunityService(db)
     return await service.get_opportunity(freight_id)
-
-
-@router.get("", response_model=PageResponse[FreightResponse])
-async def list_freights(
-    query: FreightListQuery = Depends(),
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ = current_user
-    service = FreightService(db)
-    return await service.list_freights(
-        keyword=query.keyword,
-        status_code=query.status_code,
-        source_type=query.source_type,
-        source_channel=query.source_channel,
-        origin_city_code=query.origin_city_code,
-        destination_city_code=query.destination_city_code,
-        commodity_id=query.commodity_id,
-        page=query.page,
-        page_size=query.page_size,
-    )
 
 
 @router.post("/manual", response_model=FreightResponse)

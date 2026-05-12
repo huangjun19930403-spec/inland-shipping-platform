@@ -4,13 +4,13 @@
 
 ```bash
 alembic upgrade head
-python -m scripts.seed_system_init
+python -m scripts.seed_system_init --profile production
 python -m scripts.verify_local_acceptance
 ```
 
 ## seed 顺序
 
-`scripts.seed_system_init` 按固定顺序执行：
+`scripts.seed_system_init --profile production` 按固定顺序执行：
 
 1. `seed_builtin_dicts`
 2. `seed_code_sequences`
@@ -27,9 +27,13 @@ python -m scripts.verify_local_acceptance
 13. `seed_navigation_constraints`
 14. `seed_route_samples`
 
+`--profile local-demo` 只用于本地演示链路；演示数据必须带 demo/local 标记，不得作为生产分析依据。
+
 ## 数据边界
 
 - seed 必须幂等，重复运行应更新或跳过同一业务编码。
+- profile 必须显式传入，避免把 production 基础数据和 local-demo 演示数据混写。
+- production seed 会初始化新信息架构菜单：经营总览、货源洞察中心、运力中心、航线与区域中心、运价与报价中心、数据质量与治理、系统配置。
 - `seed_builtin_dicts` 内置 `COMMODITY_UNIT`、`DANGEROUS_GOODS_LEVEL`，用于标准货品主单位和危险等级中文展示。
 - 货品分类和货品类型作为标准货品依赖的基础元数据保留，不提供复杂业务 CRUD。
 - 船舶导入批次、旧统计表和旧 E2E 航线数据已从最终初始化链移除。

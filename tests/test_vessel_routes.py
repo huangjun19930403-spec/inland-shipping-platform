@@ -264,37 +264,45 @@ def test_vessel_seed_menu_groups_keep_business_entries_visible() -> None:
 
     menu_by_code = {item["menu_code"]: item for item in MENUS}
     assert "VESSEL_SHIP_ANALYSIS" not in menu_by_code
-    assert menu_by_code["ANALYSIS_SHIPS"]["parent_code"] == "ANALYSIS_ROOT"
-    group_codes = {
+    assert menu_by_code["ANALYSIS_SHIPS"]["parent_code"] == "VESSEL_ASSET_GROUP"
+    visible_group_codes = {
         "VESSEL_WORKBENCH_GROUP",
         "VESSEL_ASSET_GROUP",
-        "VESSEL_GOVERNANCE_GROUP",
         "VESSEL_ANALYSIS_GROUP",
+    }
+    hidden_group_codes = {
+        "VESSEL_GOVERNANCE_GROUP",
         "VESSEL_CARGO_ANALYSIS_GROUP",
     }
-    assert group_codes.issubset(menu_by_code)
-    for code in group_codes:
+    assert visible_group_codes.issubset(menu_by_code)
+    assert hidden_group_codes.issubset(menu_by_code)
+    for code in visible_group_codes | hidden_group_codes:
         assert menu_by_code[code]["parent_code"] == "VESSEL_ROOT"
         assert menu_by_code[code]["menu_type_code"] == "DIRECTORY"
+    for code in visible_group_codes:
+        assert menu_by_code[code]["visible_flag"] == 1
+    for code in hidden_group_codes:
+        assert menu_by_code[code]["visible_flag"] == 0
 
     expected_parent = {
         "VESSEL_GOVERNANCE_DASHBOARD": "VESSEL_WORKBENCH_GROUP",
         "VESSEL_GOVERNANCE_TASKS": "VESSEL_WORKBENCH_GROUP",
         "VESSEL_ASSETS": "VESSEL_ASSET_GROUP",
         "VESSEL_PROFILE_ENTRY": "VESSEL_ASSET_GROUP",
+        "ANALYSIS_SHIPS": "VESSEL_ASSET_GROUP",
         "VESSEL_QUALITY": "VESSEL_WORKBENCH_GROUP",
-        "VESSEL_RELATIONS_ENTRY": "VESSEL_GOVERNANCE_GROUP",
-        "VESSEL_COMPLIANCE_RISKS": "VESSEL_GOVERNANCE_GROUP",
-        "VESSEL_BLACKLIST_SIGNALS": "VESSEL_GOVERNANCE_GROUP",
+        "VESSEL_RELATIONS_ENTRY": "VESSEL_WORKBENCH_GROUP",
+        "VESSEL_COMPLIANCE_RISKS": "VESSEL_WORKBENCH_GROUP",
+        "VESSEL_BLACKLIST_SIGNALS": "VESSEL_WORKBENCH_GROUP",
         "VESSEL_RECOGNITIONS": "VESSEL_WORKBENCH_GROUP",
         "VESSEL_AIS_SITUATION": "VESSEL_ANALYSIS_GROUP",
         "VESSEL_NODE_ROUTE_ANALYSIS": "VESSEL_ANALYSIS_GROUP",
-        "VESSEL_CANDIDATE_ANALYSIS": "VESSEL_CARGO_ANALYSIS_GROUP",
+        "VESSEL_CANDIDATE_ANALYSIS": "VESSEL_ROOT",
     }
     for code, parent_code in expected_parent.items():
         assert menu_by_code[code]["parent_code"] == parent_code
 
-    required_codes = {"VESSEL_ROOT", *group_codes, *expected_parent}
+    required_codes = {"OVERVIEW_ROOT", "DASHBOARD", "VESSEL_ROOT", *visible_group_codes, *expected_parent}
     for role_code in ("DATA_STEWARD", "OPS_ANALYST"):
         assert required_codes.issubset(set(ROLE_MENU_CODES[role_code]))
 

@@ -23,6 +23,14 @@ from app.modules.route.schemas import RouteListQuery
 from app.modules.route.service import ShippingRouteService
 
 
+def test_legacy_freight_list_route_is_not_business_entrypoint() -> None:
+    from main import app
+
+    paths = app.openapi()["paths"]
+    assert "get" not in paths.get("/api/v1/freight", {})
+    assert "get" in paths["/api/v1/freight/opportunities"]
+
+
 @compiles(BigInteger, "sqlite")
 def _compile_bigint_sqlite(element, compiler, **kw) -> str:
     _ = element, compiler, kw

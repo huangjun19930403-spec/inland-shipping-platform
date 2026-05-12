@@ -65,11 +65,11 @@ def test_water_system_backend_menus_are_initialized_for_visible_routes() -> None
         "menu_code": "ADDRESS_WATER_SYSTEMS",
         "menu_name": "水系基础数据",
         "menu_type_code": "MENU",
-        "parent_code": "DICTIONARY_ROOT",
+        "parent_code": "ROUTE_REGION_FOUNDATION_GROUP",
         "route_path": "/address/water-systems",
         "component_path": "modules/address/pages/WaterSystemListPage",
         "icon": "MapLocation",
-        "sort_order": 5,
+        "sort_order": 3,
         "visible_flag": 1,
         "status_code": "ACTIVE",
     }

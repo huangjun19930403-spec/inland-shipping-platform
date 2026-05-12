@@ -756,7 +756,7 @@ class AnalysisDashboardService:
                 source_tables=["freight", "freight_candidate", "fact_freight_daily", "fact_freight_flow_daily"],
                 sample_count=int(totals["freight_count"]),
                 actions=[
-                    AnalysisActionBlock(action_code="OPEN_FREIGHT_LIST", title="查看正式货源", target_route="/freight/list"),
+                    AnalysisActionBlock(action_code="OPEN_FREIGHT_LIST", title="查看运输机会", target_route="/freight/list"),
                     AnalysisActionBlock(action_code="OPEN_FREIGHT_QUALITY", title="处理货源清洗", target_route="/freight/normalization"),
                 ],
                 uncertainty_reasons=["分页列表指标不得替代本接口聚合结果"],

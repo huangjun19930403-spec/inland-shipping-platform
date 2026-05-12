@@ -18,18 +18,6 @@ class PageResponse(BaseModel, Generic[T]):
     items: list[T]
 
 
-class FreightListQuery(BaseModel):
-    keyword: str | None = None
-    status_code: str | None = None
-    source_type: str | None = None
-    source_channel: str | None = None
-    origin_city_code: str | None = None
-    destination_city_code: str | None = None
-    commodity_id: int | None = None
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=20, ge=1, le=200)
-
-
 class FreightBasePayload(BaseModel):
     raw_commodity_name: str | None = Field(default=None, max_length=128)
     raw_tonnage_text: str | None = Field(default=None, max_length=128)

@@ -172,59 +172,26 @@ ROLE_PERMISSION_CODES = {
 
 ROLE_MENU_CODES = {
     "DATA_STEWARD": [
+        "OVERVIEW_ROOT",
         "DASHBOARD",
-        "DICTIONARY_ROOT",
-        "ADDRESS_ADMIN_REGIONS",
-        "ADDRESS_WATER_SYSTEMS",
-        "ADDRESS_REGIONS",
-        "ADDRESS_NODES",
-        "COMMODITY_STANDARDS",
-        "VESSEL_ROOT",
-        "VESSEL_WORKBENCH_GROUP",
-        "VESSEL_ASSET_GROUP",
-        "VESSEL_GOVERNANCE_GROUP",
-        "VESSEL_ANALYSIS_GROUP",
-        "VESSEL_CARGO_ANALYSIS_GROUP",
-        "VESSEL_ASSETS",
-        "VESSEL_PROFILE_ENTRY",
-        "VESSEL_GOVERNANCE_DASHBOARD",
-        "VESSEL_GOVERNANCE_TASKS",
-        "VESSEL_QUALITY",
-        "VESSEL_RELATIONS_ENTRY",
-        "VESSEL_COMPLIANCE_RISKS",
-        "VESSEL_BLACKLIST_SIGNALS",
-        "VESSEL_RECOGNITIONS",
-        "VESSEL_AIS_SITUATION",
-        "VESSEL_NODE_ROUTE_ANALYSIS",
-        "VESSEL_CANDIDATE_ANALYSIS",
-        "ANALYSIS_SHIPS",
         "FREIGHT_ROOT",
         "FREIGHT_WECHAT_WORKBENCH",
+        "FREIGHT_TMS_INBOUNDS",
         "FREIGHT_BATCHES",
         "FREIGHT_CANDIDATES",
-        "FREIGHT_MANUAL_CREATE",
         "FREIGHT_LIST",
-        "FREIGHT_NORMALIZATION",
-        "FREIGHT_TMS_INBOUNDS",
-        "ANALYSIS_ROOT",
-        "AUDIT_ROOT",
-        "AUDIT_PENDING",
-        "AUDIT_DONE",
-    ],
-    "OPS_ANALYST": [
-        "DASHBOARD",
-        "DICTIONARY_ROOT",
-        "ADDRESS_WATER_SYSTEMS",
-        "ADDRESS_REGIONS",
-        "ADDRESS_NODES",
+        "FREIGHT_MANUAL_CREATE",
+        "FREIGHT_NORMALIZATION_ENTRY",
+        "ANALYSIS_FREIGHT",
         "VESSEL_ROOT",
-        "VESSEL_WORKBENCH_GROUP",
         "VESSEL_ASSET_GROUP",
-        "VESSEL_GOVERNANCE_GROUP",
-        "VESSEL_ANALYSIS_GROUP",
-        "VESSEL_CARGO_ANALYSIS_GROUP",
         "VESSEL_ASSETS",
         "VESSEL_PROFILE_ENTRY",
+        "ANALYSIS_SHIPS",
+        "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_AIS_SITUATION",
+        "VESSEL_NODE_ROUTE_ANALYSIS",
+        "VESSEL_WORKBENCH_GROUP",
         "VESSEL_GOVERNANCE_DASHBOARD",
         "VESSEL_GOVERNANCE_TASKS",
         "VESSEL_QUALITY",
@@ -232,37 +199,87 @@ ROLE_MENU_CODES = {
         "VESSEL_COMPLIANCE_RISKS",
         "VESSEL_BLACKLIST_SIGNALS",
         "VESSEL_RECOGNITIONS",
-        "VESSEL_AIS_SITUATION",
-        "VESSEL_NODE_ROUTE_ANALYSIS",
         "VESSEL_CANDIDATE_ANALYSIS",
-        "FREIGHT_ROOT",
-        "FREIGHT_LIST",
         "ROUTE_ROOT",
         "ROUTE_LIST",
-        "ANALYSIS_ROOT",
-        "ANALYSIS_SHIPS",
-        "ANALYSIS_FREIGHT",
         "ANALYSIS_REGIONS",
         "ANALYSIS_FLOWS",
+        "ROUTE_REGION_FOUNDATION_GROUP",
+        "ADDRESS_NODES",
+        "ADDRESS_REGIONS",
+        "ADDRESS_WATER_SYSTEMS",
+        "ADDRESS_CONSTRAINT_POINTS",
+        "AUDIT_ROOT",
+        "FREIGHT_NORMALIZATION",
+        "QUALITY_VESSEL_ISSUES",
+        "QUALITY_VESSEL_TASKS",
+        "AUDIT_PENDING",
+        "AUDIT_DONE",
+        "ANALYSIS_TASK_LIST",
+        "SYSTEM_ROOT",
+        "SYSTEM_FOUNDATION_GROUP",
+        "COMMODITY_STANDARDS",
+        "ADDRESS_ADMIN_REGIONS",
+        "DICTIONARY_DICTS",
+        "DICTIONARY_CODE_SEQUENCES",
+    ],
+    "OPS_ANALYST": [
+        "OVERVIEW_ROOT",
+        "DASHBOARD",
+        "FREIGHT_ROOT",
+        "FREIGHT_LIST",
+        "ANALYSIS_FREIGHT",
+        "VESSEL_ROOT",
+        "VESSEL_ASSET_GROUP",
+        "VESSEL_ASSETS",
+        "VESSEL_PROFILE_ENTRY",
+        "ANALYSIS_SHIPS",
+        "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_AIS_SITUATION",
+        "VESSEL_NODE_ROUTE_ANALYSIS",
+        "VESSEL_WORKBENCH_GROUP",
+        "VESSEL_GOVERNANCE_DASHBOARD",
+        "VESSEL_GOVERNANCE_TASKS",
+        "VESSEL_QUALITY",
+        "VESSEL_RELATIONS_ENTRY",
+        "VESSEL_COMPLIANCE_RISKS",
+        "VESSEL_BLACKLIST_SIGNALS",
+        "VESSEL_RECOGNITIONS",
+        "VESSEL_CANDIDATE_ANALYSIS",
+        "ROUTE_ROOT",
+        "ROUTE_LIST",
+        "ANALYSIS_REGIONS",
+        "ANALYSIS_FLOWS",
+        "ROUTE_REGION_FOUNDATION_GROUP",
+        "ADDRESS_NODES",
+        "ADDRESS_REGIONS",
+        "ADDRESS_WATER_SYSTEMS",
+        "ADDRESS_CONSTRAINT_POINTS",
+        "FREIGHT_TMS_INBOUNDS",
+        "ANALYSIS_ROOT",
         "ANALYSIS_PRICES",
         "ANALYSIS_QUOTE_SIMULATOR",
-        "ANALYSIS_TASK_ROOT",
+        "AUDIT_ROOT",
         "ANALYSIS_TASK_LIST",
     ],
     "BUSINESS_INPUTTER": [
+        "OVERVIEW_ROOT",
         "DASHBOARD",
-        "DICTIONARY_ROOT",
-        "ADDRESS_WATER_SYSTEMS",
-        "ADDRESS_NODES",
-        "COMMODITY_STANDARDS",
         "FREIGHT_ROOT",
         "FREIGHT_WECHAT_WORKBENCH",
+        "FREIGHT_TMS_INBOUNDS",
         "FREIGHT_BATCHES",
         "FREIGHT_CANDIDATES",
-        "FREIGHT_MANUAL_CREATE",
         "FREIGHT_LIST",
-        "FREIGHT_NORMALIZATION",
-        "FREIGHT_TMS_INBOUNDS",
+        "FREIGHT_MANUAL_CREATE",
+        "FREIGHT_NORMALIZATION_ENTRY",
+        "ROUTE_ROOT",
+        "ROUTE_REGION_FOUNDATION_GROUP",
+        "ADDRESS_NODES",
+        "ADDRESS_WATER_SYSTEMS",
+        "SYSTEM_ROOT",
+        "SYSTEM_FOUNDATION_GROUP",
+        "COMMODITY_STANDARDS",
     ],
 }
 
@@ -504,7 +521,7 @@ PERMISSIONS = [
         "permission_type_code": "API",
         "resource_path": "/api/v1/freight/*",
         "action_code": "ALL",
-        "description": "正式货源、微信/TMS 采集、AI 线索切分和候选确认权限",
+        "description": "运输机会、微信/TMS 采集、AI 线索切分和候选确认权限",
     },
     {
         "permission_code": "FREIGHT:READ",
@@ -512,7 +529,7 @@ PERMISSIONS = [
         "permission_type_code": "API",
         "resource_path": "/api/v1/freight/*",
         "action_code": "READ",
-        "description": "查看正式货源、微信/TMS 采集和候选货源",
+        "description": "查看运输机会、微信/TMS 采集和候选货源",
     },
     {
         "permission_code": "FREIGHT:WRITE",
@@ -520,7 +537,7 @@ PERMISSIONS = [
         "permission_type_code": "API",
         "resource_path": "/api/v1/freight/*",
         "action_code": "WRITE",
-        "description": "维护正式货源、微信/TMS 采集、解析和候选确认",
+        "description": "维护运输机会、微信/TMS 采集、解析和候选确认",
     },
     {
         "permission_code": "STORAGE:ALL",
@@ -1013,7 +1030,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_LIST",
-        "menu_name": "正式货源",
+        "menu_name": "运输机会",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/list",
@@ -1224,6 +1241,229 @@ MENUS = [
         "status_code": "ACTIVE",
     },
 ]
+
+
+def _directory_menu(
+    menu_code: str,
+    menu_name: str,
+    *,
+    parent_code: str | None = None,
+    icon: str = "Menu",
+    sort_order: int = 1,
+    visible_flag: int = 1,
+) -> dict:
+    return {
+        "menu_code": menu_code,
+        "menu_name": menu_name,
+        "menu_type_code": "DIRECTORY",
+        "parent_code": parent_code,
+        "route_path": None,
+        "component_path": None,
+        "icon": icon,
+        "sort_order": sort_order,
+        "visible_flag": visible_flag,
+        "status_code": "ACTIVE",
+    }
+
+
+def _route_menu(source_code: str, menu_code: str, menu_name: str, *, parent_code: str, sort_order: int) -> dict:
+    source = next(item for item in MENUS if item["menu_code"] == source_code)
+    return {
+        **source,
+        "menu_code": menu_code,
+        "menu_name": menu_name,
+        "parent_code": parent_code,
+        "sort_order": sort_order,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    }
+
+
+def _apply_production_menu_information_architecture() -> None:
+    by_code = {item["menu_code"]: dict(item) for item in MENUS}
+
+    def update(menu_code: str, **changes) -> None:
+        by_code[menu_code] = {**by_code[menu_code], **changes}
+
+    by_code["OVERVIEW_ROOT"] = _directory_menu("OVERVIEW_ROOT", "经营总览", icon="House", sort_order=10)
+    update("DASHBOARD", menu_name="经营驾驶舱", parent_code="OVERVIEW_ROOT", sort_order=1)
+
+    update("FREIGHT_ROOT", menu_name="货源洞察中心", sort_order=20)
+    update("FREIGHT_WECHAT_WORKBENCH", parent_code="FREIGHT_ROOT", sort_order=1)
+    update("FREIGHT_TMS_INBOUNDS", parent_code="FREIGHT_ROOT", sort_order=2)
+    update("FREIGHT_BATCHES", parent_code="FREIGHT_ROOT", sort_order=3)
+    update("FREIGHT_CANDIDATES", menu_name="候选确认", parent_code="FREIGHT_ROOT", sort_order=4)
+    update("FREIGHT_LIST", menu_name="运输机会", parent_code="FREIGHT_ROOT", sort_order=5)
+    update("FREIGHT_MANUAL_CREATE", parent_code="FREIGHT_ROOT", sort_order=6)
+    by_code["FREIGHT_NORMALIZATION_ENTRY"] = _route_menu(
+        "FREIGHT_NORMALIZATION",
+        "FREIGHT_NORMALIZATION_ENTRY",
+        "数据清洗",
+        parent_code="FREIGHT_ROOT",
+        sort_order=7,
+    )
+    update("ANALYSIS_FREIGHT", menu_name="货源分析", parent_code="FREIGHT_ROOT", sort_order=8)
+
+    update("VESSEL_ROOT", menu_name="运力中心", sort_order=30)
+    update("VESSEL_ASSET_GROUP", menu_name="可用运力池", parent_code="VESSEL_ROOT", sort_order=1)
+    update("VESSEL_ANALYSIS_GROUP", menu_name="船位与空间", parent_code="VESSEL_ROOT", sort_order=2)
+    update("VESSEL_WORKBENCH_GROUP", menu_name="可信与治理", parent_code="VESSEL_ROOT", sort_order=3)
+    update("VESSEL_GOVERNANCE_GROUP", visible_flag=0, parent_code="VESSEL_ROOT", sort_order=98)
+    update("VESSEL_CARGO_ANALYSIS_GROUP", visible_flag=0, parent_code="VESSEL_ROOT", sort_order=99)
+    update("VESSEL_ASSETS", parent_code="VESSEL_ASSET_GROUP", sort_order=1)
+    update("VESSEL_PROFILE_ENTRY", parent_code="VESSEL_ASSET_GROUP", sort_order=2)
+    update("ANALYSIS_SHIPS", menu_name="运力指标", parent_code="VESSEL_ASSET_GROUP", sort_order=3)
+    update("VESSEL_AIS_SITUATION", parent_code="VESSEL_ANALYSIS_GROUP", sort_order=1)
+    update("VESSEL_NODE_ROUTE_ANALYSIS", parent_code="VESSEL_ANALYSIS_GROUP", sort_order=2)
+    update("VESSEL_GOVERNANCE_DASHBOARD", menu_name="问题看板", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=1)
+    update("VESSEL_GOVERNANCE_TASKS", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=2)
+    update("VESSEL_QUALITY", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=3)
+    update("VESSEL_RELATIONS_ENTRY", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=4)
+    update("VESSEL_COMPLIANCE_RISKS", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=5)
+    update("VESSEL_BLACKLIST_SIGNALS", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=6)
+    update("VESSEL_RECOGNITIONS", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=7)
+    update("VESSEL_CANDIDATE_ANALYSIS", menu_name="船货适配分析", parent_code="VESSEL_ROOT", sort_order=4)
+
+    update("ROUTE_ROOT", menu_name="航线与区域中心", sort_order=40)
+    by_code["ROUTE_REGION_FOUNDATION_GROUP"] = _directory_menu(
+        "ROUTE_REGION_FOUNDATION_GROUP",
+        "区域航道基础",
+        parent_code="ROUTE_ROOT",
+        icon="MapLocation",
+        sort_order=4,
+    )
+    update("ROUTE_LIST", parent_code="ROUTE_ROOT", sort_order=1)
+    update("ANALYSIS_REGIONS", menu_name="区域供需", parent_code="ROUTE_ROOT", sort_order=2)
+    update("ANALYSIS_FLOWS", parent_code="ROUTE_ROOT", sort_order=3)
+    update("ADDRESS_NODES", menu_name="运输节点", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=1)
+    update("ADDRESS_REGIONS", menu_name="业务区域", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=2)
+    update("ADDRESS_WATER_SYSTEMS", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=3)
+    update("ADDRESS_CONSTRAINT_POINTS", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=4)
+
+    update("ANALYSIS_ROOT", menu_name="运价与报价中心", sort_order=50)
+    update("ANALYSIS_QUOTE_SIMULATOR", parent_code="ANALYSIS_ROOT", sort_order=1)
+    update("ANALYSIS_PRICES", parent_code="ANALYSIS_ROOT", sort_order=2)
+
+    update("AUDIT_ROOT", menu_name="数据质量与治理", icon="Select", sort_order=60)
+    update("FREIGHT_NORMALIZATION", menu_name="货源清洗", parent_code="AUDIT_ROOT", sort_order=1)
+    by_code["QUALITY_VESSEL_ISSUES"] = _route_menu(
+        "VESSEL_QUALITY",
+        "QUALITY_VESSEL_ISSUES",
+        "船舶资料问题",
+        parent_code="AUDIT_ROOT",
+        sort_order=2,
+    )
+    by_code["QUALITY_VESSEL_TASKS"] = _route_menu(
+        "VESSEL_GOVERNANCE_TASKS",
+        "QUALITY_VESSEL_TASKS",
+        "船舶治理任务",
+        parent_code="AUDIT_ROOT",
+        sort_order=3,
+    )
+    update("AUDIT_PENDING", parent_code="AUDIT_ROOT", sort_order=4)
+    update("AUDIT_DONE", parent_code="AUDIT_ROOT", sort_order=5)
+    update("ANALYSIS_TASK_LIST", menu_name="分析刷新任务", parent_code="AUDIT_ROOT", sort_order=6)
+    update("ANALYSIS_TASK_ROOT", visible_flag=0, sort_order=98)
+    update("AUDIT_TASKS", visible_flag=0, sort_order=99)
+
+    update("SYSTEM_ROOT", menu_name="系统配置", sort_order=70)
+    by_code["SYSTEM_FOUNDATION_GROUP"] = _directory_menu(
+        "SYSTEM_FOUNDATION_GROUP",
+        "主数据配置",
+        parent_code="SYSTEM_ROOT",
+        icon="Files",
+        sort_order=1,
+    )
+    by_code["SYSTEM_SECURITY_GROUP"] = _directory_menu(
+        "SYSTEM_SECURITY_GROUP",
+        "权限与参数",
+        parent_code="SYSTEM_ROOT",
+        icon="Setting",
+        sort_order=2,
+    )
+    update("COMMODITY_STANDARDS", menu_name="标准货品", parent_code="SYSTEM_FOUNDATION_GROUP", sort_order=1)
+    update("ADDRESS_ADMIN_REGIONS", parent_code="SYSTEM_FOUNDATION_GROUP", sort_order=2)
+    update("DICTIONARY_DICTS", parent_code="SYSTEM_FOUNDATION_GROUP", sort_order=3)
+    update("DICTIONARY_CODE_SEQUENCES", parent_code="SYSTEM_FOUNDATION_GROUP", sort_order=4)
+    update("SYSTEM_USER", parent_code="SYSTEM_SECURITY_GROUP", sort_order=1)
+    update("SYSTEM_ROLE", parent_code="SYSTEM_SECURITY_GROUP", sort_order=2)
+    update("SYSTEM_MENU", parent_code="SYSTEM_SECURITY_GROUP", sort_order=3)
+    update("SYSTEM_CONFIG", parent_code="SYSTEM_SECURITY_GROUP", sort_order=4)
+    update("DICTIONARY_ROOT", visible_flag=0, sort_order=97)
+    update("ADDRESS_ROOT", visible_flag=0, sort_order=98)
+
+    ordered_codes = [
+        "OVERVIEW_ROOT",
+        "DASHBOARD",
+        "FREIGHT_ROOT",
+        "FREIGHT_WECHAT_WORKBENCH",
+        "FREIGHT_TMS_INBOUNDS",
+        "FREIGHT_BATCHES",
+        "FREIGHT_CANDIDATES",
+        "FREIGHT_LIST",
+        "FREIGHT_MANUAL_CREATE",
+        "FREIGHT_NORMALIZATION_ENTRY",
+        "ANALYSIS_FREIGHT",
+        "VESSEL_ROOT",
+        "VESSEL_ASSET_GROUP",
+        "VESSEL_ASSETS",
+        "VESSEL_PROFILE_ENTRY",
+        "ANALYSIS_SHIPS",
+        "VESSEL_ANALYSIS_GROUP",
+        "VESSEL_AIS_SITUATION",
+        "VESSEL_NODE_ROUTE_ANALYSIS",
+        "VESSEL_WORKBENCH_GROUP",
+        "VESSEL_GOVERNANCE_DASHBOARD",
+        "VESSEL_GOVERNANCE_TASKS",
+        "VESSEL_QUALITY",
+        "VESSEL_RELATIONS_ENTRY",
+        "VESSEL_COMPLIANCE_RISKS",
+        "VESSEL_BLACKLIST_SIGNALS",
+        "VESSEL_RECOGNITIONS",
+        "VESSEL_CANDIDATE_ANALYSIS",
+        "ROUTE_ROOT",
+        "ROUTE_LIST",
+        "ANALYSIS_REGIONS",
+        "ANALYSIS_FLOWS",
+        "ROUTE_REGION_FOUNDATION_GROUP",
+        "ADDRESS_NODES",
+        "ADDRESS_REGIONS",
+        "ADDRESS_WATER_SYSTEMS",
+        "ADDRESS_CONSTRAINT_POINTS",
+        "ANALYSIS_ROOT",
+        "ANALYSIS_QUOTE_SIMULATOR",
+        "ANALYSIS_PRICES",
+        "AUDIT_ROOT",
+        "FREIGHT_NORMALIZATION",
+        "QUALITY_VESSEL_ISSUES",
+        "QUALITY_VESSEL_TASKS",
+        "AUDIT_PENDING",
+        "AUDIT_DONE",
+        "ANALYSIS_TASK_LIST",
+        "SYSTEM_ROOT",
+        "SYSTEM_FOUNDATION_GROUP",
+        "COMMODITY_STANDARDS",
+        "ADDRESS_ADMIN_REGIONS",
+        "DICTIONARY_DICTS",
+        "DICTIONARY_CODE_SEQUENCES",
+        "SYSTEM_SECURITY_GROUP",
+        "SYSTEM_USER",
+        "SYSTEM_ROLE",
+        "SYSTEM_MENU",
+        "SYSTEM_CONFIG",
+    ]
+    hidden_tail = [
+        code
+        for code in by_code
+        if code not in ordered_codes
+    ]
+    MENUS[:] = [by_code[code] for code in ordered_codes if code in by_code] + [
+        {**by_code[code], "visible_flag": 0}
+        for code in hidden_tail
+    ]
+
+
+_apply_production_menu_information_architecture()
 
 
 def infer_menu_permission_code(item: dict) -> str | None:

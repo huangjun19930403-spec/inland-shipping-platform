@@ -1518,32 +1518,6 @@ class FreightService(FreightNormalizationMixin):
         self.feedback_repo = FreightCandidateManualFeedbackRepository(db)
         self.sequence_service = CodeSequenceService(db)
 
-    async def list_freights(
-        self,
-        keyword: str | None,
-        status_code: str | None,
-        source_type: str | None,
-        source_channel: str | None,
-        origin_city_code: str | None,
-        destination_city_code: str | None,
-        commodity_id: int | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[FreightResponse]:
-        rows, total = await self.repo.list_freights(
-            keyword=keyword,
-            status_code=status_code,
-            source_type=source_type,
-            source_channel=source_channel,
-            origin_city_code=origin_city_code,
-            destination_city_code=destination_city_code,
-            commodity_id=commodity_id,
-            page=page,
-            page_size=page_size,
-        )
-        ctx = await _load_display_context(self.db, freights=rows)
-        return PageResponse[FreightResponse](total=total, page=page, page_size=page_size, items=[_to_freight_response(item, ctx) for item in rows])
-
     async def create_manual_freight(self, payload) -> FreightResponse:
         data = payload.model_dump(exclude_none=True)
         freight_no = (payload.freight_no or "").strip() or await self.sequence_service.next_code("FREIGHT_NO")

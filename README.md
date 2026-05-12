@@ -18,7 +18,7 @@
 
 ```bash
 alembic upgrade head
-python -m scripts.seed_system_init
+python -m scripts.seed_system_init --profile production
 python -m scripts.verify_local_acceptance
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -27,7 +27,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 - Health: `http://127.0.0.1:8000/health`
 
 本地私有集成配置可写入 `.env.local` 或运行时环境变量。`.env.local` 已被 Git 忽略，
-`python -m scripts.seed_system_init` 会在基础 seed 后把这些值覆盖写入本地 `system_config`；
+`python -m scripts.seed_system_init --profile production` 会在基础 seed 后把这些值覆盖写入本地 `system_config`；
 基础 seed 重复执行时不会清空已有敏感配置。
 
 ```bash

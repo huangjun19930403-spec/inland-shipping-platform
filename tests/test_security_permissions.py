@@ -190,7 +190,7 @@ async def test_current_user_menus_are_filtered_by_permission_code(session: Async
     read_menu = SysMenu(
         parent_id=None,
         menu_code="FREIGHT_LIST",
-        menu_name="正式货源",
+        menu_name="运输机会",
         menu_type_code="MENU",
         route_path="/freight/list",
         component_path=None,

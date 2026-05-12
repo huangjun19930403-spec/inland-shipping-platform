@@ -30,51 +30,6 @@ class FreightRepository:
     async def get_freight_by_id(self, freight_id: int) -> Freight | None:
         return await self.db.scalar(select(Freight).where(Freight.id == freight_id, Freight.deleted_at.is_(None)))
 
-    async def list_freights(
-        self,
-        keyword: str | None,
-        status_code: str | None,
-        source_type: str | None,
-        source_channel: str | None,
-        origin_city_code: str | None,
-        destination_city_code: str | None,
-        commodity_id: int | None,
-        page: int,
-        page_size: int,
-    ) -> tuple[list[Freight], int]:
-        stmt = select(Freight).where(Freight.deleted_at.is_(None))
-        if keyword:
-            like_value = f"%{keyword.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Freight.freight_no.ilike(like_value),
-                    Freight.cargo_title.ilike(like_value),
-                    Freight.cargo_description.ilike(like_value),
-                    Freight.raw_commodity_name.ilike(like_value),
-                    Freight.raw_origin_text.ilike(like_value),
-                    Freight.raw_destination_text.ilike(like_value),
-                    Freight.publisher_org_name.ilike(like_value),
-                    Freight.source_ref_no.ilike(like_value),
-                )
-            )
-        if status_code:
-            stmt = stmt.where(Freight.status_code == status_code)
-        if source_type:
-            stmt = stmt.where(Freight.source_type_code == source_type)
-        if source_channel:
-            stmt = stmt.where(Freight.source_channel_code == source_channel)
-        if origin_city_code:
-            stmt = stmt.where(Freight.origin_city_code == origin_city_code)
-        if destination_city_code:
-            stmt = stmt.where(Freight.destination_city_code == destination_city_code)
-        if commodity_id is not None:
-            stmt = stmt.where(Freight.commodity_standard_id == commodity_id)
-        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
-        rows = (
-            await self.db.execute(stmt.order_by(Freight.id.desc()).offset((page - 1) * page_size).limit(page_size))
-        ).scalars().all()
-        return list(rows), total
-
     async def create_freight(self, data: dict[str, Any]) -> Freight:
         row = Freight(**data)
         self.db.add(row)
