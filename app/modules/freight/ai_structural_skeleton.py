@@ -23,11 +23,16 @@ MULTI_POINT_EXPANDED = "MULTI_POINT_EXPANDED"
 ROUTE_COVERAGE_GAP = "ROUTE_COVERAGE_GAP"
 
 _PHONE_RE = re.compile(r"(?<!\d)(1[3-9]\d{9})(?!\d)")
-_ROUTE_RE = re.compile(r"(.+?)(?:——+|—+|-{2,}|一{1,3}|～～+|~~+|～+|->|=>|到|至)(.+)")
+_ROUTE_RE = re.compile(r"(.+?)(?:——+|—+|-{2,}|一+|～～+|~~+|～+|->|=>|到|至)(.+)")
 _BOUNDARY_RE = re.compile(r"^\s*(?:@所有人|@所有|[.。…—\-_=～~*＊·、，,\s]{4,})\s*$")
 _MULTI_SPLIT_RE = re.compile(r"[\/／、;；]+")
 _COMMA_SPLIT_RE = re.compile(r"[,，]+")
 _COMMODITY_WORDS = (
+    "石粉石子",
+    "石子石粉",
+    "瓜子片",
+    "机制砂",
+    "毛石",
     "沙子",
     "石子",
     "石粉",
@@ -44,11 +49,23 @@ _COMMODITY_WORDS = (
     "冷卷",
     "热卷",
     "水渣",
-    "机制砂",
     "砖",
     "货源",
 )
 _NON_DEST_WORDS = (
+    "需要",
+    "寻船",
+    "要船",
+    "单机",
+    "数条",
+    "一条",
+    "多条",
+    "船队",
+    "船舶",
+    "价格",
+    "大小",
+    "不限",
+    "不跟",
     "装卸",
     "现金",
     "高价",
@@ -66,6 +83,16 @@ _NON_DEST_WORDS = (
     "随船",
     "滚动",
     "装",
+)
+_INLINE_CONTEXT_MARKERS = (
+    "大量需要",
+    "需要",
+    "寻船",
+    "要船",
+    "单机",
+    "船队",
+    "价格",
+    "运价",
 )
 
 
@@ -199,6 +226,35 @@ def _looks_like_context_token(token: str) -> bool:
     return any(word in compact for word in _NON_DEST_WORDS) or bool(re.search(r"\d", compact))
 
 
+def _append_tail(base_tail: str, addition: str) -> str:
+    extra = addition.strip(" \t,，。!！:：")
+    if not extra:
+        return base_tail
+    return extra if not base_tail else f"{extra}，{base_tail}"
+
+
+def _split_inline_destination_tail(value: str, tail: str) -> tuple[str, str]:
+    text = value.strip()
+    if not text:
+        return text, tail
+    tonnage_match = re.search(
+        r"(\d{3,6}(?:\s*[-—–]\s*\d{3,6})?\s*(?:吨\s*(?:左右|以内|以上|内)?|左右|以内|以上|内)(?:\s*(?:船舶|船))?)$",
+        text,
+    )
+    if tonnage_match and tonnage_match.start() >= 2:
+        before = text[: tonnage_match.start()].strip(" \t,，。")
+        if before:
+            return before, _append_tail(tail, tonnage_match.group(1))
+    marker_positions = [text.find(marker) for marker in _INLINE_CONTEXT_MARKERS if text.find(marker) >= 2]
+    if marker_positions:
+        index = min(marker_positions)
+        before = text[:index].rstrip(" \t,，。!！:：")
+        after = text[index:].lstrip(" \t,，。!！:：")
+        if before and after:
+            return before, _append_tail(tail, after)
+    return text, tail
+
+
 def _extract_destinations_and_tail(value: str) -> tuple[list[str], str]:
     text = _clean_route_side(value)
     if not text:
@@ -217,6 +273,7 @@ def _extract_destinations_and_tail(value: str) -> tuple[list[str], str]:
 
     first = tokens[0] if tokens else text
     tail = "，".join(tokens[1:]) if len(tokens) > 1 else ""
+    first, tail = _split_inline_destination_tail(first, tail)
     for word in sorted(_COMMODITY_WORDS, key=len, reverse=True):
         if first.endswith(word) and len(first) > len(word) + 1:
             first = first[: -len(word)].strip()
@@ -224,6 +281,8 @@ def _extract_destinations_and_tail(value: str) -> tuple[list[str], str]:
             break
     if " " in first:
         pieces = [item for item in first.split() if item]
+        if len(pieces) > 1 and _looks_like_context_token(pieces[-1]):
+            return ["".join(pieces[:-1])], _append_tail(tail, pieces[-1])
         if len(pieces) > 1 and not any(_looks_like_context_token(item) for item in pieces[:-1]):
             return pieces, tail
     return _split_points(first, allow_comma=False), tail
@@ -236,7 +295,16 @@ def _extract_context_fields(text: str) -> dict[str, Any]:
     tonnage_match = re.search(r"\d{3,6}(?:\s*[-—–]\s*\d{3,6})?(?:吨|左右|以内|以上)?", text or "")
     if tonnage_match and not re.search(r"(元|运费|运价|单价|报价)", text or ""):
         tonnage = tonnage_match.group(0)
-    return {"commodity_name": commodity, "raw_tonnage_text": tonnage}
+    loading_match = re.search(r"(?:今晚|明天|后天|\d{1,2}(?:\s*[-—–]\s*\d{1,2})?\s*装)", text or "")
+    quantity_match = re.search(r"(?:单机\s*(?:一条|数条|多条)?|船队|多条|数条|要船|寻船|大小不限|大小不跟)", text or "")
+    vessel_match = re.search(r"(?:单机|船队|限宽\s*\d+(?:\.\d+)?\s*米|\d{3,6}(?:\s*[-—–]\s*\d{3,6})?\s*吨(?:以内|左右|以上)?\s*船舶?)", text or "")
+    return {
+        "commodity_name": commodity,
+        "raw_tonnage_text": tonnage,
+        "loading_time_text": loading_match.group(0) if loading_match else None,
+        "quantity_description": quantity_match.group(0) if quantity_match else None,
+        "vessel_description": vessel_match.group(0) if vessel_match else None,
+    }
 
 
 def _parse_contact(line_ref: str, text: str) -> dict[str, Any] | None:
@@ -249,7 +317,7 @@ def _parse_contact(line_ref: str, text: str) -> dict[str, Any] | None:
     name_text = after if re.search(r"[\u4e00-\u9fff]", after or "") else before
     name_match = re.search(r"([\u4e00-\u9fff]{1,4}(?:姐|哥|总|经理)?)", name_text or "")
     name = name_match.group(1) if name_match else None
-    if name in {"电话", "联系", "微信", "同号"}:
+    if name in {"电话", "联系", "微信", "同号"} or (name and ("微信" in name or "同号" in name)):
         name = None
     wechat = phone if "微信同号" in text or "微信" in text and "同号" in text else None
     return {
@@ -319,6 +387,9 @@ class FreightStructuralSkeletonBuilder:
                             "destination_text": destination,
                             "commodity_name": context.get("commodity_name"),
                             "raw_tonnage_text": context.get("raw_tonnage_text"),
+                            "loading_time_text": context.get("loading_time_text"),
+                            "quantity_description": context.get("quantity_description"),
+                            "vessel_description": context.get("vessel_description"),
                             "fallback_review_reason": "回程装货表达需人工确认" if backhaul else "AI 未返回该路线候选，系统按本地骨架生成待复核候选",
                             "quality_issue_codes": issue_codes,
                         }
@@ -511,6 +582,11 @@ def apply_skeleton_to_semantic_map(semantic_map: dict[str, Any], skeleton: Freig
                 "route_intent_code": "FORMAL_FREIGHT",
                 "origin": {"text": unit.get("origin_text"), "source_type_code": "LOCAL_LINE", "evidence_line_refs": unit.get("line_refs") or []},
                 "destination": {"text": unit.get("destination_text"), "source_type_code": "LOCAL_LINE", "evidence_line_refs": unit.get("line_refs") or []},
+                "commodity_name": unit.get("commodity_name"),
+                "raw_tonnage_text": unit.get("raw_tonnage_text"),
+                "loading_time_text": unit.get("loading_time_text"),
+                "quantity_description": unit.get("quantity_description"),
+                "vessel_description": unit.get("vessel_description"),
                 "route_summary": "本地骨架召回的可追溯路线，AI 字段缺失时生成待复核候选。",
                 "missing_field_codes": ["COMMODITY"] if not unit.get("commodity_name") else [],
                 "warnings": [LOCAL_SKELETON_FALLBACK, *unit.get("quality_issue_codes", [])],
@@ -560,6 +636,9 @@ def fallback_segment_from_clue(clue: dict[str, Any], reason: str | None = None) 
         "destination_text": destination_text,
         "commodity_name": clue.get("commodity_name"),
         "raw_tonnage_text": clue.get("raw_tonnage_text"),
+        "loading_time_text": clue.get("loading_time_text"),
+        "quantity_description": clue.get("quantity_description"),
+        "vessel_description": clue.get("vessel_description"),
         "availability_status_code": "UNKNOWN",
         "ai_review_status_code": "REVIEW_REQUIRED",
         "manual_review_reason": reason or "AI 未返回该路线候选，系统按本地骨架生成待复核候选",

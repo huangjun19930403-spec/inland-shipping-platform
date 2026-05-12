@@ -4,14 +4,26 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.system import SysUser
 from app.modules.storage.service import FileStorageService
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+
+
+class StorageFileUploadResponse(BaseModel):
+    id: int
+    file_name: str
+    file_url: str
+    file_ext: str | None = None
+    file_size: int
+    content_type: str
+    storage_provider_code: str
 
 
 def _content_disposition_header(filename: str | None) -> str:
@@ -23,6 +35,32 @@ def _content_disposition_header(filename: str | None) -> str:
     ascii_fallback = f"{ascii_stem or 'download'}{ascii_suffix}"
     encoded_name = quote(safe_name, safe="")
     return f'inline; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_name}'
+
+
+@router.post("/upload", response_model=StorageFileUploadResponse)
+async def upload_file(
+    file: UploadFile = File(...),
+    object_prefix: str = Form(default="uploads"),
+    current_user: SysUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    entity = await FileStorageService(db).upload_file(
+        file=file,
+        object_prefix=object_prefix,
+        uploaded_by=current_user.id,
+        allowed_content_types=None,
+        unsupported_message="仅支持图片、PDF、Word、Excel、文本、CSV 或 ZIP 文件",
+    )
+    await db.commit()
+    return StorageFileUploadResponse(
+        id=entity.id,
+        file_name=entity.original_file_name,
+        file_url=f"/api/v1/files/{entity.id}/content",
+        file_ext=Path(entity.original_file_name).suffix.lower() or None,
+        file_size=entity.file_size,
+        content_type=entity.content_type,
+        storage_provider_code=entity.storage_provider_code,
+    )
 
 
 @router.get("/{file_id}/content")

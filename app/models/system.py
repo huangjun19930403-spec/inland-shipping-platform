@@ -87,6 +87,7 @@ class SysMenu(Base, TimestampMixin):
     menu_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
     route_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
     component_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    permission_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     visible_flag: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

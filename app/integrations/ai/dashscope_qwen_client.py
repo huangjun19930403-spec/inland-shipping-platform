@@ -670,6 +670,18 @@ def _append_review_reason(segment: dict[str, Any], reason: str) -> None:
         segment["manual_review_reason"] = reason
 
 
+def _clean_contact_name(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    compact = text.replace(" ", "")
+    if compact in {"微信", "同号", "微信同号", "电话", "联系", "联系电话"}:
+        return None
+    if "微信" in compact and "同号" in compact:
+        return None
+    return text
+
+
 def _support_text(raw_content: str, segment: dict[str, Any]) -> str:
     pieces = [
         segment.get("raw_text"),
@@ -714,6 +726,11 @@ def _drop_unsupported_fields(segment: dict[str, Any], raw_content: str) -> list[
 
 def _normalize_segment_quality(segment: dict[str, Any], raw_content: str) -> tuple[dict[str, Any], list[str]]:
     normalized = dict(segment)
+    cleaned_contact_name = _clean_contact_name(normalized.get("contact_name"))
+    if cleaned_contact_name:
+        normalized["contact_name"] = cleaned_contact_name
+    else:
+        normalized.pop("contact_name", None)
     warnings = _drop_unsupported_fields(normalized, raw_content)
     if normalized.get("is_freight_candidate") is None:
         normalized["is_freight_candidate"] = True
@@ -787,6 +804,37 @@ def _segment_needs_strong_review(segment: dict[str, Any], *, confidence_threshol
         or inherited_tonnage_missing
         or str(segment.get("availability_status_code") or "").upper() != "READY"
     )
+
+
+def _segment_can_pass_without_strong_review(segment: dict[str, Any]) -> bool:
+    if segment.get("is_freight_candidate") is False or segment.get("drop_reason"):
+        return False
+    if segment.get("fallback_generated"):
+        return False
+    if segment.get("scope_risk_codes"):
+        return False
+    if segment.get("manual_review_reason") or segment.get("ai_review_reason"):
+        return False
+    if not segment.get("raw_text") or not segment.get("origin_text") or not segment.get("destination_text") or not segment.get("commodity_name"):
+        return False
+    if not (segment.get("raw_tonnage_text") or segment.get("estimated_tonnage") or segment.get("min_tonnage") or segment.get("max_tonnage")):
+        return False
+    support = _support_text("", segment)
+    for field_name in ("origin_text", "destination_text", "commodity_name", "raw_tonnage_text"):
+        if segment.get(field_name) and not _value_supported(segment.get(field_name), support):
+            return False
+    quality_issue_codes = {str(item) for item in segment.get("quality_issue_codes") or []}
+    blocking_issue_codes = {
+        "FIELD_EVIDENCE_MISSING",
+        "FORMAL_TONNAGE_MISSING",
+        "TONNAGE_SCOPE_UNSAFE",
+        "DIRTY_TONNAGE_DECISION",
+        "ROUTE_FIELD_UNSAFE",
+        "COMMODITY_SCOPE_UNSAFE",
+    }
+    if quality_issue_codes & blocking_issue_codes:
+        return False
+    return True
 
 
 def _prepare_segments(raw_content: str, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
@@ -895,8 +943,11 @@ def _apply_context_blocks_to_segments(
             if item.get(field_name) in (None, ""):
                 value = _context_value(block, *keys)
                 if value not in (None, ""):
-                    item[field_name] = value
-                    warnings.append(f"segment {item.get('segment_index') or index}: 已按 AI 上下文块继承{field_name}")
+                    if field_name == "contact_name":
+                        value = _clean_contact_name(value)
+                    if value not in (None, ""):
+                        item[field_name] = value
+                        warnings.append(f"segment {item.get('segment_index') or index}: 已按 AI 上下文块继承{field_name}")
         shared_tonnage = _context_value(block, "shared_tonnage_text", "tonnage", "raw_tonnage_text")
         if shared_tonnage and item.get("raw_tonnage_text") in (None, ""):
             warnings.append(
@@ -1732,12 +1783,34 @@ class DashScopeQwenFreightParserClient:
                     )
                     return reviewed, 0
                 except Exception as exc:  # noqa: BLE001
+                    degraded_count = 0
+                    local_pass_count = 0
                     for item in targets:
+                        if _segment_can_pass_without_strong_review(item):
+                            item["availability_status_code"] = "READY"
+                            item["ai_review_status_code"] = "PASS"
+                            item["needs_strong_review"] = False
+                            item.pop("manual_review_reason", None)
+                            item.pop("ai_review_reason", None)
+                            review_json = item.get("ai_review_json") if isinstance(item.get("ai_review_json"), dict) else {}
+                            review_json["review_degraded"] = True
+                            review_json["review_degraded_reason"] = f"强模型复核分块失败，已按本地证据门禁通过：{exc}"
+                            item["ai_review_json"] = review_json
+                            local_pass_count += 1
+                            continue
                         item["availability_status_code"] = "UNKNOWN"
                         item["manual_review_reason"] = f"强模型复核分块失败，需人工判断：{exc}"
                         item["needs_strong_review"] = True
-                    raw_chunks.append({"batch_index": chunk_index, "error": str(exc)})
-                    return [], len(targets)
+                        degraded_count += 1
+                    raw_chunks.append(
+                        {
+                            "batch_index": chunk_index,
+                            "error": str(exc),
+                            "degraded_count": degraded_count,
+                            "local_pass_count": local_pass_count,
+                        }
+                    )
+                    return [], 0
 
         results = await asyncio.gather(*(run_review_chunk(index, chunk) for index, chunk in enumerate(chunks, start=1)))
         for reviewed, failed in results:

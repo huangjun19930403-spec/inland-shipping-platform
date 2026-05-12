@@ -25,6 +25,9 @@ build/
 .env.production
 .env.local
 .env.*.local
+.seed/
+*.private.enc
+*.seed.key
 
 # Editors
 .idea/

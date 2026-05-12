@@ -219,8 +219,12 @@ async def test_image_upload_uses_injected_cos_adapter(session: AsyncSession) -> 
 
 
 @pytest.mark.asyncio
-async def test_image_upload_fails_without_enabled_cos_config(session: AsyncSession) -> None:
-    service = FileStorageService(session, object_client=FakeObjectStorageClient())
+async def test_image_upload_uses_local_provider_without_enabled_cos_config(session: AsyncSession) -> None:
+    fake_client = FakeObjectStorageClient()
+    service = FileStorageService(session, object_client=fake_client)
 
-    with pytest.raises(ValidationError, match="COS 文件存储未启用"):
-        await service.upload_image(file=_image_upload(), object_prefix="transport-nodes/1/photos")
+    entity = await service.upload_image(file=_image_upload(), object_prefix="transport-nodes/1/photos")
+
+    assert entity.bucket_name == "local"
+    assert entity.storage_provider_code == "LOCAL"
+    assert fake_client.objects[(entity.bucket_name, entity.object_key)][0].startswith(b"\xff\xd8")

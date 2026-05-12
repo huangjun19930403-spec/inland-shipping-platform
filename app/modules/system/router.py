@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_permission
 from app.integrations.config_keys import AMAP_CONFIG_PROFILE, AMAP_JS_API_KEY, AMAP_SECURITY_JS_CODE
 from app.modules.system.schemas import (
     ChangeMyPasswordRequest,
@@ -38,6 +42,8 @@ from app.modules.system.schemas import (
     RoleResponse,
     RoleUpdateRequest,
     RuntimeConfigValueResponse,
+    SystemHealthCheckItem,
+    SystemHealthCheckResponse,
     SystemConfigCreateRequest,
     SystemConfigListQuery,
     SystemConfigResponse,
@@ -52,6 +58,7 @@ from app.modules.system.schemas import (
     UserStatusLogResponse,
     UserUpdateRequest,
 )
+from app.models.system import SystemConfig
 from app.modules.system.config_test import ConfigTestService
 from app.modules.system.runtime_config import RuntimeConfigService
 from app.modules.system.service import (
@@ -67,7 +74,12 @@ from app.modules.system.service import (
 
 router = APIRouter()
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
-system_router = APIRouter(prefix="/system", tags=["system"])
+system_router = APIRouter(
+    prefix="/system",
+    tags=["system"],
+    dependencies=[Depends(require_permission("SYSTEM:READ"))],
+)
+system_public_router = APIRouter(prefix="/system", tags=["system"])
 
 
 @auth_router.post("/login", response_model=LoginResponse)
@@ -150,7 +162,7 @@ async def get_user_detail(
 @system_router.post("/users", response_model=UserResponse)
 async def create_user(
     body: UserCreateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -162,7 +174,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     body: UserUpdateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -174,7 +186,7 @@ async def update_user(
 async def reset_user_password(
     user_id: int,
     body: UserResetPasswordRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -187,7 +199,7 @@ async def reset_user_password(
 async def change_user_status(
     user_id: int,
     body: UserStatusChangeRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     service = UserService(db)
@@ -204,7 +216,7 @@ async def change_user_status(
 async def replace_user_roles(
     user_id: int,
     body: UserRoleReplaceRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -251,7 +263,7 @@ async def get_role_detail(
 @system_router.post("/roles", response_model=RoleResponse)
 async def create_role(
     body: RoleCreateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -263,7 +275,7 @@ async def create_role(
 async def update_role(
     role_id: int,
     body: RoleUpdateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -275,7 +287,7 @@ async def update_role(
 async def replace_role_permissions(
     role_id: int,
     body: RolePermissionReplaceRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -288,7 +300,7 @@ async def replace_role_permissions(
 async def replace_role_menus(
     role_id: int,
     body: RoleMenuReplaceRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -301,7 +313,7 @@ async def replace_role_menus(
 async def replace_role_data_scopes(
     role_id: int,
     body: RoleDataScopeReplaceRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -357,7 +369,7 @@ async def list_menu_tree(
 @system_router.post("/menus", response_model=MenuResponse)
 async def create_menu(
     body: MenuCreateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -369,7 +381,7 @@ async def create_menu(
 async def update_menu(
     menu_id: int,
     body: MenuUpdateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -447,7 +459,7 @@ async def get_runtime_config_value(
     )
 
 
-@system_router.get("/frontend-map-config", response_model=FrontendMapConfigResponse)
+@system_public_router.get("/frontend-map-config", response_model=FrontendMapConfigResponse)
 async def get_frontend_map_config(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -486,7 +498,7 @@ async def get_frontend_map_config(
 async def test_config_profile(
     profile_code: str,
     body: ConfigTestRequest | None = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
@@ -498,7 +510,7 @@ async def test_config_profile(
 @system_router.post("/configs", response_model=SystemConfigResponse)
 async def create_config(
     body: SystemConfigCreateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     service = SystemConfigService(db)
@@ -509,11 +521,75 @@ async def create_config(
 async def update_config(
     config_key: str,
     body: SystemConfigUpdateRequest,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("SYSTEM:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     service = SystemConfigService(db)
     return await service.update_config(config_key, body, operator_id=current_user.id)
+
+
+@system_router.get("/health-check", response_model=SystemHealthCheckResponse)
+async def run_system_health_check(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    checked_at = datetime.utcnow()
+    rows = (await db.execute(select(SystemConfig))).scalars().all()
+    total_configs = len(rows)
+    active_configs = [row for row in rows if row.config_status_code == "ACTIVE"]
+    missing_sensitive = [
+        row.config_key
+        for row in active_configs
+        if int(row.sensitive_flag or 0) == 1 and not str(row.config_value or "").strip()
+    ]
+    failed_profiles = sorted(
+        {
+            row.config_profile_code
+            for row in active_configs
+            if row.last_test_status_code == "FAILED"
+        }
+    )
+    active_config_count = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(SystemConfig).where(SystemConfig.config_status_code == "ACTIVE")
+            )
+        ).scalar_one()
+    )
+
+    items = [
+        SystemHealthCheckItem(
+            code="CONFIG_ACTIVE",
+            name="运行配置",
+            status_code="SUCCESS" if total_configs > 0 else "FAILED",
+            message=f"已启用配置 {active_config_count} 项，配置总数 {total_configs} 项",
+            checked_at=checked_at,
+        ),
+        SystemHealthCheckItem(
+            code="SENSITIVE_CONFIG",
+            name="敏感配置",
+            status_code="SUCCESS" if not missing_sensitive else "WARNING",
+            message="敏感配置均已填写" if not missing_sensitive else f"未配置：{', '.join(missing_sensitive[:8])}",
+            checked_at=checked_at,
+        ),
+        SystemHealthCheckItem(
+            code="PROFILE_TEST",
+            name="外部依赖测试",
+            status_code="SUCCESS" if not failed_profiles else "FAILED",
+            message="暂无失败的连接测试" if not failed_profiles else f"失败 Profile：{', '.join(failed_profiles)}",
+            checked_at=checked_at,
+        ),
+        SystemHealthCheckItem(
+            code="FILE_STORAGE",
+            name="文件存储",
+            status_code="SUCCESS",
+            message="当前使用本地文件存储" if not settings.COS_ENABLED else "当前使用 COS 对象存储配置",
+            checked_at=checked_at,
+        ),
+    ]
+    overall = "FAILED" if any(item.status_code == "FAILED" for item in items) else "WARNING" if any(item.status_code == "WARNING" for item in items) else "SUCCESS"
+    return SystemHealthCheckResponse(status_code=overall, checked_at=checked_at, items=items)
 
 
 @system_router.get("/login-logs", response_model=PageResponse[LoginLogResponse])
@@ -528,4 +604,5 @@ async def list_login_logs(
 
 
 router.include_router(auth_router)
+router.include_router(system_public_router)
 router.include_router(system_router)

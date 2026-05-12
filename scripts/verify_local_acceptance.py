@@ -6,13 +6,20 @@ import asyncio
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 import sqlalchemy as sa
 from sqlalchemy import func, select
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from app.core.database import AsyncSessionLocal, engine
 from app.integrations.config_keys import (
+    AMAP_CONFIG_PROFILE,
     AMAP_JS_API_KEY,
+    AMAP_ROUTE_GEOMETRY_MODE,
     AMAP_ROUTE_WEB_API_KEY,
     AMAP_SECURITY_JS_CODE,
     COS_ACCESS_KEY,
@@ -24,8 +31,35 @@ from app.integrations.config_keys import (
     COS_REGION,
     COS_SECRET_KEY,
     DASHSCOPE_API_KEY,
+    ES_HISTORY_CONFIG_PROFILE,
+    ES_HISTORY_INDEX_PREFIX,
+    ES_HOST,
+    ES_PASSWORD,
+    ES_PORT,
+    ES_R_HOST,
+    ES_R_INDEX,
+    ES_R_PASSWORD,
+    ES_R_PORT,
+    ES_R_USER,
+    ES_REALTIME_CONFIG_PROFILE,
+    ES_USER,
+    HIFLEET_CONFIG_PROFILE,
+    HIFLEET_BASE_URL,
+    HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS,
+    HIFLEET_CHECK_LOGIN_URL,
+    HIFLEET_DUPLICATE_LOGIN_RECOVERY_ENABLED,
     HIFLEET_ENABLED,
+    HIFLEET_LOGIN_URL,
+    HIFLEET_LOGOUT_URL,
     HIFLEET_PASSWORD,
+    HIFLEET_RELOGIN_CHECK_ENABLED,
+    HIFLEET_ROUTE_URL,
+    HIFLEET_SESSION_COOKIE_TTL_SECONDS,
+    HIFLEET_SESSION_IDLE_LOGOUT_SECONDS,
+    HIFLEET_SESSION_LOCK_TTL_SECONDS,
+    HIFLEET_SESSION_LOGOUT_ON_SHUTDOWN,
+    HIFLEET_SESSION_WARMUP_ON_START,
+    HIFLEET_TIMEOUT_SECONDS,
     HIFLEET_USERNAME,
 )
 from app.models.address import NavigationConstraintPoint, NodeAlias, Region, TransportNode, TransportNodeContact
@@ -86,7 +120,7 @@ from app.modules.analysis.service import AnalysisDashboardService
 from scripts.seed_local_private_config import (
     CONFIG_METADATA_BY_KEY,
     LOCAL_PRIVATE_CONFIG_KEYS,
-    _merged_local_values,
+    load_local_private_values,
     _normalize_config_value,
 )
 from main import app
@@ -267,13 +301,38 @@ LEGACY_MENU_PATHS = {
 }
 
 REQUIRED_INTEGRATION_CONFIG_KEYS = {
+    AMAP_ROUTE_GEOMETRY_MODE,
     AMAP_ROUTE_WEB_API_KEY,
     AMAP_JS_API_KEY,
     AMAP_SECURITY_JS_CODE,
     DASHSCOPE_API_KEY,
+    ES_R_HOST,
+    ES_R_PORT,
+    ES_R_USER,
+    ES_R_PASSWORD,
+    ES_R_INDEX,
+    ES_HOST,
+    ES_PORT,
+    ES_USER,
+    ES_PASSWORD,
+    ES_HISTORY_INDEX_PREFIX,
     HIFLEET_ENABLED,
+    HIFLEET_BASE_URL,
+    HIFLEET_LOGIN_URL,
+    HIFLEET_LOGOUT_URL,
+    HIFLEET_ROUTE_URL,
+    HIFLEET_CHECK_LOGIN_URL,
     HIFLEET_USERNAME,
     HIFLEET_PASSWORD,
+    HIFLEET_TIMEOUT_SECONDS,
+    HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS,
+    HIFLEET_SESSION_IDLE_LOGOUT_SECONDS,
+    HIFLEET_RELOGIN_CHECK_ENABLED,
+    HIFLEET_SESSION_WARMUP_ON_START,
+    HIFLEET_SESSION_LOGOUT_ON_SHUTDOWN,
+    HIFLEET_SESSION_LOCK_TTL_SECONDS,
+    HIFLEET_SESSION_COOKIE_TTL_SECONDS,
+    HIFLEET_DUPLICATE_LOGIN_RECOVERY_ENABLED,
     COS_ENABLED,
     COS_BUCKET_NAME,
     COS_REGION,
@@ -282,6 +341,37 @@ REQUIRED_INTEGRATION_CONFIG_KEYS = {
     COS_SECRET_KEY,
     COS_PATH_STYLE_ACCESS,
     COS_IMAGE_MAX_SIZE_MB,
+}
+
+LOCAL_DEMO_REQUIRED_NON_EMPTY_CONFIG_KEYS = {
+    AMAP_ROUTE_WEB_API_KEY,
+    AMAP_JS_API_KEY,
+    AMAP_SECURITY_JS_CODE,
+    DASHSCOPE_API_KEY,
+    ES_R_HOST,
+    ES_R_PORT,
+    ES_R_USER,
+    ES_R_PASSWORD,
+    ES_R_INDEX,
+    ES_HOST,
+    ES_PORT,
+    ES_USER,
+    ES_PASSWORD,
+    ES_HISTORY_INDEX_PREFIX,
+    HIFLEET_USERNAME,
+    HIFLEET_PASSWORD,
+    COS_BUCKET_NAME,
+    COS_REGION,
+    COS_ENDPOINT,
+    COS_ACCESS_KEY,
+    COS_SECRET_KEY,
+}
+
+LOCAL_DEMO_CONFIG_TEST_PROFILES = {
+    AMAP_CONFIG_PROFILE,
+    HIFLEET_CONFIG_PROFILE,
+    ES_REALTIME_CONFIG_PROFILE,
+    ES_HISTORY_CONFIG_PROFILE,
 }
 
 ROUTE_TRACK_STATUSES = {"NOT_GENERATED", "READY", "PARTIAL", "FAILED"}
@@ -815,9 +905,102 @@ async def verify() -> list[CheckResult]:
             )
         )
 
+        realtime_missing = sorted(
+            key
+            for key in {ES_R_HOST, ES_R_PORT, ES_R_USER, ES_R_PASSWORD, ES_R_INDEX}
+            if not str(config_by_key.get(key, ("", ""))[0] or "").strip()
+        )
+        results.append(
+            _result(
+                "realtime ES local-demo config complete",
+                not realtime_missing,
+                "configured" if not realtime_missing else ", ".join(realtime_missing),
+            )
+        )
+
+        history_missing = sorted(
+            key
+            for key in {ES_HOST, ES_PORT, ES_USER, ES_PASSWORD, ES_HISTORY_INDEX_PREFIX}
+            if not str(config_by_key.get(key, ("", ""))[0] or "").strip()
+        )
+        results.append(
+            _result(
+                "history ES local-demo config complete",
+                not history_missing,
+                "configured" if not history_missing else ", ".join(history_missing),
+            )
+        )
+
+        strict_missing = sorted(
+            key
+            for key in LOCAL_DEMO_REQUIRED_NON_EMPTY_CONFIG_KEYS
+            if not str(config_by_key.get(key, ("", ""))[0] or "").strip()
+        )
+        results.append(
+            _result(
+                "local-demo external credentials complete",
+                not strict_missing,
+                "configured" if not strict_missing else ", ".join(strict_missing),
+            )
+        )
+
+        route_mode = str(config_by_key.get(AMAP_ROUTE_GEOMETRY_MODE, ("", ""))[0] or "").strip().lower()
+        results.append(
+            _result(
+                "local-demo route geometry mode real",
+                route_mode == "real",
+                route_mode or "empty",
+            )
+        )
+
+        hifleet_enabled = str(config_by_key.get(HIFLEET_ENABLED, ("", ""))[0] or "").strip().lower()
+        results.append(
+            _result(
+                "local-demo Hifleet enabled",
+                hifleet_enabled == "true",
+                hifleet_enabled or "empty",
+            )
+        )
+
+        cos_enabled = str(config_by_key.get(COS_ENABLED, ("", ""))[0] or "").strip().lower()
+        results.append(
+            _result(
+                "local-demo COS enabled",
+                cos_enabled == "true",
+                cos_enabled or "empty",
+            )
+        )
+
+        config_test_rows = (
+            (
+                await session.execute(
+                    select(
+                        SystemConfig.config_profile_code,
+                        SystemConfig.last_test_status_code,
+                    ).where(SystemConfig.config_profile_code.in_(LOCAL_DEMO_CONFIG_TEST_PROFILES))
+                )
+            )
+            .all()
+        )
+        test_statuses_by_profile: dict[str, set[str | None]] = defaultdict(set)
+        for profile_code, status_code in config_test_rows:
+            test_statuses_by_profile[profile_code].add(status_code)
+        profiles_without_success = sorted(
+            profile_code
+            for profile_code in LOCAL_DEMO_CONFIG_TEST_PROFILES
+            if "SUCCESS" not in test_statuses_by_profile.get(profile_code, set())
+        )
+        results.append(
+            _result(
+                "local-demo external connection tests successful",
+                not profiles_without_success,
+                "all successful" if not profiles_without_success else ", ".join(profiles_without_success),
+            )
+        )
+
         local_values = {
             key: value
-            for key, value in _merged_local_values().items()
+            for key, value in load_local_private_values(source="auto").items()
             if key in LOCAL_PRIVATE_CONFIG_KEYS and str(value).strip()
         }
         local_mismatches = []

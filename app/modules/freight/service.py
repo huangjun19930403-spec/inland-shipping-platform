@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -478,6 +479,53 @@ def _parse_optional_datetime(value: Any) -> datetime | None:
     return None
 
 
+def _parse_loading_time_hint(value: Any, *, base: datetime | None = None) -> tuple[datetime | None, datetime | None]:
+    text = str(value or "").strip()
+    if not text:
+        return None, None
+    now = base or datetime.utcnow()
+    today = now.date()
+    if "今晚" in text:
+        start = datetime.combine(today, datetime.min.time()).replace(hour=18)
+        end = datetime.combine(today, datetime.max.time())
+        return start, end
+    offset = 1 if "明天" in text else 2 if "后天" in text else None
+    if offset is not None:
+        day = today + timedelta(days=offset)
+        return datetime.combine(day, datetime.min.time()), datetime.combine(day, datetime.max.time())
+    match = re.search(r"(\d{1,2})(?:\s*[-—–]\s*(\d{1,2}))?\s*装", text)
+    if not match:
+        return None, None
+    start_day = int(match.group(1))
+    end_day = int(match.group(2) or start_day)
+    year = today.year
+    month = today.month
+    try:
+        start = datetime(year, month, start_day)
+        end = datetime.combine(datetime(year, month, end_day).date(), datetime.max.time())
+    except ValueError:
+        return None, None
+    if start.date() < today and today.day >= 25 and start_day <= 7:
+        month = 1 if today.month == 12 else today.month + 1
+        year = today.year + 1 if today.month == 12 else today.year
+        try:
+            start = datetime(year, month, start_day)
+            end = datetime.combine(datetime(year, month, end_day).date(), datetime.max.time())
+        except ValueError:
+            return None, None
+    return start, end
+
+
+def _clean_contact_name(value: Any) -> str | None:
+    text = str(value or "").strip()
+    compact = text.replace(" ", "")
+    if not compact or compact in {"微信", "同号", "微信同号", "电话", "联系", "联系电话"}:
+        return None
+    if "微信" in compact and "同号" in compact:
+        return None
+    return text
+
+
 def _to_normalization_task_response(
     entity: FreightNormalizationTask,
     *,
@@ -695,6 +743,35 @@ def _to_batch_response(entity, ctx: dict[str, Any] | None = None) -> FreightBatc
 
 def _to_tms_response(entity, ctx: dict[str, Any] | None = None) -> FreightTmsInboundResponse:
     ctx = ctx or {}
+    status_code = str(entity.status_code or "NEW").upper()
+    stage_name = _label(ctx, "FREIGHT_TMS_INBOUND_STATUS", status_code) or status_code
+    progress_map = {
+        "NEW": 0,
+        "QUEUED": 8,
+        "PARSING": 45,
+        "PARSED": 100,
+        "PARTIAL_FAILED": 100,
+        "FAILED": 100,
+    }
+    heartbeat_at = entity.processed_at or entity.updated_at
+    heartbeat_age = max(0, int((datetime.utcnow() - heartbeat_at).total_seconds())) if heartbeat_at else None
+    stale_seconds = int(ctx.get("stale_heartbeat_seconds") or settings.FREIGHT_AI_STALE_HEARTBEAT_SECONDS)
+    is_stale = status_code in {"QUEUED", "PARSING"} and (
+        heartbeat_age is None or heartbeat_age >= max(30, stale_seconds)
+    )
+    if status_code == "QUEUED":
+        stage_message = "解析任务已提交，等待后台 worker 消费"
+    elif status_code == "PARSING":
+        stage_message = "AI 正在解析 TMS 入站内容"
+    elif status_code == "PARSED":
+        stage_message = f"解析完成，生成 {entity.candidate_count} 条候选货源"
+    elif status_code in {"FAILED", "PARTIAL_FAILED"}:
+        stage_message = entity.error_message or "解析失败，可检查原文后重试"
+    else:
+        stage_message = "入站记录已保存，尚未提交解析"
+    elapsed_seconds = 0
+    if entity.processed_at and entity.created_at:
+        elapsed_seconds = max(0, int((entity.processed_at - entity.created_at).total_seconds()))
     return FreightTmsInboundResponse(
         id=entity.id,
         inbound_no=entity.inbound_no,
@@ -708,12 +785,20 @@ def _to_tms_response(entity, ctx: dict[str, Any] | None = None) -> FreightTmsInb
         payload_json=entity.payload_json,
         raw_content=entity.raw_content,
         status_code=entity.status_code,
-        status_name=_label(ctx, "FREIGHT_TMS_INBOUND_STATUS", entity.status_code),
+        status_name=stage_name,
         clue_count=entity.clue_count,
         candidate_count=entity.candidate_count,
         processed_at=entity.processed_at,
         error_message=entity.error_message,
         prompt_version=entity.prompt_version,
+        parse_stage_code=status_code,
+        parse_stage_name=stage_name,
+        parse_stage_message=stage_message,
+        parse_progress_percent=progress_map.get(status_code, 0),
+        parse_heartbeat_at=heartbeat_at,
+        parse_is_stale=is_stale,
+        parse_heartbeat_age_seconds=heartbeat_age,
+        ai_elapsed_seconds=elapsed_seconds,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
     )
@@ -1284,6 +1369,13 @@ class FreightNormalizationMixin:
             availability_status = "UNKNOWN" if availability_status == "READY" else availability_status
             manual_review_reason = ai_review_reason
         raw_tonnage_text = _first(segment, "raw_tonnage_text", "tonnage_text", "tonnage_raw")
+        loading_time_from = _parse_optional_datetime(segment.get("loading_time_from"))
+        loading_time_to = _parse_optional_datetime(segment.get("loading_time_to"))
+        if loading_time_from is None and loading_time_to is None:
+            loading_time_from, loading_time_to = _parse_loading_time_hint(
+                _first(segment, "loading_time_text", "loading_time", "loading_date_text")
+            )
+        contact_name = _clean_contact_name(_first(segment, "contact_name", "contact"))
         ai_understanding = {
             "semantic_role_code": _first(segment, "semantic_role_code", "role_code") or "ROUTE",
             "line_refs": segment.get("line_refs") or segment.get("line_refs_json") or [],
@@ -1367,12 +1459,12 @@ class FreightNormalizationMixin:
             "destination_district_code": destination.get("district_code"),
             "origin_region_id_cache": origin.get("region_id"),
             "destination_region_id_cache": destination.get("region_id"),
-            "loading_time_from": _parse_optional_datetime(segment.get("loading_time_from")),
-            "loading_time_to": _parse_optional_datetime(segment.get("loading_time_to")),
+            "loading_time_from": loading_time_from,
+            "loading_time_to": loading_time_to,
             "unloading_time_from": _parse_optional_datetime(segment.get("unloading_time_from")),
             "unloading_time_to": _parse_optional_datetime(segment.get("unloading_time_to")),
             "publisher_org_name": _first(segment, "publisher_org_name", "shipper", "company"),
-            "contact_name": _first(segment, "contact_name", "contact"),
+            "contact_name": contact_name,
             "contact_phone": _first(segment, "contact_phone", "phone", "mobile"),
             "contact_wechat": segment.get("contact_wechat"),
             "confidence_score": confidence,

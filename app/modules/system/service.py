@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
-from app.core.security import create_access_token, get_password_hash, verify_password
+from app.core.security import _permission_matches, create_access_token, get_password_hash, verify_password
 from app.modules.system.repository import (
     SysDataScopeRepository,
     SysLoginLogRepository,
@@ -101,6 +101,7 @@ def _to_menu_response(row) -> MenuResponse:
         menu_type_code=row.menu_type_code,
         route_path=row.route_path,
         component_path=row.component_path,
+        permission_code=row.permission_code,
         icon=row.icon,
         sort_order=row.sort_order,
         visible_flag=row.visible_flag,
@@ -206,6 +207,7 @@ def _build_menu_tree_response(nodes: list[dict]) -> list[MenuTreeNodeResponse]:
                 menu_type_code=row["menu_type_code"],
                 route_path=row["route_path"],
                 component_path=row["component_path"],
+                permission_code=row.get("permission_code"),
                 icon=row["icon"],
                 sort_order=row["sort_order"],
                 visible_flag=row["visible_flag"],
@@ -227,6 +229,7 @@ def _build_current_user_menu_tree(nodes: list[dict]) -> list[CurrentUserMenuTree
                 menu_type_code=row["menu_type_code"],
                 route_path=row["route_path"],
                 component_path=row["component_path"],
+                permission_code=row.get("permission_code"),
                 icon=row["icon"],
                 sort_order=row["sort_order"],
                 visible_flag=row["visible_flag"],
@@ -395,9 +398,20 @@ class AuthService:
 
     async def get_current_user_menu_tree(self, current_user) -> list[CurrentUserMenuTreeResponse]:
         menus = await self.user_repo.list_user_menus(current_user.id)
+        roles = await self.user_repo.list_user_roles(current_user.id)
+        is_super_admin = any(role.role_code.upper() == "SUPER_ADMIN" for role in roles)
+        permission_codes = []
+        if not is_super_admin:
+            permission_codes = [
+                permission.permission_code
+                for permission in await self.user_repo.list_user_permissions(current_user.id)
+            ]
         node_map: dict[int, dict] = {}
         roots: list[dict] = []
         for menu in menus:
+            if menu.permission_code and not is_super_admin:
+                if not any(_permission_matches(code, menu.permission_code) for code in permission_codes):
+                    continue
             node_map[menu.id] = {
                 "id": menu.id,
                 "parent_id": menu.parent_id,
@@ -406,6 +420,7 @@ class AuthService:
                 "menu_type_code": menu.menu_type_code,
                 "route_path": menu.route_path,
                 "component_path": menu.component_path,
+                "permission_code": menu.permission_code,
                 "icon": menu.icon,
                 "sort_order": menu.sort_order,
                 "visible_flag": menu.visible_flag,
@@ -413,6 +428,8 @@ class AuthService:
                 "children": [],
             }
         for menu in menus:
+            if menu.id not in node_map:
+                continue
             current = node_map[menu.id]
             if menu.parent_id and menu.parent_id in node_map:
                 node_map[menu.parent_id]["children"].append(current)
@@ -643,6 +660,7 @@ class MenuService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = SysMenuRepository(db)
+        self.permission_repo = SysPermissionRepository(db)
 
     @staticmethod
     def _clean_required_str(value: str, field_name: str) -> str:
@@ -683,8 +701,12 @@ class MenuService:
         status_code = self._clean_required_str(payload.status_code, "status_code")
         route_path = self._clean_optional_str(payload.route_path)
         component_path = self._clean_optional_str(payload.component_path)
+        permission_code = self._clean_optional_str(payload.permission_code)
         icon = self._clean_optional_str(payload.icon)
         parent_id = payload.parent_id
+
+        if permission_code and await self.permission_repo.get_permission_by_code(permission_code) is None:
+            raise ValidationError(f"permission_code does not exist: {permission_code}")
 
         if payload.visible_flag not in {0, 1}:
             raise ValidationError("visible_flag must be 0 or 1")
@@ -703,6 +725,7 @@ class MenuService:
                 "menu_type_code": menu_type_code,
                 "route_path": route_path,
                 "component_path": component_path,
+                "permission_code": permission_code,
                 "icon": icon,
                 "sort_order": payload.sort_order,
                 "visible_flag": payload.visible_flag,
@@ -736,6 +759,12 @@ class MenuService:
             updates["route_path"] = self._clean_optional_str(updates["route_path"])
         if "component_path" in updates:
             updates["component_path"] = self._clean_optional_str(updates["component_path"])
+        if "permission_code" in updates:
+            updates["permission_code"] = self._clean_optional_str(updates["permission_code"])
+            if updates["permission_code"] and await self.permission_repo.get_permission_by_code(
+                updates["permission_code"]
+            ) is None:
+                raise ValidationError(f"permission_code does not exist: {updates['permission_code']}")
         if "icon" in updates:
             updates["icon"] = self._clean_optional_str(updates["icon"])
         row = await self.repo.update_menu(menu_id, updates)

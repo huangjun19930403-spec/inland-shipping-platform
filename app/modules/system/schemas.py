@@ -51,6 +51,7 @@ class CurrentUserMenuTreeResponse(BaseModel):
     menu_type_code: str
     route_path: str | None
     component_path: str | None
+    permission_code: str | None
     icon: str | None
     sort_order: int
     visible_flag: int
@@ -211,6 +212,7 @@ class MenuCreateRequest(BaseModel):
     menu_type_code: str = Field(min_length=1, max_length=64)
     route_path: str | None = Field(default=None, max_length=256)
     component_path: str | None = Field(default=None, max_length=256)
+    permission_code: str | None = Field(default=None, max_length=128)
     icon: str | None = Field(default=None, max_length=64)
     sort_order: int = 0
     visible_flag: int = Field(default=1, ge=0, le=1)
@@ -223,6 +225,7 @@ class MenuUpdateRequest(BaseModel):
     menu_type_code: str | None = Field(default=None, min_length=1, max_length=64)
     route_path: str | None = Field(default=None, max_length=256)
     component_path: str | None = Field(default=None, max_length=256)
+    permission_code: str | None = Field(default=None, max_length=128)
     icon: str | None = Field(default=None, max_length=64)
     sort_order: int | None = None
     visible_flag: int | None = Field(default=None, ge=0, le=1)
@@ -237,6 +240,7 @@ class MenuResponse(BaseModel):
     menu_type_code: str
     route_path: str | None
     component_path: str | None
+    permission_code: str | None
     icon: str | None
     sort_order: int
     visible_flag: int
@@ -253,6 +257,7 @@ class MenuTreeNodeResponse(BaseModel):
     menu_type_code: str
     route_path: str | None
     component_path: str | None
+    permission_code: str | None
     icon: str | None
     sort_order: int
     visible_flag: int
@@ -369,6 +374,20 @@ class ConfigTestResponse(BaseModel):
     message: str
     tested_at: datetime
     affected_config_count: int
+
+
+class SystemHealthCheckItem(BaseModel):
+    code: str
+    name: str
+    status_code: str
+    message: str
+    checked_at: datetime
+
+
+class SystemHealthCheckResponse(BaseModel):
+    status_code: str
+    checked_at: datetime
+    items: list[SystemHealthCheckItem]
 
 
 class LoginLogListQuery(BaseModel):

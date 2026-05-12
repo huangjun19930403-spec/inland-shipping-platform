@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
@@ -73,13 +74,21 @@ from app.integrations.config_keys import (
     ES_TIMEOUT_SECONDS,
     ES_USER,
     HIFLEET_BASE_URL,
+    HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS,
     HIFLEET_CHECK_LOGIN_URL,
     HIFLEET_CONFIG_PROFILE,
+    HIFLEET_DUPLICATE_LOGIN_RECOVERY_ENABLED,
     HIFLEET_ENABLED,
     HIFLEET_LOGIN_URL,
+    HIFLEET_LOGOUT_URL,
     HIFLEET_PASSWORD,
     HIFLEET_RELOGIN_CHECK_ENABLED,
     HIFLEET_ROUTE_URL,
+    HIFLEET_SESSION_COOKIE_TTL_SECONDS,
+    HIFLEET_SESSION_IDLE_LOGOUT_SECONDS,
+    HIFLEET_SESSION_LOCK_TTL_SECONDS,
+    HIFLEET_SESSION_LOGOUT_ON_SHUTDOWN,
+    HIFLEET_SESSION_WARMUP_ON_START,
     HIFLEET_TIMEOUT_SECONDS,
     HIFLEET_USERNAME,
 )
@@ -128,9 +137,37 @@ ADDITIONAL_ROLES = [
 ]
 
 ROLE_PERMISSION_CODES = {
-    "DATA_STEWARD": ["MASTER_DATA:ALL", "AUDIT:ALL", "FREIGHT:ALL"],
-    "OPS_ANALYST": ["ANALYSIS:READ", "MASTER_DATA:ALL"],
-    "BUSINESS_INPUTTER": ["FREIGHT:ALL", "MASTER_DATA:ALL"],
+    "DATA_STEWARD": [
+        "DICTIONARY:READ",
+        "MASTER_DATA:ALL",
+        "ADDRESS:ALL",
+        "COMMODITY:ALL",
+        "VESSEL:ALL",
+        "ROUTE:ALL",
+        "AUDIT:ALL",
+        "FREIGHT:ALL",
+        "STORAGE:ALL",
+    ],
+    "OPS_ANALYST": [
+        "DICTIONARY:READ",
+        "MASTER_DATA:READ",
+        "ADDRESS:READ",
+        "COMMODITY:READ",
+        "VESSEL:READ",
+        "ROUTE:READ",
+        "FREIGHT:READ",
+        "ANALYSIS:READ",
+        "STORAGE:READ",
+    ],
+    "BUSINESS_INPUTTER": [
+        "DICTIONARY:READ",
+        "MASTER_DATA:READ",
+        "ADDRESS:READ",
+        "COMMODITY:READ",
+        "ROUTE:READ",
+        "FREIGHT:ALL",
+        "STORAGE:ALL",
+    ],
 }
 
 ROLE_MENU_CODES = {
@@ -262,12 +299,44 @@ PERMISSIONS = [
         "description": "系统管理全量权限",
     },
     {
+        "permission_code": "SYSTEM:READ",
+        "permission_name": "系统管理查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/system/*",
+        "action_code": "READ",
+        "description": "查看用户、角色、菜单、配置和登录日志",
+    },
+    {
+        "permission_code": "SYSTEM:WRITE",
+        "permission_name": "系统管理维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/system/*",
+        "action_code": "WRITE",
+        "description": "维护用户、角色、菜单、权限和运行配置",
+    },
+    {
         "permission_code": "DICTIONARY:ALL",
         "permission_name": "字典管理全量权限",
         "permission_type_code": "API",
         "resource_path": "/api/v1/dictionary/*",
         "action_code": "ALL",
         "description": "字典管理全量权限",
+    },
+    {
+        "permission_code": "DICTIONARY:READ",
+        "permission_name": "字典查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/dictionary/*",
+        "action_code": "READ",
+        "description": "查看标准字典和编码序列",
+    },
+    {
+        "permission_code": "DICTIONARY:WRITE",
+        "permission_name": "字典维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/dictionary/*",
+        "action_code": "WRITE",
+        "description": "维护标准字典和编码序列",
     },
     {
         "permission_code": "MASTER_DATA:ALL",
@@ -278,12 +347,132 @@ PERMISSIONS = [
         "description": "地址/货品/船舶/航线/货源等主数据权限",
     },
     {
+        "permission_code": "MASTER_DATA:READ",
+        "permission_name": "主数据查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/*",
+        "action_code": "READ",
+        "description": "查看地址、货品、船舶和航线主数据",
+    },
+    {
+        "permission_code": "ADDRESS:ALL",
+        "permission_name": "地址基础数据全量权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/address/*",
+        "action_code": "ALL",
+        "description": "地址、节点、行政区划和通航约束点维护权限",
+    },
+    {
+        "permission_code": "ADDRESS:READ",
+        "permission_name": "地址基础数据查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/address/*",
+        "action_code": "READ",
+        "description": "查看地址、节点、行政区划和通航约束点",
+    },
+    {
+        "permission_code": "ADDRESS:WRITE",
+        "permission_name": "地址基础数据维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/address/*",
+        "action_code": "WRITE",
+        "description": "维护地址、节点、行政区划和通航约束点",
+    },
+    {
+        "permission_code": "COMMODITY:ALL",
+        "permission_name": "货品管理全量权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/commodity/*",
+        "action_code": "ALL",
+        "description": "标准货品维护权限",
+    },
+    {
+        "permission_code": "COMMODITY:READ",
+        "permission_name": "货品管理查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/commodity/*",
+        "action_code": "READ",
+        "description": "查看标准货品",
+    },
+    {
+        "permission_code": "COMMODITY:WRITE",
+        "permission_name": "货品管理维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/commodity/*",
+        "action_code": "WRITE",
+        "description": "维护标准货品",
+    },
+    {
+        "permission_code": "VESSEL:ALL",
+        "permission_name": "船舶数据全量权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/vessels/*",
+        "action_code": "ALL",
+        "description": "船舶资产、风险、治理和 AIS 数据维护权限",
+    },
+    {
+        "permission_code": "VESSEL:READ",
+        "permission_name": "船舶数据查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/vessels/*",
+        "action_code": "READ",
+        "description": "查看船舶资产、风险、治理和 AIS 数据",
+    },
+    {
+        "permission_code": "VESSEL:WRITE",
+        "permission_name": "船舶数据维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/vessels/*",
+        "action_code": "WRITE",
+        "description": "维护船舶资产、风险、治理和 AIS 数据",
+    },
+    {
+        "permission_code": "ROUTE:ALL",
+        "permission_name": "航线规划全量权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/route/*",
+        "action_code": "ALL",
+        "description": "维护航线、航线方案、航线段和几何数据",
+    },
+    {
+        "permission_code": "ROUTE:READ",
+        "permission_name": "航线规划查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/route/*",
+        "action_code": "READ",
+        "description": "查看航线、航线方案、航线段和几何数据",
+    },
+    {
+        "permission_code": "ROUTE:WRITE",
+        "permission_name": "航线规划维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/route/*",
+        "action_code": "WRITE",
+        "description": "维护航线、航线方案、航线段和几何数据",
+    },
+    {
         "permission_code": "AUDIT:ALL",
         "permission_name": "审核中心全量权限",
         "permission_type_code": "API",
         "resource_path": "/api/v1/audit/*",
         "action_code": "ALL",
         "description": "审核队列、差异查看、通过、驳回和指派权限",
+    },
+    {
+        "permission_code": "AUDIT:READ",
+        "permission_name": "审核中心查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/audit/*",
+        "action_code": "READ",
+        "description": "查看审核任务、审核记录和元数据",
+    },
+    {
+        "permission_code": "AUDIT:WRITE",
+        "permission_name": "审核中心处理权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/audit/*",
+        "action_code": "WRITE",
+        "description": "指派、通过、驳回和撤销审核任务",
     },
     {
         "permission_code": "ANALYSIS:READ",
@@ -294,12 +483,68 @@ PERMISSIONS = [
         "description": "船舶、货源、区域、流向和运价分析查看权限",
     },
     {
+        "permission_code": "ANALYSIS:WRITE",
+        "permission_name": "数据分析任务维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/analysis/*",
+        "action_code": "WRITE",
+        "description": "刷新、生成和维护分析任务",
+    },
+    {
+        "permission_code": "ANALYSIS:EXPORT",
+        "permission_name": "数据分析导出权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/analysis/*",
+        "action_code": "EXPORT",
+        "description": "导出船舶、货源、区域、流向和运价分析结果",
+    },
+    {
         "permission_code": "FREIGHT:ALL",
         "permission_name": "货源采集全量权限",
         "permission_type_code": "API",
         "resource_path": "/api/v1/freight/*",
         "action_code": "ALL",
         "description": "正式货源、微信/TMS 采集、AI 线索切分和候选确认权限",
+    },
+    {
+        "permission_code": "FREIGHT:READ",
+        "permission_name": "货源采集查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/freight/*",
+        "action_code": "READ",
+        "description": "查看正式货源、微信/TMS 采集和候选货源",
+    },
+    {
+        "permission_code": "FREIGHT:WRITE",
+        "permission_name": "货源采集维护权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/freight/*",
+        "action_code": "WRITE",
+        "description": "维护正式货源、微信/TMS 采集、解析和候选确认",
+    },
+    {
+        "permission_code": "STORAGE:ALL",
+        "permission_name": "文件存储全量权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/files/*",
+        "action_code": "ALL",
+        "description": "上传和下载业务附件",
+    },
+    {
+        "permission_code": "STORAGE:READ",
+        "permission_name": "文件存储查看权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/files/*",
+        "action_code": "READ",
+        "description": "下载和预览业务附件",
+    },
+    {
+        "permission_code": "STORAGE:WRITE",
+        "permission_name": "文件存储上传权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/files/*",
+        "action_code": "WRITE",
+        "description": "上传和维护业务附件",
     },
 ]
 
@@ -980,9 +1225,36 @@ MENUS = [
     },
 ]
 
+
+def infer_menu_permission_code(item: dict) -> str | None:
+    route_path = item.get("route_path")
+    if not route_path:
+        return item.get("permission_code")
+    explicit = item.get("permission_code")
+    if explicit:
+        return explicit
+    if route_path in {"/freight/wechat", "/freight/manual-create", "/freight/normalization"}:
+        return "FREIGHT:WRITE"
+    route_rules = (
+        ("/system", "SYSTEM:READ"),
+        ("/dictionary", "DICTIONARY:READ"),
+        ("/address", "ADDRESS:READ"),
+        ("/commodity", "COMMODITY:READ"),
+        ("/vessels", "VESSEL:READ"),
+        ("/freight", "FREIGHT:READ"),
+        ("/route", "ROUTE:READ"),
+        ("/analysis", "ANALYSIS:READ"),
+        ("/audit", "AUDIT:READ"),
+    )
+    for prefix, permission_code in route_rules:
+        if route_path == prefix or route_path.startswith(f"{prefix}/"):
+            return permission_code
+    return None
+
+
 ADMIN_USER = {
     "username": "admin",
-    "password": "Admin@123456",
+    "password": os.getenv("ADMIN_INITIAL_PASSWORD", "ChangeMe@2026!"),
     "real_name": "系统管理员",
     "mobile_phone": "13800000000",
     "email": "admin@example.com",
@@ -1061,7 +1333,7 @@ SYSTEM_CONFIGS = [
     {
         "config_key": AMAP_ROUTE_GEOMETRY_MODE,
         "config_name": "路线几何模式",
-        "config_value": "fallback",
+        "config_value": "real",
         "value_type_code": "STRING",
         "config_group_code": "MAP",
         "config_profile_code": AMAP_CONFIG_PROFILE,
@@ -1159,6 +1431,23 @@ SYSTEM_CONFIGS = [
         "last_test_message": None,
         "last_tested_at": None,
         "description": "AMMS 登录接口路径",
+    },
+    {
+        "config_key": HIFLEET_LOGOUT_URL,
+        "config_name": "AMMS 登出地址",
+        "config_value": "/hifleetapi/generalUserLogoutAction.do",
+        "value_type_code": "STRING",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 225,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS 登出接口路径",
     },
     {
         "config_key": HIFLEET_ROUTE_URL,
@@ -1261,6 +1550,125 @@ SYSTEM_CONFIGS = [
         "last_test_message": None,
         "last_tested_at": None,
         "description": "AMMS 是否启用登录态定期校验",
+    },
+    {
+        "config_key": HIFLEET_CHECK_LOGIN_COOLDOWN_SECONDS,
+        "config_name": "AMMS 登录态校验冷却秒数",
+        "config_value": "180",
+        "value_type_code": "FLOAT",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 281,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS 登录态校验最小间隔（秒）",
+    },
+    {
+        "config_key": HIFLEET_SESSION_IDLE_LOGOUT_SECONDS,
+        "config_name": "AMMS 空闲登出秒数",
+        "config_value": "1800",
+        "value_type_code": "FLOAT",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 282,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS 会话空闲后自动登出时间（秒）",
+    },
+    {
+        "config_key": HIFLEET_SESSION_WARMUP_ON_START,
+        "config_name": "AMMS 启动预热登录",
+        "config_value": "true",
+        "value_type_code": "BOOLEAN",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 283,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS 是否在启动时预热登录态",
+    },
+    {
+        "config_key": HIFLEET_SESSION_LOGOUT_ON_SHUTDOWN,
+        "config_name": "AMMS 关闭时登出",
+        "config_value": "true",
+        "value_type_code": "BOOLEAN",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 284,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS 是否在应用关闭时主动登出",
+    },
+    {
+        "config_key": HIFLEET_SESSION_LOCK_TTL_SECONDS,
+        "config_name": "AMMS 会话锁 TTL 秒数",
+        "config_value": "45",
+        "value_type_code": "INTEGER",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 285,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS 分布式会话锁超时时间（秒）",
+    },
+    {
+        "config_key": HIFLEET_SESSION_COOKIE_TTL_SECONDS,
+        "config_name": "AMMS Cookie TTL 秒数",
+        "config_value": "86400",
+        "value_type_code": "INTEGER",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 286,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS Cookie 缓存有效期（秒）",
+    },
+    {
+        "config_key": HIFLEET_DUPLICATE_LOGIN_RECOVERY_ENABLED,
+        "config_name": "AMMS 重复登录恢复开关",
+        "config_value": "true",
+        "value_type_code": "BOOLEAN",
+        "config_group_code": "INTEGRATION",
+        "config_profile_code": HIFLEET_CONFIG_PROFILE,
+        "sensitive_flag": 0,
+        "encrypted_flag": 0,
+        "editable_flag": 1,
+        "sort_order": 287,
+        "config_status_code": "ACTIVE",
+        "last_test_status_code": None,
+        "last_test_message": None,
+        "last_tested_at": None,
+        "description": "AMMS 是否在重复登录或会话冲突时自动恢复",
     },
     {
         "config_key": ES_R_SCHEME,
@@ -2132,7 +2540,40 @@ SYSTEM_CONFIGS = [
 ]
 
 
-async def seed_system_base() -> None:
+LEGACY_CONFIG_VALUE_UPGRADES = {
+    AMAP_ROUTE_GEOMETRY_MODE: {"fallback"},
+}
+
+
+def _should_preserve_existing_config_value(
+    *,
+    config: SystemConfig | None,
+    config_item: dict,
+    preserve_existing_config_values: bool,
+) -> bool:
+    if config is None:
+        return False
+
+    existing_value = str(config.config_value or "").strip()
+    seed_value = str(config_item["config_value"] or "").strip()
+    if not existing_value:
+        return False
+
+    if (
+        config.config_key in LEGACY_CONFIG_VALUE_UPGRADES
+        and existing_value in LEGACY_CONFIG_VALUE_UPGRADES[config.config_key]
+        and seed_value
+        and existing_value != seed_value
+    ):
+        return False
+
+    if preserve_existing_config_values:
+        return True
+
+    return int(config_item["sensitive_flag"] or 0) == 1 and not seed_value
+
+
+async def seed_system_base(*, preserve_existing_config_values: bool = True) -> None:
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
 
@@ -2209,6 +2650,7 @@ async def seed_system_base() -> None:
                 "menu_type_code": item["menu_type_code"],
                 "route_path": item["route_path"],
                 "component_path": item["component_path"],
+                "permission_code": infer_menu_permission_code(item),
                 "icon": item["icon"],
                 "sort_order": item["sort_order"],
                 "visible_flag": item["visible_flag"],
@@ -2337,10 +2779,10 @@ async def seed_system_base() -> None:
                     SystemConfig.config_key == config_item["config_key"]
                 )
             )
-            should_preserve_value = (
-                config is not None
-                and int(config_item["sensitive_flag"] or 0) == 1
-                and not str(config_item["config_value"] or "").strip()
+            should_preserve_value = _should_preserve_existing_config_value(
+                config=config,
+                config_item=config_item,
+                preserve_existing_config_values=preserve_existing_config_values,
             )
             if config is None:
                 config = SystemConfig(

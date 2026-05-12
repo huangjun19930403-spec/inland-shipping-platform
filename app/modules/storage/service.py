@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings as app_settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.integrations.config_keys import (
     COS_ACCESS_KEY,
@@ -21,7 +22,12 @@ from app.integrations.config_keys import (
     COS_REGION,
     COS_SECRET_KEY,
 )
-from app.integrations.storage import CosObjectStorageClient, ObjectStorageClient, ObjectStorageResult
+from app.integrations.storage import (
+    CosObjectStorageClient,
+    LocalObjectStorageClient,
+    ObjectStorageClient,
+    ObjectStorageResult,
+)
 from app.models.storage import StorageFile
 from app.modules.storage.repository import StorageFileRepository
 from app.modules.system.runtime_config import RuntimeConfigService
@@ -37,6 +43,14 @@ IMAGE_CONTENT_TYPES = {
 
 DOCUMENT_CONTENT_TYPES = {
     "application/pdf": ".pdf",
+    "text/plain": ".txt",
+    "text/csv": ".csv",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/zip": ".zip",
+    "application/x-zip-compressed": ".zip",
 }
 
 DEFAULT_FILE_CONTENT_TYPES = IMAGE_CONTENT_TYPES | DOCUMENT_CONTENT_TYPES
@@ -44,12 +58,14 @@ DEFAULT_FILE_CONTENT_TYPES = IMAGE_CONTENT_TYPES | DOCUMENT_CONTENT_TYPES
 
 @dataclass(frozen=True)
 class ObjectStorageSettings:
+    provider_code: str
     bucket_name: str
     region: str | None
     endpoint: str | None
     access_key: str
     secret_key: str
     max_file_size_bytes: int
+    local_root_dir: str | None = None
 
 
 def _safe_original_name(filename: str | None) -> str:
@@ -87,15 +103,24 @@ class FileStorageService:
 
     async def _settings(self) -> ObjectStorageSettings:
         enabled = await self.runtime_config.get_bool(COS_ENABLED, False, profile_code=COS_CONFIG_PROFILE)
+        max_mb = await self.runtime_config.get_int(COS_IMAGE_MAX_SIZE_MB, 10, profile_code=COS_CONFIG_PROFILE)
         if not enabled:
-            raise ValidationError("COS 文件存储未启用")
+            return ObjectStorageSettings(
+                provider_code="LOCAL",
+                bucket_name="local",
+                region=None,
+                endpoint=None,
+                access_key="",
+                secret_key="",
+                max_file_size_bytes=max(1, max_mb) * 1024 * 1024,
+                local_root_dir=app_settings.LOCAL_FILE_STORAGE_DIR,
+            )
 
         bucket_name = (await self.runtime_config.get_value(COS_BUCKET_NAME, "", profile_code=COS_CONFIG_PROFILE) or "").strip()
         access_key = (await self.runtime_config.get_value(COS_ACCESS_KEY, "", profile_code=COS_CONFIG_PROFILE) or "").strip()
         secret_key = (await self.runtime_config.get_value(COS_SECRET_KEY, "", profile_code=COS_CONFIG_PROFILE) or "").strip()
         region = (await self.runtime_config.get_value(COS_REGION, "", profile_code=COS_CONFIG_PROFILE) or "").strip() or None
         endpoint = (await self.runtime_config.get_value(COS_ENDPOINT, "", profile_code=COS_CONFIG_PROFILE) or "").strip() or None
-        max_mb = await self.runtime_config.get_int(COS_IMAGE_MAX_SIZE_MB, 10, profile_code=COS_CONFIG_PROFILE)
 
         if not bucket_name:
             raise ValidationError("COS_BUCKET_NAME 未配置")
@@ -105,6 +130,7 @@ class FileStorageService:
             raise ValidationError("COS_REGION 或 COS_ENDPOINT 至少需要配置一个")
 
         return ObjectStorageSettings(
+            provider_code="TENCENT_COS",
             bucket_name=bucket_name,
             region=region,
             endpoint=endpoint,
@@ -116,6 +142,8 @@ class FileStorageService:
     def _client(self, settings: ObjectStorageSettings) -> ObjectStorageClient:
         if self._object_client is not None:
             return self._object_client
+        if settings.provider_code == "LOCAL":
+            return LocalObjectStorageClient(settings.local_root_dir or app_settings.LOCAL_FILE_STORAGE_DIR)
         return CosObjectStorageClient(
             region=settings.region,
             endpoint=settings.endpoint,
@@ -174,7 +202,7 @@ class FileStorageService:
                 "original_file_name": original_name,
                 "content_type": content_type,
                 "file_size": len(content),
-                "storage_provider_code": "TENCENT_COS",
+                "storage_provider_code": settings.provider_code,
                 "uploaded_by": uploaded_by,
                 "checksum": None,
                 "status": 1,

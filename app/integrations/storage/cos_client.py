@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 
@@ -84,5 +85,39 @@ class CosObjectStorageClient:
     async def delete_object(self, *, bucket: str, key: str) -> None:
         def _delete() -> None:
             self._sync_client().delete_object(Bucket=bucket, Key=key)
+
+        await asyncio.to_thread(_delete)
+
+
+class LocalObjectStorageClient:
+    def __init__(self, root_dir: str) -> None:
+        self.root_dir = Path(root_dir).resolve()
+
+    def _path(self, bucket: str, key: str) -> Path:
+        base = (self.root_dir / bucket).resolve()
+        target = (base / key).resolve()
+        if base != target and base not in target.parents:
+            raise ValueError("invalid object key")
+        return target
+
+    async def put_object(self, *, bucket: str, key: str, body: bytes, content_type: str) -> None:
+        _ = content_type
+
+        def _put() -> None:
+            target = self._path(bucket, key)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(body)
+
+        await asyncio.to_thread(_put)
+
+    async def get_object(self, *, bucket: str, key: str) -> ObjectStorageResult:
+        def _get() -> ObjectStorageResult:
+            return ObjectStorageResult(content=self._path(bucket, key).read_bytes(), content_type=None)
+
+        return await asyncio.to_thread(_get)
+
+    async def delete_object(self, *, bucket: str, key: str) -> None:
+        def _delete() -> None:
+            self._path(bucket, key).unlink(missing_ok=True)
 
         await asyncio.to_thread(_delete)

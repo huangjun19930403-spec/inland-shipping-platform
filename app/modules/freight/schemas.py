@@ -389,6 +389,14 @@ class FreightTmsInboundResponse(BaseModel):
     processed_at: datetime | None
     error_message: str | None
     prompt_version: str | None
+    parse_stage_code: str | None = None
+    parse_stage_name: str | None = None
+    parse_stage_message: str | None = None
+    parse_progress_percent: int = 0
+    parse_heartbeat_at: datetime | None = None
+    parse_is_stale: bool = False
+    parse_heartbeat_age_seconds: int | None = None
+    ai_elapsed_seconds: int = 0
     created_at: datetime
     updated_at: datetime
 

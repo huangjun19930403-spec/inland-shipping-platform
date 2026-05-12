@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     COS_SECRET_KEY: str = ""
     COS_PATH_STYLE_ACCESS: bool = False
     COS_IMAGE_MAX_SIZE_MB: int = 10
+    LOCAL_FILE_STORAGE_DIR: str = "./storage_files"
 
 
 settings = Settings()

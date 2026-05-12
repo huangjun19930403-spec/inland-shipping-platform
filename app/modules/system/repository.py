@@ -121,7 +121,7 @@ class SysUserRepository:
                 await self.db.execute(
                     select(SysRole)
                     .join(SysUserRole, SysUserRole.role_id == SysRole.id)
-                    .where(SysUserRole.user_id == user_id)
+                    .where(SysUserRole.user_id == user_id, SysRole.status_code == "ACTIVE")
                     .order_by(SysRole.sort_order.asc(), SysRole.id.asc())
                 )
             )
@@ -133,8 +133,9 @@ class SysUserRepository:
         stmt = (
             select(SysPermission)
             .join(SysRolePermission, SysRolePermission.permission_id == SysPermission.id)
+            .join(SysRole, SysRole.id == SysRolePermission.role_id)
             .join(SysUserRole, SysUserRole.role_id == SysRolePermission.role_id)
-            .where(SysUserRole.user_id == user_id)
+            .where(SysUserRole.user_id == user_id, SysRole.status_code == "ACTIVE")
             .distinct()
             .order_by(SysPermission.id.asc())
         )
@@ -144,8 +145,9 @@ class SysUserRepository:
         stmt = (
             select(SysMenu)
             .join(SysRoleMenu, SysRoleMenu.menu_id == SysMenu.id)
+            .join(SysRole, SysRole.id == SysRoleMenu.role_id)
             .join(SysUserRole, SysUserRole.role_id == SysRoleMenu.role_id)
-            .where(SysUserRole.user_id == user_id)
+            .where(SysUserRole.user_id == user_id, SysRole.status_code == "ACTIVE")
             .distinct()
             .order_by(SysMenu.sort_order.asc(), SysMenu.id.asc())
         )
@@ -254,6 +256,11 @@ class SysPermissionRepository:
 
     async def get_permission_by_id(self, permission_id: int) -> SysPermission | None:
         return await self.db.scalar(select(SysPermission).where(SysPermission.id == permission_id))
+
+    async def get_permission_by_code(self, permission_code: str) -> SysPermission | None:
+        return await self.db.scalar(
+            select(SysPermission).where(SysPermission.permission_code == permission_code)
+        )
 
     async def list_permissions(
         self,
@@ -366,6 +373,7 @@ class SysMenuRepository:
                 "menu_type_code": item.menu_type_code,
                 "route_path": item.route_path,
                 "component_path": item.component_path,
+                "permission_code": item.permission_code,
                 "icon": item.icon,
                 "sort_order": item.sort_order,
                 "visible_flag": item.visible_flag,

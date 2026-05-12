@@ -1,45 +1,49 @@
-"""系统初始化脚本。"""
+"""Explicit seed profile wrapper."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import os
+import sys
+from pathlib import Path
 
-from scripts.seed_admin_regions import seed_admin_regions
-from scripts.seed_builtin_dicts import seed_builtin_dicts
-from scripts.seed_code_sequences import seed_code_sequences
-from scripts.seed_commodity_standards import seed_commodity_standards
-from scripts.seed_commodity_taxonomy import seed_commodity_taxonomy
-from scripts.seed_foundation_samples import seed_foundation_samples
-from scripts.seed_freight_samples import seed_freight_samples
-from scripts.seed_analysis_samples import seed_analysis_samples
-from scripts.seed_local_private_config import seed_local_private_config
-from scripts.seed_audit_samples import seed_audit_samples
-from scripts.seed_navigation_constraints import seed_navigation_constraints
-from scripts.seed_route_samples import seed_route_samples
-from scripts.seed_system_base import seed_system_base
-from scripts.seed_vessel_samples import seed_vessel_samples
-from scripts.seed_water_systems import seed_water_systems
-from scripts.purge_legacy_e2e_data import purge_legacy_e2e_data
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.seed_local_demo import seed_local_demo
+from scripts.seed_production_preset import seed_production_preset
+
+SUPPORTED_SEED_PROFILES = {"production", "local-demo"}
 
 
-async def seed_system_init() -> None:
-    await seed_builtin_dicts()
-    await seed_code_sequences()
-    await seed_admin_regions()
-    await seed_water_systems()
-    await seed_commodity_taxonomy()
-    await seed_commodity_standards()
-    await seed_foundation_samples()
-    await purge_legacy_e2e_data()
-    await seed_vessel_samples()
-    await seed_freight_samples()
-    await seed_analysis_samples()
-    await seed_system_base()
-    await seed_local_private_config()
-    await seed_audit_samples()
-    await seed_navigation_constraints()
-    await seed_route_samples()
+def resolve_seed_profile(profile: str | None = None) -> str:
+    profile_clean = (profile or os.getenv("SEED_PROFILE") or "").strip().lower()
+    if profile_clean not in SUPPORTED_SEED_PROFILES:
+        raise RuntimeError(
+            "SEED_PROFILE must be set explicitly to production or local-demo"
+        )
+    return profile_clean
+
+
+async def seed_system_init(*, profile: str | None = None) -> None:
+    profile_clean = resolve_seed_profile(profile)
+    if profile_clean == "production":
+        await seed_production_preset()
+        return
+    if profile_clean == "local-demo":
+        await seed_local_demo()
+        return
+    raise RuntimeError(f"unsupported SEED_PROFILE: {profile_clean}")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run an explicit seed profile")
+    parser.add_argument("--profile", choices=sorted(SUPPORTED_SEED_PROFILES))
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    asyncio.run(seed_system_init())
+    args = _parse_args()
+    asyncio.run(seed_system_init(profile=args.profile))

@@ -6,17 +6,21 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from collections.abc import Callable
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.system import SysUser
+from app.core.exceptions import PermissionError
+from app.models.system import SysPermission, SysRole, SysRolePermission, SysUser, SysUserRole
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+SAFE_HTTP_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -71,3 +75,141 @@ async def get_current_user(
     if user is None or not _is_user_enabled(user.status_code):
         raise credentials_exception
     return user
+
+
+def _permission_module(code: str) -> str:
+    return code.split(":", 1)[0].strip().upper()
+
+
+def _permission_matches(granted: str, required: str) -> bool:
+    granted_value = granted.strip().upper()
+    required_value = required.strip().upper()
+    if not granted_value or not required_value:
+        return False
+    if granted_value == required_value:
+        return True
+    if granted_value == "SYSTEM:ALL":
+        return True
+    granted_module = _permission_module(granted_value)
+    required_module = _permission_module(required_value)
+    granted_action = granted_value.split(":", 1)[1] if ":" in granted_value else ""
+    required_action = required_value.split(":", 1)[1] if ":" in required_value else ""
+    if granted_value == f"{required_module}:ALL":
+        return True
+    if granted_module == required_module and granted_action == "MANAGE":
+        return True
+    if (
+        granted_module == required_module
+        and granted_action == "WRITE"
+        and required_action == "READ"
+    ):
+        return True
+    if (
+        granted_module == required_module
+        and granted_action == "EXPORT"
+        and required_action == "READ"
+    ):
+        return True
+    if (
+        granted_module == required_module
+        and granted_action == "AUDIT"
+        and required_action == "READ"
+    ):
+        return True
+    if granted_value == "MASTER_DATA:ALL" and required_module in {
+        "ADDRESS",
+        "COMMODITY",
+        "DICTIONARY",
+        "ROUTE",
+        "VESSEL",
+    }:
+        return True
+    if granted_value == "FREIGHT:ALL" and required_module == "STORAGE":
+        return True
+    if granted_value == "MASTER_DATA:ALL" and required_module == "STORAGE":
+        return True
+    if granted_value == "MASTER_DATA:READ" and required_action == "READ" and required_module in {
+        "ADDRESS",
+        "COMMODITY",
+        "DICTIONARY",
+        "ROUTE",
+        "VESSEL",
+        "STORAGE",
+    }:
+        return True
+    if (
+        granted_value == "MASTER_DATA:WRITE"
+        and required_action in {"READ", "WRITE"}
+        and required_module
+        in {
+            "ADDRESS",
+            "COMMODITY",
+            "DICTIONARY",
+            "ROUTE",
+            "VESSEL",
+            "STORAGE",
+        }
+    ):
+        return True
+    if granted_value == "ANALYSIS:READ" and required_value.startswith("ANALYSIS:"):
+        return required_value in {"ANALYSIS:READ", "ANALYSIS:EXPORT"}
+    return False
+
+
+async def list_current_user_permission_codes(db: AsyncSession, user_id: int) -> list[str]:
+    stmt = (
+        select(SysPermission.permission_code)
+        .join(SysRolePermission, SysRolePermission.permission_id == SysPermission.id)
+        .join(SysRole, SysRole.id == SysRolePermission.role_id)
+        .join(SysUserRole, SysUserRole.role_id == SysRole.id)
+        .where(
+            SysUserRole.user_id == user_id,
+            SysRole.status_code == "ACTIVE",
+        )
+        .distinct()
+    )
+    return [str(row[0]) for row in (await db.execute(stmt)).all()]
+
+
+async def list_current_user_role_codes(db: AsyncSession, user_id: int) -> list[str]:
+    stmt = (
+        select(SysRole.role_code)
+        .join(SysUserRole, SysUserRole.role_id == SysRole.id)
+        .where(
+            SysUserRole.user_id == user_id,
+            SysRole.status_code == "ACTIVE",
+        )
+        .distinct()
+    )
+    return [str(row[0]) for row in (await db.execute(stmt)).all()]
+
+
+def require_permission(*required_codes: str) -> Callable[..., SysUser]:
+    async def _dependency(
+        request: Request,
+        current_user: SysUser = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> SysUser:
+        required = [code.strip().upper() for code in required_codes if code.strip()]
+        if not required:
+            return current_user
+        if request.method.upper() not in SAFE_HTTP_METHODS:
+            required = [
+                f"{_permission_module(code)}:WRITE" if code.endswith(":READ") else code
+                for code in required
+            ]
+
+        role_codes = await list_current_user_role_codes(db, current_user.id)
+        if "SUPER_ADMIN" in {code.upper() for code in role_codes}:
+            return current_user
+
+        permission_codes = await list_current_user_permission_codes(db, current_user.id)
+        if any(
+            _permission_matches(granted, required_code)
+            for required_code in required
+            for granted in permission_codes
+        ):
+            return current_user
+        raise PermissionError("当前账号没有访问该功能的权限")
+
+    return _dependency

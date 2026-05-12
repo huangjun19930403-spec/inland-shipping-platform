@@ -266,6 +266,32 @@ def test_structural_skeleton_expands_multi_origin_and_trailing_contact() -> None
     assert skeleton.context_blocks[0]["shared_contact_name"] == "胡"
 
 
+def test_structural_skeleton_does_not_expand_context_as_destination() -> None:
+    raw_text = "\n".join(
+        [
+            "牛头山—临泉  石子石粉",
+            "东流菊江码头——淮安建华管桩码头，需要单机数条",
+            "黄冈三江口——南京关门山        8000吨内",
+            "镇江一一一一合肥，沙子",
+            "南通五号桥——盐城1800吨以内",
+            "15052612052   微信同号",
+        ]
+    )
+    skeleton = FreightStructuralSkeletonBuilder().build(FreightTextIndexer().index(raw_text))
+
+    routes = {(item["origin_text"], item["destination_text"]) for item in skeleton.skeleton_units}
+    assert ("牛头山", "临泉") in routes
+    assert ("东流菊江码头", "淮安建华管桩码头") in routes
+    assert ("黄冈三江口", "南京关门山") in routes
+    assert ("镇江", "合肥") in routes
+    assert ("南通五号桥", "盐城") in routes
+    assert all(destination not in {"石子", "需要单机数条", "8000吨内"} for _, destination in routes)
+    assert len(skeleton.skeleton_units) == 5
+    assert skeleton.context_blocks[0]["shared_contact_phone"] == "15052612052"
+    assert skeleton.context_blocks[0]["shared_contact_wechat"] == "15052612052"
+    assert skeleton.context_blocks[0].get("shared_contact_name") is None
+
+
 def test_skeleton_reconciliation_creates_missing_fallback_segments() -> None:
     raw_text = "南京到芜湖动力煤1000吨\n太仓到无锡黄沙2000吨"
     indexed = FreightTextIndexer().index(raw_text)
@@ -277,6 +303,65 @@ def test_skeleton_reconciliation_creates_missing_fallback_segments() -> None:
     assert {item["raw_text"] for item in segments} == set(raw_text.splitlines())
     assert all(item["fallback_generated"] is True for item in segments)
     assert any("AI_SEGMENT_MISSING" in item for item in warnings)
+
+
+@pytest.mark.asyncio
+async def test_review_timeout_keeps_complete_local_evidence_ready() -> None:
+    indexed = FreightTextIndexer().index("南京海宏码头——涟水红日港，石子，1800吨以内船")
+    semantic_map = {
+        "route_clues": [
+            {
+                "clue_temp_id": "C1",
+                "line_refs": ["L1"],
+                "raw_text": "南京海宏码头——涟水红日港，石子，1800吨以内船",
+                "origin": {"text": "南京海宏码头"},
+                "destination": {"text": "涟水红日港"},
+            }
+        ],
+        "context_blocks": [],
+        "context_notes": [],
+    }
+    segments = [
+        _segment(
+            clue_temp_id="C1",
+            raw_text="南京海宏码头——涟水红日港，石子，1800吨以内船",
+            origin_text="南京海宏码头",
+            destination_text="涟水红日港",
+            commodity_name="石子",
+            raw_tonnage_text="1800吨以内",
+            availability_status_code="UNKNOWN",
+            confidence_score=0.62,
+            evidence=["南京海宏码头——涟水红日港，石子，1800吨以内船"],
+        )
+    ]
+    client = DashScopeQwenFreightParserClient(runtime_config=SimpleNamespace())
+
+    async def timeout_call(**kwargs):  # noqa: ANN003
+        raise TimeoutError("review timeout")
+
+    client._call_json = timeout_call  # type: ignore[method-assign]
+    review_results, review_raw, failed_count, metrics = await client.review_risky_segments(
+        indexed,
+        semantic_map,
+        segments,
+        runtime={
+            "review_threshold": 0.65,
+            "review_batch_size": 8,
+            "review_concurrency": 1,
+            "review_model": "qwen-plus",
+            "api_key": "test",
+            "timeout": 1,
+            "budget": None,
+        },
+    )
+
+    assert review_results == []
+    assert failed_count == 0
+    assert metrics[0]["review_chunk_size"] == 1
+    assert review_raw["chunks"][0]["local_pass_count"] == 1
+    assert segments[0]["availability_status_code"] == "READY"
+    assert segments[0]["ai_review_status_code"] == "PASS"
+    assert segments[0]["needs_strong_review"] is False
 
 
 def test_semantic_validator_marks_untraceable_ai_output_for_review() -> None:
