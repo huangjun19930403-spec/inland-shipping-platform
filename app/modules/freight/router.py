@@ -43,7 +43,11 @@ from app.modules.freight.schemas import (
     FreightTmsInboundResponse,
     FreightUpdateRequest,
     PageResponse,
+    ShippingOpportunityDetailResponse,
+    ShippingOpportunityListQuery,
+    ShippingOpportunitySummaryResponse,
 )
+from app.modules.freight.opportunity_service import ShippingOpportunityService
 from app.modules.freight.service import (
     FreightAttachmentService,
     FreightBatchTaskService,
@@ -334,6 +338,37 @@ async def clean_freight_normalization(
 ):
     service = FreightNormalizationSuggestionService(db)
     return await service.clean(operator_id=getattr(current_user, "id", None))
+
+
+@router.get("/opportunities", response_model=PageResponse[ShippingOpportunitySummaryResponse])
+async def list_shipping_opportunities(
+    query: ShippingOpportunityListQuery = Depends(),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingOpportunityService(db)
+    return await service.list_opportunities(
+        keyword=query.keyword,
+        status_code=query.status_code,
+        source_type=query.source_type,
+        origin_city_code=query.origin_city_code,
+        destination_city_code=query.destination_city_code,
+        commodity_id=query.commodity_id,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
+@router.get("/opportunities/{freight_id}", response_model=ShippingOpportunityDetailResponse)
+async def get_shipping_opportunity(
+    freight_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    service = ShippingOpportunityService(db)
+    return await service.get_opportunity(freight_id)
 
 
 @router.get("", response_model=PageResponse[FreightResponse])

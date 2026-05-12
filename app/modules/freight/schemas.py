@@ -196,6 +196,99 @@ class FreightResponse(BaseModel):
     updated_at: datetime
 
 
+class ShippingOpportunityListQuery(BaseModel):
+    keyword: str | None = None
+    status_code: str | None = None
+    source_type: str | None = None
+    origin_city_code: str | None = None
+    destination_city_code: str | None = None
+    commodity_id: int | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
+class ShippingOpportunityContextResponse(BaseModel):
+    freight_id: int
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+
+class ShippingOpportunityLineageResponse(BaseModel):
+    source_tables: list[str] = Field(default_factory=list)
+    source_refs: dict[str, Any] = Field(default_factory=dict)
+    data_versions: list[str] = Field(default_factory=list)
+    sample_count: int = 1
+    generated_at: datetime | None = None
+
+
+class ShippingOpportunityQualityResponse(BaseModel):
+    coverage_rate: float | None = None
+    confidence_level: str = "UNKNOWN"
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    uncertainty_reasons: list[str] = Field(default_factory=list)
+    issue_count: int = 0
+
+
+class ShippingOpportunityActionResponse(BaseModel):
+    action_code: str
+    title: str
+    target_route: str | None = None
+    query: dict[str, Any] = Field(default_factory=dict)
+    disabled_reason: str | None = None
+
+
+class ShippingOpportunitySummaryResponse(BaseModel):
+    freight_id: int
+    freight_no: str
+    cargo_title: str
+    source_type_code: str
+    source_channel_code: str | None = None
+    status_code: str
+    origin_node_id: int | None = None
+    origin_node_name: str | None = None
+    origin_city_code: str | None = None
+    origin_display: str | None = None
+    destination_node_id: int | None = None
+    destination_node_name: str | None = None
+    destination_city_code: str | None = None
+    destination_display: str | None = None
+    commodity_standard_id: int | None = None
+    commodity_standard_name: str | None = None
+    raw_commodity_name: str | None = None
+    estimated_tonnage: Decimal | None = None
+    min_tonnage: Decimal | None = None
+    max_tonnage: Decimal | None = None
+    raw_tonnage_text: str | None = None
+    unit_price: Decimal | None = None
+    total_price: Decimal | None = None
+    price_unit: str | None = None
+    route_status_code: str
+    capacity_status_code: str
+    pricing_status_code: str
+    data_quality_status_code: str
+    completeness_score: float
+    context: ShippingOpportunityContextResponse
+    lineage: ShippingOpportunityLineageResponse
+    quality: ShippingOpportunityQualityResponse
+    actions: list[ShippingOpportunityActionResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ShippingOpportunityDetailResponse(ShippingOpportunitySummaryResponse):
+    raw_origin_text: str | None = None
+    raw_destination_text: str | None = None
+    origin_match_level_code: str | None = None
+    destination_match_level_code: str | None = None
+    commodity_match_level_code: str | None = None
+    route_id: int | None = None
+    route_name: str | None = None
+    candidate_analysis_id: int | None = None
+    candidate_count: int = 0
+    latest_candidate_analysis_at: datetime | None = None
+
+
 class FreightContactItem(BaseModel):
     contact_name: str = Field(min_length=1, max_length=64)
     contact_role_code: str = Field(min_length=1, max_length=64)
