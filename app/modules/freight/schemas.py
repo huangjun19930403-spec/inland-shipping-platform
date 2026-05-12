@@ -276,6 +276,76 @@ class ShippingOpportunitySummaryResponse(BaseModel):
     updated_at: datetime
 
 
+class ShippingOpportunitySourceEvidenceResponse(BaseModel):
+    source_type_code: str
+    source_channel_code: str | None = None
+    source_ref_no: str | None = None
+    batch_no: str | None = None
+    tms_inbound_no: str | None = None
+    clue_no: str | None = None
+    candidate_no: str | None = None
+    raw_text_excerpt: str | None = None
+    prompt_version: str | None = None
+    ai_pipeline_version: str | None = None
+    ai_review_status_code: str | None = None
+    ai_warning_count: int = 0
+    confirmation_count: int = 0
+    latest_confirmation_action_code: str | None = None
+    latest_confirmation_at: datetime | None = None
+
+
+class ShippingOpportunityCleaningIssueResponse(BaseModel):
+    suggestion_id: int
+    clean_task_id: int | None = None
+    suggestion_type_code: str
+    raw_text: str | None = None
+    current_level_code: str | None = None
+    suggested_level_code: str
+    suggested_node_id: int | None = None
+    suggested_commodity_standard_id: int | None = None
+    suggested_city_code: str | None = None
+    confidence_score: Decimal | None = None
+    status_code: str
+    impact_field_code: str
+    match_basis: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class ShippingOpportunityRouteEvidenceResponse(BaseModel):
+    status_code: str
+    route_id: int | None = None
+    route_name: str | None = None
+    origin_node_id: int | None = None
+    destination_node_id: int | None = None
+    origin_region_id: int | None = None
+    destination_region_id: int | None = None
+    not_computable_reasons: list[str] = Field(default_factory=list)
+
+
+class ShippingOpportunityCapacityEvidenceResponse(BaseModel):
+    status_code: str
+    analysis_id: int | None = None
+    candidate_count: int = 0
+    low_confidence_count: int = 0
+    coverage_rate: Decimal | None = None
+    confidence_level: str = "UNKNOWN"
+    generated_at: datetime | None = None
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    uncertainty_reasons: list[str] = Field(default_factory=list)
+
+
+class ShippingOpportunityPricingEvidenceResponse(BaseModel):
+    status_code: str
+    source_layer_code: str
+    unit_price: Decimal | None = None
+    total_price: Decimal | None = None
+    price_unit: str | None = None
+    settlement_method_code: str | None = None
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    recommended_action_code: str | None = None
+    uses_demo_data: bool = False
+
+
 class ShippingOpportunityDetailResponse(ShippingOpportunitySummaryResponse):
     raw_origin_text: str | None = None
     raw_destination_text: str | None = None
@@ -287,6 +357,11 @@ class ShippingOpportunityDetailResponse(ShippingOpportunitySummaryResponse):
     candidate_analysis_id: int | None = None
     candidate_count: int = 0
     latest_candidate_analysis_at: datetime | None = None
+    source_evidence: ShippingOpportunitySourceEvidenceResponse
+    cleaning_issues: list[ShippingOpportunityCleaningIssueResponse] = Field(default_factory=list)
+    route_evidence: ShippingOpportunityRouteEvidenceResponse
+    capacity_evidence: ShippingOpportunityCapacityEvidenceResponse
+    pricing_evidence: ShippingOpportunityPricingEvidenceResponse
 
 
 class FreightContactItem(BaseModel):

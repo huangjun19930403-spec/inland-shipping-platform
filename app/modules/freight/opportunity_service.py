@@ -11,16 +11,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.models.address import TransportNode
 from app.models.commodity import CommodityStandard
-from app.models.freight import Freight, FreightNormalizationSuggestion
+from app.models.freight import (
+    Freight,
+    FreightBatchTask,
+    FreightCandidate,
+    FreightCandidateManualFeedback,
+    FreightClue,
+    FreightNormalizationSuggestion,
+    FreightTmsInbound,
+)
 from app.models.route import ShippingRoute
 from app.models.vessel import VesselCandidateAnalysis
 from app.modules.freight.schemas import (
     PageResponse,
     ShippingOpportunityActionResponse,
+    ShippingOpportunityCapacityEvidenceResponse,
+    ShippingOpportunityCleaningIssueResponse,
     ShippingOpportunityContextResponse,
     ShippingOpportunityDetailResponse,
     ShippingOpportunityLineageResponse,
+    ShippingOpportunityPricingEvidenceResponse,
     ShippingOpportunityQualityResponse,
+    ShippingOpportunityRouteEvidenceResponse,
+    ShippingOpportunitySourceEvidenceResponse,
     ShippingOpportunitySummaryResponse,
 )
 
@@ -75,6 +88,10 @@ class ShippingOpportunityService:
         summary = self._summary(row, context)
         route = context["route_by_pair"].get((row.origin_region_id_cache, row.destination_region_id_cache))
         analysis = context["candidate_by_freight"].get(row.id)
+        detail_context = await self._load_detail_context(row)
+        route_status = self._route_status(row, route)
+        capacity_status = self._capacity_status(row, analysis)
+        pricing_status = self._pricing_status(row)
         return ShippingOpportunityDetailResponse(
             **summary.model_dump(),
             raw_origin_text=row.raw_origin_text,
@@ -87,6 +104,11 @@ class ShippingOpportunityService:
             candidate_analysis_id=getattr(analysis, "id", None),
             candidate_count=getattr(analysis, "candidate_count", 0) or 0,
             latest_candidate_analysis_at=getattr(analysis, "generated_at", None),
+            source_evidence=self._source_evidence(row, detail_context),
+            cleaning_issues=self._cleaning_issues(detail_context["cleaning_suggestions"]),
+            route_evidence=self._route_evidence(row, route, route_status),
+            capacity_evidence=self._capacity_evidence(analysis, capacity_status),
+            pricing_evidence=self._pricing_evidence(row, pricing_status),
         )
 
     def _base_query(
@@ -201,6 +223,46 @@ class ShippingOpportunityService:
         ).all()
         return {int(freight_id): int(count) for freight_id, count in rows}
 
+    async def _load_detail_context(self, row: Freight) -> dict[str, Any]:
+        batch = await self.db.get(FreightBatchTask, row.source_batch_id) if row.source_batch_id else None
+        tms_inbound = await self.db.get(FreightTmsInbound, row.source_tms_inbound_id) if row.source_tms_inbound_id else None
+        clue = await self.db.get(FreightClue, row.source_clue_id) if row.source_clue_id else None
+        candidate = None
+        if row.source_candidate_id:
+            candidate = await self.db.get(FreightCandidate, row.source_candidate_id)
+        if candidate is None:
+            candidate = await self.db.scalar(
+                select(FreightCandidate).where(FreightCandidate.confirmed_freight_id == row.id).order_by(FreightCandidate.id.desc())
+            )
+        feedbacks: list[FreightCandidateManualFeedback] = []
+        if candidate:
+            feedbacks = (
+                await self.db.execute(
+                    select(FreightCandidateManualFeedback)
+                    .where(FreightCandidateManualFeedback.candidate_id == candidate.id)
+                    .order_by(FreightCandidateManualFeedback.operated_at.desc(), FreightCandidateManualFeedback.id.desc())
+                )
+            ).scalars().all()
+        suggestions = (
+            await self.db.execute(
+                select(FreightNormalizationSuggestion)
+                .where(
+                    FreightNormalizationSuggestion.freight_id == row.id,
+                    FreightNormalizationSuggestion.status_code != "APPLIED",
+                )
+                .order_by(FreightNormalizationSuggestion.status_code.asc(), FreightNormalizationSuggestion.created_at.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+        return {
+            "batch": batch,
+            "tms_inbound": tms_inbound,
+            "clue": clue,
+            "candidate": candidate,
+            "feedbacks": list(feedbacks),
+            "cleaning_suggestions": list(suggestions),
+        }
+
     def _summary(self, row: Freight, context: dict[str, Any]) -> ShippingOpportunitySummaryResponse:
         origin_node = context["node_by_id"].get(row.origin_node_id)
         destination_node = context["node_by_id"].get(row.destination_node_id)
@@ -253,7 +315,7 @@ class ShippingOpportunityService:
                 uncertainty_reasons=uncertainty,
                 issue_count=issue_count,
             ),
-            actions=self._actions(row, route_status, capacity_status, pricing_status, missing_reasons),
+            actions=self._actions(row, route_status, capacity_status, pricing_status, missing_reasons, issue_count),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -382,6 +444,7 @@ class ShippingOpportunityService:
         capacity_status: str,
         pricing_status: str,
         missing_reasons: list[str],
+        issue_count: int,
     ) -> list[ShippingOpportunityActionResponse]:
         actions = [
             ShippingOpportunityActionResponse(
@@ -391,13 +454,13 @@ class ShippingOpportunityService:
                 query={"freight_id": row.id},
             )
         ]
-        if missing_reasons or row.origin_match_level_code == "RAW" or row.destination_match_level_code == "RAW":
+        if issue_count or missing_reasons or row.origin_match_level_code == "RAW" or row.destination_match_level_code == "RAW":
             actions.append(
                 ShippingOpportunityActionResponse(
                     action_code="OPEN_FREIGHT_CLEANING",
                     title="进入货源清洗",
                     target_route="/freight/normalization",
-                    query={"freight_id": row.id, "reason_codes": missing_reasons},
+                    query={"freight_id": row.id, "keyword": row.freight_no, "status_code": "PENDING", "reason_codes": missing_reasons},
                 )
             )
         actions.append(
@@ -419,6 +482,8 @@ class ShippingOpportunityService:
                     "origin_node_id": row.origin_node_id,
                     "destination_node_id": row.destination_node_id,
                     "commodity_standard_id": row.commodity_standard_id,
+                    "tonnage": row.estimated_tonnage or row.max_tonnage or row.min_tonnage,
+                    "current_quote": row.unit_price,
                 },
                 disabled_reason=None if pricing_status != "NOT_COMPUTABLE" else "缺少起终点或标准货品，无法报价",
             )
@@ -436,3 +501,138 @@ class ShippingOpportunityService:
                 )
             )
         return actions
+
+    def _source_evidence(self, row: Freight, detail_context: dict[str, Any]) -> ShippingOpportunitySourceEvidenceResponse:
+        batch: FreightBatchTask | None = detail_context["batch"]
+        tms_inbound: FreightTmsInbound | None = detail_context["tms_inbound"]
+        clue: FreightClue | None = detail_context["clue"]
+        candidate: FreightCandidate | None = detail_context["candidate"]
+        feedbacks: list[FreightCandidateManualFeedback] = detail_context["feedbacks"]
+        raw_text = (
+            getattr(clue, "raw_text", None)
+            or getattr(candidate, "raw_text", None)
+            or getattr(tms_inbound, "raw_content", None)
+            or getattr(batch, "raw_text", None)
+        )
+        latest_feedback = feedbacks[0] if feedbacks else None
+        return ShippingOpportunitySourceEvidenceResponse(
+            source_type_code=row.source_type_code,
+            source_channel_code=row.source_channel_code,
+            source_ref_no=row.source_ref_no,
+            batch_no=getattr(batch, "batch_no", None),
+            tms_inbound_no=getattr(tms_inbound, "inbound_no", None),
+            clue_no=getattr(clue, "clue_no", None),
+            candidate_no=getattr(candidate, "candidate_no", None),
+            raw_text_excerpt=self._excerpt(raw_text),
+            prompt_version=getattr(batch, "prompt_version", None) or getattr(tms_inbound, "prompt_version", None),
+            ai_pipeline_version=getattr(batch, "ai_pipeline_version", None),
+            ai_review_status_code=getattr(candidate, "ai_review_status_code", None),
+            ai_warning_count=self._warning_count(getattr(candidate, "ai_warning_json", None)),
+            confirmation_count=len(feedbacks),
+            latest_confirmation_action_code=getattr(latest_feedback, "action_code", None),
+            latest_confirmation_at=getattr(latest_feedback, "operated_at", None),
+        )
+
+    @staticmethod
+    def _cleaning_issues(rows: list[FreightNormalizationSuggestion]) -> list[ShippingOpportunityCleaningIssueResponse]:
+        return [
+            ShippingOpportunityCleaningIssueResponse(
+                suggestion_id=row.id,
+                clean_task_id=row.clean_task_id,
+                suggestion_type_code=row.suggestion_type_code,
+                raw_text=row.raw_text,
+                current_level_code=row.current_level_code,
+                suggested_level_code=row.suggested_level_code,
+                suggested_node_id=row.suggested_node_id,
+                suggested_commodity_standard_id=row.suggested_commodity_standard_id,
+                suggested_city_code=row.suggested_city_code,
+                confidence_score=row.confidence_score,
+                status_code=row.status_code,
+                impact_field_code={
+                    "ORIGIN": "origin_node_id",
+                    "DESTINATION": "destination_node_id",
+                    "COMMODITY": "commodity_standard_id",
+                }.get(row.suggestion_type_code, row.suggestion_type_code.lower()),
+                match_basis=row.match_basis_json,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _route_evidence(row: Freight, route: ShippingRoute | None, status_code: str) -> ShippingOpportunityRouteEvidenceResponse:
+        reasons: list[str] = []
+        if not row.origin_node_id:
+            reasons.append("ORIGIN_NODE_MISSING")
+        if not row.destination_node_id:
+            reasons.append("DESTINATION_NODE_MISSING")
+        if row.origin_node_id and row.destination_node_id and route is None:
+            reasons.append("ROUTE_MODEL_NOT_BOUND")
+        return ShippingOpportunityRouteEvidenceResponse(
+            status_code=status_code,
+            route_id=getattr(route, "id", None),
+            route_name=getattr(route, "name", None),
+            origin_node_id=row.origin_node_id,
+            destination_node_id=row.destination_node_id,
+            origin_region_id=row.origin_region_id_cache,
+            destination_region_id=row.destination_region_id_cache,
+            not_computable_reasons=reasons,
+        )
+
+    @staticmethod
+    def _capacity_evidence(
+        analysis: VesselCandidateAnalysis | None,
+        status_code: str,
+    ) -> ShippingOpportunityCapacityEvidenceResponse:
+        return ShippingOpportunityCapacityEvidenceResponse(
+            status_code=status_code,
+            analysis_id=getattr(analysis, "id", None),
+            candidate_count=getattr(analysis, "candidate_count", 0) or 0,
+            low_confidence_count=getattr(analysis, "low_confidence_count", 0) or 0,
+            coverage_rate=getattr(analysis, "coverage_rate", None),
+            confidence_level=getattr(analysis, "confidence_level", "UNKNOWN") or "UNKNOWN",
+            generated_at=getattr(analysis, "generated_at", None),
+            not_computable_reasons=getattr(analysis, "not_computable_reasons_json", None) or [],
+            uncertainty_reasons=getattr(analysis, "uncertainty_notes_json", None) or [],
+        )
+
+    @staticmethod
+    def _pricing_evidence(row: Freight, status_code: str) -> ShippingOpportunityPricingEvidenceResponse:
+        reasons: list[str] = []
+        if not row.origin_node_id:
+            reasons.append("ORIGIN_NODE_MISSING")
+        if not row.destination_node_id:
+            reasons.append("DESTINATION_NODE_MISSING")
+        if not row.commodity_standard_id:
+            reasons.append("COMMODITY_STANDARD_MISSING")
+        if status_code == "NOT_COMPUTABLE" and not reasons:
+            reasons.append("PRICE_CONTEXT_NOT_COMPUTABLE")
+        return ShippingOpportunityPricingEvidenceResponse(
+            status_code=status_code,
+            source_layer_code="FREIGHT_DECLARED_PRICE" if row.unit_price or row.total_price else "QUOTE_CONTEXT",
+            unit_price=row.unit_price,
+            total_price=row.total_price,
+            price_unit=row.price_unit,
+            settlement_method_code=row.settlement_method_code,
+            not_computable_reasons=reasons if status_code == "NOT_COMPUTABLE" else [],
+            recommended_action_code="OPEN_QUOTE_SIMULATOR" if status_code != "NOT_COMPUTABLE" else "OPEN_FREIGHT_CLEANING",
+            uses_demo_data=False,
+        )
+
+    @staticmethod
+    def _excerpt(value: str | None, limit: int = 220) -> str | None:
+        if not value:
+            return None
+        text = " ".join(value.split())
+        return text if len(text) <= limit else f"{text[:limit]}..."
+
+    @staticmethod
+    def _warning_count(value: Any) -> int:
+        if isinstance(value, list):
+            return len(value)
+        if isinstance(value, dict):
+            warnings = value.get("warnings") or value.get("items")
+            if isinstance(warnings, list):
+                return len(warnings)
+            return 1 if value else 0
+        return 0
