@@ -60,6 +60,7 @@ from app.modules.system.schemas import ConfigTestRequest
 from scripts.purge_legacy_e2e_data import purge_legacy_e2e_data
 from scripts.seed_analysis_samples import seed_analysis_samples
 from scripts.seed_audit_samples import seed_audit_samples
+from scripts.seed_experience_scenarios import seed_experience_scenarios
 from scripts.seed_foundation_samples import seed_foundation_samples
 from scripts.seed_freight_samples import seed_freight_samples
 from scripts.seed_local_private_config import seed_local_private_config
@@ -206,9 +207,10 @@ async def seed_local_demo() -> None:
     await purge_legacy_e2e_data()
     await seed_vessel_samples()
     await seed_freight_samples()
+    await seed_route_samples()
+    await seed_experience_scenarios()
     await seed_analysis_samples()
     await seed_audit_samples()
-    await seed_route_samples()
     await run_local_acceptance()
 
 

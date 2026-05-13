@@ -267,3 +267,44 @@ Round 11 acceptance criteria:
 - Route-segment page has route/segment match samples.
 - Navigation constraints have pass/warning/blocked examples tied to vessels and lanes.
 - At least five freight samples can continue to matching and quote/price actions.
+
+Round 11 Report:
+
+- Added `scripts/seed_experience_scenarios.py` as a local-demo-only补数层.
+- Kept production seed unchanged; experience rows are explicitly marked through `FR-DEMO-*`, `FCA-DEMO-*`, `FBT-DEMO-*`, `FTI-DEMO-*`, `LOCAL_DEMO` and `DEMO_ES_MIRROR`.
+- Local-demo seed order now runs route samples before experience scenarios, and runs analysis/audit after the scenario rows are present.
+- Added 42 scenario freight samples across:
+  - `SCN_TCWUHU_AGG`
+  - `SCN_SUZHOU_NANJING_STEEL`
+  - `SCN_HUZHOU_WUHU_CEMENT`
+  - `SCN_RISK_NOT_COMPUTABLE`
+- Each scenario freight has source evidence with raw shipper quote, owner/boat-owner quote text and advanced quote configuration text. Round 11 keeps these as evidence only; formal owner quote modeling is left for Round 12.
+- Added AIS, node and route snapshots:
+  - `DEMO_AIS_EXPERIENCE_CURRENT`
+  - `DEMO_NODE_TAICANG_CURRENT`
+  - `DEMO_NODE_JIANGYIN_CURRENT`
+  - `DEMO_NODE_NANJING_CURRENT`
+  - `DEMO_NODE_WUHU_CURRENT`
+  - `DEMO_ROUTE_TAICANG_WUHU_CURRENT`
+  - `DEMO_ROUTE_SUZHOU_NANJING_CURRENT`
+  - `DEMO_ROUTE_HUZHOU_WUHU_CURRENT`
+- Rebuilt route graph data for the three demo lanes with ready line/segment geometry for local-demo route-segment matching.
+- Added freight-context vessel candidate analyses covering high match, medium match, stale AIS, high risk, blocked constraint and wrong ship-type cases.
+- Added local acceptance checks for `FR-DEMO-*`, quote-ready freights, source evidence, candidate analyses, AIS snapshot usability, node observations, route-segment samples, constraint statuses and automation/E2E pollution.
+
+Round 11 Verification Notes:
+
+- `scripts.seed_experience_scenarios` ran successfully on the current local database and produced 42 `FR-DEMO-*` rows, 6 freight candidate analyses and `DEMO_AIS_EXPERIENCE_CURRENT`.
+- The new Round 11 verification checks pass on the current local database.
+- Full `scripts.verify_local_acceptance` still fails on pre-existing local environment conditions: one old automation constraint row, missing history ES local values, external connection test statuses and an existing role-menu hierarchy issue. A full local-demo reset should clear the automation row; the remaining config and role-menu issues are not caused by Round 11.
+
+Round 12 Plan:
+
+1. Restore and harden `智能报价测算` without deleting its original business semantics.
+2. Reintroduce owner/boat-owner quote as a first-class pricing input instead of only raw evidence.
+3. Restore the advanced quote configuration panel and persist its assumptions in the quote decision request/response.
+4. Keep `智能报价测算` scoped to known-price decisioning: known shipper price, known owner quote or owner quote range, platform service fee, risk reserve, margin, tax/settlement, route cost and fallback line.
+5. Add a separate `运价预估测算` design and API contract for unknown market-price estimation based on origin, destination, tonnage, commodity, expected loading time, route computability, capacity tightness, AIS freshness, historical price facts, node/region coverage and data quality.
+6. Build pricing responses with sample size, coverage, confidence, lineage, not-computable reasons and recommended actions.
+7. Keep AI limited to explanation and summary. It must not fabricate price facts or replace deterministic pricing evidence.
+8. Update frontend entry points so quote-ready `FR-DEMO-*` samples can enter both known-price quote decision and future unknown-price freight estimate flows with analysis context preserved.

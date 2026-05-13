@@ -58,12 +58,43 @@ Additional local-demo steps:
 7. purge legacy E2E data
 8. seed vessel samples
 9. seed freight samples
-10. seed analysis samples
-11. seed audit samples
-12. seed route samples
-13. run local acceptance verification
+10. seed route samples
+11. seed experience scenarios
+12. seed analysis samples
+13. seed audit samples
+14. run local acceptance verification
 
 Demo records and `LOCAL_SAMPLE` facts are not production evidence.
+
+## Experience Scenario Seed
+
+`scripts.seed_experience_scenarios` is a local-demo-only补数层. It does not run in `production`.
+
+It adds scenario-coherent rows for:
+
+- 42 confirmed `FR-DEMO-*` freight samples.
+- `FBT-DEMO-*`, `FTI-DEMO-*`, `FCU-DEMO-*`, `FCA-DEMO-*` source evidence.
+- raw quote text preserving both shipper quote and owner/boat-owner quote.
+- AIS snapshot `DEMO_AIS_EXPERIENCE_CURRENT`.
+- node snapshots for Taicang, Jiangyin, Nanjing and Wuhu.
+- route snapshots for Taicang-Wuhu, Suzhou-Nanjing and Huzhou-Wuhu.
+- freight-context vessel candidate analyses.
+- node surrounding vessel observations, route-segment samples and navigation-constraint evidence.
+
+Realtime ES strategy:
+
+- The script first attempts to query configured realtime ES for seeded MMSI values.
+- If fewer than 8 usable positions are returned, it writes mirror data with `source_index="DEMO_ES_MIRROR"`.
+- `DEMO_ES_MIRROR` is only a local-demo fallback. It must never be used as production analytical evidence.
+
+The experience seed is designed to support manual page checks for:
+
+- opportunity sample library rows.
+- freight-to-vessel matching with high, medium, stale-AIS, high-risk, blocked-constraint and wrong-ship-type candidates.
+- node surrounding vessel observations.
+- route segment match samples.
+- navigation constraints with `PASS`, `WARNING`, `BLOCKED` and `UNKNOWN`.
+- quote-ready freight rows with origin node, destination node, commodity, tonnage and current shipper quote.
 
 ## Local Fresh Database
 

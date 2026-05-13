@@ -103,6 +103,8 @@ from app.models.vessel import (
     VesselLatestPositionSnapshot,
     VesselNameHistory,
     VesselNavigationConstraintEvidence,
+    VesselNodeObservationItem,
+    VesselNodeObservationVessel,
     VesselOperatorPeriod,
     VesselOwnerPeriod,
     VesselPersonCertificate,
@@ -114,6 +116,8 @@ from app.models.vessel import (
     VesselRecognitionFieldDiff,
     VesselRegistrationInfo,
     VesselRiskSignal,
+    VesselRouteSegmentMatchSample,
+    VesselRouteSegmentObservationItem,
     VesselSpatialObservationSnapshot,
 )
 from app.modules.analysis.service import AnalysisDashboardService
@@ -495,16 +499,20 @@ async def verify() -> list[CheckResult]:
             ("vessel AIS snapshots", await _count(session, VesselAisSnapshot), 1),
             ("vessel AIS city snapshot items", await _count(session, VesselAisCitySnapshotItem), 6),
             ("vessel latest positions", await _count(session, VesselLatestPositionSnapshot), 137),
-            ("vessel spatial snapshots", await _count(session, VesselSpatialObservationSnapshot), 1),
+            ("vessel spatial snapshots", await _count(session, VesselSpatialObservationSnapshot), 8),
+            ("vessel node observation items", await _count(session, VesselNodeObservationItem), 4),
+            ("vessel node observation vessels", await _count(session, VesselNodeObservationVessel), 48),
+            ("vessel route segment observation items", await _count(session, VesselRouteSegmentObservationItem), 9),
+            ("vessel route segment match samples", await _count(session, VesselRouteSegmentMatchSample), 72),
             ("vessel quality issues", await _count(session, VesselDataQualityIssue), 18),
             ("vessel risk signals", await _count(session, VesselRiskSignal), 18),
             ("vessel governance tasks", await _count(session, VesselGovernanceTask), 18),
             ("vessel certificate requirement rules", await _count(session, VesselCertificateRequirementRule), 3),
             ("vessel recognition diffs", await _count(session, VesselRecognitionFieldDiff), 8),
             ("vessel recognition adoptions", await _count(session, VesselRecognitionAdoptionRecord), 8),
-            ("vessel candidate analyses", await _count(session, VesselCandidateAnalysis), 1),
-            ("vessel candidate analysis items", await _count(session, VesselCandidateAnalysisItem), 10),
-            ("vessel navigation constraint evidence", await _count(session, VesselNavigationConstraintEvidence), 1),
+            ("vessel candidate analyses", await _count(session, VesselCandidateAnalysis), 7),
+            ("vessel candidate analysis items", await _count(session, VesselCandidateAnalysisItem), 70),
+            ("vessel navigation constraint evidence", await _count(session, VesselNavigationConstraintEvidence), 19),
             ("vessel blacklist signals", await _count(session, VesselBlacklistSignal), 6),
             ("vessel controller evidence", await _count(session, VesselControllerEvidence), 6),
             ("vessel affiliation evidence", await _count(session, VesselAffiliationEvidence), 6),
@@ -516,7 +524,7 @@ async def verify() -> list[CheckResult]:
             ("vessel person certificate recognitions table empty-ok", await _count(session, VesselPersonCertificateImageRecognition), 0),
             ("vessel certificate files table empty-ok", await _count(session, VesselCertificateFile), 0),
             ("vessel certificate recognitions table empty-ok", await _count(session, VesselCertificateImageRecognition), 0),
-            ("freights", await _count(session, Freight), 200),
+            ("freights", await _count(session, Freight), 282),
             ("wechat batch tasks", await _count(session, FreightBatchTask), 25),
             ("tms inbounds", await _count(session, FreightTmsInbound), 10),
             ("freight candidates", await _count(session, FreightCandidate), 40),
@@ -534,10 +542,95 @@ async def verify() -> list[CheckResult]:
             ("audit snapshots", await _count(session, AuditTaskSnapshot), 30),
             ("audit records", await _count(session, AuditRecord), 30),
             ("navigation constraints", await _count(session, NavigationConstraintPoint), 3),
-            ("shipping routes", await _count(session, ShippingRoute), 1),
+            ("shipping routes", await _count(session, ShippingRoute), 3),
         ]
         for name, actual, expected in count_checks:
             results.append(_result(name, actual >= expected, f"{actual} >= {expected}"))
+
+        demo_freight_count = await _count(session, Freight, Freight.freight_no.like("FR-DEMO-%"))
+        demo_quote_ready_count = await _count(
+            session,
+            Freight,
+            Freight.freight_no.like("FR-DEMO-%"),
+            Freight.origin_node_id.is_not(None),
+            Freight.destination_node_id.is_not(None),
+            Freight.commodity_standard_id.is_not(None),
+            Freight.estimated_tonnage.is_not(None),
+            Freight.unit_price.is_not(None),
+        )
+        demo_candidate_count = await _count(session, FreightCandidate, FreightCandidate.candidate_no.like("FCA-DEMO-%"))
+        demo_batch_count = await _count(session, FreightBatchTask, FreightBatchTask.batch_no.like("FBT-DEMO-%"))
+        demo_tms_count = await _count(session, FreightTmsInbound, FreightTmsInbound.inbound_no.like("FTI-DEMO-%"))
+        demo_owner_quote_text_count = await _count(
+            session,
+            FreightBatchTask,
+            FreightBatchTask.batch_no.like("FBT-DEMO-%"),
+            FreightBatchTask.raw_text.like("%船主%"),
+            FreightBatchTask.raw_text.like("%高级配置%"),
+        )
+        demo_candidate_analysis_count = await _count(
+            session,
+            VesselCandidateAnalysis,
+            VesselCandidateAnalysis.context_type_code == "FREIGHT_SAMPLE",
+            VesselCandidateAnalysis.source_layer_code == "LOCAL_DEMO",
+        )
+        demo_ais_positions = await _count(
+            session,
+            VesselLatestPositionSnapshot,
+            VesselLatestPositionSnapshot.snapshot_id == "DEMO_AIS_EXPERIENCE_CURRENT",
+        )
+        demo_ais_mirror_positions = await _count(
+            session,
+            VesselLatestPositionSnapshot,
+            VesselLatestPositionSnapshot.snapshot_id == "DEMO_AIS_EXPERIENCE_CURRENT",
+            VesselLatestPositionSnapshot.source_index == "DEMO_ES_MIRROR",
+        )
+        results.extend(
+            [
+                _result("experience FR-DEMO freights seeded", demo_freight_count >= 42, f"{demo_freight_count} >= 42"),
+                _result(
+                    "experience quote-ready freights seeded",
+                    demo_quote_ready_count >= 5,
+                    f"{demo_quote_ready_count} >= 5",
+                ),
+                _result("experience FCA-DEMO candidates seeded", demo_candidate_count >= 42, f"{demo_candidate_count} >= 42"),
+                _result("experience FBT-DEMO batches seeded", demo_batch_count >= 42, f"{demo_batch_count} >= 42"),
+                _result("experience FTI-DEMO inbounds seeded", demo_tms_count >= 42, f"{demo_tms_count} >= 42"),
+                _result(
+                    "experience quote evidence preserved",
+                    demo_owner_quote_text_count >= 42,
+                    f"{demo_owner_quote_text_count} >= 42 raw rows include owner quote and advanced config",
+                ),
+                _result(
+                    "experience freight candidate analyses seeded",
+                    demo_candidate_analysis_count >= 6,
+                    f"{demo_candidate_analysis_count} >= 6",
+                ),
+                _result(
+                    "experience AIS snapshot usable",
+                    demo_ais_positions >= 8 and (demo_ais_mirror_positions >= 8 or demo_ais_positions - demo_ais_mirror_positions >= 8),
+                    f"positions {demo_ais_positions} >= 8, DEMO_ES_MIRROR {demo_ais_mirror_positions}",
+                ),
+            ]
+        )
+
+        constraint_statuses = set(
+            (
+                await session.execute(
+                    select(VesselNavigationConstraintEvidence.status_code).where(
+                        VesselNavigationConstraintEvidence.source_ref.like("round11-experience%")
+                    )
+                )
+            ).scalars().all()
+        )
+        required_constraint_statuses = {"PASS", "WARNING", "BLOCKED", "UNKNOWN"}
+        results.append(
+            _result(
+                "experience navigation constraint statuses complete",
+                required_constraint_statuses.issubset(constraint_statuses),
+                ", ".join(sorted(constraint_statuses)) or "none",
+            )
+        )
 
         name_history_count = await _count(session, VesselNameHistory)
         identifier_history_count = await _count(session, VesselIdentifierHistory)
@@ -771,9 +864,22 @@ async def verify() -> list[CheckResult]:
                 NavigationConstraintPoint.code.like("E2E%") | NavigationConstraintPoint.name.like("%E2E%"),
             ),
             "routes": await _count(session, ShippingRoute, ShippingRoute.code.like("E2E%") | ShippingRoute.name.like("%E2E%")),
+            "freights": await _count(session, Freight, Freight.freight_no.like("E2E%") | Freight.source_ref_no.like("E2E%")),
         }
         e2e_left = {key: value for key, value in e2e_counts.items() if value}
         results.append(_result("legacy e2e data purged", not e2e_left, str(e2e_left or "none")))
+        automated_constraint_count = await _count(
+            session,
+            NavigationConstraintPoint,
+            NavigationConstraintPoint.name.like("自动化新增约束点-%"),
+        )
+        results.append(
+            _result(
+                "automation constraint pollution absent",
+                automated_constraint_count == 0,
+                f"{automated_constraint_count} automated constraint rows",
+            )
+        )
 
         menu_left = (
             (
