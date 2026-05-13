@@ -259,6 +259,7 @@ ROLE_MENU_CODES = {
         "ANALYSIS_ROOT",
         "ANALYSIS_PRICES",
         "ANALYSIS_QUOTE_SIMULATOR",
+        "ANALYSIS_RATE_ESTIMATOR",
         "AUDIT_ROOT",
         "ANALYSIS_TASK_LIST",
     ],
@@ -273,6 +274,7 @@ ROLE_MENU_CODES = {
         "FREIGHT_LIST",
         "FREIGHT_MANUAL_CREATE",
         "FREIGHT_NORMALIZATION_ENTRY",
+        "AUDIT_ROOT",
         "ROUTE_ROOT",
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NODES",
@@ -1171,6 +1173,18 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
+        "menu_code": "ANALYSIS_RATE_ESTIMATOR",
+        "menu_name": "运价预估测算",
+        "menu_type_code": "MENU",
+        "parent_code": "ANALYSIS_ROOT",
+        "route_path": "/analysis/rate-estimator",
+        "component_path": "modules/analysis/pages/AnalysisRateEstimatorPage",
+        "icon": "TrendCharts",
+        "sort_order": 7,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
         "menu_code": "ANALYSIS_TASK_ROOT",
         "menu_name": "分析任务",
         "menu_type_code": "DIRECTORY",
@@ -1342,7 +1356,8 @@ def _apply_production_menu_information_architecture() -> None:
 
     update("ANALYSIS_ROOT", menu_name="运价与报价中心", sort_order=50)
     update("ANALYSIS_QUOTE_SIMULATOR", parent_code="ANALYSIS_ROOT", sort_order=1)
-    update("ANALYSIS_PRICES", parent_code="ANALYSIS_ROOT", sort_order=2)
+    update("ANALYSIS_RATE_ESTIMATOR", parent_code="ANALYSIS_ROOT", sort_order=2)
+    update("ANALYSIS_PRICES", parent_code="ANALYSIS_ROOT", sort_order=3)
 
     update("AUDIT_ROOT", menu_name="数据质量与治理", icon="Select", sort_order=60)
     update("FREIGHT_NORMALIZATION", menu_name="货源清洗", parent_code="AUDIT_ROOT", sort_order=1)
@@ -1432,6 +1447,7 @@ def _apply_production_menu_information_architecture() -> None:
         "ADDRESS_CONSTRAINT_POINTS",
         "ANALYSIS_ROOT",
         "ANALYSIS_QUOTE_SIMULATOR",
+        "ANALYSIS_RATE_ESTIMATOR",
         "ANALYSIS_PRICES",
         "AUDIT_ROOT",
         "FREIGHT_NORMALIZATION",

@@ -106,6 +106,7 @@ async def purge_legacy_e2e_data() -> None:
                     select(NavigationConstraintPoint.id).where(
                         (NavigationConstraintPoint.code.like("E2E%"))
                         | (NavigationConstraintPoint.name.like("%E2E%"))
+                        | (NavigationConstraintPoint.name.like("自动化新增约束点-%"))
                     )
                 )
             )

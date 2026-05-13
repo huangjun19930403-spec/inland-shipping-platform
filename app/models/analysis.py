@@ -107,6 +107,46 @@ class AnalysisSnapshot(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class PricingDecisionRecord(Base):
+    __tablename__ = "pricing_decision_record"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    record_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    record_type_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    status_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    freight_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("freight.id"), nullable=True, index=True)
+    origin_node_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True)
+    destination_node_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True)
+    commodity_standard_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("commodity_standard.id"), nullable=True, index=True)
+    expected_loading_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    tonnage: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    current_quote: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    owner_quote_min: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    owner_quote_max: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    recommended_quote: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    estimated_low_quote: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    estimated_high_quote: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    cost_floor: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    gross_profit: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    gross_margin_rate: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    coverage_rate: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    confidence_level: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    fallback_level_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    context_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    input_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    advanced_config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    route_evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sample_evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    lineage_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    not_computable_reasons_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recommended_actions_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class FactFreightDaily(Base):
     __tablename__ = "fact_freight_daily"
 

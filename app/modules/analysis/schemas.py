@@ -336,6 +336,112 @@ class QuoteRouteEstimateResponse(BaseModel):
     generated_at: datetime
 
 
+class PricingAdvancedConfig(BaseModel):
+    handling_fee_per_ton: float = Field(default=3.2, ge=0)
+    insurance_fee_per_ton: float = Field(default=0.3, ge=0)
+    lock_fee_per_ton: float = Field(default=0, ge=0)
+    service_fee_rate: float = Field(default=0.02, ge=0, le=1)
+    tax_rate: float = Field(default=0.03, ge=0, le=1)
+    credit_days: int = Field(default=15, ge=0, le=365)
+    daily_capital_cost_rate: float = Field(default=0.0003, ge=0, le=1)
+    empty_sailing_rate: float = Field(default=0.15, ge=0, le=1)
+    fuel_cost_per_ton_km: float = Field(default=0.035, ge=0)
+
+
+class QuoteSimulatorContextResponse(BaseModel):
+    freight_id: int
+    freight_no: str
+    origin_node_id: int | None = None
+    destination_node_id: int | None = None
+    commodity_standard_id: int | None = None
+    tonnage: float | None = None
+    current_quote: float | None = None
+    owner_quote: float | None = None
+    owner_quote_min: float | None = None
+    owner_quote_max: float | None = None
+    owner_quote_text: str | None = None
+    advanced_config_text: str | None = None
+    advanced_config: dict | None = None
+    expected_loading_time: datetime | None = None
+    source_evidence: list[dict] = Field(default_factory=list)
+    not_computable_reasons: list[str] = Field(default_factory=list)
+
+
+class PricingDecisionMetric(BaseModel):
+    code: str
+    title: str
+    value: float | int | str | None = None
+    unit: str | None = None
+    description: str | None = None
+
+
+class PricingRecommendedAction(BaseModel):
+    action_code: str
+    title: str
+    target_route: str | None = None
+    query: dict = Field(default_factory=dict)
+    enabled: bool = True
+    disabled_reason: str | None = None
+
+
+class QuoteDecisionRequest(BaseModel):
+    freight_id: int | None = None
+    origin_node_id: int | None = None
+    destination_node_id: int | None = None
+    commodity_standard_id: int | None = None
+    tonnage: float | None = Field(default=None, gt=0)
+    current_quote: float | None = Field(default=None, gt=0)
+    owner_quote: float | None = Field(default=None, gt=0)
+    owner_quote_min: float | None = Field(default=None, gt=0)
+    owner_quote_max: float | None = Field(default=None, gt=0)
+    risk_profile: str = Field(default="STANDARD", pattern="^(STEADY|STANDARD|COMPETITIVE)$")
+    advanced_config: PricingAdvancedConfig = Field(default_factory=PricingAdvancedConfig)
+    route_status_code: str | None = None
+    route_distance_km: float | None = Field(default=None, gt=0)
+    route_geometry_source: str | None = None
+    route_not_computable_reasons: list[str] = Field(default_factory=list)
+
+
+class PricingDecisionResponse(BaseModel):
+    record_id: int
+    record_no: str
+    record_type_code: str
+    status_code: str
+    computable: bool
+    decision_code: str
+    conclusion: str
+    metrics: list[PricingDecisionMetric]
+    cost_floor: float | None = None
+    recommended_quote: float | None = None
+    estimated_low_quote: float | None = None
+    estimated_high_quote: float | None = None
+    gross_profit: float | None = None
+    gross_margin_rate: float | None = None
+    sample_size: int = 0
+    coverage_rate: float | None = None
+    confidence_level: str = "UNKNOWN"
+    fallback_level_code: str | None = None
+    route_evidence: dict = Field(default_factory=dict)
+    sample_evidence: dict = Field(default_factory=dict)
+    lineage: list[dict] = Field(default_factory=list)
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    recommended_actions: list[PricingRecommendedAction] = Field(default_factory=list)
+    generated_at: datetime
+
+
+class RateEstimateRequest(BaseModel):
+    freight_id: int | None = None
+    origin_node_id: int | None = None
+    destination_node_id: int | None = None
+    commodity_standard_id: int | None = None
+    tonnage: float | None = Field(default=None, gt=0)
+    expected_loading_time: datetime | None = None
+    route_status_code: str | None = None
+    route_distance_km: float | None = Field(default=None, gt=0)
+    route_geometry_source: str | None = None
+    route_not_computable_reasons: list[str] = Field(default_factory=list)
+
+
 class AnalysisJobRunQuery(BaseModel):
     module_code: str | None = None
     status_code: str | None = None

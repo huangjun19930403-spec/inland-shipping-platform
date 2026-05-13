@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -27,8 +27,12 @@ from app.modules.analysis.schemas import (
     HeatMapItem,
     PageResponse,
     PriceAnalysisOverviewResponse,
+    PricingDecisionResponse,
+    QuoteDecisionRequest,
     QuoteRouteEstimateRequest,
     QuoteRouteEstimateResponse,
+    QuoteSimulatorContextResponse,
+    RateEstimateRequest,
     RegionAnalysisQuery,
     RegionAnalysisOverviewResponse,
     RegionSupplyDemandAnalysisResponse,
@@ -39,6 +43,7 @@ from app.modules.analysis.schemas import (
     VesselRiskAnalysisResponse,
     VesselTrajectoryAnalysisResponse,
 )
+from app.modules.analysis.pricing_decision_service import PricingDecisionService
 from app.modules.analysis.service import AnalysisDashboardService, QuoteRouteEstimateService
 
 router = APIRouter()
@@ -389,6 +394,37 @@ async def estimate_quote_route(
     _ = current_user
     service = QuoteRouteEstimateService(db)
     return await service.estimate_route(body)
+
+
+@router.get("/quote-simulator/context", response_model=QuoteSimulatorContextResponse)
+async def get_quote_simulator_context(
+    freight_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    try:
+        return await PricingDecisionService(db).quote_context(freight_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/quote-simulator/decision", response_model=PricingDecisionResponse)
+async def create_quote_decision(
+    body: QuoteDecisionRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await PricingDecisionService(db).decide_quote(body, created_by=getattr(current_user, "id", None))
+
+
+@router.post("/rate-estimator/estimate", response_model=PricingDecisionResponse)
+async def estimate_freight_rate(
+    body: RateEstimateRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await PricingDecisionService(db).estimate_rate(body, created_by=getattr(current_user, "id", None))
 
 
 @router.get("/jobs", response_model=PageResponse[AnalysisJobRunResponse])

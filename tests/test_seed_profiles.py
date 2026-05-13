@@ -6,7 +6,7 @@ import pytest
 
 from app.integrations.config_keys import AMAP_ROUTE_GEOMETRY_MODE
 from scripts import seed_system_init
-from scripts.seed_system_base import _should_preserve_existing_config_value
+from scripts.seed_system_base import MENUS, ROLE_MENU_CODES, _should_preserve_existing_config_value
 
 
 @pytest.mark.asyncio
@@ -67,3 +67,10 @@ def test_system_base_upgrades_legacy_route_geometry_fallback() -> None:
         config_item=config_item,
         preserve_existing_config_values=True,
     )
+
+
+def test_system_base_includes_rate_estimator_menu() -> None:
+    menu_by_code = {item["menu_code"]: item for item in MENUS}
+
+    assert menu_by_code["ANALYSIS_RATE_ESTIMATOR"]["route_path"] == "/analysis/rate-estimator"
+    assert "ANALYSIS_RATE_ESTIMATOR" in ROLE_MENU_CODES["OPS_ANALYST"]

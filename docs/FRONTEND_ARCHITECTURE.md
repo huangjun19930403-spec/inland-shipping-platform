@@ -73,6 +73,12 @@ Important clients:
 
 Freight pages use `fetchShippingOpportunities`; old `fetchFreights` has been deleted.
 
+Pricing pages:
+
+- `AnalysisQuoteSimulatorPage.vue` is the known-price decision page. It accepts shipper quote, owner/boat-owner quote or owner quote range, risk profile and advanced cost configuration, then calls the backend decision API.
+- `AnalysisRateEstimatorPage.vue` is the unknown-market-rate estimate page. It accepts origin, destination, commodity, tonnage and expected loading time, then displays price range, fallback layer, sample size, coverage and confidence.
+- Both pages reuse the AMMS route evidence endpoint and must show map-state failure or not-computable reasons instead of drawing fake route lines.
+
 ## Page Organization
 
 - `modules/system/pages/DashboardPage.vue`

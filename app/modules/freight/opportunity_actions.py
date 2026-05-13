@@ -33,6 +33,7 @@ class ShippingOpportunityActionEvaluator:
             [
                 self._candidate_action(row, capacity_status),
                 self._quote_action(row, pricing_status),
+                self._rate_estimate_action(row),
             ]
         )
         if route_status == "PENDING_ROUTE_MODEL":
@@ -93,7 +94,7 @@ class ShippingOpportunityActionEvaluator:
         enabled = pricing_status != "NOT_COMPUTABLE"
         return ShippingOpportunityActionResponse(
             action_code="OPEN_QUOTE_SIMULATOR",
-            title="进入报价测算",
+            title="智能报价测算",
             target_route="/analysis/quote-simulator",
             query={
                 "freight_id": row.id,
@@ -106,4 +107,24 @@ class ShippingOpportunityActionEvaluator:
             enabled=enabled,
             required_fields=["origin_node_id", "destination_node_id", "commodity_standard_id"],
             disabled_reason=None if enabled else "缺少起终点或标准货品，无法报价",
+        )
+
+    @staticmethod
+    def _rate_estimate_action(row: Freight) -> ShippingOpportunityActionResponse:
+        enabled = bool(row.origin_node_id and row.destination_node_id and row.commodity_standard_id and (row.estimated_tonnage or row.max_tonnage or row.min_tonnage))
+        return ShippingOpportunityActionResponse(
+            action_code="OPEN_RATE_ESTIMATOR",
+            title="运价预估测算",
+            target_route="/analysis/rate-estimator",
+            query={
+                "freight_id": row.id,
+                "origin_node_id": row.origin_node_id,
+                "destination_node_id": row.destination_node_id,
+                "commodity_standard_id": row.commodity_standard_id,
+                "tonnage": row.estimated_tonnage or row.max_tonnage or row.min_tonnage,
+                "expected_loading_time": row.loading_time_from,
+            },
+            enabled=enabled,
+            required_fields=["origin_node_id", "destination_node_id", "commodity_standard_id", "tonnage"],
+            disabled_reason=None if enabled else "缺少起终点、标准货品或吨位，无法预估运价",
         )

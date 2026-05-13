@@ -2821,6 +2821,62 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_freight_source_ref_no'), ['source_ref_no'], unique=False)
         batch_op.create_index(batch_op.f('ix_freight_source_tms_inbound_id'), ['source_tms_inbound_id'], unique=False)
 
+    op.create_table('pricing_decision_record',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('record_no', sa.String(length=64), nullable=False),
+    sa.Column('record_type_code', sa.String(length=32), nullable=False),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('freight_id', sa.BigInteger(), nullable=True),
+    sa.Column('origin_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('destination_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('commodity_standard_id', sa.BigInteger(), nullable=True),
+    sa.Column('expected_loading_time', sa.DateTime(), nullable=True),
+    sa.Column('tonnage', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('current_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('owner_quote_min', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('owner_quote_max', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('recommended_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('estimated_low_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('estimated_high_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('cost_floor', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('gross_profit', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('gross_margin_rate', sa.Numeric(precision=8, scale=4), nullable=True),
+    sa.Column('sample_size', sa.Integer(), nullable=False),
+    sa.Column('coverage_rate', sa.Numeric(precision=5, scale=2), nullable=True),
+    sa.Column('confidence_level', sa.String(length=32), nullable=False),
+    sa.Column('fallback_level_code', sa.String(length=64), nullable=True),
+    sa.Column('context_json', sa.JSON(), nullable=True),
+    sa.Column('input_json', sa.JSON(), nullable=True),
+    sa.Column('advanced_config_json', sa.JSON(), nullable=True),
+    sa.Column('route_evidence_json', sa.JSON(), nullable=True),
+    sa.Column('sample_evidence_json', sa.JSON(), nullable=True),
+    sa.Column('result_json', sa.JSON(), nullable=True),
+    sa.Column('lineage_json', sa.JSON(), nullable=True),
+    sa.Column('not_computable_reasons_json', sa.JSON(), nullable=True),
+    sa.Column('recommended_actions_json', sa.JSON(), nullable=True),
+    sa.Column('created_by', sa.BigInteger(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['commodity_standard_id'], ['commodity_standard.id'], ),
+    sa.ForeignKeyConstraint(['destination_node_id'], ['transport_node.id'], ),
+    sa.ForeignKeyConstraint(['freight_id'], ['freight.id'], ),
+    sa.ForeignKeyConstraint(['origin_node_id'], ['transport_node.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('record_no')
+    )
+    with op.batch_alter_table('pricing_decision_record', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_commodity_standard_id'), ['commodity_standard_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_confidence_level'), ['confidence_level'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_created_by'), ['created_by'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_destination_node_id'), ['destination_node_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_expected_loading_time'), ['expected_loading_time'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_fallback_level_code'), ['fallback_level_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_freight_id'), ['freight_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_origin_node_id'), ['origin_node_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_record_no'), ['record_no'], unique=True)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_record_type_code'), ['record_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_status_code'), ['status_code'], unique=False)
+
     op.create_table('shipping_route_line',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('plan_id', sa.BigInteger(), nullable=False),
@@ -3890,6 +3946,20 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_shipping_route_line_plan_id'))
 
     op.drop_table('shipping_route_line')
+    with op.batch_alter_table('pricing_decision_record', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_status_code'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_record_type_code'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_record_no'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_origin_node_id'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_freight_id'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_fallback_level_code'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_expected_loading_time'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_destination_node_id'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_created_by'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_confidence_level'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_commodity_standard_id'))
+
+    op.drop_table('pricing_decision_record')
     with op.batch_alter_table('freight', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_source_tms_inbound_id'))
         batch_op.drop_index(batch_op.f('ix_freight_source_ref_no'))

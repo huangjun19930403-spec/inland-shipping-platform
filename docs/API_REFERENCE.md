@@ -157,11 +157,14 @@ Route:
 - `POST /api/v1/analysis/flows/route-cache/precompute`
 - `GET /api/v1/analysis/prices/overview`
 - `POST /api/v1/analysis/quote-simulator/route-estimate`
+- `GET /api/v1/analysis/quote-simulator/context`
+- `POST /api/v1/analysis/quote-simulator/decision`
+- `POST /api/v1/analysis/rate-estimator/estimate`
 - `GET /api/v1/analysis/jobs`
 - `GET /api/v1/analysis/tasks`
 - `POST /api/v1/analysis/tasks/{job_code}/trigger`
 
-Analysis responses should include evidence, lineage, quality, confidence and actions where the endpoint has been migrated to the production insight contract.
+Pricing decision responses include `metrics`, route evidence, sample evidence, lineage, coverage, confidence, not-computable reasons, recommended actions and the persisted `record_id`. `quote-simulator/decision` is for known shipper/owner price decisions; `rate-estimator/estimate` is for unknown market-rate estimation and must expose its fallback layer.
 
 ## Audit And Files
 

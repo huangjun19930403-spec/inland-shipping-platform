@@ -72,6 +72,7 @@ from app.models.analysis import (
     FactFreightNodeDaily,
     FactShipCityDaily,
     FactShipFlowDaily,
+    PricingDecisionRecord,
 )
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
@@ -121,6 +122,7 @@ from app.models.vessel import (
     VesselSpatialObservationSnapshot,
 )
 from app.modules.analysis.service import AnalysisDashboardService
+from app.modules.analysis.pricing_decision_service import PricingDecisionService
 from scripts.seed_local_private_config import (
     CONFIG_METADATA_BY_KEY,
     LOCAL_PRIVATE_CONFIG_KEYS,
@@ -205,6 +207,10 @@ VESSEL_TABLES = {
     "vessel_spatial_observation_snapshot",
 }
 
+PRICING_TABLES = {
+    "pricing_decision_record",
+}
+
 LEGACY_ROUTE_PATHS = {
     "/api/v1/ship",
     "/api/v1/ship/{ship_id}",
@@ -269,6 +275,9 @@ REQUIRED_ROUTE_PATHS = {
     "/api/v1/freight/normalization/tasks/{task_id}/suggestions/{suggestion_id}/apply",
     "/api/v1/freight/normalization/tasks/{task_id}/suggestions/{suggestion_id}/reject",
     "/api/v1/analysis/freight/node-ranking",
+    "/api/v1/analysis/quote-simulator/context",
+    "/api/v1/analysis/quote-simulator/decision",
+    "/api/v1/analysis/rate-estimator/estimate",
     "/api/v1/address/nodes/{node_id}/contacts",
     "/api/v1/address/nodes/{node_id}/photos",
     "/api/v1/files/{file_id}/content",
@@ -454,6 +463,14 @@ async def verify() -> list[CheckResult]:
             "all present" if not missing_vessel_tables else ", ".join(missing_vessel_tables),
         )
     )
+    missing_pricing_tables = sorted(PRICING_TABLES - tables)
+    results.append(
+        _result(
+            "pricing decision tables present",
+            not missing_pricing_tables,
+            "all present" if not missing_pricing_tables else ", ".join(missing_pricing_tables),
+        )
+    )
 
     route_paths = {getattr(route, "path", "") for route in app.routes}
     legacy_routes_left = sorted(path for path in LEGACY_ROUTE_PATHS if path in route_paths)
@@ -543,6 +560,7 @@ async def verify() -> list[CheckResult]:
             ("audit records", await _count(session, AuditRecord), 30),
             ("navigation constraints", await _count(session, NavigationConstraintPoint), 3),
             ("shipping routes", await _count(session, ShippingRoute), 3),
+            ("pricing decision records empty-ok", await _count(session, PricingDecisionRecord), 0),
         ]
         for name, actual, expected in count_checks:
             results.append(_result(name, actual >= expected, f"{actual} >= {expected}"))
@@ -558,6 +576,31 @@ async def verify() -> list[CheckResult]:
             Freight.estimated_tonnage.is_not(None),
             Freight.unit_price.is_not(None),
         )
+        demo_quote_ready_ids = (
+            await session.execute(
+                select(Freight.id)
+                .where(
+                    Freight.freight_no.like("FR-DEMO-%"),
+                    Freight.origin_node_id.is_not(None),
+                    Freight.destination_node_id.is_not(None),
+                    Freight.commodity_standard_id.is_not(None),
+                    Freight.estimated_tonnage.is_not(None),
+                    Freight.unit_price.is_not(None),
+                )
+                .order_by(Freight.id)
+                .limit(5)
+            )
+        ).scalars().all()
+        pricing_service = PricingDecisionService(session)
+        parsed_quote_context_count = 0
+        for freight_id in demo_quote_ready_ids:
+            context = await pricing_service.quote_context(int(freight_id))
+            if (
+                context.current_quote is not None
+                and (context.owner_quote_min is not None or context.owner_quote_max is not None)
+                and context.advanced_config_text
+            ):
+                parsed_quote_context_count += 1
         demo_candidate_count = await _count(session, FreightCandidate, FreightCandidate.candidate_no.like("FCA-DEMO-%"))
         demo_batch_count = await _count(session, FreightBatchTask, FreightBatchTask.batch_no.like("FBT-DEMO-%"))
         demo_tms_count = await _count(session, FreightTmsInbound, FreightTmsInbound.inbound_no.like("FTI-DEMO-%"))
@@ -592,6 +635,11 @@ async def verify() -> list[CheckResult]:
                     "experience quote-ready freights seeded",
                     demo_quote_ready_count >= 5,
                     f"{demo_quote_ready_count} >= 5",
+                ),
+                _result(
+                    "experience quote context parseable",
+                    parsed_quote_context_count >= 5,
+                    f"{parsed_quote_context_count} >= 5 include shipper quote, owner quote and advanced config",
                 ),
                 _result("experience FCA-DEMO candidates seeded", demo_candidate_count >= 42, f"{demo_candidate_count} >= 42"),
                 _result("experience FBT-DEMO batches seeded", demo_batch_count >= 42, f"{demo_batch_count} >= 42"),
@@ -919,6 +967,25 @@ async def verify() -> list[CheckResult]:
                 "business vessel menus present",
                 not missing_vessel_paths,
                 "all present" if not missing_vessel_paths else ", ".join(missing_vessel_paths),
+            )
+        )
+        required_pricing_paths = {
+            "/analysis/quote-simulator",
+            "/analysis/rate-estimator",
+            "/analysis/prices",
+        }
+        pricing_paths = {
+            row[0]
+            for row in (
+                await session.execute(select(SysMenu.route_path).where(SysMenu.route_path.in_(required_pricing_paths)))
+            ).all()
+        }
+        missing_pricing_paths = sorted(required_pricing_paths - pricing_paths)
+        results.append(
+            _result(
+                "pricing center menus present",
+                not missing_pricing_paths,
+                "all present" if not missing_pricing_paths else ", ".join(missing_pricing_paths),
             )
         )
         vessel_entry_rows = (

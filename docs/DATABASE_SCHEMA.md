@@ -12,7 +12,7 @@ It creates the full current schema directly. Historical patch migrations were re
 
 ## Schema Scale
 
-The current local schema has 137 business tables plus `alembic_version`. Tables are grouped by domain rather than by old backend menu.
+The current local schema has 138 business tables plus `alembic_version`. Tables are grouped by domain rather than by old backend menu.
 
 ## Foundation Data
 
@@ -107,6 +107,12 @@ Route tracks must represent real provider geometry. Blank, pending, failed and n
 - `fact_candidate_fit_daily`
 
 Fact tables must be interpreted with their data version, sample size, coverage and confidence. Local demo facts are not production evidence.
+
+## Pricing Decisions
+
+- `pricing_decision_record`
+
+This table stores both known-price quote decisions (`QUOTE_DECISION`) and unknown-market-rate estimates (`RATE_ESTIMATE`). Each row persists the request context, advanced quote configuration, route evidence, sample evidence, result metrics, coverage, confidence, lineage, not-computable reasons and recommended actions. It is an audit trail for pricing analysis, not a replacement for freight source evidence.
 
 ## Audit, System And Storage
 

@@ -207,11 +207,15 @@ async def test_opportunity_detail_includes_source_quality_route_capacity_and_pri
     assert detail.cleaning_issues[0].impact_field_code == "origin_node_id"
     cleaning_action = next(item for item in detail.actions if item.action_code == "OPEN_FREIGHT_CLEANING")
     quote_action = next(item for item in detail.actions if item.action_code == "OPEN_QUOTE_SIMULATOR")
+    rate_action = next(item for item in detail.actions if item.action_code == "OPEN_RATE_ESTIMATOR")
     assert cleaning_action.query["keyword"] == "FR-88"
     assert cleaning_action.enabled is True
     assert quote_action.query["current_quote"] == Decimal("88")
     assert quote_action.enabled is True
     assert "commodity_standard_id" in quote_action.required_fields
+    assert rate_action.target_route == "/analysis/rate-estimator"
+    assert rate_action.enabled is True
+    assert rate_action.query["tonnage"] == Decimal("2000")
 
 
 @pytest.mark.asyncio

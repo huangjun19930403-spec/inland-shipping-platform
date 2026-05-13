@@ -65,6 +65,7 @@ Additional local-demo steps:
 14. run local acceptance verification
 
 Demo records and `LOCAL_SAMPLE` facts are not production evidence.
+The local cleanup step removes legacy `E2E_*` rows and old automated constraint rows named `自动化新增约束点-*`.
 
 ## Experience Scenario Seed
 
@@ -95,6 +96,9 @@ The experience seed is designed to support manual page checks for:
 - route segment match samples.
 - navigation constraints with `PASS`, `WARNING`, `BLOCKED` and `UNKNOWN`.
 - quote-ready freight rows with origin node, destination node, commodity, tonnage and current shipper quote.
+- at least five quote-ready `FR-DEMO-*` rows whose raw evidence can populate智能报价测算 and运价预估测算.
+
+Round 12 uses the Round 11 raw evidence directly. It does not add a second pricing seed path: owner/boat-owner quote and advanced configuration are parsed from the existing `FBT-DEMO-*` / `FTI-DEMO-*` / `FCA-DEMO-*` evidence and pricing decisions are created only when a user or test runs the pricing APIs.
 
 ## Local Fresh Database
 

@@ -308,3 +308,43 @@ Round 12 Plan:
 6. Build pricing responses with sample size, coverage, confidence, lineage, not-computable reasons and recommended actions.
 7. Keep AI limited to explanation and summary. It must not fabricate price facts or replace deterministic pricing evidence.
 8. Update frontend entry points so quote-ready `FR-DEMO-*` samples can enter both known-price quote decision and future unknown-price freight estimate flows with analysis context preserved.
+
+Round 12 Report:
+
+- Added `pricing_decision_record` to the single `001_initial_schema` baseline and model layer.
+- Added `PricingDecisionService` as the backend owner for both pricing capabilities:
+  - `QUOTE_DECISION`: known shipper price plus owner/boat-owner quote or quote range.
+  - `RATE_ESTIMATE`: unknown market-rate estimation from historical samples and fallback layers.
+- Restored智能报价的船主/船户报价、报价区间、高级配置、航线证据、成本安全线、毛利、毛利率、议价/拒绝/可接决策和落库追溯。
+- Added运价预估测算 as a separate capability and page. It returns low/recommended/high price, sample size, coverage, confidence, fallback layer, route evidence, sample evidence and persisted record id.
+- Added pricing APIs:
+  - `GET /api/v1/analysis/quote-simulator/context`
+  - `POST /api/v1/analysis/quote-simulator/decision`
+  - `POST /api/v1/analysis/rate-estimator/estimate`
+- Kept `POST /api/v1/analysis/quote-simulator/route-estimate` as the shared real-route evidence endpoint.
+- Updated opportunity actions so confirmed freight samples can enter both智能报价测算 and运价预估测算 with freight context.
+- Updated seed/menu verification for the new pricing table, API routes, menu entry and Round 11 quote evidence parsing.
+- Updated product, backend, database, API, frontend and seed docs for the new pricing split.
+
+Round 12 Verification Notes:
+
+- `pytest tests/test_seed_profiles.py tests/test_analysis_quote_route_estimate.py tests/test_quote_decision_service.py tests/test_rate_estimator_service.py tests/test_shipping_opportunity_service.py` passed.
+- `pnpm type-check` passed in the frontend repo.
+- `pnpm build` passed in the frontend repo.
+- The current local SQLite database was non-destructively patched with the new `pricing_decision_record` table because it already had the rebuilt `001` revision stamped before this round changed the baseline. Production seed was rerun to sync menus without resetting demo data.
+- `scripts.verify_local_acceptance` now passes the Round 12 schema, menu, experience quote parsing and pollution checks. Remaining local failures are external/environmental: missing history ES local values (`ES_HOST`, `ES_PASSWORD`) and external connection test statuses for AMAP, ES_HISTORY, ES_REALTIME and HIFLEET.
+
+Round 13 Plan:
+
+1. Implement the Round 10货源洞察中心命名和信息架构整改 now that pricing actions are usable.
+2. Rename old freight second-level entries with code, seed, routes, page headers, breadcrumbs and docs aligned:
+   - `货源分析` -> `货源态势总览`
+   - `微信采集` -> `微信语义解析`
+   - `TMS 入站` -> `TMS 结构化入站`
+   - `采集批次` -> `解析批次监控`
+   - `候选确认` -> `候选证据池`
+   - `正式货源/运输机会` -> `机会样本库`
+   - `数据清洗` -> `质量治理与回算`
+3. Add freight-context `供需适配分析` entry instead of forcing users to discover it under the vessel menu.
+4. Move手工录入 out of the primary analysis path and keep it as a supplement action.
+5. Verify that one `FR-DEMO-*` freight can flow through data quality, route computability, ship matching,智能报价 and运价预估 with preserved context.
