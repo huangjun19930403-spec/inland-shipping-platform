@@ -253,7 +253,7 @@ def _derive_batch_next_action(entity, summary: dict[str, Any], *, parse_is_stale
     if parse_is_stale or status in {"NEW", "FAILED"}:
         return "RETRY_PARSE", "重新解析"
     if review_flow == "QUEUED_FOR_REVIEW" and pending > 0:
-        return "OPEN_PENDING_QUEUE", "去待确认货源"
+        return "OPEN_PENDING_QUEUE", "去候选证据池"
     if pending > 0:
         return "REVIEW_IN_BATCH", "进入确认"
     if candidate_count > 0:
@@ -762,7 +762,7 @@ def _to_tms_response(entity, ctx: dict[str, Any] | None = None) -> FreightTmsInb
     if status_code == "QUEUED":
         stage_message = "解析任务已提交，等待后台 worker 消费"
     elif status_code == "PARSING":
-        stage_message = "AI 正在解析 TMS 入站内容"
+        stage_message = "AI 正在解析 TMS 结构化入站内容"
     elif status_code == "PARSED":
         stage_message = f"解析完成，生成 {entity.candidate_count} 条候选货源"
     elif status_code in {"FAILED", "PARTIAL_FAILED"}:
@@ -1352,7 +1352,7 @@ class FreightNormalizationMixin:
         title = str(_first(segment, "cargo_title", "title") or "").strip()
         if not title:
             pieces = [origin_text, destination_text, commodity_name or "货源"]
-            title = " - ".join([item for item in pieces if item])[:256] or "待确认货源"
+            title = " - ".join([item for item in pieces if item])[:256] or "候选货源"
         raw_text = str(_first(segment, "raw_text", "source_text") or "").strip()
         availability_status = str(_first(segment, "availability_status_code") or "UNKNOWN").upper()
         manual_review_reason = _first(segment, "manual_review_reason", "review_reason")
@@ -1835,9 +1835,9 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             raise NotFoundError("FreightBatchTask", batch_id)
         existing = await self.candidate_repo.list_by_batch(batch_id)
         if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
-            raise ValidationError("该采集批次已有确认入库货源，不能重新解析")
+            raise ValidationError("该解析批次已有确认入库货源，不能重新解析")
         if str(getattr(batch, "review_flow_status_code", "") or "").upper() == "QUEUED_FOR_REVIEW":
-            raise ValidationError("该采集批次已移交待确认货源队列，不能重新解析")
+            raise ValidationError("该解析批次已移交候选证据池，不能重新解析")
         if batch.status_code == "PARSING":
             stale_seconds = await self._stale_heartbeat_seconds()
             heartbeat = batch.parse_heartbeat_at or batch.updated_at or batch.started_at
@@ -1889,9 +1889,9 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             raise NotFoundError("FreightBatchTask", batch_id)
         existing = await self.candidate_repo.list_by_batch(batch_id)
         if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
-            raise ValidationError("该采集批次已有确认入库货源，不能重新解析")
+            raise ValidationError("该解析批次已有确认入库货源，不能重新解析")
         if str(getattr(batch, "review_flow_status_code", "") or "").upper() == "QUEUED_FOR_REVIEW":
-            raise ValidationError("该采集批次已移交待确认货源队列，不能重新解析")
+            raise ValidationError("该解析批次已移交候选证据池，不能重新解析")
         if batch.status_code == "PARSED" and existing:
             return await self.get_detail(batch_id)
         started = datetime.utcnow()
@@ -2276,7 +2276,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         if batch is None:
             raise NotFoundError("FreightBatchTask", batch_id)
         if batch.status_code not in {"PARSED", "PARTIAL_FAILED"}:
-            raise ValidationError("只有解析完成的批次可以移交待确认货源队列")
+            raise ValidationError("只有解析完成的批次可以移交候选证据池")
         candidates = await self.candidate_repo.list_by_batch(batch_id)
         pending_count = sum(1 for item in candidates if item.status_code == "PENDING")
         if pending_count <= 0:
@@ -2287,7 +2287,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
             batch_id=batch_id,
             handoff_count=pending_count,
             review_flow_status_code="QUEUED_FOR_REVIEW",
-            message=f"已移交 {pending_count} 条候选货源到待确认货源队列",
+            message=f"已移交 {pending_count} 条候选货源到候选证据池",
         )
 
 
@@ -3067,7 +3067,7 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
                 status_code="RUNNING",
                 stage_code="REBUILD_ANALYSIS",
                 stage_name="重算分析事实",
-                stage_message="自动提升已回填，正在重算受影响的货源分析事实",
+                stage_message="自动提升已回填，正在重算受影响的货源态势事实",
                 progress_percent=86,
             )
             await self._rebuild_affected_analysis(min(affected_dates), max(affected_dates))

@@ -566,7 +566,7 @@ async def seed_freight_samples() -> None:
                         action_code="CONFIRM",
                         before_json={"status_code": "PENDING"},
                         after_json={"status_code": "CONFIRMED", "freight_id": confirmed_freight_id},
-                        feedback_remark="本地样例：AI 候选确认入库",
+                        feedback_remark="本地样例：AI 候选证据入库",
                         operator_id=1,
                         operated_at=confirmed_at or now,
                         created_at=confirmed_at or now,

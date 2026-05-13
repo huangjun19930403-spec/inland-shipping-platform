@@ -988,6 +988,49 @@ async def verify() -> list[CheckResult]:
                 "all present" if not missing_pricing_paths else ", ".join(missing_pricing_paths),
             )
         )
+        freight_menu_rows = (
+            await session.execute(
+                select(SysMenu.menu_code, SysMenu.menu_name, SysMenu.route_path, SysMenu.sort_order, SysMenu.visible_flag)
+                .where(SysMenu.parent_id == select(SysMenu.id).where(SysMenu.menu_code == "FREIGHT_ROOT").scalar_subquery())
+                .order_by(SysMenu.sort_order)
+            )
+        ).all()
+        visible_freight_names = [row.menu_name for row in freight_menu_rows if row.visible_flag == 1]
+        required_freight_names = [
+            "货源态势总览",
+            "微信语义解析",
+            "TMS 结构化入站",
+            "解析批次监控",
+            "候选证据池",
+            "机会样本库",
+            "供需适配分析",
+            "质量治理与回算",
+        ]
+        stale_freight_names = {"货源分析", "微信采集", "TMS 入站", "采集批次", "候选确认", "运输机会", "数据清洗", "手工录入"}
+        results.append(
+            _result(
+                "freight insight menu IA renamed",
+                visible_freight_names == required_freight_names and not stale_freight_names.intersection(visible_freight_names),
+                " > ".join(visible_freight_names),
+            )
+        )
+        freight_menu_map = {row.menu_code: row for row in freight_menu_rows}
+        manual_menu = freight_menu_map.get("FREIGHT_MANUAL_CREATE")
+        fit_menu = freight_menu_map.get("FREIGHT_SUPPLY_DEMAND_FIT")
+        results.append(
+            _result(
+                "freight supplement create hidden",
+                manual_menu is not None and manual_menu.menu_name == "补录样本" and manual_menu.visible_flag == 0,
+                str((manual_menu.menu_name, manual_menu.visible_flag) if manual_menu else "missing"),
+            )
+        )
+        results.append(
+            _result(
+                "freight supply-demand fit entry present",
+                fit_menu is not None and fit_menu.route_path == "/freight/supply-demand-fit" and fit_menu.visible_flag == 1,
+                str((fit_menu.route_path, fit_menu.visible_flag) if fit_menu else "missing"),
+            )
+        )
         vessel_entry_rows = (
             await session.execute(
                 select(SysMenu.menu_code, SysMenu.route_path, SysMenu.component_path).where(

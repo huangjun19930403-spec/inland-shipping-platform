@@ -250,5 +250,6 @@ async def test_opportunity_detail_explains_not_computable_fields(session: AsyncS
         set(detail.quality.not_computable_reasons)
     )
     disabled = next(item for item in detail.actions if item.action_code == "OPEN_CANDIDATE_VESSELS")
+    assert disabled.target_route == "/freight/supply-demand-fit"
     assert disabled.enabled is False
     assert disabled.disabled_reason

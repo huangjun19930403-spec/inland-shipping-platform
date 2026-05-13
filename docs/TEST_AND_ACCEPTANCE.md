@@ -40,11 +40,12 @@ With backend on `127.0.0.1:8000` and frontend on `127.0.0.1:5173`:
    - 数据质量与治理
    - 系统配置
 3. Open `/freight/list`.
-4. Confirm the page title is `运输机会`.
+4. Confirm the page title is `机会样本库`.
 5. Confirm it shows backend aggregate total, not current-page tonnage cards.
 6. Open evidence drawer and confirm lineage/quality/actions render.
-7. Open flow map and quote simulator map-state panels.
-8. Confirm blank maps are replaced by READY/PENDING/FAILED/NOT_COMPUTABLE state messaging.
+7. Open `/freight/supply-demand-fit` and confirm it enters freight-context candidate analysis.
+8. Open flow map and quote simulator map-state panels.
+9. Confirm blank maps are replaced by READY/PENDING/FAILED/NOT_COMPUTABLE state messaging.
 
 ## API Acceptance
 
@@ -84,6 +85,7 @@ Local-demo seed may create demo data, but it must stay visibly isolated and must
 ## Quality Gates
 
 - No menu points to a missing route.
+- 货源洞察中心菜单按 `货源态势总览 / 微信语义解析 / TMS 结构化入站 / 解析批次监控 / 候选证据池 / 机会样本库 / 供需适配分析 / 质量治理与回算` 排列。
 - No frontend page uses deleted `fetchFreights`.
 - No backend route exposes deleted `GET /api/v1/freight`.
 - No KPI card represents page-local rows as whole-query metrics.

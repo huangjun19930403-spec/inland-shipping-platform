@@ -39,6 +39,8 @@ The frontend menu mirrors backend seed:
 - 数据质量与治理
 - 系统配置
 
+货源洞察中心二级入口固定为：货源态势总览、微信语义解析、TMS 结构化入站、解析批次监控、候选证据池、机会样本库、供需适配分析、质量治理与回算。`/freight/manual-create` 保留为隐藏补录动作，不再作为二级菜单展示。
+
 ## Global Analysis Context
 
 `src/stores/analysisContext.ts` persists `AnalysisContext` in local storage and exposes query conversion for pages.

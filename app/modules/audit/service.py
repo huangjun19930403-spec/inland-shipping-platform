@@ -49,7 +49,7 @@ _OBJECT_TYPE_META = {
     "VESSEL_AFFILIATION_EVIDENCE": ("挂靠关系证据", "primary"),
     "VESSEL_RISK_REVIEW": ("船舶风险复核", "danger"),
     "VESSEL_BLACKLIST_SIGNAL": ("船舶名单信号", "danger"),
-    "FREIGHT": ("运输机会", "danger"),
+    "FREIGHT": ("机会样本", "danger"),
 }
 _CHANGE_TYPE_META = {
     "CREATE": ("新增", "success"),

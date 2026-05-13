@@ -190,7 +190,7 @@ async def test_current_user_menus_are_filtered_by_permission_code(session: Async
     read_menu = SysMenu(
         parent_id=None,
         menu_code="FREIGHT_LIST",
-        menu_name="运输机会",
+        menu_name="机会样本库",
         menu_type_code="MENU",
         route_path="/freight/list",
         component_path=None,
@@ -203,7 +203,7 @@ async def test_current_user_menus_are_filtered_by_permission_code(session: Async
     write_menu = SysMenu(
         parent_id=None,
         menu_code="FREIGHT_CREATE",
-        menu_name="手工录入",
+        menu_name="补录样本",
         menu_type_code="MENU",
         route_path="/freight/manual-create",
         component_path=None,

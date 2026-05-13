@@ -348,3 +348,29 @@ Round 13 Plan:
 3. Add freight-context `供需适配分析` entry instead of forcing users to discover it under the vessel menu.
 4. Move手工录入 out of the primary analysis path and keep it as a supplement action.
 5. Verify that one `FR-DEMO-*` freight can flow through data quality, route computability, ship matching,智能报价 and运价预估 with preserved context.
+
+Round 13 Report:
+
+- Rebuilt the货源洞察中心 second-level information architecture in production seed and frontend fallback menu.
+- Renamed visible entries to `货源态势总览 / 微信语义解析 / TMS 结构化入站 / 解析批次监控 / 候选证据池 / 机会样本库 / 供需适配分析 / 质量治理与回算`.
+- Moved `/freight/manual-create` out of primary navigation. The route remains available as a hidden `补录样本` action from the opportunity sample library.
+- Added `/freight/supply-demand-fit` as the freight-context entry for existing vessel candidate analysis. It defaults to `FREIGHT_SAMPLE` context and keeps the underlying candidate analysis service instead of creating a shell page.
+- Normalized structured local-demo candidate analysis `data_sources_json` in the response layer so `DEMO_ES_MIRROR` / `LOCAL_DEMO` evidence does not break the candidate analysis API while the public response remains `list[str]`.
+- Updated freight page headers, buttons, empty states, error copy, breadcrumbs, dashboard quick links and opportunity actions to use the new analysis-platform language.
+- Updated seed profile tests, local acceptance checks and frontend/backend documentation for the new menu contract.
+
+Round 13 Verification Notes:
+
+- Backend focused tests passed: `pytest tests/test_vessel_candidate_analysis.py tests/test_seed_profiles.py tests/test_shipping_opportunity_service.py tests/test_security_permissions.py`.
+- Frontend checks passed: `pnpm type-check` and `pnpm build`.
+- Production seed was rerun to refresh the local menu tree; the visible freight menu now appears in the expected order and `补录样本` remains hidden.
+- Browser verification confirmed `/freight` redirects to `/analysis/freight`, old freight submenu names are not visible, and `/freight/supply-demand-fit` can list `FREIGHT_SAMPLE` histories and open candidate-ship rows.
+- `scripts.verify_local_acceptance` passes the Round 13 menu, hidden supplement route and supply-demand entry checks. Remaining failures are external/environmental: missing history ES local values (`ES_HOST`, `ES_PASSWORD`) and external connection test statuses for AMAP, ES_HISTORY, ES_REALTIME and HIFLEET.
+
+Round 14 Plan:
+
+1. Enhance `货源态势总览` from chart aggregation into an insight workbench.
+2. Add problem-oriented insight cards for supply growth, route concentration, node quality gaps, price outliers and capacity-matching gaps.
+3. Make chart/table/map clicks write an `AnalysisContext` and drill into `机会样本库`, `供需适配分析`, `质量治理与回算`, `智能报价测算` or `运价预估测算`.
+4. Move long lineage, not-computable reasons and quality impact into an evidence drawer instead of scattering them across chart surfaces.
+5. Add acceptance checks that one `FR-DEMO-*` lane can move from态势 insight to样本列表, candidate fit, quote decision and rate estimate with context preserved.

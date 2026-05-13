@@ -134,7 +134,7 @@ SEQUENCE_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "biz_code": "FREIGHT_BATCH_NO",
-        "biz_name": "微信采集批次号",
+        "biz_name": "微信语义解析批次号",
         "target_table": "freight_batch_task",
         "target_column": "batch_no",
         "prefix": "FBT",
@@ -145,11 +145,11 @@ SEQUENCE_DEFINITIONS: list[dict[str, Any]] = [
         "step": 1,
         "reset_rule": "DAY",
         "is_enabled": True,
-        "remark": "微信文本货源采集批次号",
+        "remark": "微信文本货源语义解析批次号",
     },
     {
         "biz_code": "FREIGHT_TMS_INBOUND_NO",
-        "biz_name": "TMS 入站记录号",
+        "biz_name": "TMS 结构化入站记录号",
         "target_table": "freight_tms_inbound",
         "target_column": "inbound_no",
         "prefix": "FTI",

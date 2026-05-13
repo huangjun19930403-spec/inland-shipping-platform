@@ -130,7 +130,7 @@ ADDITIONAL_ROLES = [
     {
         "role_code": "BUSINESS_INPUTTER",
         "role_name": "业务录入员",
-        "description": "负责货源录入、微信/TMS 采集和候选确认",
+        "description": "负责货源补录、微信/TMS 解析和候选证据确认",
         "status_code": "ACTIVE",
         "sort_order": 4,
     },
@@ -144,6 +144,7 @@ ROLE_PERMISSION_CODES = {
         "COMMODITY:ALL",
         "VESSEL:ALL",
         "ROUTE:ALL",
+        "ANALYSIS:READ",
         "AUDIT:ALL",
         "FREIGHT:ALL",
         "STORAGE:ALL",
@@ -180,9 +181,10 @@ ROLE_MENU_CODES = {
         "FREIGHT_BATCHES",
         "FREIGHT_CANDIDATES",
         "FREIGHT_LIST",
-        "FREIGHT_MANUAL_CREATE",
+        "FREIGHT_SUPPLY_DEMAND_FIT",
         "FREIGHT_NORMALIZATION_ENTRY",
         "ANALYSIS_FREIGHT",
+        "FREIGHT_MANUAL_CREATE",
         "VESSEL_ROOT",
         "VESSEL_ASSET_GROUP",
         "VESSEL_ASSETS",
@@ -228,6 +230,7 @@ ROLE_MENU_CODES = {
         "DASHBOARD",
         "FREIGHT_ROOT",
         "FREIGHT_LIST",
+        "FREIGHT_SUPPLY_DEMAND_FIT",
         "ANALYSIS_FREIGHT",
         "VESSEL_ROOT",
         "VESSEL_ASSET_GROUP",
@@ -272,7 +275,6 @@ ROLE_MENU_CODES = {
         "FREIGHT_BATCHES",
         "FREIGHT_CANDIDATES",
         "FREIGHT_LIST",
-        "FREIGHT_MANUAL_CREATE",
         "FREIGHT_NORMALIZATION_ENTRY",
         "AUDIT_ROOT",
         "ROUTE_ROOT",
@@ -519,27 +521,27 @@ PERMISSIONS = [
     },
     {
         "permission_code": "FREIGHT:ALL",
-        "permission_name": "货源采集全量权限",
+        "permission_name": "货源洞察全量权限",
         "permission_type_code": "API",
         "resource_path": "/api/v1/freight/*",
         "action_code": "ALL",
-        "description": "运输机会、微信/TMS 采集、AI 线索切分和候选确认权限",
+        "description": "机会样本、微信/TMS 解析、AI 线索切分和候选证据权限",
     },
     {
         "permission_code": "FREIGHT:READ",
-        "permission_name": "货源采集查看权限",
+        "permission_name": "货源洞察查看权限",
         "permission_type_code": "API",
         "resource_path": "/api/v1/freight/*",
         "action_code": "READ",
-        "description": "查看运输机会、微信/TMS 采集和候选货源",
+        "description": "查看机会样本、微信/TMS 解析和候选证据",
     },
     {
         "permission_code": "FREIGHT:WRITE",
-        "permission_name": "货源采集维护权限",
+        "permission_name": "货源洞察维护权限",
         "permission_type_code": "API",
         "resource_path": "/api/v1/freight/*",
         "action_code": "WRITE",
-        "description": "维护运输机会、微信/TMS 采集、解析和候选确认",
+        "description": "维护机会样本、微信/TMS 解析和候选证据确认",
     },
     {
         "permission_code": "STORAGE:ALL",
@@ -973,7 +975,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_ROOT",
-        "menu_name": "货源采集",
+        "menu_name": "货源洞察中心",
         "menu_type_code": "DIRECTORY",
         "route_path": None,
         "component_path": None,
@@ -984,7 +986,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_WECHAT_WORKBENCH",
-        "menu_name": "微信采集",
+        "menu_name": "微信语义解析",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/wechat",
@@ -996,7 +998,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_CANDIDATES",
-        "menu_name": "待确认货源",
+        "menu_name": "候选证据池",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/candidates",
@@ -1008,7 +1010,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_BATCHES",
-        "menu_name": "采集批次",
+        "menu_name": "解析批次监控",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/batches",
@@ -1020,7 +1022,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_MANUAL_CREATE",
-        "menu_name": "手工录入",
+        "menu_name": "补录样本",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/manual-create",
@@ -1032,7 +1034,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_LIST",
-        "menu_name": "运输机会",
+        "menu_name": "机会样本库",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/list",
@@ -1044,7 +1046,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_NORMALIZATION",
-        "menu_name": "数据清洗",
+        "menu_name": "质量治理与回算",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/normalization",
@@ -1056,7 +1058,7 @@ MENUS = [
     },
     {
         "menu_code": "FREIGHT_TMS_INBOUNDS",
-        "menu_name": "TMS 入站",
+        "menu_name": "TMS 结构化入站",
         "menu_type_code": "MENU",
         "parent_code": "FREIGHT_ROOT",
         "route_path": "/freight/tms-inbounds",
@@ -1102,7 +1104,7 @@ MENUS = [
     },
     {
         "menu_code": "ANALYSIS_FREIGHT",
-        "menu_name": "货源分析",
+        "menu_name": "货源态势总览",
         "menu_type_code": "MENU",
         "parent_code": "ANALYSIS_ROOT",
         "route_path": "/analysis/freight",
@@ -1303,20 +1305,33 @@ def _apply_production_menu_information_architecture() -> None:
     update("DASHBOARD", menu_name="经营驾驶舱", parent_code="OVERVIEW_ROOT", sort_order=1)
 
     update("FREIGHT_ROOT", menu_name="货源洞察中心", sort_order=20)
-    update("FREIGHT_WECHAT_WORKBENCH", parent_code="FREIGHT_ROOT", sort_order=1)
-    update("FREIGHT_TMS_INBOUNDS", parent_code="FREIGHT_ROOT", sort_order=2)
-    update("FREIGHT_BATCHES", parent_code="FREIGHT_ROOT", sort_order=3)
-    update("FREIGHT_CANDIDATES", menu_name="候选确认", parent_code="FREIGHT_ROOT", sort_order=4)
-    update("FREIGHT_LIST", menu_name="运输机会", parent_code="FREIGHT_ROOT", sort_order=5)
-    update("FREIGHT_MANUAL_CREATE", parent_code="FREIGHT_ROOT", sort_order=6)
+    update("ANALYSIS_FREIGHT", menu_name="货源态势总览", parent_code="FREIGHT_ROOT", sort_order=1)
+    update("FREIGHT_WECHAT_WORKBENCH", menu_name="微信语义解析", parent_code="FREIGHT_ROOT", sort_order=2)
+    update("FREIGHT_TMS_INBOUNDS", menu_name="TMS 结构化入站", parent_code="FREIGHT_ROOT", sort_order=3)
+    update("FREIGHT_BATCHES", menu_name="解析批次监控", parent_code="FREIGHT_ROOT", sort_order=4)
+    update("FREIGHT_CANDIDATES", menu_name="候选证据池", parent_code="FREIGHT_ROOT", sort_order=5)
+    update("FREIGHT_LIST", menu_name="机会样本库", parent_code="FREIGHT_ROOT", sort_order=6)
+    by_code["FREIGHT_SUPPLY_DEMAND_FIT"] = {
+        "menu_code": "FREIGHT_SUPPLY_DEMAND_FIT",
+        "menu_name": "供需适配分析",
+        "menu_type_code": "MENU",
+        "parent_code": "FREIGHT_ROOT",
+        "route_path": "/freight/supply-demand-fit",
+        "component_path": "modules/vessel/pages/VesselCandidateAnalysisPage",
+        "permission_code": "VESSEL:READ",
+        "icon": "DataAnalysis",
+        "sort_order": 7,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    }
     by_code["FREIGHT_NORMALIZATION_ENTRY"] = _route_menu(
         "FREIGHT_NORMALIZATION",
         "FREIGHT_NORMALIZATION_ENTRY",
-        "数据清洗",
+        "质量治理与回算",
         parent_code="FREIGHT_ROOT",
-        sort_order=7,
+        sort_order=8,
     )
-    update("ANALYSIS_FREIGHT", menu_name="货源分析", parent_code="FREIGHT_ROOT", sort_order=8)
+    update("FREIGHT_MANUAL_CREATE", menu_name="补录样本", parent_code="FREIGHT_ROOT", sort_order=98, visible_flag=0)
 
     update("VESSEL_ROOT", menu_name="运力中心", sort_order=30)
     update("VESSEL_ASSET_GROUP", menu_name="可用运力池", parent_code="VESSEL_ROOT", sort_order=1)
@@ -1416,9 +1431,10 @@ def _apply_production_menu_information_architecture() -> None:
         "FREIGHT_BATCHES",
         "FREIGHT_CANDIDATES",
         "FREIGHT_LIST",
-        "FREIGHT_MANUAL_CREATE",
+        "FREIGHT_SUPPLY_DEMAND_FIT",
         "FREIGHT_NORMALIZATION_ENTRY",
         "ANALYSIS_FREIGHT",
+        "FREIGHT_MANUAL_CREATE",
         "VESSEL_ROOT",
         "VESSEL_ASSET_GROUP",
         "VESSEL_ASSETS",

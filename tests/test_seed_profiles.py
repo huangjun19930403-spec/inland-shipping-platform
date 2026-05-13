@@ -74,3 +74,31 @@ def test_system_base_includes_rate_estimator_menu() -> None:
 
     assert menu_by_code["ANALYSIS_RATE_ESTIMATOR"]["route_path"] == "/analysis/rate-estimator"
     assert "ANALYSIS_RATE_ESTIMATOR" in ROLE_MENU_CODES["OPS_ANALYST"]
+
+
+def test_system_base_uses_freight_insight_information_architecture() -> None:
+    freight_children = [
+        item
+        for item in MENUS
+        if item.get("parent_code") == "FREIGHT_ROOT" and item.get("visible_flag") == 1
+    ]
+    ordered_names = [item["menu_name"] for item in sorted(freight_children, key=lambda item: item["sort_order"])]
+    menu_by_code = {item["menu_code"]: item for item in MENUS}
+
+    assert ordered_names == [
+        "货源态势总览",
+        "微信语义解析",
+        "TMS 结构化入站",
+        "解析批次监控",
+        "候选证据池",
+        "机会样本库",
+        "供需适配分析",
+        "质量治理与回算",
+    ]
+    assert menu_by_code["FREIGHT_MANUAL_CREATE"]["visible_flag"] == 0
+    assert menu_by_code["FREIGHT_MANUAL_CREATE"]["menu_name"] == "补录样本"
+    assert menu_by_code["FREIGHT_SUPPLY_DEMAND_FIT"]["route_path"] == "/freight/supply-demand-fit"
+    assert menu_by_code["FREIGHT_SUPPLY_DEMAND_FIT"]["permission_code"] == "VESSEL:READ"
+    assert "FREIGHT_SUPPLY_DEMAND_FIT" in ROLE_MENU_CODES["DATA_STEWARD"]
+    assert "FREIGHT_SUPPLY_DEMAND_FIT" in ROLE_MENU_CODES["OPS_ANALYST"]
+    assert "FREIGHT_SUPPLY_DEMAND_FIT" not in ROLE_MENU_CODES["BUSINESS_INPUTTER"]

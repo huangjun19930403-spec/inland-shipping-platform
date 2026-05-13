@@ -81,8 +81,8 @@ class ShippingOpportunityActionEvaluator:
         enabled = capacity_status != "NOT_COMPUTABLE"
         return ShippingOpportunityActionResponse(
             action_code="OPEN_CANDIDATE_VESSELS",
-            title="船货适配分析",
-            target_route="/vessels/candidate-analysis",
+            title="供需适配分析",
+            target_route="/freight/supply-demand-fit",
             query={"context_type_code": "FREIGHT_SAMPLE", "freight_id": row.id},
             enabled=enabled,
             required_fields=["freight_id", "origin_node_id", "destination_node_id", "commodity_standard_id"],

@@ -81,6 +81,7 @@ from app.modules.analysis.schemas import (
     VesselTrajectoryAnalysisResponse,
 )
 from app.modules.analysis.map_state import build_map_state_payload, default_retry_action
+from app.modules.analysis.job_catalog import MODULE_NAMES
 from app.modules.analysis.quote_route_service import QuoteRouteEstimateService
 from app.modules.system.runtime_config import RuntimeConfigService
 
@@ -165,12 +166,13 @@ def _evidence(
 
 
 def _job_to_response(entity: AnalysisJobRun) -> AnalysisJobRunResponse:
+    module_name = MODULE_NAMES.get(entity.module_code, entity.module_name)
     return AnalysisJobRunResponse(
         id=entity.id,
         job_code=entity.job_code,
         job_name=entity.job_name,
         module_code=entity.module_code,
-        module_name=entity.module_name,
+        module_name=module_name,
         stat_date_from=entity.stat_date_from,
         stat_date_to=entity.stat_date_to,
         status_code=entity.status_code,
@@ -190,12 +192,13 @@ def _job_to_response(entity: AnalysisJobRun) -> AnalysisJobRunResponse:
 
 
 def _task_to_response(entity: AnalysisJobDefinition) -> AnalysisTaskResponse:
+    module_name = MODULE_NAMES.get(entity.module_code, entity.module_name)
     return AnalysisTaskResponse(
         id=entity.id,
         job_code=entity.job_code,
         job_name=entity.job_name,
         module_code=entity.module_code,
-        module_name=entity.module_name,
+        module_name=module_name,
         description=entity.description,
         source_tables_json=entity.source_tables_json,
         target_tables_json=entity.target_tables_json,
@@ -756,7 +759,7 @@ class AnalysisDashboardService:
                 source_tables=["freight", "freight_candidate", "fact_freight_daily", "fact_freight_flow_daily"],
                 sample_count=int(totals["freight_count"]),
                 actions=[
-                    AnalysisActionBlock(action_code="OPEN_FREIGHT_LIST", title="查看运输机会", target_route="/freight/list"),
+                    AnalysisActionBlock(action_code="OPEN_FREIGHT_LIST", title="查看机会样本库", target_route="/freight/list"),
                     AnalysisActionBlock(action_code="OPEN_FREIGHT_QUALITY", title="处理货源清洗", target_route="/freight/normalization"),
                 ],
                 uncertainty_reasons=["分页列表指标不得替代本接口聚合结果"],

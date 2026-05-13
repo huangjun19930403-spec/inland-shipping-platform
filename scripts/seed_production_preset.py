@@ -18,6 +18,8 @@ from scripts.seed_commodity_taxonomy import seed_commodity_taxonomy
 from scripts.seed_navigation_constraints import seed_navigation_constraints
 from scripts.seed_system_base import seed_system_base
 from scripts.seed_water_systems import seed_water_systems
+from app.core.database import AsyncSessionLocal
+from app.modules.analysis.statistics import seed_analysis_job_definitions
 
 
 async def seed_production_preset() -> None:
@@ -28,6 +30,9 @@ async def seed_production_preset() -> None:
     await seed_commodity_taxonomy()
     await seed_commodity_standards()
     await seed_navigation_constraints()
+    async with AsyncSessionLocal() as session:
+        await seed_analysis_job_definitions(session)
+        await session.commit()
     await seed_system_base(preserve_existing_config_values=True)
 
 

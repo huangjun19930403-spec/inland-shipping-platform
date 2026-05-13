@@ -1297,7 +1297,7 @@ class DashScopeQwenFreightParserClient:
                 "输入可能是一条消息内包含多条标准化运单、数组或嵌套字段。"
                 "每条可发布运单输出为一个 segments 元素；未知字段必须是 null，不要编造。"
             )
-            user_hint = "请把 TMS 运单消息转成待确认货源候选："
+            user_hint = "请把 TMS 运单消息转成候选证据池货源候选："
             source_payload = raw_content
         else:
             system_hint = (

@@ -779,7 +779,7 @@ class VesselCandidateAnalysisService:
             low_confidence_count=analysis.low_confidence_count,
             not_computable_reasons=analysis.not_computable_reasons_json or [],
             uncertainty_notes=analysis.uncertainty_notes_json or [],
-            data_sources=analysis.data_sources_json or [],
+            data_sources=self._data_source_codes(analysis.data_sources_json),
             analysis_center_path=self._analysis_center_path(analysis),
             source_context_path=self._source_context_path(analysis),
             context_quality_gaps=await self._context_quality_gaps(analysis),
@@ -1022,7 +1022,7 @@ class VesselCandidateAnalysisService:
             risk_reasons=row.risk_reasons_json or [],
             uncertainty_reasons=row.uncertainty_reasons_json or [],
             not_computable_reasons=row.not_computable_reasons_json or [],
-            data_sources=row.data_sources_json or [],
+            data_sources=self._data_source_codes(row.data_sources_json),
             annotations=annotations,
         )
 
@@ -1139,6 +1139,24 @@ class VesselCandidateAnalysisService:
         for value in values:
             if value and value not in result:
                 result.append(value)
+        return result
+
+    def _data_source_codes(self, values: list[Any] | None) -> list[str]:
+        result: list[str] = []
+        for value in values or []:
+            code: str | None = None
+            if isinstance(value, str):
+                code = value
+            elif isinstance(value, dict):
+                for key in ("source_layer", "source_index", "snapshot_id", "ais_snapshot_id", "route_snapshot_id"):
+                    raw = value.get(key)
+                    if raw:
+                        code = str(raw)
+                        break
+            elif value:
+                code = str(value)
+            if code and code not in result:
+                result.append(code)
         return result
 
     def _contains_forbidden_terms(self, value: str | None) -> bool:
