@@ -82,12 +82,14 @@ Important files:
 - `app/modules/analysis/router.py`
 - `app/modules/analysis/service.py`
 - `app/modules/analysis/pricing_decision_service.py`
+- `app/modules/analysis/rate_estimation.py`
+- `app/modules/analysis/freight_insights.py`
 - `app/modules/analysis/statistics.py`
 - `app/modules/analysis/job_catalog.py`
 
 `statistics.py` builds daily facts. Production analysis must not treat local sample facts as real external evidence.
 
-`PricingDecisionService` owns pricing decision logic. Known-price quote decisions and unknown-market-rate estimates are persisted in `pricing_decision_record` with input context, advanced configuration, route evidence, sample evidence, coverage, confidence, lineage and recommended actions.
+`PricingDecisionService` owns known-price quote decision orchestration and persistence. `RateSampleEstimator` owns unknown-market-rate comparable-sample selection, weighting, fallback trace and quality warnings. Pricing records are persisted in `pricing_decision_record` with input context, advanced configuration, route evidence, sample evidence, coverage, confidence, lineage and recommended actions.
 
 ### Governance And System
 

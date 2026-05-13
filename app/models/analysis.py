@@ -110,7 +110,7 @@ class AnalysisSnapshot(Base):
 class PricingDecisionRecord(Base):
     __tablename__ = "pricing_decision_record"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     record_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     record_type_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     status_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)

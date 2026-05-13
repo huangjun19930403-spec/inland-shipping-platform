@@ -106,6 +106,19 @@ class AnalysisActionBlock(BaseModel):
     disabled_reason: str | None = None
 
 
+class AnalysisInsightBlock(BaseModel):
+    insight_code: str
+    title: str
+    conclusion: str
+    severity_code: str = "INFO"
+    sample_size: int = 0
+    coverage_rate: float | None = None
+    confidence_level: str = "UNKNOWN"
+    evidence: list[dict] = Field(default_factory=list)
+    not_computable_reasons: list[str] = Field(default_factory=list)
+    recommended_actions: list[AnalysisActionBlock] = Field(default_factory=list)
+
+
 class AnalysisMapStateBlock(BaseModel):
     status_code: str
     provider_code: str = "AMMS"
@@ -208,6 +221,7 @@ class FreightAnalysisOverviewResponse(AnalysisWorkbenchMeta):
     date_from: date
     date_to: date
     metrics: list[MetricCard]
+    insights: list[AnalysisInsightBlock] = Field(default_factory=list)
     trend: list[ChartPoint]
     node_ranking: list[HeatMapItem] = Field(default_factory=list)
     commodity_structure: list[ChartPoint]
@@ -423,6 +437,10 @@ class PricingDecisionResponse(BaseModel):
     fallback_level_code: str | None = None
     route_evidence: dict = Field(default_factory=dict)
     sample_evidence: dict = Field(default_factory=dict)
+    factor_breakdown: list[dict] = Field(default_factory=list)
+    comparable_samples: list[dict] = Field(default_factory=list)
+    fallback_trace: list[dict] = Field(default_factory=list)
+    quality_warnings: list[str] = Field(default_factory=list)
     lineage: list[dict] = Field(default_factory=list)
     not_computable_reasons: list[str] = Field(default_factory=list)
     recommended_actions: list[PricingRecommendedAction] = Field(default_factory=list)

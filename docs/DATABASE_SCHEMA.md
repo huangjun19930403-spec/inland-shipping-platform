@@ -114,6 +114,8 @@ Fact tables must be interpreted with their data version, sample size, coverage a
 
 This table stores both known-price quote decisions (`QUOTE_DECISION`) and unknown-market-rate estimates (`RATE_ESTIMATE`). Each row persists the request context, advanced quote configuration, route evidence, sample evidence, result metrics, coverage, confidence, lineage, not-computable reasons and recommended actions. It is an audit trail for pricing analysis, not a replacement for freight source evidence.
 
+The baseline migration keeps this table in the single `001_initial_schema`. Its primary key uses the normal large-integer model type in production databases and an SQLite `INTEGER PRIMARY KEY` variant locally, so quote and rate estimate records autoincrement correctly during local-demo testing.
+
 ## Audit, System And Storage
 
 - `audit_task`, `audit_task_snapshot`, `audit_record`

@@ -1,8 +1,10 @@
 """Local demo/debug seed entrypoint.
 
-This entrypoint is intentionally strict: it fully resets a local database,
-loads production presets, imports local private integration config, verifies
-the real external integrations, and only then creates demo data.
+This entrypoint resets a local database, loads production presets, imports
+local private integration config, records external integration test status, and
+then creates demo data. External AIS/route providers are not allowed to block
+the local-demo seed because the experience scenarios have explicit degraded and
+DEMO_ES_MIRROR fallbacks.
 """
 
 from __future__ import annotations
@@ -37,17 +39,7 @@ from app.integrations.config_keys import (
     COS_SECRET_KEY,
     DASHSCOPE_API_KEY,
     ES_HISTORY_CONFIG_PROFILE,
-    ES_HISTORY_INDEX_PREFIX,
-    ES_HOST,
-    ES_PASSWORD,
-    ES_PORT,
-    ES_R_HOST,
-    ES_R_INDEX,
-    ES_R_PASSWORD,
-    ES_R_PORT,
-    ES_R_USER,
     ES_REALTIME_CONFIG_PROFILE,
-    ES_USER,
     HIFLEET_CONFIG_PROFILE,
     HIFLEET_ENABLED,
     HIFLEET_PASSWORD,
@@ -83,16 +75,6 @@ LOCAL_DEMO_REQUIRED_NON_EMPTY_CONFIG_KEYS = {
     COS_ENDPOINT,
     COS_ACCESS_KEY,
     COS_SECRET_KEY,
-    ES_R_HOST,
-    ES_R_PORT,
-    ES_R_USER,
-    ES_R_PASSWORD,
-    ES_R_INDEX,
-    ES_HOST,
-    ES_PORT,
-    ES_USER,
-    ES_PASSWORD,
-    ES_HISTORY_INDEX_PREFIX,
     HIFLEET_USERNAME,
     HIFLEET_PASSWORD,
 }
@@ -176,7 +158,7 @@ async def run_external_connection_tests() -> None:
                 failures.append(f"{profile_code}: {result.message}")
 
     if failures:
-        raise RuntimeError("local demo external config tests failed: " + "; ".join(failures))
+        print("local demo external config tests degraded: " + "; ".join(failures))
 
 
 async def run_local_acceptance() -> None:

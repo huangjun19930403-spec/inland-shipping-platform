@@ -8,13 +8,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
-from app.models.address import TransportNode
 from app.models.analysis import PricingDecisionRecord
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightTmsInbound
+from app.modules.analysis.rate_estimation import (
+    RateSampleEstimator,
+    confidence_level,
+    is_demo_freight,
+    weighted_percentile,
+)
 from app.modules.analysis.schemas import (
     PricingDecisionMetric,
     PricingDecisionResponse,
@@ -25,7 +29,6 @@ from app.modules.analysis.schemas import (
 )
 
 
-LOCAL_ENVIRONMENTS = {"local", "dev", "development", "test", "testing"}
 QUOTE_RE = re.compile(r"(?:船主|船户|船东)[^0-9]{0,8}([0-9]+(?:\.[0-9]+)?)\s*(?:元|块)?\s*/?\s*吨")
 SHIPPER_QUOTE_RE = re.compile(r"(?:货主|当前货主)?(?:报价|运价)[^0-9]{0,8}([0-9]+(?:\.[0-9]+)?)\s*(?:元|块)?\s*/?\s*吨")
 ADVANCED_CONFIG_RE = re.compile(r"高级配置[:：]?\s*([^。；\n]*(?:[；;][^。\n]*)?)")
@@ -81,15 +84,6 @@ def _record_no(record_type_code: str) -> str:
     return f"PR-{record_type_code}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}"
 
 
-def _is_demo_freight(row: Freight) -> bool:
-    values = [row.freight_no, row.source_ref_no, row.source_type_code, row.source_channel_code]
-    return any("DEMO" in str(value or "").upper() or "LOCAL_SAMPLE" in str(value or "").upper() for value in values)
-
-
-def _production_allows_demo() -> bool:
-    return (settings.APP_ENV or "").strip().lower() in LOCAL_ENVIRONMENTS
-
-
 def _parse_owner_quote(text: str | None) -> tuple[float | None, str | None]:
     if not text:
         return None, None
@@ -130,41 +124,6 @@ def _parse_advanced_config_values(text: str | None) -> dict[str, float | int] | 
     if lock_match:
         result["lock_fee_per_ton"] = float(lock_match.group(1))
     return result or None
-
-
-def _confidence(sample_size: int, fallback_level: str, coverage_rate: float, price_spread: float) -> str:
-    if sample_size >= 12 and fallback_level == "EXACT_NODE_COMMODITY" and coverage_rate >= 90 and price_spread <= 0.18:
-        return "HIGH"
-    if sample_size >= 5 and coverage_rate >= 60 and price_spread <= 0.35:
-        return "MEDIUM"
-    return "LOW"
-
-
-def _percentile(values: list[float], ratio: float) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    index = min(len(ordered) - 1, max(0, round((len(ordered) - 1) * ratio)))
-    return ordered[index]
-
-
-def _geo_distance_km(origin: TransportNode | None, destination: TransportNode | None) -> float | None:
-    if origin is None or destination is None:
-        return None
-    origin_lng = _num(origin.longitude)
-    origin_lat = _num(origin.latitude)
-    dest_lng = _num(destination.longitude)
-    dest_lat = _num(destination.latitude)
-    if None in (origin_lng, origin_lat, dest_lng, dest_lat):
-        return None
-    assert origin_lng is not None and origin_lat is not None and dest_lng is not None and dest_lat is not None
-    radius = 6371.0
-    lat1 = math.radians(origin_lat)
-    lat2 = math.radians(dest_lat)
-    delta_lat = math.radians(dest_lat - origin_lat)
-    delta_lng = math.radians(dest_lng - origin_lng)
-    a = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2
-    return 2 * radius * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 class PricingDecisionService:
@@ -324,7 +283,9 @@ class PricingDecisionService:
                 created_by=created_by,
             )
 
-        sample_rows, fallback_level = await self._rate_samples(context, _num(payload.route_distance_km))
+        route_distance_km = _num(payload.route_distance_km)
+        estimator = RateSampleEstimator(self.db)
+        sample_rows, fallback_level, fallback_trace = await estimator.rate_samples(context, route_distance_km)
         if not sample_rows:
             return await self._persist_response(
                 record_type_code="RATE_ESTIMATE",
@@ -338,34 +299,51 @@ class PricingDecisionService:
                 result={},
                 reasons=["PRICE_SAMPLE_MISSING"],
                 actions=self._estimate_actions(False),
+                fallback_trace=fallback_trace,
+                quality_warnings=["PRICE_SAMPLE_MISSING"],
                 created_by=created_by,
             )
 
-        prices = [float(row.unit_price) for row in sample_rows if _num(row.unit_price)]
-        weighted_sum = 0.0
-        weight_total = 0.0
-        for row in sample_rows:
-            price = _num(row.unit_price)
-            if price is None:
-                continue
-            weight = self._sample_weight(row, context, fallback_level)
-            weighted_sum += price * weight
-            weight_total += weight
-        recommended = weighted_sum / weight_total if weight_total else sum(prices) / len(prices)
-        low = _percentile(prices, 0.2)
-        high = _percentile(prices, 0.8)
+        weighted_samples = await estimator.weighted_rate_samples(sample_rows, context, fallback_level, route_distance_km, payload.route_status_code)
+        filtered_samples, outlier_count = estimator.exclude_price_outliers(weighted_samples)
+        if not filtered_samples:
+            filtered_samples = weighted_samples
+        prices = [item.price for item in filtered_samples]
+        weight_total = sum(item.weight for item in filtered_samples)
+        recommended = sum(item.price * item.weight for item in filtered_samples) / weight_total if weight_total else sum(prices) / len(prices)
+        low = weighted_percentile(filtered_samples, 0.2)
+        high = weighted_percentile(filtered_samples, 0.8)
         avg = sum(prices) / len(prices)
         spread = ((max(prices) - min(prices)) / avg) if avg else 1
+        effective_size = estimator.effective_sample_size(filtered_samples)
+        factor_breakdown = estimator.aggregate_factor_breakdown(filtered_samples)
+        quality_warnings = estimator.rate_quality_warnings(
+            filtered_samples,
+            fallback_level=fallback_level,
+            route_warnings=route_warnings,
+            outlier_count=outlier_count,
+            effective_sample_size=effective_size,
+        )
         coverage = {
             "EXACT_NODE_COMMODITY": 95,
             "CITY_COMMODITY": 80,
-            "COMMODITY": 65,
+            "FLOW_COMMODITY_TYPE": 70,
+            "COMMODITY": 62,
             "DISTANCE_BAND": 55,
             "GLOBAL_PRICE": 45,
         }.get(fallback_level, 30)
         if route_warnings:
             coverage = max(20, coverage - 15)
-        confidence = _confidence(len(prices), fallback_level, coverage, spread)
+        if outlier_count:
+            coverage = max(20, coverage - min(12, outlier_count * 3))
+        confidence = confidence_level(
+            len(prices),
+            fallback_level,
+            coverage,
+            spread,
+            effective_sample_size=effective_size,
+            quality_warnings=quality_warnings,
+        )
         result = {
             "recommended_quote": _round(recommended),
             "estimated_low_quote": _round(low),
@@ -373,12 +351,15 @@ class PricingDecisionService:
             "price_spread": _round(spread, 4),
             "fallback_level_code": fallback_level,
             "route_warnings": route_warnings,
+            "effective_sample_size": _round(effective_size, 2),
+            "outlier_count": outlier_count,
         }
         sample_evidence = {
             "sample_size": len(prices),
+            "raw_sample_size": len(weighted_samples),
             "fallback_level_code": fallback_level,
-            "sample_freight_nos": [row.freight_no for row in sample_rows[:12]],
-            "includes_demo_data": any(_is_demo_freight(row) for row in sample_rows),
+            "sample_freight_nos": [item.row.freight_no for item in filtered_samples[:12]],
+            "includes_demo_data": any(is_demo_freight(row) for row in sample_rows),
         }
         metrics = [
             PricingDecisionMetric(code="recommended_quote", title="推荐预估价", value=_round(recommended), unit="元/吨"),
@@ -404,6 +385,10 @@ class PricingDecisionService:
             coverage_rate=coverage,
             confidence_level=confidence,
             fallback_level_code=fallback_level,
+            factor_breakdown=factor_breakdown,
+            comparable_samples=estimator.comparable_sample_payload(filtered_samples),
+            fallback_trace=fallback_trace,
+            quality_warnings=quality_warnings,
             actions=self._estimate_actions(True),
             created_by=created_by,
         )
@@ -516,103 +501,6 @@ class PricingDecisionService:
             "not_computable_reasons": payload.route_not_computable_reasons,
         }
 
-    async def _rate_samples(self, context: PricingContext, route_distance_km: float | None = None) -> tuple[list[Freight], str]:
-        assert context.commodity_standard_id is not None
-        base_conditions = [
-            Freight.unit_price.is_not(None),
-            Freight.estimated_tonnage.is_not(None),
-            Freight.unit_price > 0,
-            Freight.estimated_tonnage > 0,
-        ]
-        if context.freight is not None:
-            base_conditions.append(Freight.id != context.freight.id)
-
-        async def rows_for(*conditions) -> list[Freight]:
-            rows = (
-                await self.db.execute(
-                    select(Freight)
-                    .where(*base_conditions, *conditions)
-                    .order_by(Freight.published_at.desc().nullslast(), Freight.id.desc())
-                    .limit(80)
-                )
-            ).scalars().all()
-            if _production_allows_demo():
-                return list(rows)
-            return [row for row in rows if not _is_demo_freight(row)]
-
-        exact = await rows_for(
-            Freight.origin_node_id == context.origin_node_id,
-            Freight.destination_node_id == context.destination_node_id,
-            Freight.commodity_standard_id == context.commodity_standard_id,
-        )
-        if len(exact) >= 3:
-            return exact, "EXACT_NODE_COMMODITY"
-
-        city_rows = await rows_for(
-            Freight.origin_city_code == (context.freight.origin_city_code if context.freight else None),
-            Freight.destination_city_code == (context.freight.destination_city_code if context.freight else None),
-            Freight.commodity_standard_id == context.commodity_standard_id,
-        )
-        if len(city_rows) >= 5:
-            return city_rows, "CITY_COMMODITY"
-
-        commodity_rows = await rows_for(Freight.commodity_standard_id == context.commodity_standard_id)
-        if len(commodity_rows) >= 5:
-            return commodity_rows, "COMMODITY"
-
-        if route_distance_km and route_distance_km > 0:
-            distance_candidates = await rows_for(
-                Freight.origin_node_id.is_not(None),
-                Freight.destination_node_id.is_not(None),
-            )
-            distance_rows = await self._distance_band_rows(distance_candidates, route_distance_km)
-            if len(distance_rows) >= 5:
-                return distance_rows, "DISTANCE_BAND"
-
-        global_rows = await rows_for(or_(Freight.commodity_standard_id == context.commodity_standard_id, Freight.commodity_standard_id.is_not(None)))
-        return global_rows, "GLOBAL_PRICE"
-
-    async def _distance_band_rows(self, rows: list[Freight], route_distance_km: float) -> list[Freight]:
-        node_ids = {int(row.origin_node_id) for row in rows if row.origin_node_id} | {
-            int(row.destination_node_id) for row in rows if row.destination_node_id
-        }
-        if not node_ids:
-            return []
-        nodes = (
-            await self.db.execute(select(TransportNode).where(TransportNode.id.in_(node_ids)))
-        ).scalars().all()
-        node_by_id = {int(node.id): node for node in nodes}
-        tolerance = max(80.0, route_distance_km * 0.35)
-        matched: list[tuple[float, Freight]] = []
-        for row in rows:
-            approx_distance = _geo_distance_km(
-                node_by_id.get(int(row.origin_node_id)) if row.origin_node_id else None,
-                node_by_id.get(int(row.destination_node_id)) if row.destination_node_id else None,
-            )
-            if approx_distance is None:
-                continue
-            delta = abs(approx_distance - route_distance_km)
-            if delta <= tolerance:
-                matched.append((delta, row))
-        matched.sort(key=lambda item: item[0])
-        return [row for _, row in matched[:80]]
-
-    @staticmethod
-    def _sample_weight(row: Freight, context: PricingContext, fallback_level: str) -> float:
-        weight = {
-            "EXACT_NODE_COMMODITY": 1.0,
-            "CITY_COMMODITY": 0.75,
-            "COMMODITY": 0.55,
-            "DISTANCE_BAND": 0.45,
-            "GLOBAL_PRICE": 0.35,
-        }.get(fallback_level, 0.3)
-        sample_tonnage = _num(row.estimated_tonnage)
-        if sample_tonnage and context.tonnage:
-            weight *= max(0.45, 1 - min(abs(sample_tonnage - context.tonnage) / max(context.tonnage, 1), 0.55))
-        if _is_demo_freight(row):
-            weight *= 0.85
-        return weight
-
     async def _persist_response(
         self,
         *,
@@ -638,6 +526,10 @@ class PricingDecisionService:
         coverage_rate: float | None = None,
         confidence_level: str = "UNKNOWN",
         fallback_level_code: str | None = None,
+        factor_breakdown: list[dict[str, Any]] | None = None,
+        comparable_samples: list[dict[str, Any]] | None = None,
+        fallback_trace: list[dict[str, Any]] | None = None,
+        quality_warnings: list[str] | None = None,
         created_by: int | None = None,
     ) -> PricingDecisionResponse:
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -648,6 +540,15 @@ class PricingDecisionService:
             {"source_table": "pricing_decision_record", "record_type_code": record_type_code},
         ]
         lineage = [item for item in lineage if item is not None]
+        result_payload = {
+            "decision_code": decision_code,
+            "conclusion": conclusion,
+            **result,
+            "factor_breakdown": factor_breakdown or [],
+            "comparable_samples": comparable_samples or [],
+            "fallback_trace": fallback_trace or [],
+            "quality_warnings": quality_warnings or [],
+        }
         record = PricingDecisionRecord(
             record_no=_record_no(record_type_code),
             record_type_code=record_type_code,
@@ -679,7 +580,7 @@ class PricingDecisionService:
             advanced_config_json=payload.get("advanced_config"),
             route_evidence_json=route_evidence,
             sample_evidence_json=sample_evidence,
-            result_json={"decision_code": decision_code, "conclusion": conclusion, **result},
+            result_json=result_payload,
             lineage_json=lineage,
             not_computable_reasons_json=reasons,
             recommended_actions_json=[item.model_dump(mode="json") for item in actions],
@@ -710,6 +611,10 @@ class PricingDecisionService:
             fallback_level_code=fallback_level_code,
             route_evidence=route_evidence,
             sample_evidence=sample_evidence,
+            factor_breakdown=factor_breakdown or [],
+            comparable_samples=comparable_samples or [],
+            fallback_trace=fallback_trace or [],
+            quality_warnings=quality_warnings or [],
             lineage=lineage,
             not_computable_reasons=reasons,
             recommended_actions=actions,

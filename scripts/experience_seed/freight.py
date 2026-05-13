@@ -351,9 +351,96 @@ async def _seed_freight_scenarios(
                 session.add(FreightTagRelation(freight_id=freight.id, tag_code=tag[:64], created_at=now))
             freight_rows.append(freight)
 
+    await _seed_price_history_samples(session, freight_rows, now)
     await _seed_quality_suggestions(session, freight_rows, now)
     await session.flush()
     return freight_rows
+
+
+async def _seed_price_history_samples(session, freight_rows: list[Freight], now: datetime) -> None:
+    """Add comparable historical rate samples for local-demo rate estimation."""
+    comparable_roots = [
+        row
+        for row in freight_rows
+        if row.origin_node_id and row.destination_node_id and row.commodity_standard_id and row.unit_price and row.estimated_tonnage
+    ][:9]
+    sequence = 0
+    for root in comparable_roots:
+        base_price = Decimal(str(root.unit_price))
+        base_tonnage = Decimal(str(root.estimated_tonnage))
+        for index, (days_back, price_delta, tonnage_ratio) in enumerate(
+            [
+                (7, Decimal("-2.5"), Decimal("0.92")),
+                (13, Decimal("-1.2"), Decimal("0.96")),
+                (21, Decimal("0.4"), Decimal("1.02")),
+                (34, Decimal("1.6"), Decimal("1.08")),
+                (48, Decimal("2.3"), Decimal("0.88")),
+                (72, Decimal("3.1"), Decimal("1.12")),
+                (96, Decimal("-3.4"), Decimal("0.84")),
+                (126, Decimal("4.2"), Decimal("1.16")),
+            ],
+            start=1,
+        ):
+            sequence += 1
+            sample_no = f"FR-DEMO-HIST-{sequence:04d}"
+            tonnage = (base_tonnage * tonnage_ratio).quantize(Decimal("0.01"))
+            unit_price = max(Decimal("8.00"), (base_price + price_delta + Decimal(str(index % 3)) * Decimal("0.35"))).quantize(Decimal("0.01"))
+            loading_from = now - timedelta(days=days_back)
+            session.add(
+                Freight(
+                    freight_no=sample_no,
+                    source_type_code="LOCAL_DEMO",
+                    source_channel_code="RATE_HISTORY",
+                    source_ref_no=f"rate-history-{root.freight_no}-{index}",
+                    raw_commodity_name=root.raw_commodity_name,
+                    raw_tonnage_text=f"{int(tonnage)}吨",
+                    raw_origin_text=root.raw_origin_text,
+                    raw_destination_text=root.raw_destination_text,
+                    cargo_title=f"历史可比样本 {root.cargo_title}",
+                    cargo_description=(
+                        "LOCAL_DEMO 运价预估历史样本；用于展示同装卸地、同货品、相近吨位、"
+                        "不同时间新旧样本的加权估算。"
+                    ),
+                    commodity_standard_id=root.commodity_standard_id,
+                    commodity_match_level_code=root.commodity_match_level_code,
+                    packaging_form_code=root.packaging_form_code,
+                    estimated_tonnage=tonnage,
+                    min_tonnage=(tonnage * Decimal("0.92")).quantize(Decimal("0.01")),
+                    max_tonnage=(tonnage * Decimal("1.08")).quantize(Decimal("0.01")),
+                    unit_price=unit_price,
+                    total_price=(tonnage * unit_price).quantize(Decimal("0.01")),
+                    price_unit="元/吨",
+                    settlement_method_code=root.settlement_method_code,
+                    origin_node_id=root.origin_node_id,
+                    destination_node_id=root.destination_node_id,
+                    origin_match_level_code="NODE",
+                    destination_match_level_code="NODE",
+                    origin_province_code=root.origin_province_code,
+                    origin_city_code=root.origin_city_code,
+                    origin_district_code=root.origin_district_code,
+                    destination_province_code=root.destination_province_code,
+                    destination_city_code=root.destination_city_code,
+                    destination_district_code=root.destination_district_code,
+                    origin_region_id_cache=root.origin_region_id_cache,
+                    destination_region_id_cache=root.destination_region_id_cache,
+                    loading_time_from=loading_from,
+                    loading_time_to=loading_from + timedelta(hours=8),
+                    unloading_time_from=loading_from + timedelta(days=2),
+                    unloading_time_to=loading_from + timedelta(days=3),
+                    publisher_org_name=root.publisher_org_name,
+                    status_code="PUBLISHED",
+                    published_at=loading_from - timedelta(days=1),
+                    expired_at=loading_from + timedelta(days=20),
+                    confirmed_at=loading_from,
+                    hall_status_code="LISTED",
+                    hall_published_at=loading_from - timedelta(days=1),
+                    hall_visible_until=loading_from + timedelta(days=20),
+                    audit_status="APPROVED",
+                    audited_at=loading_from,
+                    created_at=loading_from,
+                    updated_at=now,
+                )
+            )
 
 
 async def _seed_quality_suggestions(session, freight_rows: list[Freight], now: datetime) -> None:
@@ -411,4 +498,3 @@ async def _seed_quality_suggestions(session, freight_rows: list[Freight], now: d
                 updated_at=now,
             )
         )
-

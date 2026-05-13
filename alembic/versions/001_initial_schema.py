@@ -2822,7 +2822,7 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_freight_source_tms_inbound_id'), ['source_tms_inbound_id'], unique=False)
 
     op.create_table('pricing_decision_record',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'), autoincrement=True, nullable=False),
     sa.Column('record_no', sa.String(length=64), nullable=False),
     sa.Column('record_type_code', sa.String(length=32), nullable=False),
     sa.Column('status_code', sa.String(length=32), nullable=False),

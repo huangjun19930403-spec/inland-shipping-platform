@@ -123,6 +123,9 @@ async def test_rate_estimator_uses_exact_node_commodity_samples(session: AsyncSe
     assert response.sample_size == 3
     assert response.estimated_low_quote is not None
     assert response.estimated_high_quote is not None
+    assert response.factor_breakdown
+    assert response.comparable_samples
+    assert response.fallback_trace[0]["level_code"] == "EXACT_NODE_COMMODITY"
 
 
 @pytest.mark.asyncio
@@ -147,6 +150,7 @@ async def test_rate_estimator_falls_back_to_city_flow_samples(session: AsyncSess
     assert response.computable is True
     assert response.fallback_level_code == "CITY_COMMODITY"
     assert response.coverage_rate == 80
+    assert response.factor_breakdown
 
 
 @pytest.mark.asyncio
@@ -177,6 +181,7 @@ async def test_rate_estimator_falls_back_to_distance_band(session: AsyncSession)
     assert response.computable is True
     assert response.fallback_level_code == "DISTANCE_BAND"
     assert response.sample_size == 5
+    assert any(item["code"] == "distance_similarity" for item in response.factor_breakdown)
 
 
 @pytest.mark.asyncio
@@ -208,3 +213,35 @@ async def test_rate_estimator_returns_not_computable_when_samples_are_unusable(s
 
     assert response.computable is False
     assert "PRICE_SAMPLE_MISSING" in response.not_computable_reasons
+
+
+@pytest.mark.asyncio
+async def test_rate_estimator_excludes_price_outliers_and_reports_quality(session: AsyncSession) -> None:
+    await _seed_foundation(session)
+    session.add_all(
+        [
+            _freight(501, origin_node_id=1, destination_node_id=2, commodity_id=10, price="82"),
+            _freight(502, origin_node_id=1, destination_node_id=2, commodity_id=10, price="84"),
+            _freight(503, origin_node_id=1, destination_node_id=2, commodity_id=10, price="85"),
+            _freight(504, origin_node_id=1, destination_node_id=2, commodity_id=10, price="86"),
+            _freight(505, origin_node_id=1, destination_node_id=2, commodity_id=10, price="87"),
+            _freight(506, origin_node_id=1, destination_node_id=2, commodity_id=10, price="220"),
+        ]
+    )
+    await session.commit()
+
+    response = await PricingDecisionService(session).estimate_rate(
+        RateEstimateRequest(
+            origin_node_id=1,
+            destination_node_id=2,
+            commodity_standard_id=10,
+            tonnage=2000,
+            route_status_code="READY",
+            route_distance_km=220,
+        )
+    )
+
+    assert response.computable is True
+    assert response.recommended_quote is not None
+    assert response.recommended_quote < 120
+    assert "PRICE_OUTLIER_EXCLUDED" in response.quality_warnings

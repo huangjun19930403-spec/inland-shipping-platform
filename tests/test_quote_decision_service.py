@@ -129,6 +129,7 @@ async def test_quote_context_parses_owner_quote_and_decision_persists_record(ses
     )
 
     assert response.record_id
+    assert response.record_id > 0
     assert response.record_type_code == "QUOTE_DECISION"
     assert response.decision_code == "ACCEPT"
     assert response.cost_floor is not None
@@ -173,3 +174,21 @@ async def test_quote_decision_requires_route_tonnage_and_commodity(session: Asyn
     assert {"COMMODITY_STANDARD_MISSING", "TONNAGE_MISSING", "ROUTE_DISTANCE_MISSING"}.issubset(
         set(response.not_computable_reasons)
     )
+
+
+@pytest.mark.asyncio
+async def test_quote_decision_requires_owner_quote_but_still_persists_record(session: AsyncSession) -> None:
+    await _seed_quote_freight(session, owner_quote="55")
+
+    response = await PricingDecisionService(session).decide_quote(
+        QuoteDecisionRequest(
+            freight_id=55,
+            route_status_code="READY",
+            route_distance_km=120,
+            route_geometry_source="AMMS",
+        )
+    )
+
+    assert response.record_id > 0
+    assert response.decision_code == "NOT_COMPUTABLE"
+    assert "OWNER_QUOTE_MISSING" in response.not_computable_reasons

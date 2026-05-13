@@ -73,13 +73,13 @@ The local cleanup step removes legacy `E2E_*` rows and old automated constraint 
 
 It adds scenario-coherent rows for:
 
-- 42 confirmed `FR-DEMO-*` freight samples.
+- 42 main `FR-DEMO-*` freight samples plus local-demo historical comparable samples for rate estimation.
 - `FBT-DEMO-*`, `FTI-DEMO-*`, `FCU-DEMO-*`, `FCA-DEMO-*` source evidence.
 - raw quote text preserving both shipper quote and owner/boat-owner quote.
 - AIS snapshot `DEMO_AIS_EXPERIENCE_CURRENT`.
 - node snapshots for Taicang, Jiangyin, Nanjing and Wuhu.
 - route snapshots for Taicang-Wuhu, Suzhou-Nanjing and Huzhou-Wuhu.
-- freight-context vessel candidate analyses.
+- freight-context vessel candidate analyses for every computable main demo freight, including the top visible opportunity rows.
 - node surrounding vessel observations, route-segment samples and navigation-constraint evidence.
 
 Realtime ES strategy:
@@ -97,8 +97,9 @@ The experience seed is designed to support manual page checks for:
 - navigation constraints with `PASS`, `WARNING`, `BLOCKED` and `UNKNOWN`.
 - quote-ready freight rows with origin node, destination node, commodity, tonnage and current shipper quote.
 - at least five quote-ready `FR-DEMO-*` rows whose raw evidence can populate智能报价测算 and运价预估测算.
+- at least five visible `FR-DEMO-*` opportunity rows whose supply-demand fit page can show candidate vessels without an empty demo state.
 
-Round 12 uses the Round 11 raw evidence directly. It does not add a second pricing seed path: owner/boat-owner quote and advanced configuration are parsed from the existing `FBT-DEMO-*` / `FTI-DEMO-*` / `FCA-DEMO-*` evidence and pricing decisions are created only when a user or test runs the pricing APIs.
+Round 12 and Round 14 use the Round 11 raw evidence directly for known-price quote context: owner/boat-owner quote and advanced configuration are parsed from the existing `FBT-DEMO-*` / `FTI-DEMO-*` / `FCA-DEMO-*` evidence. Rate estimation uses the added local-demo historical comparable freight rows, with `LOCAL_DEMO` clearly reported as a demo evidence layer. Pricing decisions are created only when a user or test runs the pricing APIs.
 
 ## Local Fresh Database
 

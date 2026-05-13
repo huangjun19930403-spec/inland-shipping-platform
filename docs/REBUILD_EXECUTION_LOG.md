@@ -374,3 +374,34 @@ Round 14 Plan:
 3. Make chart/table/map clicks write an `AnalysisContext` and drill into `机会样本库`, `供需适配分析`, `质量治理与回算`, `智能报价测算` or `运价预估测算`.
 4. Move long lineage, not-computable reasons and quality impact into an evidence drawer instead of scattering them across chart surfaces.
 5. Add acceptance checks that one `FR-DEMO-*` lane can move from态势 insight to样本列表, candidate fit, quote decision and rate estimate with context preserved.
+
+Round 14 Final Report:
+
+- Fixed the local SQLite pricing failure. `pricing_decision_record.id` now uses an SQLite `INTEGER PRIMARY KEY` variant while production databases keep the large-integer primary-key model. Quote and rate estimate APIs can persist records and return `record_id`.
+- Backed up and reset the local SQLite database, rebuilt from the single `001_initial_schema`, and reran `local-demo` seed.
+- Expanded local-demo experience seed from hidden matching samples to visible opportunity coverage. Computable main `FR-DEMO-*` rows now receive freight-context candidate analyses, and the top visible opportunity rows have 10 candidate vessels each.
+- Added local-demo historical comparable freight samples so运价预估测算 can demonstrate exact-node and fallback sample weighting instead of returning an empty or formula-only result.
+- Rebuilt the rate estimator algorithm around comparable-sample weighting, fallback trace, factor breakdown, outlier handling, quality warnings and confidence scoring. It no longer uses `distance * fixed coefficient` as the final market price.
+- Split the pricing implementation into `PricingDecisionService` and `RateSampleEstimator`, and moved freight insight card construction into `freight_insights.py` so Round 14 did not add another oversized service object.
+- Extended pricing responses with `factor_breakdown`, `comparable_samples`, `fallback_trace` and `quality_warnings`.
+- Reworked智能报价测算 and运价预估测算 into three-zone workbenches: context/input, route/evidence, result/actions. The quote advanced configuration is restored in a drawer.
+- Added freight overview insight cards for growth/capacity gaps, hot-route concentration, quality gaps, price anomaly review and candidate-fit gaps, each with evidence and drill-down actions.
+- Fixed the freight-context supply-demand page so a `freight_id` entry loads existing READY candidate analysis by default instead of showing an empty table.
+- Updated local acceptance to verify pricing autoincrement, executable quote decisions, executable rate estimates, visible opportunity fit analyses and optional degraded external providers.
+
+Round 14 Final Verification Notes:
+
+- `scripts.seed_system_init --profile local-demo` completed successfully after local DB reset.
+- `scripts.verify_local_acceptance` passed. External AMAP/HIFLEET/ES checks are recorded as degraded local provider states instead of blocking local-demo seed.
+- Backend focused tests passed for seed profiles, quote decision, rate estimator, opportunity service, vessel candidate analysis, vessel spatial analysis and vessel facts.
+- Frontend `pnpm type-check` and `pnpm build` passed.
+- Browser verification on the locally running frontend confirmed:
+  - `FR-DEMO-0042` opens智能报价测算 with shipper quote, owner quote and advanced configuration; generating a decision returns a record number and no backend 500.
+  - The same freight opens运价预估测算 with low/recommended/high price, comparable samples, fallback layer and factor breakdown.
+  - `货源态势总览` shows five business insights and insight actions drill into downstream pages.
+  - `/freight/supply-demand-fit?freight_id=282` loads an existing READY analysis with 10 candidate vessels.
+
+Final State:
+
+- The delete-style rebuild branch now has the production baseline, seed profiles, pricing decision flow, rate estimation flow, freight insight navigation and local-demo data chain required for the current acceptance target.
+- Remaining hardening is incremental, not a blocker for this round: continue splitting oversized historical services/pages, broaden E2E coverage, and connect real production ES/AMMS providers outside the local-demo fallback path.

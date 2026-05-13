@@ -572,9 +572,16 @@ async def _seed_candidate_analyses(
     demo_positions: list[DemoPosition],
 ) -> None:
     profile_positions = _position_by_profile(demo_positions)
-    selected_freights = freight_rows[:2] + freight_rows[12:14] + freight_rows[22:24]
+    selected_freights = [
+        freight
+        for freight in freight_rows
+        if freight.origin_node_id
+        and freight.destination_node_id
+        and freight.commodity_standard_id
+        and freight.estimated_tonnage
+    ]
     if len(selected_freights) < 6:
-        selected_freights = freight_rows[:6]
+        selected_freights = [freight for freight in freight_rows if freight.origin_node_id and freight.destination_node_id][:6]
     for analysis_index, freight in enumerate(selected_freights, start=1):
         route_key = "TAICANG_WUHU"
         if freight.destination_city_code == "320100":
@@ -693,4 +700,3 @@ async def _seed_candidate_analyses(
                     created_at=now,
                 )
             )
-

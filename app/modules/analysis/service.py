@@ -80,6 +80,7 @@ from app.modules.analysis.schemas import (
     VesselRiskAnalysisResponse,
     VesselTrajectoryAnalysisResponse,
 )
+from app.modules.analysis.freight_insights import build_freight_insights
 from app.modules.analysis.map_state import build_map_state_payload, default_retry_action
 from app.modules.analysis.job_catalog import MODULE_NAMES
 from app.modules.analysis.quote_route_service import QuoteRouteEstimateService
@@ -750,6 +751,11 @@ class AnalysisDashboardService:
         start, end = await self._date_range(date_from, date_to)
         totals = await self._freight_totals(start, end)
         raw_quality = await self._freight_raw_quality()
+        trend = await self.freight_trend(start, end)
+        node_ranking = await self.freight_node_ranking(start, end, 12)
+        commodity_structure = await self.freight_commodity_structure(start, end)
+        price_distribution = await self.freight_price_distribution(start, end)
+        hot_routes = await self.freight_hot_routes(start, end, 8)
         return FreightAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
@@ -771,11 +777,22 @@ class AnalysisDashboardService:
                 _metric("avg_unit_price", "平均运价", totals["avg_unit_price"], "元/吨"),
                 _metric("raw_level_count", "待清洗货源", raw_quality["raw_level_count"], "条", "原文级装卸地或货品仍需清洗提升"),
             ],
-            trend=await self.freight_trend(start, end),
-            node_ranking=await self.freight_node_ranking(start, end, 12),
-            commodity_structure=await self.freight_commodity_structure(start, end),
-            price_distribution=await self.freight_price_distribution(start, end),
-            hot_routes=await self.freight_hot_routes(start, end, 8),
+            insights=build_freight_insights(
+                totals=totals,
+                raw_quality=raw_quality,
+                trend=trend,
+                node_ranking=node_ranking,
+                commodity_structure=commodity_structure,
+                price_distribution=price_distribution,
+                hot_routes=hot_routes,
+                start=start,
+                end=end,
+            ),
+            trend=trend,
+            node_ranking=node_ranking,
+            commodity_structure=commodity_structure,
+            price_distribution=price_distribution,
+            hot_routes=hot_routes,
         )
 
     async def _freight_raw_quality(self) -> dict[str, int]:

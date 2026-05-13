@@ -164,7 +164,11 @@ Route:
 - `GET /api/v1/analysis/tasks`
 - `POST /api/v1/analysis/tasks/{job_code}/trigger`
 
-Pricing decision responses include `metrics`, route evidence, sample evidence, lineage, coverage, confidence, not-computable reasons, recommended actions and the persisted `record_id`. `quote-simulator/decision` is for known shipper/owner price decisions; `rate-estimator/estimate` is for unknown market-rate estimation and must expose its fallback layer.
+`analysis/freight/overview` returns business `insights` in addition to metrics. Each insight includes sample size, coverage, confidence, evidence, not-computable reasons and drill-down actions into opportunity samples, supply-demand fit, quality governance, quote decision or rate estimate.
+
+Pricing decision responses include `metrics`, route evidence, sample evidence, lineage, coverage, confidence, not-computable reasons, recommended actions and the persisted `record_id`. Round 14 pricing responses also expose `factor_breakdown`, `comparable_samples`, `fallback_trace` and `quality_warnings`.
+
+`quote-simulator/decision` is for known shipper/owner price decisions. `rate-estimator/estimate` is for unknown market-rate estimation. The estimator uses weighted comparable samples and explicit fallback layers; it must not use a single distance formula as the final market price.
 
 ## Audit And Files
 

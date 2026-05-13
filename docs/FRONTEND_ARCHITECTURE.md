@@ -78,8 +78,10 @@ Freight pages use `fetchShippingOpportunities`; old `fetchFreights` has been del
 Pricing pages:
 
 - `AnalysisQuoteSimulatorPage.vue` is the known-price decision page. It accepts shipper quote, owner/boat-owner quote or owner quote range, risk profile and advanced cost configuration, then calls the backend decision API.
-- `AnalysisRateEstimatorPage.vue` is the unknown-market-rate estimate page. It accepts origin, destination, commodity, tonnage and expected loading time, then displays price range, fallback layer, sample size, coverage and confidence.
+- `AnalysisRateEstimatorPage.vue` is the unknown-market-rate estimate page. It accepts origin, destination, commodity, tonnage and expected loading time, then displays price range, fallback layer, sample size, coverage, confidence, comparable samples, factor breakdown and quality warnings.
 - Both pages reuse the AMMS route evidence endpoint and must show map-state failure or not-computable reasons instead of drawing fake route lines.
+- Both pricing pages use a three-zone workbench: context/input, route and evidence, result and actions. Advanced quote configuration lives in a drawer so the main decision stays readable.
+- `/freight/supply-demand-fit` reuses the candidate analysis page in freight context. When a `freight_id` has existing local-demo READY analysis, the page loads it by default instead of showing an empty candidate table.
 
 ## Page Organization
 
