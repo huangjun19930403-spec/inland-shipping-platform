@@ -360,6 +360,8 @@ class PricingAdvancedConfig(BaseModel):
     daily_capital_cost_rate: float = Field(default=0.0003, ge=0, le=1)
     empty_sailing_rate: float = Field(default=0.15, ge=0, le=1)
     fuel_cost_per_ton_km: float = Field(default=0.035, ge=0)
+    target_margin_rate: float | None = Field(default=None, ge=0, le=1)
+    redline_scene: dict | None = None
 
 
 class QuoteSimulatorContextResponse(BaseModel):
@@ -408,6 +410,7 @@ class QuoteDecisionRequest(BaseModel):
     owner_quote: float | None = Field(default=None, gt=0)
     owner_quote_min: float | None = Field(default=None, gt=0)
     owner_quote_max: float | None = Field(default=None, gt=0)
+    quote_direction: str = Field(default="SHIPPER_FIRST", pattern="^(SHIPPER_FIRST|SHIPOWNER_FIRST)$")
     risk_profile: str = Field(default="STANDARD", pattern="^(STEADY|STANDARD|COMPETITIVE)$")
     advanced_config: PricingAdvancedConfig = Field(default_factory=PricingAdvancedConfig)
     route_status_code: str | None = None
@@ -431,6 +434,9 @@ class PricingDecisionResponse(BaseModel):
     estimated_high_quote: float | None = None
     gross_profit: float | None = None
     gross_margin_rate: float | None = None
+    quote_direction: str | None = None
+    selected_scheme_code: str | None = None
+    redline_schemes: list[dict] = Field(default_factory=list)
     sample_size: int = 0
     coverage_rate: float | None = None
     confidence_level: str = "UNKNOWN"

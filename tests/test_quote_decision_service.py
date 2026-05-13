@@ -143,11 +143,11 @@ async def test_quote_context_parses_owner_quote_and_decision_persists_record(ses
 
 @pytest.mark.asyncio
 async def test_quote_decision_rejects_when_owner_quote_breaks_margin(session: AsyncSession) -> None:
-    await _seed_quote_freight(session, owner_quote="82")
+    await _seed_quote_freight(session, owner_quote="96")
     response = await PricingDecisionService(session).decide_quote(
         QuoteDecisionRequest(
             freight_id=55,
-            owner_quote=82,
+            owner_quote=96,
             route_status_code="READY",
             route_distance_km=120,
             route_geometry_source="AMMS",
@@ -171,9 +171,7 @@ async def test_quote_decision_requires_route_tonnage_and_commodity(session: Asyn
     )
 
     assert response.decision_code == "NOT_COMPUTABLE"
-    assert {"COMMODITY_STANDARD_MISSING", "TONNAGE_MISSING", "ROUTE_DISTANCE_MISSING"}.issubset(
-        set(response.not_computable_reasons)
-    )
+    assert {"COMMODITY_STANDARD_MISSING", "TONNAGE_MISSING"}.issubset(set(response.not_computable_reasons))
 
 
 @pytest.mark.asyncio

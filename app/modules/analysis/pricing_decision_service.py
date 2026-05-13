@@ -5,13 +5,14 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analysis import PricingDecisionRecord
+from app.core.timezone import utc_now_naive
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightTmsInbound
 from app.modules.analysis.rate_estimation import (
     RateSampleEstimator,
@@ -19,6 +20,7 @@ from app.modules.analysis.rate_estimation import (
     is_demo_freight,
     weighted_percentile,
 )
+from app.modules.analysis.pricing_redline import build_redline_decision
 from app.modules.analysis.schemas import (
     PricingDecisionMetric,
     PricingDecisionResponse,
@@ -32,7 +34,6 @@ from app.modules.analysis.schemas import (
 QUOTE_RE = re.compile(r"(?:船主|船户|船东)[^0-9]{0,8}([0-9]+(?:\.[0-9]+)?)\s*(?:元|块)?\s*/?\s*吨")
 SHIPPER_QUOTE_RE = re.compile(r"(?:货主|当前货主)?(?:报价|运价)[^0-9]{0,8}([0-9]+(?:\.[0-9]+)?)\s*(?:元|块)?\s*/?\s*吨")
 ADVANCED_CONFIG_RE = re.compile(r"高级配置[:：]?\s*([^。；\n]*(?:[；;][^。\n]*)?)")
-
 
 @dataclass
 class PricingContext:
@@ -81,7 +82,7 @@ def _first_text(*values: Any) -> str | None:
 
 
 def _record_no(record_type_code: str) -> str:
-    return f"PR-{record_type_code}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}"
+    return f"PR-{record_type_code}-{utc_now_naive().strftime('%Y%m%d%H%M%S%f')}"
 
 
 def _parse_owner_quote(text: str | None) -> tuple[float | None, str | None]:
@@ -169,11 +170,9 @@ class PricingDecisionService:
         reasons = self._base_missing_reasons(context, require_current_quote=True, require_owner_quote=False)
         if owner_quote is None:
             reasons.append("OWNER_QUOTE_MISSING")
-        route_distance = _num(payload.route_distance_km)
+        route_warnings: list[str] = []
         if payload.route_status_code and payload.route_status_code != "READY":
-            reasons.extend(payload.route_not_computable_reasons or ["ROUTE_NOT_READY"])
-        if route_distance is None or route_distance <= 0:
-            reasons.append("ROUTE_DISTANCE_MISSING")
+            route_warnings.extend(payload.route_not_computable_reasons or ["ROUTE_NOT_READY"])
 
         if reasons:
             return await self._persist_response(
@@ -188,10 +187,11 @@ class PricingDecisionService:
                 result={},
                 reasons=list(dict.fromkeys(reasons)),
                 actions=self._quote_actions(can_estimate=True, can_quote=False),
+                quality_warnings=route_warnings,
                 created_by=created_by,
             )
 
-        assert context.current_quote is not None and context.tonnage is not None and route_distance is not None
+        assert context.current_quote is not None and context.tonnage is not None
         assert owner_quote is not None
         risk_cfg = {
             "STEADY": {"margin": 0.12, "reserve": 0.08},
@@ -200,62 +200,63 @@ class PricingDecisionService:
         }[payload.risk_profile]
         cfg = payload.advanced_config
         current_quote = context.current_quote
-        distance_cost = route_distance * cfg.fuel_cost_per_ton_km * (1 + cfg.empty_sailing_rate)
-        fixed_cost = cfg.handling_fee_per_ton + cfg.insurance_fee_per_ton + cfg.lock_fee_per_ton
-        percentage_cost = current_quote * (cfg.service_fee_rate + cfg.tax_rate + risk_cfg["reserve"])
-        capital_cost = current_quote * cfg.credit_days * cfg.daily_capital_cost_rate
-        non_owner_cost = distance_cost + fixed_cost + percentage_cost + capital_cost
-        target_profit = current_quote * risk_cfg["margin"]
-        owner_ceiling = max(0.0, current_quote - non_owner_cost - target_profit)
-        cost_floor = non_owner_cost + owner_quote
-        gross_profit = current_quote - cost_floor
-        gross_margin_rate = gross_profit / current_quote if current_quote else 0
-
-        if gross_profit < 0:
-            decision_code = "REJECT"
-            conclusion = "船主报价已高于货主报价可覆盖空间，建议拒绝或重新议价。"
-        elif owner_quote > owner_ceiling:
-            decision_code = "NEGOTIATE"
-            conclusion = "船主报价压缩目标毛利，建议按推荐上限议价。"
-        else:
-            decision_code = "ACCEPT"
-            conclusion = "船主报价低于推荐上限，可进入报价确认。"
+        target_margin = cfg.target_margin_rate if cfg.target_margin_rate is not None else risk_cfg["margin"]
+        quote_direction = payload.quote_direction
+        redline = build_redline_decision(
+            current_quote=current_quote,
+            owner_quote=owner_quote,
+            quote_direction=quote_direction,
+            target_margin=target_margin,
+            raw_scene=cfg.redline_scene,
+        )
 
         result = {
-            "decision_code": decision_code,
-            "non_owner_cost": _round(non_owner_cost),
-            "distance_cost": _round(distance_cost),
-            "fixed_cost": _round(fixed_cost),
-            "percentage_cost": _round(percentage_cost),
-            "capital_cost": _round(capital_cost),
-            "target_profit": _round(target_profit),
-            "owner_quote": _round(owner_quote),
-            "owner_ceiling": _round(owner_ceiling),
+            "decision_code": redline.decision_code,
+            "quote_direction": quote_direction,
+            "target_margin_rate": _round(target_margin, 4),
+            "scene": {
+                "id": redline.scene.get("id"),
+                "name": redline.scene.get("name"),
+                "note": redline.scene.get("note"),
+            },
+            "selected_scheme_code": redline.best_scheme["scheme_code"],
+            "redline_schemes": redline.redline_schemes,
+            "route_warnings": route_warnings,
         }
         metrics = [
             PricingDecisionMetric(code="current_quote", title="货主报价", value=_round(current_quote), unit="元/吨"),
             PricingDecisionMetric(code="owner_quote", title="船主报价", value=_round(owner_quote), unit="元/吨"),
-            PricingDecisionMetric(code="owner_ceiling", title="推荐船主价上限", value=_round(owner_ceiling), unit="元/吨"),
-            PricingDecisionMetric(code="gross_profit", title="预计毛利", value=_round(gross_profit), unit="元/吨"),
+            PricingDecisionMetric(
+                code="target_line",
+                title="目标毛利线",
+                value=_round(redline.recommended_quote),
+                unit="元/吨",
+                description="按当前测算方向，达到目标毛利所需的船户上限或货主最低报价。",
+            ),
+            PricingDecisionMetric(code="gross_profit", title="预计毛利", value=_round(redline.gross_profit), unit="元/吨"),
         ]
         return await self._persist_response(
             record_type_code="QUOTE_DECISION",
-            status_code=decision_code,
-            decision_code=decision_code,
-            conclusion=conclusion,
+            status_code=redline.decision_code,
+            decision_code=redline.decision_code,
+            conclusion=redline.conclusion,
             context=context,
             payload=payload.model_dump(mode="json"),
             route_evidence=self._route_evidence(payload),
-            sample_evidence={"sample_size": 1, "source": "direct_owner_quote"},
+            sample_evidence={"sample_size": 1, "source": "direct_owner_quote", "scene_id": redline.scene.get("id")},
             result=result,
             metrics=metrics,
-            cost_floor=cost_floor,
-            recommended_quote=owner_ceiling,
-            gross_profit=gross_profit,
-            gross_margin_rate=gross_margin_rate,
+            cost_floor=redline.cost_floor,
+            recommended_quote=redline.recommended_quote,
+            gross_profit=redline.gross_profit,
+            gross_margin_rate=redline.gross_margin_rate,
             sample_size=1,
-            coverage_rate=100,
-            confidence_level="HIGH",
+            coverage_rate=90 if route_warnings else 100,
+            confidence_level="MEDIUM" if route_warnings else "HIGH",
+            quote_direction=quote_direction,
+            selected_scheme_code=str(redline.best_scheme["scheme_code"]),
+            redline_schemes=redline.redline_schemes,
+            quality_warnings=route_warnings,
             actions=self._quote_actions(can_estimate=True, can_quote=True),
             created_by=created_by,
         )
@@ -522,6 +523,9 @@ class PricingDecisionService:
         estimated_high_quote: float | None = None,
         gross_profit: float | None = None,
         gross_margin_rate: float | None = None,
+        quote_direction: str | None = None,
+        selected_scheme_code: str | None = None,
+        redline_schemes: list[dict[str, Any]] | None = None,
         sample_size: int = 0,
         coverage_rate: float | None = None,
         confidence_level: str = "UNKNOWN",
@@ -532,7 +536,7 @@ class PricingDecisionService:
         quality_warnings: list[str] | None = None,
         created_by: int | None = None,
     ) -> PricingDecisionResponse:
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = utc_now_naive()
         reasons = reasons or []
         actions = actions or []
         lineage = [
@@ -548,6 +552,9 @@ class PricingDecisionService:
             "comparable_samples": comparable_samples or [],
             "fallback_trace": fallback_trace or [],
             "quality_warnings": quality_warnings or [],
+            "redline_schemes": redline_schemes or result.get("redline_schemes") or [],
+            "selected_scheme_code": selected_scheme_code or result.get("selected_scheme_code"),
+            "quote_direction": quote_direction or result.get("quote_direction"),
         }
         record = PricingDecisionRecord(
             record_no=_record_no(record_type_code),
