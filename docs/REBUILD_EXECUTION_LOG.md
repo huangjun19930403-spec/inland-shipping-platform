@@ -405,3 +405,30 @@ Final State:
 
 - The delete-style rebuild branch now has the production baseline, seed profiles, pricing decision flow, rate estimation flow, freight insight navigation and local-demo data chain required for the current acceptance target.
 - Remaining hardening is incremental, not a blocker for this round: continue splitting oversized historical services/pages, broaden E2E coverage, and connect real production ES/AMMS providers outside the local-demo fallback path.
+
+Round 15 Report:
+
+- Rebuilt `/analysis/flows` into a two-tab analysis workbench:
+  - `货源流向分析` now focuses on freight OD heat, real route map, source/region/commodity structure flow and freight corridor actions.
+  - `船舶流向分析` now focuses on vessel OD heat, AIS freshness, active vessels, average deadweight, corridor occupancy, return opportunity and vessel-flow details.
+- Kept the existing `/api/v1/analysis/flows/overview` route and expanded it with `subject=freight|ship|all` plus optional flow filters. Existing `freight_flows` and `ship_flows` remain compatible.
+- Extended flow response items with city codes, active capacity, average deadweight, AIS freshness, route occupancy, return opportunity, confidence, risk and recommended actions.
+- Added structured response blocks for `freight_summary`, `freight_structure`, `freight_corridors`, `ship_summary`, `ship_quality`, `ship_corridors` and `ship_flow_details`.
+- Added backend enrichment so freight lanes can show matched nearby capacity and reverse/return opportunity without requiring exact same-node ship-flow facts.
+- Added vessel-flow enrichment from `VesselProfileSummary` and ship-flow facts, including AIS freshness, average deadweight and same-city return freight opportunities.
+- Reworked the frontend OD heat matrix to support both freight mode and ship mode; ship mode uses `voyage_count` and surfaces active ships/AIS freshness.
+- Added new frontend components for flow Sankey structure and route/capacity corridor cards.
+- Updated local acceptance to assert the new freight and ship flow workbench response blocks are populated and enriched.
+
+Round 15 Verification Notes:
+
+- Backend tests passed: `pytest tests/test_analysis_flow_overview_round15.py tests/test_analysis_quote_route_estimate.py tests/test_seed_profiles.py`.
+- Frontend checks passed: `pnpm type-check` and `pnpm build`.
+- API spot checks on the locally running backend confirmed:
+  - `subject=freight` returns 20 freight flows, 23 structure links, 8 corridors, 645 matched-capacity vessels and enriched first-lane return opportunity.
+  - `subject=ship` returns 20 ship flows, ship quality data, 8 corridors, 20 detail rows, 40% AIS freshness and 180 return-opportunity freight rows.
+- Browser smoke test on the locally running frontend confirmed both tabs render, the freight OD matrix and ship OD matrix are visible, and the ship detail section loads.
+- Follow-up browser tuning fixed the oversized CSS Grid issue that pushed the ship-flow ranking column offscreen. The ship workbench now keeps the map and ranking/quality panels in a bounded two-column layout, and the ship OD/corridor/detail sections remain visible below.
+- The ship tab no longer auto-submits AMMS route precompute and polling when opened. It displays existing route readiness and only draws the top vessel corridors, which removes the visible tab-load stall.
+- The freight structure Sankey now includes a readable side evidence list, and route corridor panels use fixed-height internal scrolling so long corridor data no longer stretches the whole page.
+- Latest browser smoke test on the refreshed local frontend completed with no browser console errors.

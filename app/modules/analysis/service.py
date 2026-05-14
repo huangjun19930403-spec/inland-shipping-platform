@@ -11,7 +11,7 @@ import json
 import math
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -44,6 +44,7 @@ from app.models.analysis import (
 from app.models.commodity import CommodityStandard
 from app.models.freight import Freight
 from app.models.dictionary import StdDict, StdDictItem
+from app.models.vessel import VesselProfileSummary
 from app.modules.address.boundary_utils import (
     boundary_paths_for_precision,
     extract_geojson_polygons,
@@ -63,6 +64,7 @@ from app.modules.analysis.schemas import (
     BoundaryHeatMapItem,
     ChartPoint,
     FlowAnalysisOverviewResponse,
+    FlowAnalysisQuery,
     FlowMapItem,
     FlowRouteCachePrecomputeResponse,
     FreightAnalysisOverviewResponse,
@@ -81,6 +83,12 @@ from app.modules.analysis.schemas import (
     VesselTrajectoryAnalysisResponse,
 )
 from app.modules.analysis.freight_insights import build_freight_insights
+from app.modules.analysis.flow_workbench import (
+    enrich_flow_relationships,
+    flow_corridor_items,
+    freight_structure_links,
+    ship_quality_points,
+)
 from app.modules.analysis.map_state import build_map_state_payload, default_retry_action
 from app.modules.analysis.job_catalog import MODULE_NAMES
 from app.modules.analysis.quote_route_service import QuoteRouteEstimateService
@@ -111,6 +119,38 @@ def _ratio(value: float, total: float) -> float | None:
     if not total:
         return None
     return round(value / total, 4)
+
+
+def _confidence_from_rate(value: float | None) -> str:
+    if value is None:
+        return "UNKNOWN"
+    if value >= 0.85:
+        return "HIGH"
+    if value >= 0.65:
+        return "MEDIUM"
+    if value > 0:
+        return "LOW"
+    return "UNKNOWN"
+
+
+def _freshness_level_from_rate(value: float | None) -> str:
+    if value is None:
+        return "UNKNOWN"
+    if value >= 0.75:
+        return "FRESH"
+    if value >= 0.45:
+        return "RECENT"
+    if value > 0:
+        return "STALE"
+    return "UNKNOWN"
+
+
+def _pair_ais_freshness(left: tuple[float, str] | None, right: tuple[float, str] | None) -> tuple[float | None, str | None]:
+    rates = [item[0] for item in (left, right) if item is not None]
+    if not rates:
+        return None, "UNKNOWN"
+    rate = round(sum(rates) / len(rates), 4)
+    return rate, _freshness_level_from_rate(rate)
 
 
 def _metric(code: str, title: str, value: Any, unit: str | None = None, description: str | None = None) -> MetricCard:
@@ -641,6 +681,39 @@ class AnalysisDashboardService:
             labels.setdefault(dict_code, {})[item_code] = item_name
         return labels
 
+    async def _ship_city_ais_metrics(self) -> dict[str, tuple[float, str]]:
+        fresh_expr = case(
+            (VesselProfileSummary.ais_freshness_level.in_(["FRESH", "RECENT"]), 1),
+            else_=0,
+        )
+        rows = (
+            await self.db.execute(
+                select(
+                    VesselProfileSummary.latest_city_code,
+                    func.count(VesselProfileSummary.id),
+                    func.sum(fresh_expr),
+                )
+                .where(VesselProfileSummary.latest_city_code.is_not(None))
+                .group_by(VesselProfileSummary.latest_city_code)
+            )
+        ).all()
+        metrics: dict[str, tuple[float, str]] = {}
+        for city_code, total, fresh in rows:
+            count = int(_num(total))
+            rate = round(_num(fresh) / count, 4) if count else 0.0
+            metrics[str(city_code)] = (rate, _freshness_level_from_rate(rate))
+        return metrics
+
+    async def _ship_city_capacity_metrics(self) -> dict[str, int]:
+        rows = (
+            await self.db.execute(
+                select(VesselProfileSummary.latest_city_code, func.count(VesselProfileSummary.id))
+                .where(VesselProfileSummary.latest_city_code.is_not(None))
+                .group_by(VesselProfileSummary.latest_city_code)
+            )
+        ).all()
+        return {str(city_code): int(_num(count)) for city_code, count in rows}
+
     @staticmethod
     def _workbench_meta(
         start: date,
@@ -652,11 +725,12 @@ class AnalysisDashboardService:
         data_versions: list[str] | None = None,
         not_computable_reasons: list[str] | None = None,
         uncertainty_reasons: list[str] | None = None,
+        filters: dict | None = None,
     ) -> dict[str, Any]:
         confidence = "HIGH" if sample_count > 0 and not not_computable_reasons else "UNKNOWN"
         coverage_rate = 100.0 if sample_count > 0 and not not_computable_reasons else 0.0
         return {
-            "context": AnalysisContextBlock(date_from=start, date_to=end),
+            "context": AnalysisContextBlock(date_from=start, date_to=end, filters=filters or {}),
             "lineage": AnalysisLineageBlock(
                 source_tables=source_tables,
                 data_versions=data_versions or ["FORMAL_ANALYSIS_V1"],
@@ -954,11 +1028,25 @@ class AnalysisDashboardService:
         *,
         route_geometry_mode: str = "cache",
         force_refresh_routes: bool = False,
+        query: FlowAnalysisQuery | None = None,
     ) -> list[FlowMapItem]:
         origin = aliased(TransportNode)
         destination = aliased(TransportNode)
         origin_city = aliased(AdminRegion)
         destination_city = aliased(AdminRegion)
+        city_capacity = await self._ship_city_capacity_metrics()
+        conditions = [FactFreightFlowDaily.stat_date >= start, FactFreightFlowDaily.stat_date <= end]
+        if query:
+            if query.origin_node_id is not None:
+                conditions.append(FactFreightFlowDaily.origin_node_id == query.origin_node_id)
+            if query.destination_node_id is not None:
+                conditions.append(FactFreightFlowDaily.destination_node_id == query.destination_node_id)
+            if query.origin_region_id is not None:
+                conditions.append(FactFreightFlowDaily.origin_region_id == query.origin_region_id)
+            if query.destination_region_id is not None:
+                conditions.append(FactFreightFlowDaily.destination_region_id == query.destination_region_id)
+            if query.commodity_standard_id is not None:
+                conditions.append(FactFreightFlowDaily.commodity_standard_id == query.commodity_standard_id)
         rows = (
             await self.db.execute(
                 select(
@@ -984,7 +1072,7 @@ class AnalysisDashboardService:
                 .outerjoin(origin_city, origin_city.code == FactFreightFlowDaily.origin_city_code)
                 .outerjoin(destination_city, destination_city.code == FactFreightFlowDaily.destination_city_code)
                 .outerjoin(CommodityStandard, CommodityStandard.id == FactFreightFlowDaily.commodity_standard_id)
-                .where(FactFreightFlowDaily.stat_date >= start, FactFreightFlowDaily.stat_date <= end)
+                .where(*conditions)
                 .group_by(
                     origin.id,
                     origin.name,
@@ -1004,14 +1092,19 @@ class AnalysisDashboardService:
                 .limit(limit)
             )
         ).all()
-        items = [
-            FlowMapItem(
+        items = []
+        for row in rows:
+            nearby_capacity = round((city_capacity.get(str(row[10]), 0) + city_capacity.get(str(row[11]), 0)) / 2)
+            items.append(
+                FlowMapItem(
                 origin_id=row[0],
                 origin_name=row[1] or row[8] or row[10] or "未知起点",
+                origin_city_code=row[10],
                 origin_longitude=_num(row[2]) if row[2] is not None else None,
                 origin_latitude=_num(row[3]) if row[3] is not None else None,
                 destination_id=row[4],
                 destination_name=row[5] or row[9] or row[11] or "未知终点",
+                destination_city_code=row[11],
                 destination_longitude=_num(row[6]) if row[6] is not None else None,
                 destination_latitude=_num(row[7]) if row[7] is not None else None,
                 commodity_name=row[12],
@@ -1019,9 +1112,10 @@ class AnalysisDashboardService:
                 freight_count=int(_num(row[13])),
                 tonnage=round(_num(row[14]), 2),
                 avg_unit_price=round(_num(row[15]), 2),
+                active_ship_count=nearby_capacity,
+                confidence_level=_confidence_from_rate(min(1.0, nearby_capacity / max(1, _num(row[13])))),
             )
-            for row in rows
-        ]
+            )
         if route_geometry_mode == "none":
             return items
         return await self._attach_flow_route_geometries(
@@ -1134,9 +1228,21 @@ class AnalysisDashboardService:
         *,
         route_geometry_mode: str = "cache",
         force_refresh_routes: bool = False,
+        query: FlowAnalysisQuery | None = None,
     ) -> list[FlowMapItem]:
         origin = aliased(TransportNode)
         destination = aliased(TransportNode)
+        conditions = [FactShipFlowDaily.stat_date >= start, FactShipFlowDaily.stat_date <= end]
+        if query:
+            if query.origin_node_id is not None:
+                conditions.append(FactShipFlowDaily.origin_node_id == query.origin_node_id)
+            if query.destination_node_id is not None:
+                conditions.append(FactShipFlowDaily.destination_node_id == query.destination_node_id)
+            if query.origin_region_id is not None:
+                conditions.append(FactShipFlowDaily.origin_region_id == query.origin_region_id)
+            if query.destination_region_id is not None:
+                conditions.append(FactShipFlowDaily.destination_region_id == query.destination_region_id)
+        city_ais_metrics = await self._ship_city_ais_metrics()
         rows = (
             await self.db.execute(
                 select(
@@ -1148,35 +1254,75 @@ class AnalysisDashboardService:
                     destination.name,
                     destination.longitude,
                     destination.latitude,
+                    FactShipFlowDaily.origin_city_code,
+                    FactShipFlowDaily.destination_city_code,
                     func.sum(FactShipFlowDaily.ship_count),
                     func.sum(FactShipFlowDaily.voyage_count),
                     func.sum(FactShipFlowDaily.total_deadweight_ton),
+                    func.avg(FactShipFlowDaily.coverage_rate),
+                    func.max(FactShipFlowDaily.confidence_level),
                 )
                 .join(origin, origin.id == FactShipFlowDaily.origin_node_id)
                 .join(destination, destination.id == FactShipFlowDaily.destination_node_id)
-                .where(FactShipFlowDaily.stat_date >= start, FactShipFlowDaily.stat_date <= end)
-                .group_by(origin.id, origin.name, origin.longitude, origin.latitude, destination.id, destination.name, destination.longitude, destination.latitude)
+                .where(*conditions)
+                .group_by(
+                    origin.id,
+                    origin.name,
+                    origin.longitude,
+                    origin.latitude,
+                    destination.id,
+                    destination.name,
+                    destination.longitude,
+                    destination.latitude,
+                    FactShipFlowDaily.origin_city_code,
+                    FactShipFlowDaily.destination_city_code,
+                )
                 .order_by(func.sum(FactShipFlowDaily.voyage_count).desc())
                 .limit(limit)
             )
         ).all()
-        items = [
-            FlowMapItem(
+        items = []
+        for row in rows:
+            ship_count = int(_num(row[10]))
+            voyage_count = int(_num(row[11]))
+            total_deadweight = _num(row[12])
+            ais_rate, ais_level = _pair_ais_freshness(
+                city_ais_metrics.get(row[8]),
+                city_ais_metrics.get(row[9]),
+            )
+            coverage_rate = _num(row[13]) if row[13] is not None else None
+            confidence = row[14] or _confidence_from_rate(coverage_rate or ais_rate)
+            items.append(
+                FlowMapItem(
                 origin_id=row[0],
                 origin_name=row[1],
+                origin_city_code=row[8],
                 origin_longitude=_num(row[2]) if row[2] is not None else None,
                 origin_latitude=_num(row[3]) if row[3] is not None else None,
                 destination_id=row[4],
                 destination_name=row[5],
+                destination_city_code=row[9],
                 destination_longitude=_num(row[6]) if row[6] is not None else None,
                 destination_latitude=_num(row[7]) if row[7] is not None else None,
-                value=int(_num(row[9])),
-                ship_count=int(_num(row[8])),
-                voyage_count=int(_num(row[9])),
-                tonnage=round(_num(row[10]), 2),
+                value=voyage_count,
+                ship_count=ship_count,
+                active_ship_count=ship_count,
+                voyage_count=voyage_count,
+                tonnage=round(total_deadweight, 2),
+                avg_deadweight_ton=round(total_deadweight / ship_count, 2) if ship_count else None,
+                ais_freshness_rate=ais_rate,
+                ais_freshness_level=ais_level,
+                confidence_level=confidence,
             )
-            for row in rows
-        ]
+            )
+        if query:
+            if query.deadweight_min is not None:
+                items = [item for item in items if (item.avg_deadweight_ton or 0) >= query.deadweight_min]
+            if query.deadweight_max is not None:
+                items = [item for item in items if (item.avg_deadweight_ton or 0) <= query.deadweight_max]
+            if query.ais_freshness_level:
+                target_level = query.ais_freshness_level.upper()
+                items = [item for item in items if str(item.ais_freshness_level or "").upper() == target_level]
         if route_geometry_mode == "none":
             return items
         return await self._attach_flow_route_geometries(
@@ -1337,10 +1483,35 @@ class AnalysisDashboardService:
             )
         return items
 
-    async def flow_overview(self, date_from: date | None, date_to: date | None) -> FlowAnalysisOverviewResponse:
-        start, end = await self._date_range(date_from, date_to)
-        freight_flows = await self.freight_hot_routes(start, end, 20)
-        ship_flows = await self.ship_flow_map(start, end, 20)
+    def _flow_query_filters(self, query: FlowAnalysisQuery) -> dict[str, Any]:
+        return {key: value for key, value in query.model_dump().items() if value not in (None, "", "all")}
+
+    async def flow_overview(self, query: FlowAnalysisQuery) -> FlowAnalysisOverviewResponse:
+        start, end = await self._date_range(query.date_from, query.date_to)
+        include_freight = query.subject in {"all", "freight"}
+        include_ship = query.subject in {"all", "ship"}
+        freight_flows = await self.freight_hot_routes(start, end, 20, query=query) if include_freight else []
+        ship_flows = await self.ship_flow_map(start, end, 20, query=query) if include_ship else []
+        companion_freight_flows = freight_flows
+        companion_ship_flows = ship_flows
+        if include_freight and not include_ship:
+            companion_ship_flows = await self.ship_flow_map(start, end, 20, route_geometry_mode="none")
+        if include_ship and not include_freight:
+            companion_freight_flows = await self.freight_hot_routes(start, end, 20, route_geometry_mode="none")
+        enrich_flow_relationships(companion_freight_flows, companion_ship_flows)
+
+        freight_count = sum(item.freight_count or 0 for item in freight_flows)
+        freight_tonnage = sum(item.tonnage or 0 for item in freight_flows)
+        freight_matched_capacity = sum(item.active_ship_count or 0 for item in freight_flows)
+        freight_issue_count = sum(1 for item in freight_flows if item.risk_level_code in {"MEDIUM", "HIGH"})
+        ship_active_count = sum(item.active_ship_count or item.ship_count or 0 for item in ship_flows)
+        ship_voyage_count = sum(item.voyage_count or 0 for item in ship_flows)
+        avg_ais_freshness = (
+            sum((item.ais_freshness_rate or 0) * (item.active_ship_count or item.ship_count or 0) for item in ship_flows)
+            / max(1, ship_active_count)
+        )
+        return_opportunity_count = sum(item.return_opportunity_count or 0 for item in ship_flows)
+
         return FlowAnalysisOverviewResponse(
             date_from=start,
             date_to=end,
@@ -1354,6 +1525,7 @@ class AnalysisDashboardService:
                     AnalysisActionBlock(action_code="OPEN_ROUTE_LIST", title="查看航线规划", target_route="/route/list"),
                 ],
                 uncertainty_reasons=["流向地图只使用 READY 轨迹绘制，失败或待生成状态需查看 route_not_computable_reasons"],
+                filters=self._flow_query_filters(query),
             ),
             metrics=[
                 _metric("freight_flow_count", "货源流向", len(freight_flows), "条"),
@@ -1363,6 +1535,23 @@ class AnalysisDashboardService:
             ],
             freight_flows=freight_flows,
             ship_flows=ship_flows,
+            freight_summary=[
+                _metric("freight_total_count", "总货源", freight_count, "条"),
+                _metric("freight_total_tonnage", "发布货量", freight_tonnage, "吨"),
+                _metric("matched_capacity", "匹配运力", freight_matched_capacity, "艘"),
+                _metric("freight_issue_count", "需关注流向", freight_issue_count, "条"),
+            ],
+            freight_structure=freight_structure_links(freight_flows),
+            freight_corridors=flow_corridor_items(freight_flows, subject="freight"),
+            ship_summary=[
+                _metric("active_ship_count", "活跃船舶", ship_active_count, "艘"),
+                _metric("voyage_count", "识别航次", ship_voyage_count, "航次"),
+                _metric("ais_freshness_rate", "AIS 新鲜率", round(avg_ais_freshness * 100, 2), "%"),
+                _metric("return_opportunity_count", "返程机会", return_opportunity_count, "条"),
+            ],
+            ship_quality=ship_quality_points(ship_flows),
+            ship_corridors=flow_corridor_items(ship_flows, subject="ship"),
+            ship_flow_details=flow_corridor_items(ship_flows, subject="ship", limit=20),
         )
 
     @staticmethod

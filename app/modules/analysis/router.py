@@ -20,6 +20,7 @@ from app.modules.analysis.schemas import (
     BoundaryHeatMapItem,
     ChartPoint,
     FlowAnalysisOverviewResponse,
+    FlowAnalysisQuery,
     FlowMapItem,
     FlowRouteCachePrecomputeRequest,
     FlowRouteCachePrecomputeResponse,
@@ -327,24 +328,24 @@ async def get_region_supply_demand_analysis(
 
 @router.get("/flows/overview", response_model=FlowAnalysisOverviewResponse)
 async def get_flow_analysis_overview(
-    query: AnalysisDateRangeQuery = Depends(),
+    query: FlowAnalysisQuery = Depends(),
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
     service = AnalysisDashboardService(db)
-    return await service.flow_overview(query.date_from, query.date_to)
+    return await service.flow_overview(query)
 
 
 @router.get("/flows/map", response_model=FlowAnalysisOverviewResponse)
 async def get_flow_map(
-    query: AnalysisDateRangeQuery = Depends(),
+    query: FlowAnalysisQuery = Depends(),
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
     service = AnalysisDashboardService(db)
-    return await service.flow_overview(query.date_from, query.date_to)
+    return await service.flow_overview(query)
 
 
 @router.post("/flows/route-cache/precompute", response_model=FlowRouteCachePrecomputeResponse)

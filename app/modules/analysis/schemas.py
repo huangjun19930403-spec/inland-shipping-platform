@@ -23,6 +23,19 @@ class AnalysisDateRangeQuery(BaseModel):
     date_to: date | None = None
 
 
+class FlowAnalysisQuery(AnalysisDateRangeQuery):
+    subject: str = Field(default="all", pattern="^(all|freight|ship)$")
+    origin_node_id: int | None = None
+    destination_node_id: int | None = None
+    origin_region_id: int | None = None
+    destination_region_id: int | None = None
+    commodity_standard_id: int | None = None
+    vessel_type_code: str | None = None
+    deadweight_min: float | None = None
+    deadweight_max: float | None = None
+    ais_freshness_level: str | None = None
+
+
 class FlowRouteCachePrecomputeRequest(AnalysisDateRangeQuery):
     flow_types: list[str] = Field(default_factory=lambda: ["freight", "ship"])
     limit: int = Field(default=20, ge=1, le=80)
@@ -150,10 +163,12 @@ class ChartPoint(BaseModel):
 class FlowMapItem(BaseModel):
     origin_id: int | None = None
     origin_name: str
+    origin_city_code: str | None = None
     origin_longitude: float | None = None
     origin_latitude: float | None = None
     destination_id: int | None = None
     destination_name: str
+    destination_city_code: str | None = None
     destination_longitude: float | None = None
     destination_latitude: float | None = None
     value: float | int
@@ -172,6 +187,48 @@ class FlowMapItem(BaseModel):
     route_point_count: int | None = None
     route_not_computable_reasons: list[str] = Field(default_factory=list)
     map_state: AnalysisMapStateBlock | None = None
+    active_ship_count: int | None = None
+    avg_deadweight_ton: float | None = None
+    ais_freshness_rate: float | None = None
+    ais_freshness_level: str | None = None
+    route_occupancy_rate: float | None = None
+    empty_return_score: float | None = None
+    return_opportunity_count: int | None = None
+    confidence_level: str | None = None
+    risk_level_code: str | None = None
+    recommended_actions: list[AnalysisActionBlock] = Field(default_factory=list)
+
+
+class FlowStructureLink(BaseModel):
+    source: str
+    target: str
+    value: float | int
+    source_level_code: str | None = None
+    target_level_code: str | None = None
+    extra: dict | None = None
+
+
+class FlowCorridorItem(BaseModel):
+    origin_name: str
+    destination_name: str
+    value: float | int
+    freight_count: int | None = None
+    ship_count: int | None = None
+    voyage_count: int | None = None
+    tonnage: float | None = None
+    avg_unit_price: float | None = None
+    active_ship_count: int | None = None
+    avg_deadweight_ton: float | None = None
+    ais_freshness_rate: float | None = None
+    route_distance_km: float | None = None
+    route_status_code: str | None = None
+    route_occupancy_rate: float | None = None
+    empty_return_score: float | None = None
+    return_opportunity_count: int | None = None
+    confidence_level: str | None = None
+    risk_level_code: str | None = None
+    summary: str | None = None
+    actions: list[AnalysisActionBlock] = Field(default_factory=list)
 
 
 class HeatMapItem(BaseModel):
@@ -253,6 +310,13 @@ class FlowAnalysisOverviewResponse(AnalysisWorkbenchMeta):
     metrics: list[MetricCard]
     freight_flows: list[FlowMapItem]
     ship_flows: list[FlowMapItem]
+    freight_summary: list[MetricCard] = Field(default_factory=list)
+    freight_structure: list[FlowStructureLink] = Field(default_factory=list)
+    freight_corridors: list[FlowCorridorItem] = Field(default_factory=list)
+    ship_summary: list[MetricCard] = Field(default_factory=list)
+    ship_quality: list[ChartPoint] = Field(default_factory=list)
+    ship_corridors: list[FlowCorridorItem] = Field(default_factory=list)
+    ship_flow_details: list[FlowCorridorItem] = Field(default_factory=list)
 
 
 class PriceAnalysisOverviewResponse(AnalysisWorkbenchMeta):

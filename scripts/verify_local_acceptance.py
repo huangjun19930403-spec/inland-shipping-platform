@@ -62,6 +62,8 @@ from app.integrations.config_keys import (
     HIFLEET_TIMEOUT_SECONDS,
     HIFLEET_USERNAME,
 )
+from app.modules.analysis.schemas import FlowAnalysisQuery
+from app.modules.analysis.service import AnalysisDashboardService
 from app.models.address import NavigationConstraintPoint, NodeAlias, Region, TransportNode, TransportNodeContact
 from app.models.analysis import (
     AnalysisJobDefinition,
@@ -555,6 +557,36 @@ async def verify() -> list[CheckResult]:
         ]
         for name, actual, expected in count_checks:
             results.append(_result(name, actual >= expected, f"{actual} >= {expected}"))
+
+        flow_service = AnalysisDashboardService(session)
+        freight_flow_overview = await flow_service.flow_overview(FlowAnalysisQuery(subject="freight"))
+        ship_flow_overview = await flow_service.flow_overview(FlowAnalysisQuery(subject="ship"))
+        freight_action_count = sum(len(item.recommended_actions or []) for item in freight_flow_overview.freight_flows)
+        ship_freshness_count = sum(
+            1
+            for item in ship_flow_overview.ship_flows
+            if item.ais_freshness_rate is not None and item.avg_deadweight_ton is not None and item.return_opportunity_count is not None
+        )
+        results.extend(
+            [
+                _result(
+                    "flow freight workbench summary ready",
+                    len(freight_flow_overview.freight_summary) >= 4
+                    and len(freight_flow_overview.freight_structure) >= 8
+                    and len(freight_flow_overview.freight_corridors) >= 5
+                    and freight_action_count >= 10,
+                    f"summary {len(freight_flow_overview.freight_summary)}, structure {len(freight_flow_overview.freight_structure)}, corridors {len(freight_flow_overview.freight_corridors)}, actions {freight_action_count}",
+                ),
+                _result(
+                    "flow ship workbench enriched metrics ready",
+                    len(ship_flow_overview.ship_summary) >= 4
+                    and len(ship_flow_overview.ship_corridors) >= 5
+                    and len(ship_flow_overview.ship_flow_details) >= 5
+                    and ship_freshness_count >= 5,
+                    f"summary {len(ship_flow_overview.ship_summary)}, corridors {len(ship_flow_overview.ship_corridors)}, details {len(ship_flow_overview.ship_flow_details)}, enriched {ship_freshness_count}",
+                ),
+            ]
+        )
 
         demo_freight_count = await _count(session, Freight, Freight.freight_no.like("FR-DEMO-%"))
         demo_quote_ready_count = await _count(
