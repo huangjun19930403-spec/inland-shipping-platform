@@ -126,6 +126,8 @@ from app.models.vessel import (
 from app.modules.analysis.service import AnalysisDashboardService
 from app.modules.analysis.pricing_decision_service import PricingDecisionService
 from app.modules.analysis.schemas import QuoteDecisionRequest, RateEstimateRequest
+from app.modules.vessel.candidate_service import VesselCandidateAnalysisService
+from app.modules.vessel.schemas import VesselCandidateAnalysisCreateRequest, VesselCandidateAnalysisFilters
 from scripts.seed_local_private_config import (
     CONFIG_METADATA_BY_KEY,
     LOCAL_PRIVATE_CONFIG_KEYS,
@@ -693,6 +695,60 @@ async def verify() -> list[CheckResult]:
                 VesselCandidateAnalysis.freight_id.in_(visible_fit_freight_ids),
                 VesselCandidateAnalysis.candidate_count >= 8,
             )
+        demo_candidate_freight_id = await session.scalar(
+            select(FreightCandidate.id).where(FreightCandidate.candidate_no.like("FCA-DEMO-%")).order_by(FreightCandidate.id).limit(1)
+        )
+        demo_node_id = await session.scalar(select(TransportNode.id).where(TransportNode.code == "NODE_SUZHOU_TAICANG_PORT"))
+        demo_destination_node_id = await session.scalar(select(TransportNode.id).where(TransportNode.code == "NODE_WUHU_ZHUJIAQIAO_PORT"))
+        demo_route_id = await session.scalar(select(ShippingRoute.id).where(ShippingRoute.code == "ROUTE_TAICANG_WUHU"))
+        demo_region_id = await session.scalar(select(Region.id).where(Region.code == "REGION_YANGTZE_DELTA"))
+        candidate_context_success_count = 0
+        candidate_context_details: list[str] = []
+        demo_context_cases = [
+            ("FREIGHT_SAMPLE", {"context_type_code": "FREIGHT_SAMPLE", "freight_id": visible_fit_freight_ids[0] if visible_fit_freight_ids else None}),
+            ("FREIGHT_CANDIDATE", {"context_type_code": "FREIGHT_CANDIDATE", "freight_candidate_id": demo_candidate_freight_id}),
+            ("NODE", {"context_type_code": "NODE", "origin_node_id": demo_node_id}),
+            ("ROUTE", {"context_type_code": "ROUTE", "route_id": demo_route_id}),
+            ("REGION", {"context_type_code": "REGION", "region_id": demo_region_id}),
+            (
+                "MANUAL",
+                {
+                    "context_type_code": "MANUAL",
+                    "origin_node_id": demo_node_id,
+                    "destination_node_id": demo_destination_node_id,
+                    "tonnage": 2600,
+                },
+            ),
+            (
+                "FREIGHT_SAMPLE_SET",
+                {
+                    "context_type_code": "FREIGHT_SAMPLE_SET",
+                    "freight_sample_ids": [visible_fit_freight_ids[0]] if visible_fit_freight_ids else [],
+                    "origin_node_id": demo_node_id,
+                    "destination_node_id": demo_destination_node_id,
+                    "route_id": demo_route_id,
+                },
+            ),
+        ]
+        candidate_service = VesselCandidateAnalysisService(session)
+        for context_name, payload in demo_context_cases:
+            if any(value is None for key, value in payload.items() if key != "freight_sample_ids") or (
+                context_name == "FREIGHT_SAMPLE_SET" and not payload.get("freight_sample_ids")
+            ):
+                candidate_context_details.append(f"{context_name}: missing demo selector")
+                continue
+            response = await candidate_service.create_analysis(
+                VesselCandidateAnalysisCreateRequest(
+                    **payload,
+                    reported_within_minutes=720,
+                    filters=VesselCandidateAnalysisFilters(max_node_distance_km=50, quality_threshold="MEDIUM"),
+                )
+            )
+            clean_items = sum(1 for item in response.items if not item.not_computable_reasons)
+            ok = response.status_code != "NOT_COMPUTABLE" and response.candidate_count >= 8 and clean_items >= 5
+            if ok:
+                candidate_context_success_count += 1
+            candidate_context_details.append(f"{context_name}:{response.status_code}/{response.candidate_count}/clean={clean_items}")
         demo_ais_positions = await _count(
             session,
             VesselLatestPositionSnapshot,
@@ -744,6 +800,11 @@ async def verify() -> list[CheckResult]:
                     "experience visible opportunities have fit analyses",
                     visible_fit_analysis_count >= min(5, len(visible_fit_freight_ids)),
                     f"{visible_fit_analysis_count}/{len(visible_fit_freight_ids)} visible FR-DEMO opportunities with 8+ candidates",
+                ),
+                _result(
+                    "experience candidate analysis contexts executable",
+                    candidate_context_success_count == len(demo_context_cases),
+                    "; ".join(candidate_context_details),
                 ),
                 _result(
                     "experience AIS snapshot usable",

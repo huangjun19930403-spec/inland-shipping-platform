@@ -23,9 +23,11 @@ from app.models.vessel import (
     VesselCandidateAnalysisItem,
     VesselLatestPositionSnapshot,
     VesselNavigationConstraintEvidence,
+    VesselNodeObservationItem,
     VesselNodeObservationVessel,
     VesselProfileSummary,
     VesselRouteSegmentMatchSample,
+    VesselRouteSegmentObservationItem,
     VesselSpatialObservationSnapshot,
 )
 from app.modules.vessel.schemas import (
@@ -372,6 +374,9 @@ class VesselCandidateAnalysisService:
     ) -> VesselSpatialObservationSnapshot | None:
         service = VesselSpatialAnalysisService(self.db)
         if context.route_id or context.line_id:
+            cached = await self._cached_route_snapshot(context)
+            if cached is not None:
+                return cached
             response = await service.route_situation(
                 VesselAisRouteSituationQuery(
                     route_id=context.route_id,
@@ -385,6 +390,9 @@ class VesselCandidateAnalysisService:
             )
             return await self._load_spatial_snapshot(response.snapshot.snapshot_id)
         if context.origin_node_id:
+            cached = await self._cached_node_snapshot(context.origin_node_id)
+            if cached is not None:
+                return cached
             response = await service.node_situation(
                 VesselAisNodeSituationQuery(
                     node_id=context.origin_node_id,
@@ -398,6 +406,41 @@ class VesselCandidateAnalysisService:
             )
             return await self._load_spatial_snapshot(response.snapshot.snapshot_id)
         return None
+
+    async def _cached_node_snapshot(self, node_id: int) -> VesselSpatialObservationSnapshot | None:
+        now = datetime.utcnow()
+        return await self.db.scalar(
+            select(VesselSpatialObservationSnapshot)
+            .join(VesselNodeObservationItem, VesselNodeObservationItem.snapshot_id == VesselSpatialObservationSnapshot.snapshot_id)
+            .where(
+                VesselNodeObservationItem.node_id == node_id,
+                VesselSpatialObservationSnapshot.status_code.in_(["READY", "PARTIAL"]),
+                or_(VesselSpatialObservationSnapshot.expires_at.is_(None), VesselSpatialObservationSnapshot.expires_at > now),
+            )
+            .order_by(desc(VesselSpatialObservationSnapshot.generated_at), desc(VesselSpatialObservationSnapshot.id))
+            .limit(1)
+        )
+
+    async def _cached_route_snapshot(self, context: _AnalysisContext) -> VesselSpatialObservationSnapshot | None:
+        now = datetime.utcnow()
+        stmt = (
+            select(VesselSpatialObservationSnapshot)
+            .join(
+                VesselRouteSegmentObservationItem,
+                VesselRouteSegmentObservationItem.snapshot_id == VesselSpatialObservationSnapshot.snapshot_id,
+            )
+            .where(
+                VesselSpatialObservationSnapshot.status_code.in_(["READY", "PARTIAL"]),
+                or_(VesselSpatialObservationSnapshot.expires_at.is_(None), VesselSpatialObservationSnapshot.expires_at > now),
+            )
+        )
+        if context.route_id:
+            stmt = stmt.where(VesselRouteSegmentObservationItem.route_id == context.route_id)
+        if context.line_id:
+            stmt = stmt.where(VesselRouteSegmentObservationItem.line_id == context.line_id)
+        return await self.db.scalar(
+            stmt.order_by(desc(VesselSpatialObservationSnapshot.generated_at), desc(VesselSpatialObservationSnapshot.id)).limit(1)
+        )
 
     async def _load_spatial_snapshot(self, snapshot_id: str | None) -> VesselSpatialObservationSnapshot | None:
         if not snapshot_id:
@@ -452,12 +495,18 @@ class VesselCandidateAnalysisService:
                 VesselNavigationConstraintEvidence.context_id == context.origin_node_id,
             )
         else:
-            return {"status": "UNKNOWN", "items": []}
+            return {"status": "NOT_APPLICABLE", "items": []}
         rows = (await self.db.execute(stmt)).scalars().all()
         if not rows:
             return {"status": "UNKNOWN", "items": []}
         statuses = {row.status_code for row in rows}
-        if "MISSING_SOURCE" in statuses:
+        if statuses & {"PASS", "AVAILABLE"}:
+            status = "WARNING" if statuses & {"WARNING", "STALE"} else "AVAILABLE"
+        elif "WARNING" in statuses:
+            status = "WARNING"
+        elif "BLOCKED" in statuses:
+            status = "BLOCKED"
+        elif "MISSING_SOURCE" in statuses:
             status = "MISSING_SOURCE"
         elif "UNKNOWN" in statuses:
             status = "UNKNOWN"
@@ -489,7 +538,7 @@ class VesselCandidateAnalysisService:
         if payload.filters.quality_threshold:
             stmt = stmt.where(VesselProfileSummary.data_quality_level.in_(self._allowed_quality_levels(payload.filters.quality_threshold)))
         _ = context
-        rows = (await self.db.execute(stmt.order_by(desc(VesselProfileSummary.refreshed_at)).limit(200))).scalars().all()
+        rows = (await self.db.execute(stmt.order_by(desc(VesselProfileSummary.refreshed_at)).limit(60))).scalars().all()
         return list(rows)
 
     def _score_summary(
@@ -651,6 +700,14 @@ class VesselCandidateAnalysisService:
     def _navigation_score(self, status: str, uncertainty: list[str], not_computable: list[str]) -> Decimal:
         if status == "AVAILABLE":
             return Decimal("10")
+        if status == "WARNING":
+            uncertainty.append("NAVIGATION_CONSTRAINT_WARNING")
+            return Decimal("6")
+        if status == "BLOCKED":
+            not_computable.append("NAVIGATION_CONSTRAINT_BLOCKED")
+            return Decimal("0")
+        if status == "NOT_APPLICABLE":
+            return Decimal("8")
         if status == "STALE":
             uncertainty.append("NAVIGATION_CONSTRAINT_STALE")
             return Decimal("4")
@@ -1126,10 +1183,10 @@ class VesselCandidateAnalysisService:
 
     def _allowed_quality_levels(self, threshold: str) -> list[str]:
         if threshold == "HIGH":
-            return ["HIGH"]
+            return ["HIGH", "GOOD"]
         if threshold == "MEDIUM":
-            return ["HIGH", "MEDIUM"]
-        return ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
+            return ["HIGH", "MEDIUM", "GOOD", "REVIEW"]
+        return ["HIGH", "MEDIUM", "GOOD", "REVIEW", "LOW", "UNKNOWN"]
 
     def _min_confidence(self, left: str, right: str) -> str:
         return left if CONFIDENCE_ORDER.get(left, 0) <= CONFIDENCE_ORDER.get(right, 0) else right
