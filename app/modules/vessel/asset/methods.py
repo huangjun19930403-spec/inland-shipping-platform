@@ -655,8 +655,8 @@ class VesselAssetMixin:
                     latest_position_time=summary.latest_position_time,
                     latest_city_code=summary.latest_city_code,
                     latest_city_name=summary.latest_city_name,
-                    analysis_sample_tags=summary.analysis_sample_tags_json or [],
-                    data_sources=summary.data_sources_json or [],
+                    analysis_sample_tags=self._data_source_codes(summary.analysis_sample_tags_json),
+                    data_sources=self._data_source_codes(summary.data_sources_json),
                     uncertainty_notes=uncertainty_notes,
                     risk_evidence_summary=summary.risk_evidence_summary_json or [],
                     summary_status_code=summary_status_code,
@@ -690,6 +690,25 @@ class VesselAssetMixin:
                 )
             )
         return items
+
+    @staticmethod
+    def _data_source_codes(values: list[Any] | None) -> list[str]:
+        result: list[str] = []
+        for value in values or []:
+            code: str | None = None
+            if isinstance(value, str):
+                code = value
+            elif isinstance(value, dict):
+                for key in ("source_layer", "source_index", "snapshot_id", "ais_snapshot_id", "route_snapshot_id"):
+                    raw = value.get(key)
+                    if raw:
+                        code = str(raw)
+                        break
+            elif value:
+                code = str(value)
+            if code and code not in result:
+                result.append(code)
+        return result
 
     @staticmethod
     def _asset_explain_reason(summary_status_code: str, uncertainty_notes: list[str], summary: VesselProfileSummary) -> str | None:
