@@ -702,7 +702,7 @@ MENUS = [
     },
     {
         "menu_code": "ADDRESS_WATER_SYSTEMS",
-        "menu_name": "水系基础数据",
+        "menu_name": "航道水系基础数据",
         "menu_type_code": "MENU",
         "parent_code": "DICTIONARY_ROOT",
         "route_path": "/address/water-systems",

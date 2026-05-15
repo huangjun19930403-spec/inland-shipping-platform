@@ -64,7 +64,7 @@ def test_water_system_backend_menus_are_initialized_for_visible_routes() -> None
 
     assert menu_by_code["ADDRESS_WATER_SYSTEMS"] == {
         "menu_code": "ADDRESS_WATER_SYSTEMS",
-        "menu_name": "水系基础数据",
+        "menu_name": "航道水系基础数据",
         "menu_type_code": "MENU",
         "parent_code": "ROUTE_REGION_FOUNDATION_GROUP",
         "route_path": "/address/water-systems",
@@ -122,12 +122,18 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
     assert category_counts == {"MAIN_RIVER": 16, "TRIBUTARY": 40, "CANAL": 31, "LAKE": 18, "DELTA_NETWORK": 15}
     assert ais_counts == {"INCLUDED": 109, "EXCLUDED": 11}
     assert {row["water_system_code"] for row in rows} >= {"WS-YANGTZE", "WS-GRAND-CANAL", "WS-TAIHU", "WS-FUCHUN-RIVER", "WS-BAIYANGDIAN"}
+    assert {row["source_version"] for row in rows} == {"revier_navigation_channel_v6"}
     assert by_code["WS-YANGTZE"]["water_system_name"] == "长江干线"
     assert by_code["WS-XIJIANG"]["water_system_name"] == "西江航运干线"
+    assert by_code["WS-YANGTZE"]["geometry_union_status"] == "CHANNEL_ENVELOPE"
+    assert by_code["WS-YANGTZE"]["boundary_quality_code"] == "HIGH_CONFIDENCE"
+    assert by_code["WS-YANGTZE"]["source_feature_count"] == 4
+    assert by_code["WS-YANGTZE"]["point_count"] < 50000
+    assert by_code["WS-YANGTZE"]["source_names"] == ["长江"]
     assert Decimal("113") < Decimal(str(by_code["WS-YANGTZE"]["display_center_longitude"])) < Decimal("116")
     assert Decimal("29") < Decimal(str(by_code["WS-YANGTZE"]["display_center_latitude"])) < Decimal("32")
-    assert Decimal("125") < Decimal(str(by_name["松花江"]["display_center_longitude"])) < Decimal("128")
-    assert Decimal("45") < Decimal(str(by_name["松花江"]["display_center_latitude"])) < Decimal("47")
+    assert Decimal("128") < Decimal(str(by_name["松花江"]["display_center_longitude"])) < Decimal("130")
+    assert Decimal("44") < Decimal(str(by_name["松花江"]["display_center_latitude"])) < Decimal("46")
     assert Decimal("119") < Decimal(str(by_name["太湖"]["display_center_longitude"])) < Decimal("121")
     assert Decimal("30") < Decimal(str(by_name["太湖"]["display_center_latitude"])) < Decimal("32")
     assert by_name["富春江"]["parent_water_system_code"] == "WS-QIANTANG-RIVER"
@@ -140,22 +146,27 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
     assert "盐邵河" in by_name["盐邵线"]["source_names"]
     assert by_name["京杭运河"]["boundary_coordinate_system_code"] == "GCJ02"
     assert by_name["京杭运河"]["geometry_coordinate_system_code"] == "WGS84"
-    assert by_name["京杭运河"]["display_center_longitude"] != by_name["京杭运河"]["center_longitude"]
+    assert by_name["京杭运河"]["geometry_union_status"] == "CHANNEL_CORRIDOR_REPAIRED"
+    assert by_name["京杭运河"]["boundary_quality_code"] == "REVIEW"
+    assert by_name["京杭运河"]["review_required"] is True
+    assert by_name["京杭运河"]["source_feature_count"] == 11
+    assert by_name["京杭运河"]["point_count"] < 2000
+    assert by_name["京杭运河"]["source_names"] == ["京杭运河", "航道缺口修复走廊"]
     for name in ["淀山湖", "泖河", "横潦泾", "竖潦泾", "通吕运河", "九圩港"]:
         assert by_name[name]["geometry_status_code"] == "AVAILABLE"
         assert by_name[name]["ais_situation_scope"] == "INCLUDED"
-    assert by_name["长湖申线—黄浦江—大浦线"]["geometry_union_status"] == "CARRIER_COMPOSITE"
-    assert by_name["长湖申线—黄浦江—大浦线"]["match_confidence_code"] == "MEDIUM"
+    assert by_name["长湖申线—黄浦江—大浦线"]["geometry_union_status"] == "CHANNEL_REVIEW_FALLBACK"
+    assert by_name["长湖申线—黄浦江—大浦线"]["match_confidence_code"] == "LOW"
     assert by_name["苏申外港线—苏申内港线"]["source_feature_count"] >= 4
     assert {"黄浦江", "泖河", "浏河", "元和塘"}.issubset(
         set(by_name["苏申外港线—苏申内港线"]["source_names"])
     )
-    assert {"曹娥江", "余姚江", "甬江", "杭甬运河"}.issubset(set(by_name["杭甬运河"]["source_names"]))
+    assert by_name["杭甬运河"]["source_names"] == ["杭甬运河"]
     assert "红旗塘" in by_name["杭申线"]["source_names"]
     assert "闸港" in by_name["杭平申线"]["source_names"]
     assert by_name["杭湖锡线"]["source_feature_count"] >= 4
     assert by_name["宿连航道相关水域"]["source_feature_count"] >= 1
-    assert by_name["宿连航道相关水域"]["boundary_quality_code"] == "LOW_CONFIDENCE_CARRIER"
+    assert by_name["宿连航道相关水域"]["boundary_quality_code"] == "HIGH_CONFIDENCE"
     assert by_name["南阳湖"]["navigation_category_code"] == "LAKE"
     assert by_name["黄墩湖"]["navigation_scope_code"] == "WATER_AREA"
     assert by_code["WS-YAMEN-WATERWAY"]["ais_situation_scope"] == "EXCLUDED"
@@ -166,7 +177,7 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
         assert by_name[name]["geometry_status_code"] == "AVAILABLE"
         assert by_name[name]["ais_situation_scope"] == "INCLUDED"
     assert by_name["合裕线"]["geometry_status_code"] == "AVAILABLE"
-    assert by_name["合裕线"]["boundary_quality_code"] == "LOW_CONFIDENCE_CARRIER"
+    assert by_name["合裕线"]["boundary_quality_code"] == "REVIEW"
     assert {"南淝河", "巢湖", "裕溪河"}.issubset(set(by_name["合裕线"]["source_names"]))
     missing_names = {
         "苏南运河", "苏北运河", "江汉运河", "沙颍河",
@@ -176,7 +187,7 @@ def test_embedded_water_system_seed_data_has_expected_counts_and_geometry() -> N
     assert {"杨林塘", "通榆运河"}.isdisjoint(by_name)
 
     assert SOURCE_ASSIGNMENT_AUDIT_PATH.exists()
-    assert sum(1 for _ in SOURCE_ASSIGNMENT_AUDIT_PATH.open(encoding="utf-8")) == 39431
+    assert sum(1 for _ in SOURCE_ASSIGNMENT_AUDIT_PATH.open(encoding="utf-8")) == 39432
 
 
 def test_default_water_system_seed_uses_embedded_rows_without_zip_lookup(monkeypatch: pytest.MonkeyPatch) -> None:

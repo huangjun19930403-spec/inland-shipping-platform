@@ -1,4 +1,4 @@
-"""预置水系基础数据初始化脚本。"""
+"""预置航道水系基础数据初始化脚本。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import struct
 import zipfile
 import zlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,7 @@ from app.modules.address.boundary_utils import (
     polygons_bbox,
     serialize_boundary_paths,
 )
-from scripts.seed_data import navigation_water_systems_v5 as embedded_water_systems
+from scripts.seed_data import navigation_water_systems_v6 as embedded_water_systems
 
 try:
     import shapefile  # type: ignore[import-not-found]
@@ -35,13 +35,14 @@ except Exception:  # pragma: no cover - dependency guard for bootstrap environme
 
 
 SOURCE_VERSION = embedded_water_systems.DATA_VERSION
-SOURCE_ASSIGNMENT_AUDIT_PATH = Path(__file__).resolve().parent / "seed_data" / "water_system_source_assignment_v5.jsonl"
+SOURCE_ASSIGNMENT_AUDIT_PATH = Path(__file__).resolve().parent / "seed_data" / "water_system_source_assignment_v6.jsonl"
 OLD_SOURCE_VERSIONS = {
     "revier_wgs84_l1_l4_v1",
     "revier_wgs84_navigation_v1",
     "revier_wgs84_navigation_v2",
     "revier_wgs84_navigation_v3",
     "revier_wgs84_navigation_v4",
+    "revier_wgs84_navigation_v5",
 }
 DEFAULT_LEVELS = (1, 2, 3, 4, 5, 6, 7)
 LEVEL_LAYER_NAMES = {
@@ -440,7 +441,7 @@ async def seed_water_systems(source: str | None = None, levels: tuple[int, ...] 
     if source:
         _resolve_source_path(source)
     rows = _seed_rows_from_embedded(levels)
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     inserted = 0
     updated = 0
     skipped = 0

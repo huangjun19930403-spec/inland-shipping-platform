@@ -746,15 +746,15 @@ def _water_level_name(level: int | None) -> str | None:
     if level is None:
         return None
     return {
-        0: "待补边界",
-        1: "一级水系",
-        2: "二级水系",
-        3: "三级水系",
-        4: "四级水系",
-        5: "五级水系",
-        6: "六级水系",
-        7: "七级水系",
-    }.get(level, f"{level}级水系")
+        0: "待补航道边界",
+        1: "一级源面",
+        2: "二级源面",
+        3: "三级源面",
+        4: "四级源面",
+        5: "五级源面",
+        6: "六级源面",
+        7: "七级源面",
+    }.get(level, f"{level}级源面")
 
 
 def _water_feature_type_name(code: str | None) -> str | None:
@@ -780,7 +780,7 @@ def _water_boundary_type_name(code: str | None) -> str | None:
         "DOUBLE_LINE_RIVER": "双线河",
         "BOUNDARY_RIVER": "界河",
         "WATER_BODY": "水域面",
-        "STANDARD": "标准边界",
+        "STANDARD": "标准航道边界",
         "OTHER": "其他",
     }.get(code or "OTHER")
 
@@ -797,11 +797,11 @@ def _water_navigation_category_name(code: str | None) -> str | None:
 
 def _water_navigation_scope_name(code: str | None) -> str | None:
     return {
-        "CORE": "核心航运水系",
-        "IMPORTANT": "重要航运水系",
+        "CORE": "核心航道水系",
+        "IMPORTANT": "重要航道水系",
         "WATER_AREA": "重要湖区水域",
         "REVIEW": "复核保留",
-        "MISSING": "待补边界",
+        "MISSING": "待补航道边界",
     }.get(code or "")
 
 
@@ -813,7 +813,7 @@ def _water_boundary_quality_name(code: str | None) -> str | None:
         "CARRIER_COMPOSITE": "承载合并",
         "LOW_CONFIDENCE_CARRIER": "低置信承载",
         "REVIEW": "待复核",
-        "MISSING": "缺少边界",
+        "MISSING": "缺少航道边界",
         "UNKNOWN": "未知",
     }.get(code or "UNKNOWN")
 

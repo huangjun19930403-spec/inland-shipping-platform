@@ -73,14 +73,14 @@ logger = logging.getLogger(__name__)
 
 
 WATER_LEVEL_LABELS = {
-    0: "待补边界",
-    1: "一级水系",
-    2: "二级水系",
-    3: "三级水系",
-    4: "四级水系",
-    5: "五级水系",
-    6: "六级水系",
-    7: "七级水系",
+    0: "待补航道边界",
+    1: "一级源面",
+    2: "二级源面",
+    3: "三级源面",
+    4: "四级源面",
+    5: "五级源面",
+    6: "六级源面",
+    7: "七级源面",
 }
 WATER_FEATURE_TYPE_LABELS = {
     "RIVER": "河流",
@@ -103,13 +103,13 @@ WATER_BOUNDARY_TYPE_LABELS = {
     "DOUBLE_LINE_RIVER": "双线河",
     "BOUNDARY_RIVER": "界河",
     "WATER_BODY": "水域面",
-    "STANDARD": "标准边界",
+    "STANDARD": "标准航道边界",
     "OTHER": "其他",
 }
 WATER_GEOMETRY_STATUS_LABELS = {
-    "AVAILABLE": "有边界",
-    "MISSING": "缺少边界",
-    "INVALID": "边界异常",
+    "AVAILABLE": "有航道边界",
+    "MISSING": "缺少航道边界",
+    "INVALID": "航道边界异常",
     "UNKNOWN": "未知",
 }
 WATER_NAVIGATION_CATEGORY_LABELS = {
@@ -120,11 +120,11 @@ WATER_NAVIGATION_CATEGORY_LABELS = {
     "DELTA_NETWORK": "三角洲水网",
 }
 WATER_NAVIGATION_SCOPE_LABELS = {
-    "CORE": "核心航运水系",
-    "IMPORTANT": "重要航运水系",
+    "CORE": "核心航道水系",
+    "IMPORTANT": "重要航道水系",
     "WATER_AREA": "重要湖区水域",
     "REVIEW": "复核保留",
-    "MISSING": "待补边界",
+    "MISSING": "待补航道边界",
 }
 WATER_AIS_SCOPE_LABELS = {
     "INCLUDED": "参与态势",
@@ -149,7 +149,10 @@ WATER_GEOMETRY_UNION_LABELS = {
     "SINGLE_SOURCE": "单要素",
     "MULTIPART_MERGED": "多要素合并",
     "CARRIER_COMPOSITE": "承载合并",
-    "MISSING": "缺少边界",
+    "CHANNEL_ENVELOPE": "航道包络",
+    "CHANNEL_CORRIDOR_REPAIRED": "航道走廊修复",
+    "CHANNEL_REVIEW_FALLBACK": "航道待复核",
+    "MISSING": "缺少航道边界",
 }
 WATER_BOUNDARY_QUALITY_LABELS = {
     "PRECISE_SOURCE": "精确来源",
@@ -158,7 +161,7 @@ WATER_BOUNDARY_QUALITY_LABELS = {
     "CARRIER_COMPOSITE": "承载合并",
     "LOW_CONFIDENCE_CARRIER": "低置信承载",
     "REVIEW": "待复核",
-    "MISSING": "缺少边界",
+    "MISSING": "缺少航道边界",
     "UNKNOWN": "未知",
 }
 
@@ -235,7 +238,7 @@ def _to_admin_boundary_response(
 
 
 def _water_level_name(level: int) -> str:
-    return WATER_LEVEL_LABELS.get(level, f"{level}级水系")
+    return WATER_LEVEL_LABELS.get(level, f"{level}级源面")
 
 
 def _water_feature_type_name(code: str | None) -> str:
