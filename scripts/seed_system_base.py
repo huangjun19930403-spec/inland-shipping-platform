@@ -209,7 +209,7 @@ ROLE_MENU_CODES = {
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NODES",
         "ADDRESS_REGIONS",
-        "ADDRESS_WATER_SYSTEMS",
+        "ADDRESS_NAVIGATION_CHANNELS",
         "ADDRESS_CONSTRAINT_POINTS",
         "AUDIT_ROOT",
         "FREIGHT_NORMALIZATION",
@@ -257,7 +257,7 @@ ROLE_MENU_CODES = {
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NODES",
         "ADDRESS_REGIONS",
-        "ADDRESS_WATER_SYSTEMS",
+        "ADDRESS_NAVIGATION_CHANNELS",
         "ADDRESS_CONSTRAINT_POINTS",
         "FREIGHT_TMS_INBOUNDS",
         "ANALYSIS_ROOT",
@@ -282,7 +282,7 @@ ROLE_MENU_CODES = {
         "ROUTE_ROOT",
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NODES",
-        "ADDRESS_WATER_SYSTEMS",
+        "ADDRESS_NAVIGATION_CHANNELS",
         "SYSTEM_ROOT",
         "SYSTEM_FOUNDATION_GROUP",
         "COMMODITY_STANDARDS",
@@ -306,6 +306,7 @@ LEGACY_MENU_CODES = {
     "VESSEL_IMPORT",
     "VESSEL_SHIP_ANALYSIS",
     "ROUTE_PLANS",
+    "ADDRESS_WATER_SYSTEMS",
     "ANALYSIS_CARGO",
     "ANALYSIS_JOBS",
     "FREIGHT_AI_PARSE_RECORDS",
@@ -701,12 +702,12 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "ADDRESS_WATER_SYSTEMS",
-        "menu_name": "航道水系基础数据",
+        "menu_code": "ADDRESS_NAVIGATION_CHANNELS",
+        "menu_name": "航道基础数据",
         "menu_type_code": "MENU",
         "parent_code": "DICTIONARY_ROOT",
-        "route_path": "/address/water-systems",
-        "component_path": "modules/address/pages/WaterSystemListPage",
+        "route_path": "/address/navigation-channels",
+        "component_path": "modules/address/pages/NavigationChannelListPage",
         "icon": "MapLocation",
         "sort_order": 5,
         "visible_flag": 1,
@@ -1380,7 +1381,7 @@ def _apply_production_menu_information_architecture() -> None:
     update("ANALYSIS_FLOWS", parent_code="ROUTE_ROOT", sort_order=3)
     update("ADDRESS_NODES", menu_name="运输节点", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=1)
     update("ADDRESS_REGIONS", menu_name="业务区域", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=2)
-    update("ADDRESS_WATER_SYSTEMS", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=3)
+    update("ADDRESS_NAVIGATION_CHANNELS", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=3)
     update("ADDRESS_CONSTRAINT_POINTS", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=4)
 
     update("ANALYSIS_ROOT", menu_name="运价与报价中心", sort_order=50)
@@ -1474,7 +1475,7 @@ def _apply_production_menu_information_architecture() -> None:
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NODES",
         "ADDRESS_REGIONS",
-        "ADDRESS_WATER_SYSTEMS",
+        "ADDRESS_NAVIGATION_CHANNELS",
         "ADDRESS_CONSTRAINT_POINTS",
         "ANALYSIS_ROOT",
         "ANALYSIS_QUOTE_SIMULATOR",

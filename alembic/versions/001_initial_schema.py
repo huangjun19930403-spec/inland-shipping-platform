@@ -53,76 +53,64 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_admin_region_parent_code'), ['parent_code'], unique=False)
 
     op.create_table(
-    'water_system',
+    'navigation_channel',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('water_system_code', sa.String(length=32), nullable=False),
-    sa.Column('water_system_name', sa.String(length=128), nullable=False),
-    sa.Column('standard_name', sa.String(length=128), nullable=True),
+    sa.Column('channel_code', sa.String(length=64), nullable=False),
+    sa.Column('channel_name', sa.String(length=128), nullable=False),
+    sa.Column('official_name', sa.String(length=128), nullable=True),
     sa.Column('display_name', sa.String(length=128), nullable=True),
-    sa.Column('parent_water_system_code', sa.String(length=32), nullable=True),
-    sa.Column('water_level', sa.SmallInteger(), nullable=False),
-    sa.Column('feature_type_code', sa.String(length=32), nullable=False),
-    sa.Column('hydrology_period_code', sa.String(length=32), nullable=False),
-    sa.Column('salinity_type_code', sa.String(length=32), nullable=False),
-    sa.Column('water_boundary_type_code', sa.String(length=32), nullable=False),
-    sa.Column('navigation_category_code', sa.String(length=32), nullable=True),
-    sa.Column('navigation_scope_code', sa.String(length=32), nullable=True),
-    sa.Column('ais_situation_scope', sa.String(length=32), nullable=True),
+    sa.Column('alias_names', sa.JSON(), nullable=True),
+    sa.Column('parent_channel_code', sa.String(length=64), nullable=True),
+    sa.Column('channel_type_code', sa.String(length=32), nullable=False),
+    sa.Column('planning_level_code', sa.String(length=32), nullable=False),
+    sa.Column('planning_basis_code', sa.String(length=128), nullable=True),
+    sa.Column('start_place', sa.String(length=128), nullable=True),
+    sa.Column('end_place', sa.String(length=128), nullable=True),
+    sa.Column('via_city_names', sa.JSON(), nullable=True),
+    sa.Column('via_port_names', sa.JSON(), nullable=True),
+    sa.Column('technical_grade_current_code', sa.String(length=32), nullable=True),
+    sa.Column('technical_grade_planned_code', sa.String(length=32), nullable=True),
+    sa.Column('ais_scope_code', sa.String(length=32), nullable=False),
     sa.Column('display_priority', sa.Integer(), nullable=False),
-    sa.Column('match_level_code', sa.String(length=32), nullable=True),
-    sa.Column('match_confidence_code', sa.String(length=32), nullable=True),
     sa.Column('review_required', sa.Boolean(), nullable=False),
-    sa.Column('source_feature_count', sa.Integer(), nullable=False),
-    sa.Column('source_object_ids', sa.JSON(), nullable=True),
-    sa.Column('source_levels', sa.JSON(), nullable=True),
-    sa.Column('source_layer_names', sa.JSON(), nullable=True),
-    sa.Column('source_names', sa.JSON(), nullable=True),
-    sa.Column('source_remarks', sa.JSON(), nullable=True),
-    sa.Column('geometry_union_status', sa.String(length=32), nullable=True),
-    sa.Column('business_remark', sa.String(length=512), nullable=True),
-    sa.Column('display_center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
-    sa.Column('display_center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
-    sa.Column('source_remark', sa.String(length=256), nullable=True),
-    sa.Column('source_layer_name', sa.String(length=64), nullable=False),
+    sa.Column('segment_count', sa.Integer(), nullable=False),
+    sa.Column('source_summary', sa.String(length=1024), nullable=True),
+    sa.Column('source_audit_summary', sa.JSON(), nullable=True),
     sa.Column('source_version', sa.String(length=64), nullable=False),
     sa.Column('is_enabled', sa.Boolean(), nullable=False),
     sa.Column('sort_order', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('water_system_code')
+    sa.UniqueConstraint('channel_code')
     )
-    with op.batch_alter_table('water_system', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_water_system_ais_situation_scope'), ['ais_situation_scope'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_feature_type_code'), ['feature_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_geometry_union_status'), ['geometry_union_status'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_hydrology_period_code'), ['hydrology_period_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_is_enabled'), ['is_enabled'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_match_confidence_code'), ['match_confidence_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_match_level_code'), ['match_level_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_navigation_category_code'), ['navigation_category_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_navigation_scope_code'), ['navigation_scope_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_parent_water_system_code'), ['parent_water_system_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_review_required'), ['review_required'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_salinity_type_code'), ['salinity_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_source_layer_name'), ['source_layer_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_source_version'), ['source_version'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_standard_name'), ['standard_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_water_boundary_type_code'), ['water_boundary_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_water_level'), ['water_level'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_water_system_code'), ['water_system_code'], unique=True)
-        batch_op.create_index(batch_op.f('ix_water_system_water_system_name'), ['water_system_name'], unique=False)
+    with op.batch_alter_table('navigation_channel', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_ais_scope_code'), ['ais_scope_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_code'), ['channel_code'], unique=True)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_name'), ['channel_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_type_code'), ['channel_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_is_enabled'), ['is_enabled'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_official_name'), ['official_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_parent_channel_code'), ['parent_channel_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_planning_basis_code'), ['planning_basis_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_planning_level_code'), ['planning_level_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_review_required'), ['review_required'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_version'), ['source_version'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_technical_grade_current_code'), ['technical_grade_current_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_technical_grade_planned_code'), ['technical_grade_planned_code'], unique=False)
 
     op.create_table(
-    'water_system_boundary',
+    'navigation_channel_boundary',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('water_system_id', sa.BigInteger(), nullable=False),
+    sa.Column('channel_id', sa.BigInteger(), nullable=False),
     sa.Column('geometry_json', sa.JSON(), nullable=False),
     sa.Column('boundary_paths_low', sa.JSON(), nullable=True),
     sa.Column('boundary_paths_medium', sa.JSON(), nullable=True),
     sa.Column('boundary_paths_high', sa.JSON(), nullable=True),
     sa.Column('center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
     sa.Column('center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('display_center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('display_center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
     sa.Column('bbox_min_lng', sa.Numeric(precision=11, scale=8), nullable=True),
     sa.Column('bbox_min_lat', sa.Numeric(precision=10, scale=8), nullable=True),
     sa.Column('bbox_max_lng', sa.Numeric(precision=11, scale=8), nullable=True),
@@ -133,20 +121,96 @@ def upgrade() -> None:
     sa.Column('point_count', sa.Integer(), nullable=False),
     sa.Column('geometry_status_code', sa.String(length=32), nullable=False),
     sa.Column('boundary_quality_code', sa.String(length=32), nullable=False),
+    sa.Column('connectivity_status_code', sa.String(length=32), nullable=False),
+    sa.Column('repair_status_code', sa.String(length=32), nullable=False),
+    sa.Column('coverage_policy_code', sa.String(length=64), nullable=False),
     sa.Column('geometry_coordinate_system_code', sa.String(length=16), nullable=False),
     sa.Column('boundary_coordinate_system_code', sa.String(length=16), nullable=False),
     sa.Column('is_current', sa.Boolean(), nullable=False),
     sa.Column('imported_at', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['water_system_id'], ['water_system.id'], ),
+    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    with op.batch_alter_table('water_system_boundary', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_water_system_boundary_boundary_quality_code'), ['boundary_quality_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_boundary_geometry_status_code'), ['geometry_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_boundary_is_current'), ['is_current'], unique=False)
-        batch_op.create_index(batch_op.f('ix_water_system_boundary_water_system_id'), ['water_system_id'], unique=False)
+    with op.batch_alter_table('navigation_channel_boundary', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_boundary_quality_code'), ['boundary_quality_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_channel_id'), ['channel_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_connectivity_status_code'), ['connectivity_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_geometry_status_code'), ['geometry_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_is_current'), ['is_current'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_repair_status_code'), ['repair_status_code'], unique=False)
+
+    op.create_table(
+    'navigation_channel_segment',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('channel_id', sa.BigInteger(), nullable=False),
+    sa.Column('segment_code', sa.String(length=96), nullable=False),
+    sa.Column('segment_name', sa.String(length=128), nullable=False),
+    sa.Column('segment_kind_code', sa.String(length=32), nullable=False),
+    sa.Column('sequence_no', sa.Integer(), nullable=False),
+    sa.Column('start_place', sa.String(length=128), nullable=True),
+    sa.Column('end_place', sa.String(length=128), nullable=True),
+    sa.Column('via_city_names', sa.JSON(), nullable=True),
+    sa.Column('source_water_names', sa.JSON(), nullable=True),
+    sa.Column('source_summary', sa.String(length=512), nullable=True),
+    sa.Column('geometry_status_code', sa.String(length=32), nullable=False),
+    sa.Column('boundary_quality_code', sa.String(length=32), nullable=False),
+    sa.Column('connectivity_status_code', sa.String(length=32), nullable=False),
+    sa.Column('repair_status_code', sa.String(length=32), nullable=False),
+    sa.Column('review_required', sa.Boolean(), nullable=False),
+    sa.Column('sort_order', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('channel_id', 'segment_code', name='uk_navigation_channel_segment_code')
+    )
+    with op.batch_alter_table('navigation_channel_segment', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_boundary_quality_code'), ['boundary_quality_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_channel_id'), ['channel_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_connectivity_status_code'), ['connectivity_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_geometry_status_code'), ['geometry_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_repair_status_code'), ['repair_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_review_required'), ['review_required'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_code'), ['segment_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_kind_code'), ['segment_kind_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_name'), ['segment_name'], unique=False)
+
+    op.create_table(
+    'navigation_channel_source_audit',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('channel_id', sa.BigInteger(), nullable=True),
+    sa.Column('segment_id', sa.BigInteger(), nullable=True),
+    sa.Column('channel_code', sa.String(length=64), nullable=True),
+    sa.Column('segment_code', sa.String(length=96), nullable=True),
+    sa.Column('source_name', sa.String(length=128), nullable=True),
+    sa.Column('source_layer_name', sa.String(length=256), nullable=True),
+    sa.Column('source_object_id', sa.String(length=64), nullable=True),
+    sa.Column('source_level', sa.SmallInteger(), nullable=True),
+    sa.Column('decision_code', sa.String(length=64), nullable=False),
+    sa.Column('role_code', sa.String(length=64), nullable=False),
+    sa.Column('reason_code', sa.String(length=128), nullable=True),
+    sa.Column('source_remark', sa.String(length=512), nullable=True),
+    sa.Column('review_required', sa.Boolean(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
+    sa.ForeignKeyConstraint(['segment_id'], ['navigation_channel_segment.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('navigation_channel_source_audit', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_channel_code'), ['channel_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_channel_id'), ['channel_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_decision_code'), ['decision_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_reason_code'), ['reason_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_review_required'), ['review_required'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_role_code'), ['role_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_segment_code'), ['segment_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_segment_id'), ['segment_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_layer_name'), ['source_layer_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_level'), ['source_level'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_name'), ['source_name'], unique=False)
 
     op.create_table('analysis_bucket_definition',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -4581,35 +4645,53 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_analysis_bucket_definition_bucket_code'))
 
     op.drop_table('analysis_bucket_definition')
-    with op.batch_alter_table('water_system_boundary', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_water_system_boundary_water_system_id'))
-        batch_op.drop_index(batch_op.f('ix_water_system_boundary_is_current'))
-        batch_op.drop_index(batch_op.f('ix_water_system_boundary_geometry_status_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_boundary_boundary_quality_code'))
-
-    op.drop_table('water_system_boundary')
-    with op.batch_alter_table('water_system', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_water_system_water_system_name'))
-        batch_op.drop_index(batch_op.f('ix_water_system_water_system_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_water_level'))
-        batch_op.drop_index(batch_op.f('ix_water_system_water_boundary_type_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_standard_name'))
-        batch_op.drop_index(batch_op.f('ix_water_system_source_version'))
-        batch_op.drop_index(batch_op.f('ix_water_system_source_layer_name'))
-        batch_op.drop_index(batch_op.f('ix_water_system_salinity_type_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_review_required'))
-        batch_op.drop_index(batch_op.f('ix_water_system_parent_water_system_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_navigation_scope_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_navigation_category_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_match_level_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_match_confidence_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_is_enabled'))
-        batch_op.drop_index(batch_op.f('ix_water_system_hydrology_period_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_geometry_union_status'))
-        batch_op.drop_index(batch_op.f('ix_water_system_feature_type_code'))
-        batch_op.drop_index(batch_op.f('ix_water_system_ais_situation_scope'))
-
-    op.drop_table('water_system')
+    with op.batch_alter_table('navigation_channel_source_audit', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_level'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_layer_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_segment_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_segment_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_role_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_review_required'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_reason_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_decision_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_channel_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_channel_code'))
+    op.drop_table('navigation_channel_source_audit')
+    with op.batch_alter_table('navigation_channel_segment', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_kind_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_review_required'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_repair_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_geometry_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_connectivity_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_channel_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_boundary_quality_code'))
+    op.drop_table('navigation_channel_segment')
+    with op.batch_alter_table('navigation_channel_boundary', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_repair_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_is_current'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_geometry_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_connectivity_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_channel_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_boundary_quality_code'))
+    op.drop_table('navigation_channel_boundary')
+    with op.batch_alter_table('navigation_channel', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_technical_grade_planned_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_technical_grade_current_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_version'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_review_required'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_planning_level_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_planning_basis_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_parent_channel_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_official_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_is_enabled'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_type_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_ais_scope_code'))
+    op.drop_table('navigation_channel')
     with op.batch_alter_table('admin_region', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_admin_region_parent_code'))
 

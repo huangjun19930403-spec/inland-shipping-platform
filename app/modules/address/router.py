@@ -45,11 +45,13 @@ from app.modules.address.schemas import (
     TransportNodeProfileUpsertRequest,
     TransportNodeResponse,
     TransportNodeUpdateRequest,
-    WaterSystemBoundaryResponse,
-    WaterSystemDetailResponse,
-    WaterSystemQuery,
-    WaterSystemResponse,
-    WaterSystemSummaryResponse,
+    NavigationChannelBoundaryResponse,
+    NavigationChannelDetailResponse,
+    NavigationChannelQuery,
+    NavigationChannelResponse,
+    NavigationChannelSegmentResponse,
+    NavigationChannelSourceAuditResponse,
+    NavigationChannelSummaryResponse,
 )
 from app.modules.address.service import (
     AdminRegionService,
@@ -57,7 +59,7 @@ from app.modules.address.service import (
     BusinessRegionService,
     NavigationConstraintPointService,
     TransportNodeService,
-    WaterSystemService,
+    NavigationChannelService,
 )
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -126,50 +128,67 @@ async def get_admin_region_children(
     return await service.list_children(admin_code)
 
 
-@router.get("/water-systems/summary", response_model=WaterSystemSummaryResponse)
-async def get_water_system_summary(db: AsyncSession = Depends(get_db)):
-    service = WaterSystemService(db)
+@router.get("/navigation-channels/summary", response_model=NavigationChannelSummaryResponse)
+async def get_navigation_channel_summary(db: AsyncSession = Depends(get_db)):
+    service = NavigationChannelService(db)
     return await service.summary()
 
 
-@router.get("/water-systems", response_model=PageResponse[WaterSystemResponse])
-async def list_water_systems(
-    query: WaterSystemQuery = Depends(),
+@router.get("/navigation-channels", response_model=PageResponse[NavigationChannelResponse])
+async def list_navigation_channels(
+    query: NavigationChannelQuery = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    service = WaterSystemService(db)
-    return await service.list_water_systems(
+    service = NavigationChannelService(db)
+    return await service.list_navigation_channels(
         keyword=query.keyword,
-        water_level=query.water_level,
-        feature_type_code=query.feature_type_code,
-        hydrology_period_code=query.hydrology_period_code,
-        salinity_type_code=query.salinity_type_code,
-        navigation_category_code=query.navigation_category_code,
-        navigation_scope_code=query.navigation_scope_code,
-        ais_situation_scope=query.ais_situation_scope,
+        channel_type_code=query.channel_type_code,
+        planning_level_code=query.planning_level_code,
+        ais_scope_code=query.ais_scope_code,
         geometry_status_code=query.geometry_status_code,
+        boundary_quality_code=query.boundary_quality_code,
+        connectivity_status_code=query.connectivity_status_code,
+        repair_status_code=query.repair_status_code,
         page=query.page,
         page_size=query.page_size,
     )
 
 
-@router.get("/water-systems/{water_system_code}", response_model=WaterSystemDetailResponse)
-async def get_water_system_detail(
-    water_system_code: str,
+@router.get("/navigation-channels/{channel_code}", response_model=NavigationChannelDetailResponse)
+async def get_navigation_channel_detail(
+    channel_code: str,
     db: AsyncSession = Depends(get_db),
 ):
-    service = WaterSystemService(db)
-    return await service.get_water_system_detail(water_system_code)
+    service = NavigationChannelService(db)
+    return await service.get_navigation_channel_detail(channel_code)
 
 
-@router.get("/water-systems/{water_system_code}/boundary", response_model=WaterSystemBoundaryResponse)
-async def get_water_system_boundary(
-    water_system_code: str,
+@router.get("/navigation-channels/{channel_code}/boundary", response_model=NavigationChannelBoundaryResponse)
+async def get_navigation_channel_boundary(
+    channel_code: str,
     precision: str = Query("medium", pattern="^(low|medium|high)$"),
     db: AsyncSession = Depends(get_db),
 ):
-    service = WaterSystemService(db)
-    return await service.get_water_system_boundary(water_system_code, precision)
+    service = NavigationChannelService(db)
+    return await service.get_navigation_channel_boundary(channel_code, precision)
+
+
+@router.get("/navigation-channels/{channel_code}/segments", response_model=list[NavigationChannelSegmentResponse])
+async def list_navigation_channel_segments(
+    channel_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    service = NavigationChannelService(db)
+    return await service.list_navigation_channel_segments(channel_code)
+
+
+@router.get("/navigation-channels/{channel_code}/source-audit", response_model=list[NavigationChannelSourceAuditResponse])
+async def list_navigation_channel_source_audit(
+    channel_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    service = NavigationChannelService(db)
+    return await service.list_navigation_channel_source_audit(channel_code)
 
 
 @router.get("/options/cities", response_model=list[AdminRegionResponse])

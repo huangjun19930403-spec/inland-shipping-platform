@@ -16,8 +16,8 @@ from scripts.seed_code_sequences import seed_code_sequences
 from scripts.seed_commodity_standards import seed_commodity_standards
 from scripts.seed_commodity_taxonomy import seed_commodity_taxonomy
 from scripts.seed_navigation_constraints import seed_navigation_constraints
+from scripts.seed_navigation_channels import seed_navigation_channels
 from scripts.seed_system_base import seed_system_base
-from scripts.seed_water_systems import seed_water_systems
 from app.core.database import AsyncSessionLocal
 from app.modules.analysis.statistics import seed_analysis_job_definitions
 
@@ -26,7 +26,7 @@ async def seed_production_preset() -> None:
     await seed_builtin_dicts()
     await seed_code_sequences()
     await seed_admin_regions()
-    await seed_water_systems()
+    await seed_navigation_channels()
     await seed_commodity_taxonomy()
     await seed_commodity_standards()
     await seed_navigation_constraints()

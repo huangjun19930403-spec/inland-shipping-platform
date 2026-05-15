@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.integrations.amap import AmapGeocodeClient
-from app.models.address import AdminRegion, WaterSystem, WaterSystemBoundary
+from app.models.address import (
+    AdminRegion,
+    NavigationChannel,
+    NavigationChannelBoundary,
+    NavigationChannelSegment,
+    NavigationChannelSourceAudit,
+)
 from app.modules.address.repository import (
     AdminRegionRepository,
     NavigationConstraintPointRepository,
@@ -39,10 +45,12 @@ from app.modules.address.schemas import (
     RegionBoundaryVersionCreateRequest,
     RegionBoundaryVersionResponse,
     RegionCityRelationResponse,
-    WaterSystemBoundaryResponse,
-    WaterSystemDetailResponse,
-    WaterSystemResponse,
-    WaterSystemSummaryResponse,
+    NavigationChannelBoundaryResponse,
+    NavigationChannelDetailResponse,
+    NavigationChannelResponse,
+    NavigationChannelSegmentResponse,
+    NavigationChannelSourceAuditResponse,
+    NavigationChannelSummaryResponse,
     NodeAliasResponse,
     TransportNodeContactResponse,
     TransportNodeContactReplaceRequest,
@@ -72,97 +80,64 @@ from app.modules.storage.service import FileStorageService
 logger = logging.getLogger(__name__)
 
 
-WATER_LEVEL_LABELS = {
-    0: "待补航道边界",
-    1: "一级源面",
-    2: "二级源面",
-    3: "三级源面",
-    4: "四级源面",
-    5: "五级源面",
-    6: "六级源面",
-    7: "七级源面",
+CHANNEL_TYPE_LABELS = {
+    "MAIN_LINE": "干线航道",
+    "MAIN_RIVER_CHANNEL": "干流航道",
+    "TRIBUTARY_CHANNEL": "支流航道",
+    "CANAL": "运河航道",
+    "DELTA_WATERWAY": "三角洲水道",
+    "CHANNEL_NETWORK": "高等级航道网",
+    "PLANNED_CHANNEL": "规划航道",
 }
-WATER_FEATURE_TYPE_LABELS = {
-    "RIVER": "河流",
-    "CANAL": "运河/航道",
-    "LAKE": "湖泊",
-    "RESERVOIR": "水库",
-    "OTHER": "其他水域",
+CHANNEL_PLANNING_LEVEL_LABELS = {
+    "NATIONAL_CORE": "国家核心航道",
+    "NATIONAL_IMPORTANT": "国家重要航道",
+    "NATIONAL_NETWORK": "国家高等级航道网",
+    "PROVINCIAL_HIGH_GRADE": "省级高等级航道",
+    "REGIONAL_IMPORTANT": "区域重要航道",
+    "PLANNED_GAP": "规划待补航道",
+    "REVIEW": "待复核航道",
 }
-WATER_HYDROLOGY_PERIOD_LABELS = {
-    "PERENNIAL": "常年",
-    "SEASONAL": "时令",
-    "UNKNOWN": "未知",
+CHANNEL_AIS_SCOPE_LABELS = {
+    "INCLUDED": "纳入 AIS 航道归属",
+    "EXCLUDED": "暂不参与 AIS 归属",
 }
-WATER_SALINITY_LABELS = {
-    "SALINE": "咸水",
-    "FRESH": "淡水",
-    "UNKNOWN": "未知",
-}
-WATER_BOUNDARY_TYPE_LABELS = {
-    "DOUBLE_LINE_RIVER": "双线河",
-    "BOUNDARY_RIVER": "界河",
-    "WATER_BODY": "水域面",
-    "STANDARD": "标准航道边界",
-    "OTHER": "其他",
-}
-WATER_GEOMETRY_STATUS_LABELS = {
+CHANNEL_GEOMETRY_STATUS_LABELS = {
     "AVAILABLE": "有航道边界",
     "MISSING": "缺少航道边界",
     "INVALID": "航道边界异常",
     "UNKNOWN": "未知",
 }
-WATER_NAVIGATION_CATEGORY_LABELS = {
-    "MAIN_RIVER": "骨干河流",
-    "TRIBUTARY": "重要支流",
-    "CANAL": "运河/航道",
-    "LAKE": "湖区水域",
-    "DELTA_NETWORK": "三角洲水网",
-}
-WATER_NAVIGATION_SCOPE_LABELS = {
-    "CORE": "核心航道水系",
-    "IMPORTANT": "重要航道水系",
-    "WATER_AREA": "重要湖区水域",
-    "REVIEW": "复核保留",
-    "MISSING": "待补航道边界",
-}
-WATER_AIS_SCOPE_LABELS = {
-    "INCLUDED": "参与态势",
-    "EXCLUDED": "暂不参与",
-}
-WATER_MATCH_LEVEL_LABELS = {
-    "OFFICIAL_TARGET": "官方目录目标",
-    "EXACT": "精确匹配",
-    "ALIAS": "别名匹配",
-    "SAFE_CONTAINS": "安全包含",
-    "CARRIER_COMPOSITE": "承载合并",
-    "SPATIAL_CARRIER": "空间承载",
-    "LOW_CONFIDENCE_CARRIER": "低置信承载",
-    "MISSING": "未命中",
-}
-WATER_MATCH_CONFIDENCE_LABELS = {
-    "HIGH": "高",
-    "MEDIUM": "中",
-    "LOW": "低",
-}
-WATER_GEOMETRY_UNION_LABELS = {
-    "SINGLE_SOURCE": "单要素",
-    "MULTIPART_MERGED": "多要素合并",
-    "CARRIER_COMPOSITE": "承载合并",
-    "CHANNEL_ENVELOPE": "航道包络",
-    "CHANNEL_CORRIDOR_REPAIRED": "航道走廊修复",
-    "CHANNEL_REVIEW_FALLBACK": "航道待复核",
-    "MISSING": "缺少航道边界",
-}
-WATER_BOUNDARY_QUALITY_LABELS = {
+CHANNEL_BOUNDARY_QUALITY_LABELS = {
     "PRECISE_SOURCE": "精确来源",
-    "HIGH_CONFIDENCE": "高置信",
-    "MEDIUM_CONFIDENCE": "中置信",
+    "HIGH_CONFIDENCE": "高可信",
+    "MEDIUM_CONFIDENCE": "中可信",
     "CARRIER_COMPOSITE": "承载合并",
-    "LOW_CONFIDENCE_CARRIER": "低置信承载",
+    "LOW_CONFIDENCE_CARRIER": "低可信承载",
     "REVIEW": "待复核",
     "MISSING": "缺少航道边界",
     "UNKNOWN": "未知",
+}
+CHANNEL_CONNECTIVITY_LABELS = {
+    "CONNECTED": "连续",
+    "REPAIRED": "修复连续",
+    "PARTIAL": "局部连续",
+    "MISSING": "缺失",
+    "UNKNOWN": "未知",
+}
+CHANNEL_REPAIR_STATUS_LABELS = {
+    "NONE": "未修复",
+    "REVIEW_CORRIDOR": "走廊修复待复核",
+    "REVIEW_FALLBACK": "兜底修复待复核",
+    "MISSING": "待补边界",
+}
+CHANNEL_SEGMENT_KIND_LABELS = {
+    "MAIN_CORRIDOR": "主航道走廊",
+    "NATURAL_WATERWAY": "天然水道段",
+    "CANAL_SECTION": "运河段",
+    "LAKE_PASSAGE": "湖区通航段",
+    "REPAIR_CORRIDOR": "修复走廊",
+    "PLANNED_SECTION": "规划段",
 }
 
 
@@ -237,63 +212,39 @@ def _to_admin_boundary_response(
     )
 
 
-def _water_level_name(level: int) -> str:
-    return WATER_LEVEL_LABELS.get(level, f"{level}级源面")
+def _channel_type_name(code: str | None) -> str:
+    return CHANNEL_TYPE_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
-def _water_feature_type_name(code: str | None) -> str:
-    return WATER_FEATURE_TYPE_LABELS.get(code or "OTHER", code or "其他水域")
+def _channel_planning_level_name(code: str | None) -> str:
+    return CHANNEL_PLANNING_LEVEL_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
-def _water_hydrology_period_name(code: str | None) -> str:
-    return WATER_HYDROLOGY_PERIOD_LABELS.get(code or "UNKNOWN", code or "未知")
+def _channel_ais_scope_name(code: str | None) -> str:
+    return CHANNEL_AIS_SCOPE_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
-def _water_salinity_name(code: str | None) -> str:
-    return WATER_SALINITY_LABELS.get(code or "UNKNOWN", code or "未知")
+def _channel_geometry_status_name(code: str | None) -> str:
+    return CHANNEL_GEOMETRY_STATUS_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
-def _water_boundary_type_name(code: str | None) -> str:
-    return WATER_BOUNDARY_TYPE_LABELS.get(code or "OTHER", code or "其他")
+def _channel_boundary_quality_name(code: str | None) -> str:
+    return CHANNEL_BOUNDARY_QUALITY_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
-def _water_geometry_status_name(code: str | None) -> str:
-    return WATER_GEOMETRY_STATUS_LABELS.get(code or "UNKNOWN", code or "未知")
+def _channel_connectivity_status_name(code: str | None) -> str:
+    return CHANNEL_CONNECTIVITY_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
-def _water_navigation_category_name(code: str | None) -> str | None:
-    return WATER_NAVIGATION_CATEGORY_LABELS.get(code or "")
+def _channel_repair_status_name(code: str | None) -> str:
+    return CHANNEL_REPAIR_STATUS_LABELS.get(code or "NONE", code or "未修复")
 
 
-def _water_navigation_scope_name(code: str | None) -> str | None:
-    return WATER_NAVIGATION_SCOPE_LABELS.get(code or "")
+def _channel_segment_kind_name(code: str | None) -> str:
+    return CHANNEL_SEGMENT_KIND_LABELS.get(code or "UNKNOWN", code or "未知")
 
 
-def _water_ais_scope_name(code: str | None) -> str | None:
-    return WATER_AIS_SCOPE_LABELS.get(code or "")
-
-
-def _water_match_level_name(code: str | None) -> str | None:
-    return WATER_MATCH_LEVEL_LABELS.get(code or "")
-
-
-def _water_match_confidence_name(code: str | None) -> str | None:
-    return WATER_MATCH_CONFIDENCE_LABELS.get(code or "")
-
-
-def _water_geometry_union_status_name(code: str | None) -> str | None:
-    return WATER_GEOMETRY_UNION_LABELS.get(code or "")
-
-
-def _water_boundary_quality_name(code: str | None) -> str:
-    return WATER_BOUNDARY_QUALITY_LABELS.get(code or "UNKNOWN", code or "未知")
-
-
-def _source_level_names(levels: list[int] | None) -> list[str]:
-    return [_water_level_name(level) for level in levels or []]
-
-
-def _boundary_paths_by_precision(boundary: WaterSystemBoundary | None, precision: str) -> list[list[list[float]]]:
+def _boundary_paths_by_precision(boundary: NavigationChannelBoundary | None, precision: str) -> list[list[list[float]]]:
     if boundary is None:
         return []
     if precision == "high":
@@ -303,113 +254,167 @@ def _boundary_paths_by_precision(boundary: WaterSystemBoundary | None, precision
     return boundary.boundary_paths_low or []
 
 
-def _to_water_system_response(
-    row: WaterSystem,
-    boundary: WaterSystemBoundary | None,
-) -> WaterSystemResponse:
+def _to_navigation_channel_response(
+    row: NavigationChannel,
+    boundary: NavigationChannelBoundary | None,
+) -> NavigationChannelResponse:
     geometry_status_code = boundary.geometry_status_code if boundary else "MISSING"
-    return WaterSystemResponse(
+    boundary_quality_code = boundary.boundary_quality_code if boundary else "MISSING"
+    connectivity_status_code = boundary.connectivity_status_code if boundary else "MISSING"
+    repair_status_code = boundary.repair_status_code if boundary else "MISSING"
+    return NavigationChannelResponse(
         id=row.id,
-        water_system_code=row.water_system_code,
-        water_system_name=row.water_system_name,
-        standard_name=row.standard_name,
+        channel_code=row.channel_code,
+        channel_name=row.channel_name,
+        official_name=row.official_name,
         display_name=row.display_name,
-        parent_water_system_code=row.parent_water_system_code,
-        water_level=row.water_level,
-        water_level_name=_water_level_name(row.water_level),
-        feature_type_code=row.feature_type_code,
-        feature_type_name=_water_feature_type_name(row.feature_type_code),
-        hydrology_period_code=row.hydrology_period_code,
-        hydrology_period_name=_water_hydrology_period_name(row.hydrology_period_code),
-        salinity_type_code=row.salinity_type_code,
-        salinity_type_name=_water_salinity_name(row.salinity_type_code),
-        water_boundary_type_code=row.water_boundary_type_code,
-        water_boundary_type_name=_water_boundary_type_name(row.water_boundary_type_code),
-        navigation_category_code=row.navigation_category_code,
-        navigation_category_name=_water_navigation_category_name(row.navigation_category_code),
-        navigation_scope_code=row.navigation_scope_code,
-        navigation_scope_name=_water_navigation_scope_name(row.navigation_scope_code),
-        ais_situation_scope=row.ais_situation_scope,
-        ais_situation_scope_name=_water_ais_scope_name(row.ais_situation_scope),
+        alias_names=row.alias_names or [],
+        parent_channel_code=row.parent_channel_code,
+        channel_type_code=row.channel_type_code,
+        channel_type_name=_channel_type_name(row.channel_type_code),
+        planning_level_code=row.planning_level_code,
+        planning_level_name=_channel_planning_level_name(row.planning_level_code),
+        planning_basis_code=row.planning_basis_code,
+        start_place=row.start_place,
+        end_place=row.end_place,
+        via_city_names=row.via_city_names or [],
+        via_port_names=row.via_port_names or [],
+        technical_grade_current_code=row.technical_grade_current_code,
+        technical_grade_planned_code=row.technical_grade_planned_code,
+        ais_scope_code=row.ais_scope_code,
+        ais_scope_name=_channel_ais_scope_name(row.ais_scope_code),
         display_priority=row.display_priority,
-        match_level_code=row.match_level_code,
-        match_level_name=_water_match_level_name(row.match_level_code),
-        match_confidence_code=row.match_confidence_code,
-        match_confidence_name=_water_match_confidence_name(row.match_confidence_code),
         review_required=row.review_required,
-        source_feature_count=row.source_feature_count,
-        source_object_ids=row.source_object_ids or [],
-        source_levels=row.source_levels or [],
-        source_level_names=_source_level_names(row.source_levels),
-        source_layer_names=row.source_layer_names or [],
-        source_names=row.source_names or [],
-        source_remarks=row.source_remarks or [],
-        geometry_union_status=row.geometry_union_status,
-        geometry_union_status_name=_water_geometry_union_status_name(row.geometry_union_status),
-        business_remark=row.business_remark,
-        source_remark=row.source_remark,
-        source_layer_name=row.source_layer_name,
+        segment_count=row.segment_count,
+        source_summary=row.source_summary,
+        source_audit_summary=row.source_audit_summary or {},
         source_version=row.source_version,
         is_enabled=row.is_enabled,
         has_boundary=bool(boundary and boundary.geometry_status_code == "AVAILABLE"),
         geometry_status_code=geometry_status_code,
-        geometry_status_name=_water_geometry_status_name(geometry_status_code),
+        geometry_status_name=_channel_geometry_status_name(geometry_status_code),
+        boundary_quality_code=boundary_quality_code,
+        boundary_quality_name=_channel_boundary_quality_name(boundary_quality_code),
+        connectivity_status_code=connectivity_status_code,
+        connectivity_status_name=_channel_connectivity_status_name(connectivity_status_code),
+        repair_status_code=repair_status_code,
+        repair_status_name=_channel_repair_status_name(repair_status_code),
         imported_at=boundary.imported_at if boundary else None,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
 
 
-def _to_water_system_detail_response(
-    row: WaterSystem,
-    boundary: WaterSystemBoundary | None,
-) -> WaterSystemDetailResponse:
-    base = _to_water_system_response(row, boundary).model_dump()
-    return WaterSystemDetailResponse(
+def _to_navigation_channel_detail_response(
+    row: NavigationChannel,
+    boundary: NavigationChannelBoundary | None,
+) -> NavigationChannelDetailResponse:
+    base = _to_navigation_channel_response(row, boundary).model_dump()
+    return NavigationChannelDetailResponse(
         **base,
         center_longitude=boundary.center_longitude if boundary else None,
         center_latitude=boundary.center_latitude if boundary else None,
-        display_center_longitude=row.display_center_longitude,
-        display_center_latitude=row.display_center_latitude,
+        display_center_longitude=boundary.display_center_longitude if boundary else None,
+        display_center_latitude=boundary.display_center_latitude if boundary else None,
         ring_count=boundary.ring_count if boundary else 0,
         point_count=boundary.point_count if boundary else 0,
-        boundary_quality_code=boundary.boundary_quality_code if boundary else "MISSING",
-        boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code if boundary else "MISSING"),
+        bbox_min_lng=boundary.bbox_min_lng if boundary else None,
+        bbox_min_lat=boundary.bbox_min_lat if boundary else None,
+        bbox_max_lng=boundary.bbox_max_lng if boundary else None,
+        bbox_max_lat=boundary.bbox_max_lat if boundary else None,
+        coverage_policy_code=boundary.coverage_policy_code if boundary else None,
         geometry_coordinate_system_code=boundary.geometry_coordinate_system_code if boundary else "WGS84",
-        boundary_coordinate_system_code=boundary.boundary_coordinate_system_code if boundary else "WGS84",
+        boundary_coordinate_system_code=boundary.boundary_coordinate_system_code if boundary else "GCJ02",
     )
 
 
-def _to_water_boundary_response(
-    row: WaterSystem,
-    boundary: WaterSystemBoundary | None,
+def _to_navigation_channel_boundary_response(
+    row: NavigationChannel,
+    boundary: NavigationChannelBoundary | None,
     precision: str,
-) -> WaterSystemBoundaryResponse:
+) -> NavigationChannelBoundaryResponse:
     paths = _boundary_paths_by_precision(boundary, precision)
     geometry_status_code = boundary.geometry_status_code if boundary else "MISSING"
-    return WaterSystemBoundaryResponse(
-        water_system_code=row.water_system_code,
-        water_system_name=row.water_system_name,
-        water_level=row.water_level,
-        water_level_name=_water_level_name(row.water_level),
-        navigation_category_code=row.navigation_category_code,
-        navigation_category_name=_water_navigation_category_name(row.navigation_category_code),
-        navigation_scope_code=row.navigation_scope_code,
-        navigation_scope_name=_water_navigation_scope_name(row.navigation_scope_code),
-        parent_water_system_code=row.parent_water_system_code,
+    boundary_quality_code = boundary.boundary_quality_code if boundary else "MISSING"
+    connectivity_status_code = boundary.connectivity_status_code if boundary else "MISSING"
+    repair_status_code = boundary.repair_status_code if boundary else "MISSING"
+    return NavigationChannelBoundaryResponse(
+        channel_code=row.channel_code,
+        channel_name=row.channel_name,
+        parent_channel_code=row.parent_channel_code,
+        channel_type_code=row.channel_type_code,
+        channel_type_name=_channel_type_name(row.channel_type_code),
+        planning_level_code=row.planning_level_code,
+        planning_level_name=_channel_planning_level_name(row.planning_level_code),
         precision=precision,
         boundary_paths=paths,
         has_boundary=bool(paths),
         geometry_status_code=geometry_status_code,
-        geometry_status_name=_water_geometry_status_name(geometry_status_code),
-        boundary_quality_code=boundary.boundary_quality_code if boundary else "MISSING",
-        boundary_quality_name=_water_boundary_quality_name(boundary.boundary_quality_code if boundary else "MISSING"),
+        geometry_status_name=_channel_geometry_status_name(geometry_status_code),
+        boundary_quality_code=boundary_quality_code,
+        boundary_quality_name=_channel_boundary_quality_name(boundary_quality_code),
+        connectivity_status_code=connectivity_status_code,
+        connectivity_status_name=_channel_connectivity_status_name(connectivity_status_code),
+        repair_status_code=repair_status_code,
+        repair_status_name=_channel_repair_status_name(repair_status_code),
         center_longitude=boundary.center_longitude if boundary else None,
         center_latitude=boundary.center_latitude if boundary else None,
-        display_center_longitude=row.display_center_longitude,
-        display_center_latitude=row.display_center_latitude,
+        display_center_longitude=boundary.display_center_longitude if boundary else None,
+        display_center_latitude=boundary.display_center_latitude if boundary else None,
         geometry_coordinate_system_code=boundary.geometry_coordinate_system_code if boundary else "WGS84",
-        boundary_coordinate_system_code=boundary.boundary_coordinate_system_code if boundary else "WGS84",
+        boundary_coordinate_system_code=boundary.boundary_coordinate_system_code if boundary else "GCJ02",
+    )
+
+
+def _to_navigation_channel_segment_response(
+    channel: NavigationChannel,
+    row: NavigationChannelSegment,
+) -> NavigationChannelSegmentResponse:
+    return NavigationChannelSegmentResponse(
+        id=row.id,
+        channel_code=channel.channel_code,
+        channel_name=channel.channel_name,
+        segment_code=row.segment_code,
+        segment_name=row.segment_name,
+        segment_kind_code=row.segment_kind_code,
+        segment_kind_name=_channel_segment_kind_name(row.segment_kind_code),
+        sequence_no=row.sequence_no,
+        start_place=row.start_place,
+        end_place=row.end_place,
+        via_city_names=row.via_city_names or [],
+        source_water_names=row.source_water_names or [],
+        source_summary=row.source_summary,
+        geometry_status_code=row.geometry_status_code,
+        geometry_status_name=_channel_geometry_status_name(row.geometry_status_code),
+        boundary_quality_code=row.boundary_quality_code,
+        boundary_quality_name=_channel_boundary_quality_name(row.boundary_quality_code),
+        connectivity_status_code=row.connectivity_status_code,
+        connectivity_status_name=_channel_connectivity_status_name(row.connectivity_status_code),
+        repair_status_code=row.repair_status_code,
+        repair_status_name=_channel_repair_status_name(row.repair_status_code),
+        review_required=row.review_required,
+        sort_order=row.sort_order,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_navigation_channel_source_audit_response(row: NavigationChannelSourceAudit) -> NavigationChannelSourceAuditResponse:
+    return NavigationChannelSourceAuditResponse(
+        id=row.id,
+        channel_code=row.channel_code,
+        segment_code=row.segment_code,
+        source_name=row.source_name,
+        source_layer_name=row.source_layer_name,
+        source_object_id=row.source_object_id,
+        source_level=row.source_level,
+        decision_code=row.decision_code,
+        role_code=row.role_code,
+        reason_code=row.reason_code,
+        source_remark=row.source_remark,
+        review_required=row.review_required,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -586,16 +591,16 @@ class AdminRegionService:
         return [_to_admin_region_response(row) for row in rows]
 
 
-class WaterSystemService:
+class NavigationChannelService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def summary(self) -> WaterSystemSummaryResponse:
-        total_count = int((await self.db.execute(select(func.count()).select_from(WaterSystem))).scalar_one() or 0)
+    async def summary(self) -> NavigationChannelSummaryResponse:
+        total_count = int((await self.db.execute(select(func.count()).select_from(NavigationChannel))).scalar_one() or 0)
         enabled_count = int(
             (
                 await self.db.execute(
-                    select(func.count()).select_from(WaterSystem).where(WaterSystem.is_enabled.is_(True))
+                    select(func.count()).select_from(NavigationChannel).where(NavigationChannel.is_enabled.is_(True))
                 )
             ).scalar_one()
             or 0
@@ -604,164 +609,198 @@ class WaterSystemService:
             (
                 await self.db.execute(
                     select(func.count())
-                    .select_from(WaterSystemBoundary)
-                    .join(WaterSystem, WaterSystem.id == WaterSystemBoundary.water_system_id)
+                    .select_from(NavigationChannelBoundary)
+                    .join(NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id)
                     .where(
-                        WaterSystem.is_enabled.is_(True),
-                        WaterSystemBoundary.is_current.is_(True),
-                        WaterSystemBoundary.geometry_status_code == "AVAILABLE",
+                        NavigationChannel.is_enabled.is_(True),
+                        NavigationChannelBoundary.is_current.is_(True),
+                        NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
                     )
                 )
             ).scalar_one()
             or 0
         )
-        level_rows = (
+        type_rows = (
             await self.db.execute(
-                select(WaterSystem.water_level, func.count())
-                .where(WaterSystem.is_enabled.is_(True))
-                .group_by(WaterSystem.water_level)
+                select(NavigationChannel.channel_type_code, func.count())
+                .where(NavigationChannel.is_enabled.is_(True))
+                .group_by(NavigationChannel.channel_type_code)
             )
         ).all()
-        scope_rows = (
+        planning_rows = (
             await self.db.execute(
-                select(WaterSystem.navigation_scope_code, func.count())
-                .where(WaterSystem.is_enabled.is_(True))
-                .group_by(WaterSystem.navigation_scope_code)
+                select(NavigationChannel.planning_level_code, func.count())
+                .where(NavigationChannel.is_enabled.is_(True))
+                .group_by(NavigationChannel.planning_level_code)
             )
         ).all()
-        category_rows = (
+        ais_rows = (
             await self.db.execute(
-                select(WaterSystem.navigation_category_code, func.count())
-                .where(WaterSystem.is_enabled.is_(True))
-                .group_by(WaterSystem.navigation_category_code)
+                select(NavigationChannel.ais_scope_code, func.count())
+                .where(NavigationChannel.is_enabled.is_(True))
+                .group_by(NavigationChannel.ais_scope_code)
             )
         ).all()
-        ais_scope_rows = (
+        boundary_quality_rows = (
             await self.db.execute(
-                select(WaterSystem.ais_situation_scope, func.count())
-                .where(WaterSystem.is_enabled.is_(True))
-                .group_by(WaterSystem.ais_situation_scope)
+                select(NavigationChannelBoundary.boundary_quality_code, func.count())
+                .join(NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id)
+                .where(NavigationChannel.is_enabled.is_(True), NavigationChannelBoundary.is_current.is_(True))
+                .group_by(NavigationChannelBoundary.boundary_quality_code)
+            )
+        ).all()
+        connectivity_rows = (
+            await self.db.execute(
+                select(NavigationChannelBoundary.connectivity_status_code, func.count())
+                .join(NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id)
+                .where(NavigationChannel.is_enabled.is_(True), NavigationChannelBoundary.is_current.is_(True))
+                .group_by(NavigationChannelBoundary.connectivity_status_code)
+            )
+        ).all()
+        repair_rows = (
+            await self.db.execute(
+                select(NavigationChannelBoundary.repair_status_code, func.count())
+                .join(NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id)
+                .where(NavigationChannel.is_enabled.is_(True), NavigationChannelBoundary.is_current.is_(True))
+                .group_by(NavigationChannelBoundary.repair_status_code)
             )
         ).all()
         version_row = await self.db.scalar(
-            select(WaterSystem.source_version)
-            .where(WaterSystem.is_enabled.is_(True))
-            .group_by(WaterSystem.source_version)
-            .order_by(func.count().desc(), WaterSystem.source_version.desc())
+            select(NavigationChannel.source_version)
+            .where(NavigationChannel.is_enabled.is_(True))
+            .group_by(NavigationChannel.source_version)
+            .order_by(func.count().desc(), NavigationChannel.source_version.desc())
             .limit(1)
         )
-        return WaterSystemSummaryResponse(
+        return NavigationChannelSummaryResponse(
             total_count=total_count,
             boundary_count=boundary_count,
             enabled_count=enabled_count,
-            level_counts={str(level): int(count) for level, count in level_rows},
-            navigation_scope_counts={str(scope or "UNKNOWN"): int(count) for scope, count in scope_rows},
-            navigation_category_counts={str(category or "UNKNOWN"): int(count) for category, count in category_rows},
-            ais_situation_scope_counts={str(scope or "UNKNOWN"): int(count) for scope, count in ais_scope_rows},
+            channel_type_counts={str(code or "UNKNOWN"): int(count) for code, count in type_rows},
+            planning_level_counts={str(code or "UNKNOWN"): int(count) for code, count in planning_rows},
+            ais_scope_counts={str(code or "UNKNOWN"): int(count) for code, count in ais_rows},
+            boundary_quality_counts={str(code or "UNKNOWN"): int(count) for code, count in boundary_quality_rows},
+            connectivity_status_counts={str(code or "UNKNOWN"): int(count) for code, count in connectivity_rows},
+            repair_status_counts={str(code or "UNKNOWN"): int(count) for code, count in repair_rows},
             current_source_version=version_row,
         )
 
-    async def list_water_systems(
+    async def list_navigation_channels(
         self,
         *,
         keyword: str | None,
-        water_level: int | None,
-        feature_type_code: str | None,
-        hydrology_period_code: str | None,
-        salinity_type_code: str | None,
-        navigation_category_code: str | None,
-        navigation_scope_code: str | None,
-        ais_situation_scope: str | None,
+        channel_type_code: str | None,
+        planning_level_code: str | None,
+        ais_scope_code: str | None,
         geometry_status_code: str | None,
+        boundary_quality_code: str | None,
+        connectivity_status_code: str | None,
+        repair_status_code: str | None,
         page: int,
         page_size: int,
-    ) -> PageResponse[WaterSystemResponse]:
+    ) -> PageResponse[NavigationChannelResponse]:
         stmt = (
             select(
-                WaterSystem,
-                WaterSystemBoundary.id.label("boundary_id"),
-                WaterSystemBoundary.geometry_status_code,
-                WaterSystemBoundary.imported_at,
+                NavigationChannel,
+                NavigationChannelBoundary.id.label("boundary_id"),
+                NavigationChannelBoundary.geometry_status_code,
+                NavigationChannelBoundary.imported_at,
+                NavigationChannelBoundary.boundary_quality_code,
+                NavigationChannelBoundary.connectivity_status_code,
+                NavigationChannelBoundary.repair_status_code,
             )
             .outerjoin(
-                WaterSystemBoundary,
-                (WaterSystemBoundary.water_system_id == WaterSystem.id)
-                & (WaterSystemBoundary.is_current.is_(True)),
+                NavigationChannelBoundary,
+                (NavigationChannelBoundary.channel_id == NavigationChannel.id)
+                & (NavigationChannelBoundary.is_current.is_(True)),
             )
-            .where(WaterSystem.is_enabled.is_(True))
+            .where(NavigationChannel.is_enabled.is_(True))
         )
         if keyword:
             like_value = f"%{keyword.strip()}%"
             stmt = stmt.where(
                 or_(
-                    WaterSystem.water_system_code.ilike(like_value),
-                    WaterSystem.water_system_name.ilike(like_value),
-                    WaterSystem.standard_name.ilike(like_value),
-                    WaterSystem.display_name.ilike(like_value),
-                    WaterSystem.source_remark.ilike(like_value),
+                    NavigationChannel.channel_code.ilike(like_value),
+                    NavigationChannel.channel_name.ilike(like_value),
+                    NavigationChannel.official_name.ilike(like_value),
+                    NavigationChannel.display_name.ilike(like_value),
+                    NavigationChannel.source_summary.ilike(like_value),
                 )
             )
-        if water_level is not None:
-            stmt = stmt.where(WaterSystem.water_level == water_level)
-        if feature_type_code:
-            stmt = stmt.where(WaterSystem.feature_type_code == feature_type_code)
-        if hydrology_period_code:
-            stmt = stmt.where(WaterSystem.hydrology_period_code == hydrology_period_code)
-        if salinity_type_code:
-            stmt = stmt.where(WaterSystem.salinity_type_code == salinity_type_code)
-        if navigation_category_code:
-            stmt = stmt.where(WaterSystem.navigation_category_code == navigation_category_code)
-        if navigation_scope_code:
-            stmt = stmt.where(WaterSystem.navigation_scope_code == navigation_scope_code)
-        if ais_situation_scope:
-            stmt = stmt.where(WaterSystem.ais_situation_scope == ais_situation_scope)
+        if channel_type_code:
+            stmt = stmt.where(NavigationChannel.channel_type_code == channel_type_code)
+        if planning_level_code:
+            stmt = stmt.where(NavigationChannel.planning_level_code == planning_level_code)
+        if ais_scope_code:
+            stmt = stmt.where(NavigationChannel.ais_scope_code == ais_scope_code)
         if geometry_status_code:
-            stmt = stmt.where(WaterSystemBoundary.geometry_status_code == geometry_status_code)
+            stmt = stmt.where(NavigationChannelBoundary.geometry_status_code == geometry_status_code)
+        if boundary_quality_code:
+            stmt = stmt.where(NavigationChannelBoundary.boundary_quality_code == boundary_quality_code)
+        if connectivity_status_code:
+            stmt = stmt.where(NavigationChannelBoundary.connectivity_status_code == connectivity_status_code)
+        if repair_status_code:
+            stmt = stmt.where(NavigationChannelBoundary.repair_status_code == repair_status_code)
 
         total = int((await self.db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar_one())
         rows = (
             await self.db.execute(
-                stmt.order_by(WaterSystem.display_priority.asc(), WaterSystem.sort_order.asc(), WaterSystem.id.asc())
+                stmt.order_by(NavigationChannel.display_priority.asc(), NavigationChannel.sort_order.asc(), NavigationChannel.id.asc())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
         ).all()
-        items: list[WaterSystemResponse] = []
-        for water_system, boundary_id, status_code, imported_at in rows:
+        items: list[NavigationChannelResponse] = []
+        for channel, boundary_id, status_code, imported_at, quality_code, connectivity_code, repair_code in rows:
             boundary = (
-                SimpleNamespace(geometry_status_code=status_code, imported_at=imported_at)
+                SimpleNamespace(
+                    geometry_status_code=status_code,
+                    imported_at=imported_at,
+                    boundary_quality_code=quality_code,
+                    connectivity_status_code=connectivity_code,
+                    repair_status_code=repair_code,
+                )
                 if boundary_id
                 else None
             )
-            items.append(_to_water_system_response(water_system, boundary))
-        return PageResponse[WaterSystemResponse](total=total, page=page, page_size=page_size, items=items)
+            items.append(_to_navigation_channel_response(channel, boundary))
+        return PageResponse[NavigationChannelResponse](total=total, page=page, page_size=page_size, items=items)
 
-    async def get_water_system_detail(self, water_system_code: str) -> WaterSystemDetailResponse:
+    async def get_navigation_channel_detail(self, channel_code: str) -> NavigationChannelDetailResponse:
         row = await self.db.scalar(
-            select(WaterSystem).where(
-                WaterSystem.water_system_code == water_system_code,
-                WaterSystem.is_enabled.is_(True),
+            select(NavigationChannel).where(
+                NavigationChannel.channel_code == channel_code,
+                NavigationChannel.is_enabled.is_(True),
             )
         )
         if row is None:
-            raise NotFoundError("WaterSystem", water_system_code)
+            raise NotFoundError("NavigationChannel", channel_code)
         boundary_row = (
             await self.db.execute(
                 select(
-                    WaterSystemBoundary.id,
-                    WaterSystemBoundary.geometry_status_code,
-                WaterSystemBoundary.imported_at,
-                WaterSystemBoundary.center_longitude,
-                WaterSystemBoundary.center_latitude,
-                    WaterSystemBoundary.boundary_quality_code,
-                    WaterSystemBoundary.geometry_coordinate_system_code,
-                    WaterSystemBoundary.boundary_coordinate_system_code,
-                    WaterSystemBoundary.ring_count,
-                    WaterSystemBoundary.point_count,
+                    NavigationChannelBoundary.id,
+                    NavigationChannelBoundary.geometry_status_code,
+                    NavigationChannelBoundary.imported_at,
+                    NavigationChannelBoundary.center_longitude,
+                    NavigationChannelBoundary.center_latitude,
+                    NavigationChannelBoundary.display_center_longitude,
+                    NavigationChannelBoundary.display_center_latitude,
+                    NavigationChannelBoundary.boundary_quality_code,
+                    NavigationChannelBoundary.connectivity_status_code,
+                    NavigationChannelBoundary.repair_status_code,
+                    NavigationChannelBoundary.coverage_policy_code,
+                    NavigationChannelBoundary.geometry_coordinate_system_code,
+                    NavigationChannelBoundary.boundary_coordinate_system_code,
+                    NavigationChannelBoundary.ring_count,
+                    NavigationChannelBoundary.point_count,
+                    NavigationChannelBoundary.bbox_min_lng,
+                    NavigationChannelBoundary.bbox_min_lat,
+                    NavigationChannelBoundary.bbox_max_lng,
+                    NavigationChannelBoundary.bbox_max_lat,
                 )
                 .where(
-                    WaterSystemBoundary.water_system_id == row.id,
-                    WaterSystemBoundary.is_current.is_(True),
+                    NavigationChannelBoundary.channel_id == row.id,
+                    NavigationChannelBoundary.is_current.is_(True),
                 )
                 .limit(1)
             )
@@ -773,37 +812,82 @@ class WaterSystemService:
                 imported_at=boundary_row.imported_at,
                 center_longitude=boundary_row.center_longitude,
                 center_latitude=boundary_row.center_latitude,
+                display_center_longitude=boundary_row.display_center_longitude,
+                display_center_latitude=boundary_row.display_center_latitude,
                 boundary_quality_code=boundary_row.boundary_quality_code,
+                connectivity_status_code=boundary_row.connectivity_status_code,
+                repair_status_code=boundary_row.repair_status_code,
+                coverage_policy_code=boundary_row.coverage_policy_code,
                 geometry_coordinate_system_code=boundary_row.geometry_coordinate_system_code,
                 boundary_coordinate_system_code=boundary_row.boundary_coordinate_system_code,
                 ring_count=boundary_row.ring_count,
                 point_count=boundary_row.point_count,
+                bbox_min_lng=boundary_row.bbox_min_lng,
+                bbox_min_lat=boundary_row.bbox_min_lat,
+                bbox_max_lng=boundary_row.bbox_max_lng,
+                bbox_max_lat=boundary_row.bbox_max_lat,
             )
-        return _to_water_system_detail_response(row, boundary)
+        return _to_navigation_channel_detail_response(row, boundary)
 
-    async def get_water_system_boundary(
+    async def get_navigation_channel_boundary(
         self,
-        water_system_code: str,
+        channel_code: str,
         precision: str,
-    ) -> WaterSystemBoundaryResponse:
+    ) -> NavigationChannelBoundaryResponse:
         normalized_precision = precision if precision in {"low", "medium", "high"} else "medium"
         row = await self.db.scalar(
-            select(WaterSystem).where(
-                WaterSystem.water_system_code == water_system_code,
-                WaterSystem.is_enabled.is_(True),
+            select(NavigationChannel).where(
+                NavigationChannel.channel_code == channel_code,
+                NavigationChannel.is_enabled.is_(True),
             )
         )
         if row is None:
-            raise NotFoundError("WaterSystem", water_system_code)
+            raise NotFoundError("NavigationChannel", channel_code)
         boundary = await self.db.scalar(
-            select(WaterSystemBoundary)
+            select(NavigationChannelBoundary)
             .where(
-                WaterSystemBoundary.water_system_id == row.id,
-                WaterSystemBoundary.is_current.is_(True),
+                NavigationChannelBoundary.channel_id == row.id,
+                NavigationChannelBoundary.is_current.is_(True),
             )
             .limit(1)
         )
-        return _to_water_boundary_response(row, boundary, normalized_precision)
+        return _to_navigation_channel_boundary_response(row, boundary, normalized_precision)
+
+    async def list_navigation_channel_segments(self, channel_code: str) -> list[NavigationChannelSegmentResponse]:
+        channel = await self.db.scalar(
+            select(NavigationChannel).where(
+                NavigationChannel.channel_code == channel_code,
+                NavigationChannel.is_enabled.is_(True),
+            )
+        )
+        if channel is None:
+            raise NotFoundError("NavigationChannel", channel_code)
+        rows = (
+            await self.db.execute(
+                select(NavigationChannelSegment)
+                .where(NavigationChannelSegment.channel_id == channel.id)
+                .order_by(NavigationChannelSegment.sort_order.asc(), NavigationChannelSegment.sequence_no.asc())
+            )
+        ).scalars().all()
+        return [_to_navigation_channel_segment_response(channel, row) for row in rows]
+
+    async def list_navigation_channel_source_audit(self, channel_code: str) -> list[NavigationChannelSourceAuditResponse]:
+        channel = await self.db.scalar(
+            select(NavigationChannel).where(
+                NavigationChannel.channel_code == channel_code,
+                NavigationChannel.is_enabled.is_(True),
+            )
+        )
+        if channel is None:
+            raise NotFoundError("NavigationChannel", channel_code)
+        rows = (
+            await self.db.execute(
+                select(NavigationChannelSourceAudit)
+                .where(NavigationChannelSourceAudit.channel_id == channel.id)
+                .order_by(NavigationChannelSourceAudit.id.asc())
+            )
+        ).scalars().all()
+        return [_to_navigation_channel_source_audit_response(row) for row in rows]
 
 
 class BusinessRegionService:

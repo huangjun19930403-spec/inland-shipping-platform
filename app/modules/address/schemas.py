@@ -63,105 +63,98 @@ class AdminRegionBoundaryResponse(BaseModel):
     updated_at: datetime
 
 
-class WaterSystemQuery(BaseModel):
+class NavigationChannelQuery(BaseModel):
     keyword: str | None = None
-    water_level: int | None = Field(default=None, ge=0, le=7)
-    feature_type_code: str | None = None
-    hydrology_period_code: str | None = None
-    salinity_type_code: str | None = None
-    navigation_category_code: str | None = None
-    navigation_scope_code: str | None = None
-    ais_situation_scope: str | None = None
+    channel_type_code: str | None = None
+    planning_level_code: str | None = None
+    ais_scope_code: str | None = None
     geometry_status_code: str | None = None
+    boundary_quality_code: str | None = None
+    connectivity_status_code: str | None = None
+    repair_status_code: str | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=500)
 
 
-class WaterSystemSummaryResponse(BaseModel):
+class NavigationChannelSummaryResponse(BaseModel):
     total_count: int
     boundary_count: int
     enabled_count: int
-    level_counts: dict[str, int] = Field(default_factory=dict)
-    navigation_scope_counts: dict[str, int] = Field(default_factory=dict)
-    navigation_category_counts: dict[str, int] = Field(default_factory=dict)
-    ais_situation_scope_counts: dict[str, int] = Field(default_factory=dict)
+    channel_type_counts: dict[str, int] = Field(default_factory=dict)
+    planning_level_counts: dict[str, int] = Field(default_factory=dict)
+    ais_scope_counts: dict[str, int] = Field(default_factory=dict)
+    boundary_quality_counts: dict[str, int] = Field(default_factory=dict)
+    connectivity_status_counts: dict[str, int] = Field(default_factory=dict)
+    repair_status_counts: dict[str, int] = Field(default_factory=dict)
     current_source_version: str | None = None
 
 
-class WaterSystemResponse(BaseModel):
+class NavigationChannelResponse(BaseModel):
     id: int
-    water_system_code: str
-    water_system_name: str
-    standard_name: str | None = None
+    channel_code: str
+    channel_name: str
+    official_name: str | None = None
     display_name: str | None = None
-    parent_water_system_code: str | None = None
-    water_level: int
-    water_level_name: str
-    feature_type_code: str
-    feature_type_name: str
-    hydrology_period_code: str
-    hydrology_period_name: str
-    salinity_type_code: str
-    salinity_type_name: str
-    water_boundary_type_code: str
-    water_boundary_type_name: str
-    navigation_category_code: str | None = None
-    navigation_category_name: str | None = None
-    navigation_scope_code: str | None = None
-    navigation_scope_name: str | None = None
-    ais_situation_scope: str | None = None
-    ais_situation_scope_name: str | None = None
+    alias_names: list[str] = Field(default_factory=list)
+    parent_channel_code: str | None = None
+    channel_type_code: str
+    channel_type_name: str
+    planning_level_code: str
+    planning_level_name: str
+    planning_basis_code: str | None = None
+    start_place: str | None = None
+    end_place: str | None = None
+    via_city_names: list[str] = Field(default_factory=list)
+    via_port_names: list[str] = Field(default_factory=list)
+    technical_grade_current_code: str | None = None
+    technical_grade_planned_code: str | None = None
+    ais_scope_code: str
+    ais_scope_name: str
     display_priority: int = 0
-    match_level_code: str | None = None
-    match_level_name: str | None = None
-    match_confidence_code: str | None = None
-    match_confidence_name: str | None = None
     review_required: bool = False
-    source_feature_count: int = 0
-    source_object_ids: list[int] = Field(default_factory=list)
-    source_levels: list[int] = Field(default_factory=list)
-    source_level_names: list[str] = Field(default_factory=list)
-    source_layer_names: list[str] = Field(default_factory=list)
-    source_names: list[str] = Field(default_factory=list)
-    source_remarks: list[str] = Field(default_factory=list)
-    geometry_union_status: str | None = None
-    geometry_union_status_name: str | None = None
-    business_remark: str | None = None
-    source_remark: str | None
-    source_layer_name: str
+    segment_count: int = 0
+    source_summary: str | None = None
+    source_audit_summary: dict[str, int] = Field(default_factory=dict)
     source_version: str
     is_enabled: bool
     has_boundary: bool = False
     geometry_status_code: str = "UNKNOWN"
     geometry_status_name: str = "未知"
+    boundary_quality_code: str = "UNKNOWN"
+    boundary_quality_name: str = "未知"
+    connectivity_status_code: str = "UNKNOWN"
+    connectivity_status_name: str = "未知"
+    repair_status_code: str = "NONE"
+    repair_status_name: str = "未修复"
     imported_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
 
-class WaterSystemDetailResponse(WaterSystemResponse):
+class NavigationChannelDetailResponse(NavigationChannelResponse):
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
     display_center_longitude: Decimal | None = None
     display_center_latitude: Decimal | None = None
     ring_count: int = 0
     point_count: int = 0
-    boundary_quality_code: str = "UNKNOWN"
-    boundary_quality_name: str = "未知"
+    bbox_min_lng: Decimal | None = None
+    bbox_min_lat: Decimal | None = None
+    bbox_max_lng: Decimal | None = None
+    bbox_max_lat: Decimal | None = None
+    coverage_policy_code: str | None = None
     geometry_coordinate_system_code: str = "WGS84"
-    boundary_coordinate_system_code: str = "WGS84"
+    boundary_coordinate_system_code: str = "GCJ02"
 
 
-class WaterSystemBoundaryResponse(BaseModel):
-    water_system_code: str
-    water_system_name: str
-    water_level: int
-    water_level_name: str
-    navigation_category_code: str | None = None
-    navigation_category_name: str | None = None
-    navigation_scope_code: str | None = None
-    navigation_scope_name: str | None = None
-    parent_water_system_code: str | None = None
+class NavigationChannelBoundaryResponse(BaseModel):
+    channel_code: str
+    channel_name: str
+    parent_channel_code: str | None = None
+    channel_type_code: str
+    channel_type_name: str
+    planning_level_code: str
+    planning_level_name: str
     precision: str
     boundary_paths: list[list[list[float]]] = Field(default_factory=list)
     has_boundary: bool = False
@@ -169,12 +162,61 @@ class WaterSystemBoundaryResponse(BaseModel):
     geometry_status_name: str = "未知"
     boundary_quality_code: str = "UNKNOWN"
     boundary_quality_name: str = "未知"
+    connectivity_status_code: str = "UNKNOWN"
+    connectivity_status_name: str = "未知"
+    repair_status_code: str = "NONE"
+    repair_status_name: str = "未修复"
     center_longitude: Decimal | None = None
     center_latitude: Decimal | None = None
     display_center_longitude: Decimal | None = None
     display_center_latitude: Decimal | None = None
     geometry_coordinate_system_code: str = "WGS84"
-    boundary_coordinate_system_code: str = "WGS84"
+    boundary_coordinate_system_code: str = "GCJ02"
+
+
+class NavigationChannelSegmentResponse(BaseModel):
+    id: int
+    channel_code: str
+    channel_name: str
+    segment_code: str
+    segment_name: str
+    segment_kind_code: str
+    segment_kind_name: str
+    sequence_no: int
+    start_place: str | None = None
+    end_place: str | None = None
+    via_city_names: list[str] = Field(default_factory=list)
+    source_water_names: list[str] = Field(default_factory=list)
+    source_summary: str | None = None
+    geometry_status_code: str = "UNKNOWN"
+    geometry_status_name: str = "未知"
+    boundary_quality_code: str = "UNKNOWN"
+    boundary_quality_name: str = "未知"
+    connectivity_status_code: str = "UNKNOWN"
+    connectivity_status_name: str = "未知"
+    repair_status_code: str = "NONE"
+    repair_status_name: str = "未修复"
+    review_required: bool = False
+    sort_order: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class NavigationChannelSourceAuditResponse(BaseModel):
+    id: int
+    channel_code: str | None = None
+    segment_code: str | None = None
+    source_name: str | None = None
+    source_layer_name: str | None = None
+    source_object_id: str | None = None
+    source_level: int | None = None
+    decision_code: str
+    role_code: str
+    reason_code: str | None = None
+    source_remark: str | None = None
+    review_required: bool = False
+    created_at: datetime
+    updated_at: datetime
 
 
 class BusinessRegionListQuery(BaseModel):

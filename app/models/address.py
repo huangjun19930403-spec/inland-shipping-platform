@@ -59,50 +59,42 @@ class AdminRegionBoundary(Base, TimestampMixin):
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
-class WaterSystem(Base, TimestampMixin):
-    __tablename__ = "water_system"
+class NavigationChannel(Base, TimestampMixin):
+    __tablename__ = "navigation_channel"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    water_system_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
-    water_system_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    standard_name: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    channel_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    channel_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    official_name: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    parent_water_system_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    water_level: Mapped[int] = mapped_column(SmallInteger, nullable=False, index=True)
-    feature_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="OTHER", index=True)
-    hydrology_period_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
-    salinity_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
-    water_boundary_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="STANDARD", index=True)
-    navigation_category_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    navigation_scope_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    ais_situation_scope: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    alias_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    parent_channel_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    channel_type_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    planning_level_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    planning_basis_code: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    start_place: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    end_place: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    via_city_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    via_port_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    technical_grade_current_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    technical_grade_planned_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    ais_scope_code: Mapped[str] = mapped_column(String(32), nullable=False, default="INCLUDED", index=True)
     display_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    match_level_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    match_confidence_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    source_feature_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    source_object_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    source_levels: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    source_layer_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    source_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    source_remarks: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    geometry_union_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    business_remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    display_center_longitude: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
-    display_center_latitude: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
-    source_remark: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    source_layer_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    segment_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_summary: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_audit_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_version: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-class WaterSystemBoundary(Base, TimestampMixin):
-    __tablename__ = "water_system_boundary"
+class NavigationChannelBoundary(Base, TimestampMixin):
+    __tablename__ = "navigation_channel_boundary"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    water_system_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("water_system.id"), nullable=False, index=True
+    channel_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("navigation_channel.id"), nullable=False, index=True
     )
     geometry_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     boundary_paths_low: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -110,6 +102,8 @@ class WaterSystemBoundary(Base, TimestampMixin):
     boundary_paths_high: Mapped[list | None] = mapped_column(JSON, nullable=True)
     center_longitude: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     center_latitude: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
+    display_center_longitude: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
+    display_center_latitude: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
     bbox_min_lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     bbox_min_lat: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True)
     bbox_max_lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
@@ -120,10 +114,63 @@ class WaterSystemBoundary(Base, TimestampMixin):
     point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     geometry_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="AVAILABLE", index=True)
     boundary_quality_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    connectivity_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    repair_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="NONE", index=True)
+    coverage_policy_code: Mapped[str] = mapped_column(String(64), nullable=False, default="CHANNEL_CORRIDOR_ENVELOPE")
     geometry_coordinate_system_code: Mapped[str] = mapped_column(String(16), nullable=False, default="WGS84")
-    boundary_coordinate_system_code: Mapped[str] = mapped_column(String(16), nullable=False, default="WGS84")
+    boundary_coordinate_system_code: Mapped[str] = mapped_column(String(16), nullable=False, default="GCJ02")
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     imported_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+
+
+class NavigationChannelSegment(Base, TimestampMixin):
+    __tablename__ = "navigation_channel_segment"
+    __table_args__ = (
+        UniqueConstraint("channel_id", "segment_code", name="uk_navigation_channel_segment_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    channel_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("navigation_channel.id"), nullable=False, index=True
+    )
+    segment_code: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    segment_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    segment_kind_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    start_place: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    end_place: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    via_city_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    source_water_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    source_summary: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    geometry_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    boundary_quality_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    connectivity_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", index=True)
+    repair_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="NONE", index=True)
+    review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class NavigationChannelSourceAudit(Base, TimestampMixin):
+    __tablename__ = "navigation_channel_source_audit"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    channel_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_channel.id"), nullable=True, index=True
+    )
+    segment_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_channel_segment.id"), nullable=True, index=True
+    )
+    channel_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    segment_code: Mapped[str | None] = mapped_column(String(96), nullable=True, index=True)
+    source_name: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    source_layer_name: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    source_object_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_level: Mapped[int | None] = mapped_column(SmallInteger, nullable=True, index=True)
+    decision_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    role_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    source_remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
 
 class Region(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):

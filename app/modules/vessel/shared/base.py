@@ -29,7 +29,7 @@ from app.integrations.config_keys import (
     VESSEL_AIS_UNMATCHED_SCAN_LIMIT,
 )
 from app.integrations.es import RealtimeEsClient
-from app.models.address import AdminRegion, AdminRegionBoundary, Region, WaterSystem, WaterSystemBoundary
+from app.models.address import AdminRegion, AdminRegionBoundary, Region, NavigationChannel, NavigationChannelBoundary
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.dictionary import StdDict, StdDictItem
 from app.models.vessel import (
@@ -136,14 +136,14 @@ from app.modules.vessel.schemas import (
     VesselPositionCityVesselsResponse,
     VesselAisCityBoundaryItemResponse,
     VesselAisCityBoundaryResponse,
-    VesselAisWaterSystemBoundaryItemResponse,
-    VesselAisWaterSystemBoundaryResponse,
+    VesselAisNavigationChannelBoundaryItemResponse,
+    VesselAisNavigationChannelBoundaryResponse,
     VesselAisSnapshotResponse,
     VesselAisUnmatchedMmsiResponse,
-    VesselPositionWaterSystemSituationItemResponse,
-    VesselPositionWaterSystemSituationResponse,
-    VesselPositionWaterSystemSituationSummary,
-    VesselPositionWaterSystemVesselsResponse,
+    VesselPositionNavigationChannelSituationItemResponse,
+    VesselPositionNavigationChannelSituationResponse,
+    VesselPositionNavigationChannelSituationSummary,
+    VesselPositionNavigationChannelVesselsResponse,
     VesselPositionMonitorItemResponse,
     VesselPositionMonitorResponse,
     VesselPositionMonitorSummary,
@@ -265,16 +265,16 @@ CURRENT_CITY_SOURCE_UNKNOWN = "UNKNOWN"
 CURRENT_CITY_SOURCE_INVALID_POSITION = "INVALID_POSITION"
 CITY_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_GRID_CELL_SIZE_DEGREES = 1.0
-WATER_SYSTEM_GRID_CELL_SIZE_DEGREES = 0.1
-UNKNOWN_WATER_SYSTEM_CODE = "UNKNOWN"
-UNKNOWN_WATER_SYSTEM_NAME = "未知水系"
-CURRENT_WATER_SYSTEM_SOURCE_BOUNDARY = "WATER_SYSTEM_BOUNDARY"
-CURRENT_WATER_SYSTEM_SOURCE_NEAR_BOUNDARY = "NEAR_BOUNDARY"
-WATER_SYSTEM_BOUNDARY_CACHE_TTL_SECONDS = 1800
+CHANNEL_GRID_CELL_SIZE_DEGREES = 0.1
+UNKNOWN_CHANNEL_CODE = "UNKNOWN"
+UNKNOWN_CHANNEL_NAME = "未知航道"
+CURRENT_CHANNEL_SOURCE_BOUNDARY = "CHANNEL_BOUNDARY"
+CURRENT_CHANNEL_SOURCE_NEAR_BOUNDARY = "NEAR_CHANNEL_BOUNDARY"
+CHANNEL_BOUNDARY_CACHE_TTL_SECONDS = 1800
 CITY_SITUATION_CACHE_KEY_PREFIX = "vessel:city_situation:response:"
-WATER_SYSTEM_SITUATION_CACHE_KEY_PREFIX = "vessel:water_system_situation:response:"
+CHANNEL_SITUATION_CACHE_KEY_PREFIX = "vessel:channel_situation:response:"
 CITY_SITUATION_VESSELS_CACHE_KEY_PREFIX = "vessel:city_situation:vessels:"
-WATER_SYSTEM_SITUATION_VESSELS_CACHE_KEY_PREFIX = "vessel:water_system_situation:vessels:"
+CHANNEL_SITUATION_VESSELS_CACHE_KEY_PREFIX = "vessel:channel_situation:vessels:"
 CITY_SITUATION_SNAPSHOT_KEY_PREFIX = "vessel:city_situation:snapshot:"
 CITY_SITUATION_SNAPSHOT_TTL_SECONDS = settings.VESSEL_CITY_SITUATION_SNAPSHOT_TTL_SECONDS
 CITY_SITUATION_SNAPSHOT_MAX_SIZE = 20
@@ -329,26 +329,24 @@ class _CityBoundary:
 
 
 @dataclass(slots=True)
-class _WaterSystemBoundary:
+class _NavigationChannelBoundary:
     code: str
     name: str
-    parent_water_system_code: str | None
-    level: int
-    feature_type_code: str
-    hydrology_period_code: str
-    salinity_type_code: str
-    water_boundary_type_code: str
-    navigation_category_code: str | None
-    navigation_scope_code: str | None
-    ais_situation_scope: str | None
+    parent_channel_code: str | None
+    channel_type_code: str
+    planning_level_code: str
+    ais_scope_code: str | None
     center_longitude: Decimal | None
     center_latitude: Decimal | None
     display_center_longitude: Decimal | None
     display_center_latitude: Decimal | None
     boundary_quality_code: str
+    connectivity_status_code: str
+    repair_status_code: str
     geometry_coordinate_system_code: str
     boundary_coordinate_system_code: str
     shape_area_degree: Decimal | None
+    display_priority: int
     bbox: tuple[float, float, float, float]
     bbox_area: float
     polygons: list[list[list[tuple[float, float]]]]
@@ -366,12 +364,11 @@ class _ResolvedCity:
 
 
 @dataclass(slots=True)
-class _ResolvedWaterSystem:
-    water_system_code: str | None
-    water_system_name: str
-    current_water_system_source: str
-    water_level: int | None = None
-    boundary: _WaterSystemBoundary | None = None
+class _ResolvedNavigationChannel:
+    channel_code: str | None
+    channel_name: str
+    current_channel_source: str
+    boundary: _NavigationChannelBoundary | None = None
     match_distance_m: Decimal | None = None
 
 
@@ -411,9 +408,9 @@ class _CitySituationResponseCacheEntry:
 
 
 @dataclass(slots=True)
-class _WaterSystemSituationResponseCacheEntry:
+class _NavigationChannelSituationResponseCacheEntry:
     expires_at: datetime
-    response: VesselPositionWaterSystemSituationResponse
+    response: VesselPositionNavigationChannelSituationResponse
 
 
 @dataclass(slots=True)
@@ -423,18 +420,18 @@ class _CitySituationVesselsResponseCacheEntry:
 
 
 @dataclass(slots=True)
-class _WaterSystemSituationVesselsResponseCacheEntry:
+class _NavigationChannelSituationVesselsResponseCacheEntry:
     expires_at: datetime
-    response: VesselPositionWaterSystemVesselsResponse
+    response: VesselPositionNavigationChannelVesselsResponse
 
 
 _CITY_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
-_WATER_SYSTEM_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
+_CHANNEL_BOUNDARY_CACHE: dict[str, Any] = {"loaded_at": None, "boundaries": [], "grid_index": {}}
 _CITY_SITUATION_SNAPSHOTS: dict[str, _CitySituationSnapshot] = {}
 _CITY_SITUATION_RESPONSE_CACHE: dict[str, _CitySituationResponseCacheEntry] = {}
-_WATER_SYSTEM_SITUATION_RESPONSE_CACHE: dict[str, _WaterSystemSituationResponseCacheEntry] = {}
+_CHANNEL_SITUATION_RESPONSE_CACHE: dict[str, _NavigationChannelSituationResponseCacheEntry] = {}
 _CITY_SITUATION_VESSELS_RESPONSE_CACHE: dict[str, _CitySituationVesselsResponseCacheEntry] = {}
-_WATER_SYSTEM_SITUATION_VESSELS_RESPONSE_CACHE: dict[str, _WaterSystemSituationVesselsResponseCacheEntry] = {}
+_CHANNEL_SITUATION_VESSELS_RESPONSE_CACHE: dict[str, _NavigationChannelSituationVesselsResponseCacheEntry] = {}
 _CITY_SITUATION_REDIS_CLIENT: Any | None = None
 
 
@@ -612,8 +609,8 @@ def _city_situation_cache_ttl() -> int:
     return max(5, int(settings.VESSEL_CITY_SITUATION_CACHE_TTL_SECONDS or 60))
 
 
-def _water_system_situation_cache_ttl() -> int:
-    return max(5, int(settings.VESSEL_WATER_SYSTEM_SITUATION_CACHE_TTL_SECONDS or 60))
+def _channel_situation_cache_ttl() -> int:
+    return max(5, int(settings.VESSEL_CHANNEL_SITUATION_CACHE_TTL_SECONDS or 60))
 
 
 def _city_snapshot_ttl() -> int:
@@ -652,7 +649,7 @@ def _city_situation_query_cache_key(query: Any) -> str:
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
 
 
-def _water_system_situation_query_cache_key(query: Any) -> str:
+def _channel_situation_query_cache_key(query: Any) -> str:
     return _city_situation_query_cache_key(query)
 
 
@@ -742,80 +739,53 @@ def _source_status_name(code: str) -> str:
     }.get(code, code)
 
 
-def _water_level_name(level: int | None) -> str | None:
-    if level is None:
-        return None
+def _channel_type_name(code: str | None) -> str | None:
     return {
-        0: "待补航道边界",
-        1: "一级源面",
-        2: "二级源面",
-        3: "三级源面",
-        4: "四级源面",
-        5: "五级源面",
-        6: "六级源面",
-        7: "七级源面",
-    }.get(level, f"{level}级源面")
-
-
-def _water_feature_type_name(code: str | None) -> str | None:
-    return {
-        "RIVER": "河流",
-        "CANAL": "运河/航道",
-        "LAKE": "湖泊",
-        "RESERVOIR": "水库",
-        "OTHER": "其他水域",
-    }.get(code or "OTHER")
-
-
-def _water_hydrology_period_name(code: str | None) -> str | None:
-    return {"PERENNIAL": "常年", "SEASONAL": "时令", "UNKNOWN": "未知"}.get(code or "UNKNOWN")
-
-
-def _water_salinity_name(code: str | None) -> str | None:
-    return {"SALINE": "咸水", "FRESH": "淡水", "UNKNOWN": "未知"}.get(code or "UNKNOWN")
-
-
-def _water_boundary_type_name(code: str | None) -> str | None:
-    return {
-        "DOUBLE_LINE_RIVER": "双线河",
-        "BOUNDARY_RIVER": "界河",
-        "WATER_BODY": "水域面",
-        "STANDARD": "标准航道边界",
-        "OTHER": "其他",
-    }.get(code or "OTHER")
-
-
-def _water_navigation_category_name(code: str | None) -> str | None:
-    return {
-        "MAIN_RIVER": "骨干河流",
-        "TRIBUTARY": "重要支流",
-        "CANAL": "运河/航道",
-        "LAKE": "湖区水域",
-        "DELTA_NETWORK": "三角洲水网",
+        "MAIN_LINE": "干线航道",
+        "MAIN_RIVER_CHANNEL": "干流航道",
+        "TRIBUTARY_CHANNEL": "支流航道",
+        "CANAL": "运河航道",
+        "DELTA_WATERWAY": "三角洲水道",
+        "CHANNEL_NETWORK": "高等级航道网",
+        "PLANNED_CHANNEL": "规划航道",
     }.get(code or "")
 
 
-def _water_navigation_scope_name(code: str | None) -> str | None:
+def _channel_planning_level_name(code: str | None) -> str | None:
     return {
-        "CORE": "核心航道水系",
-        "IMPORTANT": "重要航道水系",
-        "WATER_AREA": "重要湖区水域",
-        "REVIEW": "复核保留",
-        "MISSING": "待补航道边界",
+        "NATIONAL_CORE": "国家核心航道",
+        "NATIONAL_IMPORTANT": "国家重要航道",
+        "NATIONAL_NETWORK": "国家高等级航道网",
+        "PROVINCIAL_HIGH_GRADE": "省级高等级航道",
+        "REGIONAL_IMPORTANT": "区域重要航道",
+        "PLANNED_GAP": "规划待补航道",
+        "REVIEW": "待复核航道",
     }.get(code or "")
 
 
-def _water_boundary_quality_name(code: str | None) -> str | None:
+def _channel_ais_scope_name(code: str | None) -> str | None:
+    return {"INCLUDED": "纳入 AIS 航道归属", "EXCLUDED": "暂不参与 AIS 航道归属"}.get(code or "")
+
+
+def _channel_boundary_quality_name(code: str | None) -> str | None:
     return {
         "PRECISE_SOURCE": "精确来源",
-        "HIGH_CONFIDENCE": "高置信",
-        "MEDIUM_CONFIDENCE": "中置信",
+        "HIGH_CONFIDENCE": "高可信",
+        "MEDIUM_CONFIDENCE": "中可信",
         "CARRIER_COMPOSITE": "承载合并",
-        "LOW_CONFIDENCE_CARRIER": "低置信承载",
+        "LOW_CONFIDENCE_CARRIER": "低可信承载",
         "REVIEW": "待复核",
         "MISSING": "缺少航道边界",
         "UNKNOWN": "未知",
     }.get(code or "UNKNOWN")
+
+
+def _channel_connectivity_status_name(code: str | None) -> str | None:
+    return {"CONNECTED": "连续", "REPAIRED": "修复连续", "PARTIAL": "局部连续", "MISSING": "缺失", "UNKNOWN": "未知"}.get(code or "UNKNOWN")
+
+
+def _channel_repair_status_name(code: str | None) -> str | None:
+    return {"NONE": "未修复", "REVIEW_CORRIDOR": "走廊修复待复核", "REVIEW_FALLBACK": "兜底修复待复核", "MISSING": "待补边界"}.get(code or "NONE")
 
 
 def _ais_freshness_level(age_minutes: int | None) -> str:
@@ -958,25 +928,25 @@ def _build_city_boundary_grid(boundaries: list[_CityBoundary]) -> dict[tuple[int
     return dict(grid)
 
 
-def _water_grid_range(min_value: float, max_value: float) -> range:
+def _channel_grid_range(min_value: float, max_value: float) -> range:
     import math
 
-    start = math.floor(min_value / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES)
-    end = math.floor(max_value / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES)
+    start = math.floor(min_value / CHANNEL_GRID_CELL_SIZE_DEGREES)
+    end = math.floor(max_value / CHANNEL_GRID_CELL_SIZE_DEGREES)
     return range(start, end + 1)
 
 
-def _water_grid_key(longitude: float, latitude: float) -> tuple[int, int]:
+def _channel_grid_key(longitude: float, latitude: float) -> tuple[int, int]:
     import math
 
     return (
-        math.floor(longitude / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES),
-        math.floor(latitude / WATER_SYSTEM_GRID_CELL_SIZE_DEGREES),
+        math.floor(longitude / CHANNEL_GRID_CELL_SIZE_DEGREES),
+        math.floor(latitude / CHANNEL_GRID_CELL_SIZE_DEGREES),
     )
 
 
-def _water_neighbor_grid_keys(longitude: float, latitude: float, radius_cells: int = 1) -> list[tuple[int, int]]:
-    x_index, y_index = _water_grid_key(longitude, latitude)
+def _channel_neighbor_grid_keys(longitude: float, latitude: float, radius_cells: int = 1) -> list[tuple[int, int]]:
+    x_index, y_index = _channel_grid_key(longitude, latitude)
     return [
         (x_index + dx, y_index + dy)
         for dx in range(-radius_cells, radius_cells + 1)
@@ -984,12 +954,12 @@ def _water_neighbor_grid_keys(longitude: float, latitude: float, radius_cells: i
     ]
 
 
-def _build_water_system_boundary_grid(boundaries: list[_WaterSystemBoundary]) -> dict[tuple[int, int], list[_WaterSystemBoundary]]:
-    grid: dict[tuple[int, int], list[_WaterSystemBoundary]] = defaultdict(list)
+def _build_channel_boundary_grid(boundaries: list[_NavigationChannelBoundary]) -> dict[tuple[int, int], list[_NavigationChannelBoundary]]:
+    grid: dict[tuple[int, int], list[_NavigationChannelBoundary]] = defaultdict(list)
     for boundary in boundaries:
         min_x, min_y, max_x, max_y = boundary.bbox
-        for x_index in _water_grid_range(min_x, max_x):
-            for y_index in _water_grid_range(min_y, max_y):
+        for x_index in _channel_grid_range(min_x, max_x):
+            for y_index in _channel_grid_range(min_y, max_y):
                 grid[(x_index, y_index)].append(boundary)
     return dict(grid)
 

@@ -39,10 +39,10 @@ from app.modules.vessel.schemas import (
     VesselPositionCitySituationResponse,
     VesselPositionCitySituationSummary,
     VesselPositionCityVesselsResponse,
-    VesselPositionWaterSystemSituationQuery,
-    VesselPositionWaterSystemSituationResponse,
-    VesselPositionWaterSystemSituationSummary,
-    VesselPositionWaterSystemVesselsResponse,
+    VesselPositionNavigationChannelSituationQuery,
+    VesselPositionNavigationChannelSituationResponse,
+    VesselPositionNavigationChannelSituationSummary,
+    VesselPositionNavigationChannelVesselsResponse,
 )
 
 
@@ -903,18 +903,18 @@ async def test_vessel_city_situation_uses_realtime_cache_before_live_query() -> 
 
 
 @pytest.mark.asyncio
-async def test_vessel_water_system_situation_uses_response_cache_before_live_query() -> None:
+async def test_vessel_channel_situation_uses_response_cache_before_live_query() -> None:
     service = VesselService.__new__(VesselService)
     events: list[str] = []
     generated_at = datetime(2026, 5, 10, 8, 0, 0)
-    cached_response = VesselPositionWaterSystemSituationResponse(
+    cached_response = VesselPositionNavigationChannelSituationResponse(
         source_status="AVAILABLE",
         source_status_name="可用",
         generated_at=generated_at,
         cache_status="MISS",
         cache_generated_at=generated_at,
         snapshot_backend="redis",
-        summary=VesselPositionWaterSystemSituationSummary(
+        summary=VesselPositionNavigationChannelSituationSummary(
             matched_profile_count=3,
             scanned_profile_count=3,
             queried_mmsi_count=3,
@@ -924,13 +924,13 @@ async def test_vessel_water_system_situation_uses_response_cache_before_live_que
             stale_position_count=0,
             contactable_position_count=3,
             certificate_risk_count=0,
-            water_system_count=2,
-            query_snapshot_id="redis-water-ais",
+            channel_count=2,
+            query_snapshot_id="redis-channel-ais",
             snapshot_status_code="READY",
             snapshot_expires_at=generated_at + timedelta(days=365),
             is_partial=False,
         ),
-        water_systems=[],
+        channels=[],
     )
 
     async def cache_backend() -> str:
@@ -942,23 +942,23 @@ async def test_vessel_water_system_situation_uses_response_cache_before_live_que
         return cached_response, "redis"
 
     async def live_limits():
-        raise AssertionError("water system situation should not load live ES limits when a cache is available")
+        raise AssertionError("channel situation should not load live ES limits when a cache is available")
 
     service._city_cache_backend = cache_backend  # type: ignore[method-assign]
-    service._get_water_system_situation_response_cache = cached  # type: ignore[method-assign]
+    service._get_channel_situation_response_cache = cached  # type: ignore[method-assign]
     service._ais_runtime_limits = live_limits  # type: ignore[method-assign]
 
-    result = await service.position_water_system_situation(
-        VesselPositionWaterSystemSituationQuery(reported_within_minutes=1600, include_boundary=False)
+    result = await service.position_channel_situation(
+        VesselPositionNavigationChannelSituationQuery(reported_within_minutes=1600, include_boundary=False)
     )
 
     assert result.cache_status == "HIT"
-    assert result.summary.query_snapshot_id == "redis-water-ais"
+    assert result.summary.query_snapshot_id == "redis-channel-ais"
     assert events == ["backend", "cache-read"]
 
 
 @pytest.mark.asyncio
-async def test_vessel_water_system_situation_stores_response_cache_on_miss() -> None:
+async def test_vessel_channel_situation_stores_response_cache_on_miss() -> None:
     service = VesselService.__new__(VesselService)
     events: list[str] = []
 
@@ -1012,13 +1012,13 @@ async def test_vessel_water_system_situation_stores_response_cache_on_miss() -> 
 
     async def store_snapshot(*args, **kwargs) -> str:
         events.append("snapshot")
-        return "water-snapshot"
+        return "channel-snapshot"
 
     async def store_response_cache(*args, **kwargs) -> None:
         events.append("response-cache")
 
     service._city_cache_backend = cache_backend  # type: ignore[method-assign]
-    service._get_water_system_situation_response_cache = no_cached  # type: ignore[method-assign]
+    service._get_channel_situation_response_cache = no_cached  # type: ignore[method-assign]
     service._ais_runtime_limits = limits  # type: ignore[method-assign]
     service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
     service._position_monitor_profiles = profiles  # type: ignore[method-assign]
@@ -1026,16 +1026,16 @@ async def test_vessel_water_system_situation_stores_response_cache_on_miss() -> 
     service._position_monitor_items_for_profiles = positions_for_profiles  # type: ignore[method-assign]
     service._compliance_risk_by_profile = risk_by_profile  # type: ignore[method-assign]
     service._summary_risk_level_by_profile = risk_by_profile  # type: ignore[method-assign]
-    service._water_system_boundaries = boundaries  # type: ignore[method-assign]
+    service._channel_boundaries = boundaries  # type: ignore[method-assign]
     service._store_city_situation_snapshot = store_snapshot  # type: ignore[method-assign]
-    service._store_water_system_situation_response_cache = store_response_cache  # type: ignore[method-assign]
+    service._store_channel_situation_response_cache = store_response_cache  # type: ignore[method-assign]
 
-    result = await service.position_water_system_situation(
-        VesselPositionWaterSystemSituationQuery(reported_within_minutes=1440, include_boundary=False, include_empty_water_systems=False)
+    result = await service.position_channel_situation(
+        VesselPositionNavigationChannelSituationQuery(reported_within_minutes=1440, include_boundary=False, include_empty_channels=False)
     )
 
     assert result.cache_status == "MISS"
-    assert result.summary.query_snapshot_id == "water-snapshot"
+    assert result.summary.query_snapshot_id == "channel-snapshot"
     assert events == [
         "backend",
         "cache-read",
@@ -1050,7 +1050,7 @@ async def test_vessel_water_system_situation_stores_response_cache_on_miss() -> 
 
 
 @pytest.mark.asyncio
-async def test_vessel_water_system_situation_force_refresh_skips_response_cache() -> None:
+async def test_vessel_channel_situation_force_refresh_skips_response_cache() -> None:
     service = VesselService.__new__(VesselService)
     events: list[str] = []
 
@@ -1059,7 +1059,7 @@ async def test_vessel_water_system_situation_force_refresh_skips_response_cache(
         return "memory"
 
     async def fail_cached(_cache_key: str):
-        raise AssertionError("force refresh should not read the water system response cache")
+        raise AssertionError("force refresh should not read the channel response cache")
 
     async def limits() -> dict[str, int]:
         events.append("limits")
@@ -1074,14 +1074,14 @@ async def test_vessel_water_system_situation_force_refresh_skips_response_cache(
         return []
 
     service._city_cache_backend = cache_backend  # type: ignore[method-assign]
-    service._get_water_system_situation_response_cache = fail_cached  # type: ignore[method-assign]
+    service._get_channel_situation_response_cache = fail_cached  # type: ignore[method-assign]
     service._ais_runtime_limits = limits  # type: ignore[method-assign]
     service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
     service._position_monitor_profiles = profiles  # type: ignore[method-assign]
 
-    query = VesselPositionWaterSystemSituationQuery(reported_within_minutes=1440, include_boundary=False, include_empty_water_systems=False)
+    query = VesselPositionNavigationChannelSituationQuery(reported_within_minutes=1440, include_boundary=False, include_empty_channels=False)
     object.__setattr__(query, "force_refresh", True)
-    result = await service.position_water_system_situation(query)
+    result = await service.position_channel_situation(query)
 
     assert result.source_status == "EMPTY"
     assert result.cache_status == "MISS"
@@ -1089,7 +1089,7 @@ async def test_vessel_water_system_situation_force_refresh_skips_response_cache(
 
 
 @pytest.mark.asyncio
-async def test_vessel_water_system_precompute_uses_default_fast_query(monkeypatch) -> None:
+async def test_vessel_channel_precompute_uses_default_fast_query(monkeypatch) -> None:
     captured: dict[str, object] = {}
     drilldowns: list[object] = []
     generated_at = datetime(2026, 5, 11, 8, 0, 0)
@@ -1105,49 +1105,49 @@ async def test_vessel_water_system_precompute_uses_default_fast_query(monkeypatc
         def __init__(self, db) -> None:
             captured["db"] = db
 
-        async def position_water_system_situation(self, query):
+        async def position_channel_situation(self, query):
             captured["query"] = query
             return SimpleNamespace(
                 source_status="AVAILABLE",
                 generated_at=generated_at,
                 summary=SimpleNamespace(
                     positioned_count=8,
-                    water_system_count=2,
-                    query_snapshot_id="water-snapshot",
+                    channel_count=2,
+                    query_snapshot_id="channel-snapshot",
                     is_partial=False,
                 ),
-                water_systems=[
-                    SimpleNamespace(positioned_count=8, water_system_code="WS_YANGTZE", water_system_name="长江干线")
+                channels=[
+                    SimpleNamespace(positioned_count=8, channel_code="NC-YANGTZE", channel_name="长江干线")
                 ],
                 snapshot_backend="memory",
             )
 
-        async def position_water_system_vessels(self, query):
+        async def position_channel_vessels(self, query):
             drilldowns.append(query)
             return SimpleNamespace(total=8, items=[])
 
     monkeypatch.setattr(vessel_position_tasks, "AsyncSessionLocal", lambda: FakeSessionContext())
     monkeypatch.setattr(vessel_position_tasks, "VesselService", FakeVesselService)
 
-    result = await vessel_position_tasks._precompute_water_system_situation()
+    result = await vessel_position_tasks._precompute_channel_situation()
     query = captured["query"]
 
     assert result == {
         "source_status": "AVAILABLE",
         "generated_at": generated_at.isoformat(),
         "positioned_count": 8,
-        "water_system_count": 2,
+        "channel_count": 2,
         "drilldown_count": 1,
         "is_partial": False,
         "snapshot_backend": "memory",
     }
     assert query.include_boundary is False
-    assert query.include_empty_water_systems is False
-    assert query.water_levels == "1,2,3,4,5,6,7"
+    assert query.include_empty_channels is False
+    assert query.planning_level_codes == "NATIONAL_CORE,NATIONAL_NETWORK,NATIONAL_IMPORTANT,PROVINCIAL_HIGH_GRADE,REGIONAL_IMPORTANT,REVIEW"
     assert getattr(query, "force_refresh") is True
     assert len(drilldowns) == 1
-    assert drilldowns[0].water_system_code == "WS_YANGTZE"
-    assert drilldowns[0].query_snapshot_id == "water-snapshot"
+    assert drilldowns[0].channel_code == "NC-YANGTZE"
+    assert drilldowns[0].query_snapshot_id == "channel-snapshot"
     assert drilldowns[0].page_size == 100
 
 
@@ -1799,15 +1799,15 @@ async def test_vessel_city_vessels_uses_drilldown_cache_before_snapshot() -> Non
 
 
 @pytest.mark.asyncio
-async def test_vessel_water_system_vessels_uses_drilldown_cache_before_snapshot() -> None:
+async def test_vessel_channel_vessels_uses_drilldown_cache_before_snapshot() -> None:
     service = VesselService.__new__(VesselService)
     events: list[str] = []
-    cached_response = VesselPositionWaterSystemVesselsResponse(
+    cached_response = VesselPositionNavigationChannelVesselsResponse(
         total=1,
         page=1,
         page_size=20,
         items=[],
-        query_snapshot_id="water-snapshot",
+        query_snapshot_id="channel-snapshot",
         snapshot_hit=True,
         is_partial=False,
     )
@@ -1817,16 +1817,16 @@ async def test_vessel_water_system_vessels_uses_drilldown_cache_before_snapshot(
         return cached_response, "redis"
 
     async def fail_snapshot(_snapshot_id):
-        raise AssertionError("cached water drilldown should not read the full situation snapshot")
+        raise AssertionError("cached channel drilldown should not read the full situation snapshot")
 
-    service._get_water_system_vessels_response_cache = cached  # type: ignore[method-assign]
+    service._get_channel_vessels_response_cache = cached  # type: ignore[method-assign]
     service._get_city_situation_snapshot = fail_snapshot  # type: ignore[method-assign]
 
-    result = await service.position_water_system_vessels(
+    result = await service.position_channel_vessels(
         SimpleNamespace(
-            query_snapshot_id="water-snapshot",
-            water_system_code="WS_YANGTZE",
-            water_system_name=None,
+            query_snapshot_id="channel-snapshot",
+            channel_code="NC-YANGTZE",
+            channel_name=None,
             page=1,
             page_size=20,
             reported_within_minutes=1440,
@@ -1874,8 +1874,8 @@ def test_vessel_precompute_worker_ready_queues_analysis_tasks(monkeypatch) -> No
 
     monkeypatch.setattr(vessel_position_tasks.settings, "VESSEL_SITUATION_PRECOMPUTE_ON_WORKER_START", True)
     monkeypatch.setattr(vessel_position_tasks, "precompute_city_situation_task", FakeTask("city"))
-    monkeypatch.setattr(vessel_position_tasks, "precompute_water_system_situation_task", FakeTask("water"))
+    monkeypatch.setattr(vessel_position_tasks, "precompute_channel_situation_task", FakeTask("channel"))
 
     vessel_position_tasks.precompute_situations_on_worker_ready()
 
-    assert queued == [("city", "analysis"), ("water", "analysis")]
+    assert queued == [("city", "analysis"), ("channel", "analysis")]
