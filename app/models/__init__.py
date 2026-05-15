@@ -104,6 +104,7 @@ from app.models.freight import (
     FreightTagRelation,
     FreightTmsInbound,
 )
+from app.models.task import AsyncTaskRun
 from app.models.analysis import (
     AnalysisBucketDefinition,
     AnalysisIndicatorDefinition,
@@ -241,6 +242,7 @@ __all__ = [
     "FreightContact",
     "FreightSourceAttachment",
     "FreightTagRelation",
+    "AsyncTaskRun",
     "AnalysisIndicatorDefinition",
     "AnalysisBucketDefinition",
     "AnalysisJobDefinition",

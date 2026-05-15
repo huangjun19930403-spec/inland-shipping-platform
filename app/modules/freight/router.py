@@ -47,16 +47,16 @@ from app.modules.freight.schemas import (
     ShippingOpportunitySummaryResponse,
 )
 from app.modules.freight.opportunity_service import ShippingOpportunityService
-from app.modules.freight.service import (
+from app.modules.freight.batch_service import FreightBatchTaskService
+from app.modules.freight.candidate_service import FreightCandidateService
+from app.modules.freight.freight_profile_service import (
     FreightAttachmentService,
-    FreightBatchTaskService,
-    FreightCandidateService,
     FreightContactService,
-    FreightNormalizationSuggestionService,
     FreightService,
     FreightTagService,
-    FreightTmsInboundService,
 )
+from app.modules.freight.normalization_service import FreightNormalizationSuggestionService
+from app.modules.freight.tms_service import FreightTmsInboundService
 
 router = APIRouter()
 

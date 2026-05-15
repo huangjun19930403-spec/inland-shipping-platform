@@ -43,6 +43,10 @@ celery_app.conf.update(
     timezone="Asia/Shanghai",
     enable_utc=False,
     worker_prefetch_multiplier=1,
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    task_time_limit=1200,
+    task_soft_time_limit=1140,
     task_always_eager=settings.ANALYSIS_CELERY_EAGER,
     task_eager_propagates=settings.ANALYSIS_CELERY_EAGER,
     task_routes={

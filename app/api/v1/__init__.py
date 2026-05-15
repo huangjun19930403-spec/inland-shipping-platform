@@ -13,6 +13,7 @@ from app.modules.freight.router import router as freight_router
 from app.modules.route.router import router as route_router
 from app.modules.storage.router import router as storage_router
 from app.modules.system.router import router as system_router
+from app.modules.tasks.router import router as tasks_router
 from app.modules.vessel.router import router as vessel_router
 
 api_router = APIRouter()
@@ -56,6 +57,12 @@ api_router.include_router(
     analysis_router,
     prefix="/analysis",
     tags=["analysis"],
+    dependencies=[Depends(require_permission("ANALYSIS:READ"))],
+)
+api_router.include_router(
+    tasks_router,
+    prefix="/tasks",
+    tags=["tasks"],
     dependencies=[Depends(require_permission("ANALYSIS:READ"))],
 )
 api_router.include_router(

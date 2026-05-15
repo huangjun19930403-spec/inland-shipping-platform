@@ -217,6 +217,7 @@ ROLE_MENU_CODES = {
         "QUALITY_VESSEL_TASKS",
         "AUDIT_PENDING",
         "AUDIT_DONE",
+        "TASK_RUNS_CENTER",
         "ANALYSIS_TASK_LIST",
         "SYSTEM_ROOT",
         "SYSTEM_FOUNDATION_GROUP",
@@ -265,6 +266,7 @@ ROLE_MENU_CODES = {
         "ANALYSIS_RATE_ESTIMATOR",
         "AUDIT_ROOT",
         "ANALYSIS_TASK_LIST",
+        "TASK_RUNS_CENTER",
     ],
     "BUSINESS_INPUTTER": [
         "OVERVIEW_ROOT",
@@ -1210,6 +1212,18 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
+        "menu_code": "TASK_RUNS_CENTER",
+        "menu_name": "后台任务中心",
+        "menu_type_code": "MENU",
+        "parent_code": "ANALYSIS_TASK_ROOT",
+        "route_path": "/tasks/runs",
+        "component_path": "modules/tasks/pages/TaskRunListPage",
+        "icon": "Operation",
+        "sort_order": 2,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
         "menu_code": "AUDIT_ROOT",
         "menu_name": "审核中心",
         "menu_type_code": "DIRECTORY",
@@ -1392,7 +1406,8 @@ def _apply_production_menu_information_architecture() -> None:
     )
     update("AUDIT_PENDING", parent_code="AUDIT_ROOT", sort_order=4)
     update("AUDIT_DONE", parent_code="AUDIT_ROOT", sort_order=5)
-    update("ANALYSIS_TASK_LIST", menu_name="分析刷新任务", parent_code="AUDIT_ROOT", sort_order=6)
+    update("TASK_RUNS_CENTER", menu_name="后台任务中心", parent_code="AUDIT_ROOT", sort_order=6)
+    update("ANALYSIS_TASK_LIST", menu_name="分析刷新任务", parent_code="AUDIT_ROOT", sort_order=7)
     update("ANALYSIS_TASK_ROOT", visible_flag=0, sort_order=98)
     update("AUDIT_TASKS", visible_flag=0, sort_order=99)
 
@@ -1471,6 +1486,7 @@ def _apply_production_menu_information_architecture() -> None:
         "QUALITY_VESSEL_TASKS",
         "AUDIT_PENDING",
         "AUDIT_DONE",
+        "TASK_RUNS_CENTER",
         "ANALYSIS_TASK_LIST",
         "SYSTEM_ROOT",
         "SYSTEM_FOUNDATION_GROUP",
@@ -1516,6 +1532,7 @@ def infer_menu_permission_code(item: dict) -> str | None:
         ("/freight", "FREIGHT:READ"),
         ("/route", "ROUTE:READ"),
         ("/analysis", "ANALYSIS:READ"),
+        ("/tasks", "ANALYSIS:READ"),
         ("/audit", "AUDIT:READ"),
     )
     for prefix, permission_code in route_rules:

@@ -73,6 +73,7 @@ from app.modules.freight.schemas import (
     PageResponse,
 )
 from app.modules.system.runtime_config import RuntimeConfigService
+from app.modules.tasks.service import AsyncTaskRunService
 
 
 DISPLAY_DICT_CODES = [
@@ -1837,7 +1838,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
             raise ValidationError("该解析批次已有确认入库货源，不能重新解析")
         if str(getattr(batch, "review_flow_status_code", "") or "").upper() == "QUEUED_FOR_REVIEW":
-            raise ValidationError("该解析批次已移交候选证据池，不能重新解析")
+            raise ValidationError("该解析批次已移交待确认候选证据池，不能重新解析")
         if batch.status_code == "PARSING":
             stale_seconds = await self._stale_heartbeat_seconds()
             heartbeat = batch.parse_heartbeat_at or batch.updated_at or batch.started_at
@@ -1859,12 +1860,34 @@ class FreightBatchTaskService(FreightNormalizationMixin):
                 "ai_elapsed_seconds": 0,
             },
         )
+        task_run_service = AsyncTaskRunService(self.db)
+        task_run = await task_run_service.create_queued(
+            task_name="freight.parse_wechat_batch",
+            task_title="微信货源语义解析",
+            queue_name="freight_ai",
+            business_type="FREIGHT_BATCH",
+            business_id=batch_id,
+            business_no=batch.batch_no,
+            idempotency_key=f"freight.parse_wechat_batch:{batch_id}",
+            requested_by=requested_by,
+            triggered_by="manual",
+            max_retries=1,
+            extra_json={"source_type_code": batch.source_type_code, "source_channel_code": batch.source_channel_code},
+        )
+        should_dispatch = not (
+            task_run.celery_task_id
+            and task_run.status_code in {"QUEUED", "STARTED", "RUNNING", "RETRYING"}
+        )
         await self.db.commit()
+        if not should_dispatch:
+            return await self.get_detail(batch_id)
         try:
             from app.tasks.freight_ai_tasks import parse_wechat_batch_task
 
-            parse_wechat_batch_task.delay(batch_id, requested_by)
+            async_result = parse_wechat_batch_task.delay(batch_id, requested_by, task_run.id)
+            await task_run_service.bind_celery_task_id(task_run.id, str(async_result.id))
         except Exception as exc:  # noqa: BLE001
+            await task_run_service.mark_failed(task_run.id, f"解析任务投递失败：{exc}")
             await self.repo.update(
                 batch_id,
                 {
@@ -1891,7 +1914,7 @@ class FreightBatchTaskService(FreightNormalizationMixin):
         if any(item.status_code == "CONFIRMED" or item.confirmed_freight_id is not None for item in existing):
             raise ValidationError("该解析批次已有确认入库货源，不能重新解析")
         if str(getattr(batch, "review_flow_status_code", "") or "").upper() == "QUEUED_FOR_REVIEW":
-            raise ValidationError("该解析批次已移交候选证据池，不能重新解析")
+            raise ValidationError("该解析批次已移交待确认候选证据池，不能重新解析")
         if batch.status_code == "PARSED" and existing:
             return await self.get_detail(batch_id)
         started = datetime.utcnow()
@@ -2355,12 +2378,34 @@ class FreightTmsInboundService(FreightNormalizationMixin):
         if inbound.status_code == "PARSING":
             return await self.get_detail(inbound_id)
         await self.repo.update(inbound_id, {"status_code": "QUEUED", "error_message": None})
+        task_run_service = AsyncTaskRunService(self.db)
+        task_run = await task_run_service.create_queued(
+            task_name="freight.parse_tms_inbound",
+            task_title="TMS 入站货源解析",
+            queue_name="freight_ai",
+            business_type="FREIGHT_TMS_INBOUND",
+            business_id=inbound_id,
+            business_no=inbound.inbound_no,
+            idempotency_key=f"freight.parse_tms_inbound:{inbound_id}",
+            requested_by=requested_by,
+            triggered_by="manual",
+            max_retries=1,
+            extra_json={"source_trace_id": inbound.source_trace_id, "external_ref_no": inbound.external_ref_no},
+        )
+        should_dispatch = not (
+            task_run.celery_task_id
+            and task_run.status_code in {"QUEUED", "STARTED", "RUNNING", "RETRYING"}
+        )
         await self.db.commit()
+        if not should_dispatch:
+            return await self.get_detail(inbound_id)
         try:
             from app.tasks.freight_ai_tasks import parse_tms_inbound_task
 
-            parse_tms_inbound_task.delay(inbound_id, requested_by)
+            async_result = parse_tms_inbound_task.delay(inbound_id, requested_by, task_run.id)
+            await task_run_service.bind_celery_task_id(task_run.id, str(async_result.id))
         except Exception as exc:  # noqa: BLE001
+            await task_run_service.mark_failed(task_run.id, f"解析任务投递失败：{exc}")
             await self.repo.update(inbound_id, {"status_code": "FAILED", "processed_at": datetime.utcnow(), "error_message": f"解析任务投递失败：{exc}"})
             await self.db.commit()
             raise ValidationError(f"解析任务投递失败：{exc}") from exc
@@ -2906,16 +2951,31 @@ class FreightNormalizationSuggestionService(FreightNormalizationMixin):
                 "updated_at": now,
             }
         )
+        task_run_service = AsyncTaskRunService(self.db)
+        task_run = await task_run_service.create_queued(
+            task_name="freight.clean_normalization",
+            task_title="货源主数据清洗治理",
+            queue_name="freight_ai",
+            business_type="FREIGHT_NORMALIZATION_TASK",
+            business_id=task.id,
+            business_no=task.task_no,
+            idempotency_key=f"freight.clean_normalization:{task.id}",
+            requested_by=operator_id,
+            triggered_by="manual",
+            max_retries=1,
+        )
         await self.db.commit()
         celery_task_id: str | None = None
         try:
             from app.tasks.freight_ai_tasks import clean_freight_normalization_task
 
-            async_result = clean_freight_normalization_task.delay(task.id, operator_id)
+            async_result = clean_freight_normalization_task.delay(task.id, operator_id, task_run.id)
             celery_task_id = str(async_result.id)
             task = await self.task_repo.update(task.id, {"celery_task_id": celery_task_id}) or task
             await self.db.commit()
+            await task_run_service.bind_celery_task_id(task_run.id, celery_task_id)
         except Exception as exc:  # noqa: BLE001
+            await task_run_service.mark_failed(task_run.id, f"清洗任务投递失败：{exc}")
             task = await self.task_repo.update(
                 task.id,
                 {
