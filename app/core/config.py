@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     FREIGHT_AI_REVIEW_CONFIDENCE_THRESHOLD: float = 0.80
     FREIGHT_AI_WARN_RAW_CHARS: int = 20000
     FREIGHT_AI_STALE_HEARTBEAT_SECONDS: int = 180
+    COMMODITY_RECOGNITION_AI_MODEL: str = "qwen-plus"
     VESSEL_IMAGE_AI_PROVIDER: str = "DASHSCOPE_QWEN"
     VESSEL_IMAGE_AI_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     VESSEL_IMAGE_AI_API_KEY: str = ""

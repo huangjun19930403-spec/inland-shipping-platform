@@ -25,6 +25,7 @@ from app.modules.commodity.schemas import (
     CommodityDecisionRuleResponse,
     CommodityDefaultRuleReplaceRequest,
     CommodityDefaultRuleResponse,
+    CommodityFreightUsageItem,
     CommodityMetadataResponse,
     CommodityCategoryResponse,
     CommodityStandardCreateRequest,
@@ -527,6 +528,16 @@ class CommodityStandardService:
                 freight_count=freight_count,
                 raw_pending_count=raw_pending_count,
                 latest_freight_at=latest,
+                recent_freights=[
+                    CommodityFreightUsageItem(
+                        freight_id=int(row.id),
+                        freight_no=row.freight_no,
+                        cargo_title=row.cargo_title,
+                        status_code=row.status_code,
+                        updated_at=row.updated_at,
+                    )
+                    for row in await self.repo.recent_freight_usage(standard_id)
+                ],
             ),
         )
 

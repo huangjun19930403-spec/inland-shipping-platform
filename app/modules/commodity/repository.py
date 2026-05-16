@@ -275,6 +275,17 @@ class CommodityStandardRepository:
         )
         return int(row[0] or 0), raw_pending, row[1]
 
+    async def recent_freight_usage(self, standard_id: int, *, limit: int = 8) -> list[Freight]:
+        rows = (
+            await self.db.execute(
+                select(Freight)
+                .where(Freight.commodity_standard_id == standard_id, Freight.deleted_at.is_(None))
+                .order_by(Freight.updated_at.desc(), Freight.id.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+        return list(rows)
+
     async def list_aliases(self, standard_id: int) -> list[CommodityAlias]:
         return list(
             (

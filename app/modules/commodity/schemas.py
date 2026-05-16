@@ -256,10 +256,19 @@ class CommodityStandardImageResponse(BaseModel):
     updated_at: datetime
 
 
+class CommodityFreightUsageItem(BaseModel):
+    freight_id: int
+    freight_no: str
+    cargo_title: str | None = None
+    status_code: str | None = None
+    updated_at: datetime | None = None
+
+
 class CommodityStandardUsageSummary(BaseModel):
     freight_count: int = 0
     raw_pending_count: int = 0
     latest_freight_at: datetime | None = None
+    recent_freights: list[CommodityFreightUsageItem] = Field(default_factory=list)
 
 
 class CommodityStandardResponse(BaseModel):

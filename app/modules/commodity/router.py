@@ -23,9 +23,11 @@ from app.modules.commodity.schemas import (
     CommodityStandardUpdateRequest,
     PageResponse,
 )
+from app.modules.commodity.recognition.router import router as recognition_router
 from app.modules.commodity.service import CommodityMetadataService, CommodityStandardService
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
+router.include_router(recognition_router)
 
 
 @router.get("/metadata", response_model=CommodityMetadataResponse)

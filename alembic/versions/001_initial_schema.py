@@ -2621,6 +2621,45 @@ def upgrade() -> None:
     with op.batch_alter_table('commodity_alias', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_commodity_alias_commodity_standard_id'), ['commodity_standard_id'], unique=False)
 
+    op.create_table('commodity_recognition_record',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('raw_name', sa.String(length=128), nullable=False),
+    sa.Column('normalized_name', sa.String(length=128), nullable=False),
+    sa.Column('context_note', sa.Text(), nullable=True),
+    sa.Column('category_hint_id', sa.BigInteger(), nullable=True),
+    sa.Column('type_hint_id', sa.BigInteger(), nullable=True),
+    sa.Column('request_payload_json', sa.JSON(), nullable=True),
+    sa.Column('deterministic_result_json', sa.JSON(), nullable=True),
+    sa.Column('ai_result_json', sa.JSON(), nullable=True),
+    sa.Column('suggestion_json', sa.JSON(), nullable=True),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('ai_status_code', sa.String(length=32), nullable=False),
+    sa.Column('ai_error_message', sa.String(length=512), nullable=True),
+    sa.Column('adopted_action_code', sa.String(length=32), nullable=True),
+    sa.Column('adopted_standard_id', sa.BigInteger(), nullable=True),
+    sa.Column('adopted_alias_id', sa.BigInteger(), nullable=True),
+    sa.Column('adopted_by_id', sa.BigInteger(), nullable=True),
+    sa.Column('adopted_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['adopted_alias_id'], ['commodity_alias.id'], ),
+    sa.ForeignKeyConstraint(['adopted_by_id'], ['sys_user.id'], ),
+    sa.ForeignKeyConstraint(['adopted_standard_id'], ['commodity_standard.id'], ),
+    sa.ForeignKeyConstraint(['category_hint_id'], ['commodity_category.id'], ),
+    sa.ForeignKeyConstraint(['type_hint_id'], ['commodity_type.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('commodity_recognition_record', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_action_code'), ['adopted_action_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_alias_id'), ['adopted_alias_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_by_id'), ['adopted_by_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_standard_id'), ['adopted_standard_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_category_hint_id'), ['category_hint_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_normalized_name'), ['normalized_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_raw_name'), ['raw_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_status_code'), ['status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_type_hint_id'), ['type_hint_id'], unique=False)
+
     op.create_table('commodity_handling_mode_rule',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('commodity_standard_id', sa.BigInteger(), nullable=False),
@@ -4092,6 +4131,18 @@ def downgrade() -> None:
     with op.batch_alter_table('commodity_alias', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_commodity_alias_commodity_standard_id'))
 
+    with op.batch_alter_table('commodity_recognition_record', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_type_hint_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_status_code'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_raw_name'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_normalized_name'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_category_hint_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_standard_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_by_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_alias_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_action_code'))
+
+    op.drop_table('commodity_recognition_record')
     op.drop_table('commodity_alias')
     with op.batch_alter_table('vessel_risk_signal', schema=None) as batch_op:
         batch_op.drop_index('uq_vessel_risk_signal_active_fingerprint', sqlite_where=sa.text("status_code IN ('OPEN', 'IN_REVIEW', 'EVIDENCE_ADDED')"), postgresql_where=sa.text("status_code IN ('OPEN', 'IN_REVIEW', 'EVIDENCE_ADDED')"))

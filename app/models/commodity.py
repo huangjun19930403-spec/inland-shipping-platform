@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -89,6 +90,37 @@ class CommodityAlias(Base, TimestampMixin):
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     match_weight: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class CommodityRecognitionRecord(Base, TimestampMixin):
+    __tablename__ = "commodity_recognition_record"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    raw_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    normalized_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    context_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category_hint_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_category.id"), nullable=True, index=True
+    )
+    type_hint_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_type.id"), nullable=True, index=True
+    )
+    request_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    deterministic_result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    suggestion_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="COMPLETED", index=True)
+    ai_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="SKIPPED")
+    ai_error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    adopted_action_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    adopted_standard_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_standard.id"), nullable=True, index=True
+    )
+    adopted_alias_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("commodity_alias.id"), nullable=True, index=True
+    )
+    adopted_by_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("sys_user.id"), nullable=True, index=True)
+    adopted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class CommodityAttributeDefinition(Base, TimestampMixin):

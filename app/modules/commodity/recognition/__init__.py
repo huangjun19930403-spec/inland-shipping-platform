@@ -1,0 +1,1 @@
+"""Standard commodity recognition submodule."""
