@@ -30,7 +30,7 @@ from app.modules.vessel.schemas import (
     VesselNavigationConstraintQuery,
 )
 from app.modules.vessel.spatial_service import _HistorySearchResult, VesselSpatialAnalysisService
-from scripts.seed_builtin_dicts import BUILTIN_DICTS
+from scripts.seeds.loaders.builtin_dicts import BUILTIN_DICTS
 
 
 @compiles(BigInteger, "sqlite")

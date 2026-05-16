@@ -1,0 +1,24 @@
+{
+  "version": "round7_seed_structure_test_v1",
+  "source_type_code": "TEST_FIXTURE",
+  "route": {
+    "code": "TEST_ROUTE_TAICANG_WUHU",
+    "name": "测试夹具太仓至芜湖航线",
+    "plan_code": "TEST_PLAN_TAICANG_WUHU",
+    "line_code": "TEST_LINE_TAICANG_WUHU",
+    "line_name": "测试夹具太仓-芜湖主线",
+    "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
+    "destination_region_code": "REGION_TMS_WANJIANG",
+    "node_keys": ["TAICANG", "NANJING", "WUHU"]
+  },
+  "freight": {
+    "freight_no": "TEST-FR-0001",
+    "source_ref_no": "TEST-WB-0001",
+    "origin_node_key": "TAICANG",
+    "destination_node_key": "WUHU",
+    "commodity_codes": ["STD_MACHINE_SAND"],
+    "tonnage": "1200.00",
+    "unit_price": "42.00",
+    "publisher_org_name": "测试夹具货主"
+  }
+}

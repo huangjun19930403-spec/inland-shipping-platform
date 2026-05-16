@@ -5,7 +5,7 @@ VENV_PIP := $(VENV)/bin/pip
 VENV_UVICORN := $(VENV)/bin/uvicorn
 VENV_ALEMBIC := $(VENV)/bin/alembic
 
-.PHONY: install migrate seed dev clean
+.PHONY: install migrate seed seed-production seed-demo seed-test dev clean
 
 install:
 	@if [ ! -d "$(VENV)" ]; then $(PYTHON) -m venv $(VENV); fi
@@ -14,8 +14,16 @@ install:
 migrate:
 	$(VENV_ALEMBIC) upgrade head
 
-seed:
-	PYTHONPATH=. $(VENV_PYTHON) -m scripts.seed_system_init
+seed: seed-production
+
+seed-production:
+	PYTHONPATH=. $(VENV_PYTHON) -m scripts.seeds.cli --profile production
+
+seed-demo:
+	PYTHONPATH=. $(VENV_PYTHON) -m scripts.seeds.cli --profile local-demo
+
+seed-test:
+	PYTHONPATH=. $(VENV_PYTHON) -m scripts.seeds.cli --profile test
 
 dev:
 	PYTHONPATH=. $(VENV_UVICORN) main:app --host 0.0.0.0 --port 8000 --reload

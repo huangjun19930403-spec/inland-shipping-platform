@@ -61,13 +61,13 @@ from app.integrations.config_keys import (
     HIFLEET_TIMEOUT_SECONDS,
     HIFLEET_USERNAME,
 )
-from scripts.seed_local_private_config import (
+from scripts.seeds.loaders.local_private_config import (
     LOCAL_PRIVATE_CONFIG_KEYS,
     export_local_private_vault,
     load_local_private_vault,
     _normalize_config_value,
 )
-from scripts.seed_system_base import SYSTEM_CONFIGS
+from scripts.seeds.loaders.system_base import SYSTEM_CONFIGS
 
 
 def test_local_private_seed_key_set_includes_runtime_credentials() -> None:

@@ -1,10 +1,134 @@
 [
-  {"code": "MINERAL_BUILDING_MATERIAL", "name": "矿建建材", "description": "矿建建材类标准分类", "sort_order": 10},
-  {"code": "ENERGY_FUEL", "name": "能源燃料", "description": "能源燃料类标准分类", "sort_order": 20},
-  {"code": "METAL_AND_METALLURGY", "name": "金属与冶金原料", "description": "金属与冶金原料类标准分类", "sort_order": 30},
-  {"code": "GRAIN_AND_AGRI", "name": "粮食与农产品", "description": "粮食与农产品类标准分类", "sort_order": 40},
-  {"code": "WOOD_AND_PAPER", "name": "木材与纸品", "description": "木材与纸品类标准分类", "sort_order": 50},
-  {"code": "CHEMICALS", "name": "化工原料与制品", "description": "化工原料与制品类标准分类", "sort_order": 60},
-  {"code": "CONTAINERIZED_CARGO", "name": "集装箱与单元化货类", "description": "集装箱与单元化货类标准分类", "sort_order": 70},
-  {"code": "GENERAL_CARGO_AND_EQUIPMENT", "name": "件杂货与设备", "description": "件杂货与设备类标准分类", "sort_order": 80}
+  {
+    "code": "MTC_01_COAL_PRODUCTS",
+    "name": "煤炭及制品",
+    "description": "GB/T 42820-2023 与 JT/T 1110 多式联运货物分类口径：煤炭及煤制品。",
+    "sort_order": 10
+  },
+  {
+    "code": "MTC_02_PETROLEUM_GAS",
+    "name": "石油、天然气及制品",
+    "description": "原油、成品油、天然气、液化石油气及其他石油制品。",
+    "sort_order": 20
+  },
+  {
+    "code": "MTC_03_METAL_ORE",
+    "name": "金属矿石",
+    "description": "铁矿石、贵金属矿石、放射性矿石及其他金属矿石。",
+    "sort_order": 30
+  },
+  {
+    "code": "MTC_04_STEEL_NONFERROUS",
+    "name": "钢铁及有色金属",
+    "description": "钢铁、有色金属、贵金属、铁合金及其制品。",
+    "sort_order": 40
+  },
+  {
+    "code": "MTC_05_MINERAL_BUILDING",
+    "name": "矿物性建筑材料",
+    "description": "砖瓦砌块、土石、砂、玻璃、水泥制品及其他矿建材料。",
+    "sort_order": 50
+  },
+  {
+    "code": "MTC_06_CEMENT",
+    "name": "水泥",
+    "description": "水泥、水泥熟料和其他水泥类货品。",
+    "sort_order": 60
+  },
+  {
+    "code": "MTC_07_WOOD",
+    "name": "木材",
+    "description": "原木、锯材、人造板材、木制品、木浆等木材及制品。",
+    "sort_order": 70
+  },
+  {
+    "code": "MTC_08_NON_METAL_ORE",
+    "name": "非金属矿石",
+    "description": "磷矿石、硫矿石、石灰石、铝矾土、石膏及其他非金属矿石。",
+    "sort_order": 80
+  },
+  {
+    "code": "MTC_09_FERTILIZER_PESTICIDE",
+    "name": "化肥及农药",
+    "description": "化肥、农药和动植物肥料。",
+    "sort_order": 90
+  },
+  {
+    "code": "MTC_10_SALT",
+    "name": "盐",
+    "description": "原盐、食用盐、非食用盐和其他盐。",
+    "sort_order": 100
+  },
+  {
+    "code": "MTC_11_GRAIN",
+    "name": "粮食",
+    "description": "小麦、玉米、黄豆、大米、稻谷、面粉、薯类等粮食。",
+    "sort_order": 110
+  },
+  {
+    "code": "MTC_12_MACHINERY",
+    "name": "机械设备",
+    "description": "通用、专用、电气、交通运输设备及其他机械设备。",
+    "sort_order": 120
+  },
+  {
+    "code": "MTC_13_ELECTRONICS",
+    "name": "电子设备仪器及元器件",
+    "description": "通信广播设备、计算机、电子元器件、仪器仪表和家电。",
+    "sort_order": 130
+  },
+  {
+    "code": "MTC_14_CHEMICALS",
+    "name": "化工原料及制品",
+    "description": "橡胶、纯碱、无机/有机化学品、树脂塑料、危险品和日化品。",
+    "sort_order": 140
+  },
+  {
+    "code": "MTC_15_DAILY_INDUSTRY",
+    "name": "日用工业品及文体用品",
+    "description": "纸及制品、日用工业品、文体用品和工艺美术品。",
+    "sort_order": 150
+  },
+  {
+    "code": "MTC_16_FOOD_TOBACCO",
+    "name": "饮食品及烟草制品",
+    "description": "糖、烟草、饮料酒、食品、乳制品及其他饮食品。",
+    "sort_order": 160
+  },
+  {
+    "code": "MTC_17_TEXTILE",
+    "name": "服装及纺织制品",
+    "description": "纱线丝纤维、布匹、服装鞋帽、针织纺织和皮毛制品。",
+    "sort_order": 170
+  },
+  {
+    "code": "MTC_18_MEDICINE",
+    "name": "医药产品",
+    "description": "中药材、中成药、西药、生物制品及其他医药品。",
+    "sort_order": 180
+  },
+  {
+    "code": "MTC_19_AGRI_FORESTRY",
+    "name": "农、林、牧、渔业产品",
+    "description": "棉花、经济作物、林业产品、牧业产品、水产品等。",
+    "sort_order": 190
+  },
+  {
+    "code": "MTC_20_CONTAINER",
+    "name": "集装箱与单元化货物",
+    "description": "港口统计和内河业务扩展：集装箱、开顶箱、托盘化/单元化货物。",
+    "sort_order": 200
+  },
+  {
+    "code": "MTC_90_OTHER",
+    "name": "其他货类",
+    "description": "军用物资、行李包裹邮件、饲料、水、冰、垃圾、废旧物品等其他货类。",
+    "sort_order": 210
+  },
+  {
+    "code": "MTC_99_UNCLASSIFIED",
+    "name": "未分类物品",
+    "description": "无法归入上述类别但需保留运输分类的未分类物品。",
+    "sort_order": 220
+  }
 ]

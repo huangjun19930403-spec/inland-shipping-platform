@@ -24,8 +24,12 @@ if [ "${RUN_MIGRATIONS_ON_START:-true}" = "true" ]; then
 fi
 
 if [ "${RUN_SEED_ON_START:-true}" = "true" ]; then
+  if [ -z "${SEED_PROFILE:-}" ]; then
+    echo "[entrypoint] SEED_PROFILE must be set when RUN_SEED_ON_START=true"
+    exit 1
+  fi
   echo "[entrypoint] running formal seed initializer..."
-  PYTHONPATH=. python -m scripts.seed_system_init
+  PYTHONPATH=. python -m scripts.seeds.cli --profile "$SEED_PROFILE"
 fi
 
 if [ "$#" -gt 0 ]; then

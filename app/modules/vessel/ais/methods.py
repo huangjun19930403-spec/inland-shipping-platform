@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from app.modules.vessel.shared import base as _base
+from app.integrations.config_keys import ES_TIMEOUT_SECONDS
 
 globals().update({name: getattr(_base, name) for name in dir(_base) if not name.startswith("__")})
 
@@ -19,6 +20,7 @@ def _public_ais_error_message(error: Any) -> str | None:
         "failed to parse",
         "status=",
         "body=",
+        "realtime es 请求失败",
         "traceback",
         "exception",
     ]
@@ -31,6 +33,8 @@ def _public_ais_error_message(error: Any) -> str | None:
 
 class VesselAisMixin:
     """Implementation methods for the vessel ais domain."""
+
+    _FULL_AIS_SNAPSHOT_ID = "AIS-PRODUCTION-CURRENT"
 
     async def _realtime_es_host(self) -> str:
         value = await self.runtime_config.get_value(
@@ -63,10 +67,45 @@ class VesselAisMixin:
         )
         return {
             "profile_limit": _safe_int(profile_limit, 2000, minimum=1, maximum=20000),
-            "es_batch_size": _safe_int(batch_size, 500, minimum=1, maximum=2000),
+            "es_batch_size": _safe_int(batch_size, 500, minimum=1, maximum=500),
             "es_max_concurrency": _safe_int(max_concurrency, 4, minimum=1, maximum=16),
             "unmatched_scan_limit": _safe_int(unmatched_scan_limit, 1000, minimum=1, maximum=10000),
         }
+
+    async def _ais_realtime_query_budget_seconds(self) -> float:
+        default_timeout = float(settings.ES_TIMEOUT_SECONDS or 12.0)
+        runtime_config = getattr(self, "runtime_config", None)
+        if runtime_config is None:
+            timeout = default_timeout
+        else:
+            timeout = await runtime_config.get_float(
+                ES_TIMEOUT_SECONDS,
+                default_timeout,
+                profile_code=ES_REALTIME_CONFIG_PROFILE,
+            )
+        return max(25.0, min(float(timeout or default_timeout), 45.0))
+
+    async def _ais_es_request_timeout_seconds(self) -> float:
+        budget = await self._ais_realtime_query_budget_seconds()
+        return max(5.0, min(20.0, budget - 0.5))
+
+    def _has_position_profile_filters(self, query: Any) -> bool:
+        filter_attrs = [
+            "keyword",
+            "ship_type_code",
+            "profile_status_code",
+            "deadweight_min",
+            "deadweight_max",
+            "draft_max",
+            "contact_available",
+        ]
+        return any(getattr(query, attr, None) not in (None, "") for attr in filter_attrs)
+
+    async def _rollback_after_realtime_abort(self) -> None:
+        try:
+            await self.db.rollback()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rollback after realtime AIS abort failed: %s", exc)
 
     async def _city_cache_backend(self) -> str:
         setting = _city_cache_backend_setting()
@@ -91,6 +130,16 @@ class VesselAisMixin:
                     },
                 )
             return "memory"
+        now = datetime.utcnow()
+        checked_at = _CITY_SITUATION_REDIS_BACKEND_CHECK.get("checked_at")
+        checked_backend = _CITY_SITUATION_REDIS_BACKEND_CHECK.get("backend")
+        if (
+            checked_at
+            and checked_backend in {"redis", "memory"}
+            and (now - checked_at).total_seconds() < 30
+            and (checked_backend == "redis" or not shared_required)
+        ):
+            return checked_backend
         if Redis is None:
             if shared_required:
                 raise AppException(
@@ -99,12 +148,14 @@ class VesselAisMixin:
                     status_code=503,
                     detail={"cache_backend": setting},
                 )
+            _CITY_SITUATION_REDIS_BACKEND_CHECK.update({"checked_at": now, "backend": "memory"})
             logger.warning("city situation redis client unavailable; falling back to memory cache")
             return "memory"
         try:
             redis_client = await self._city_redis()
             if redis_client is not None:
                 await redis_client.ping()
+                _CITY_SITUATION_REDIS_BACKEND_CHECK.update({"checked_at": now, "backend": "redis"})
                 return "redis"
         except Exception as exc:  # noqa: BLE001
             if shared_required:
@@ -114,13 +165,23 @@ class VesselAisMixin:
                     status_code=503,
                     detail={"cache_backend": setting, "error": str(exc)},
                 ) from exc
+            _CITY_SITUATION_REDIS_BACKEND_CHECK.update({"checked_at": now, "backend": "memory"})
             logger.warning("city situation redis unavailable; falling back to memory cache: %s", exc)
+        _CITY_SITUATION_REDIS_BACKEND_CHECK.update({"checked_at": now, "backend": "memory"})
         return "memory"
 
     async def _city_redis(self) -> Any | None:
-        global _CITY_SITUATION_REDIS_CLIENT
+        global _CITY_SITUATION_REDIS_CLIENT, _CITY_SITUATION_REDIS_LOOP_ID
         if Redis is None:
             return None
+        current_loop_id = id(asyncio.get_running_loop())
+        if _CITY_SITUATION_REDIS_CLIENT is not None and _CITY_SITUATION_REDIS_LOOP_ID != current_loop_id:
+            try:
+                await _CITY_SITUATION_REDIS_CLIENT.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+            _CITY_SITUATION_REDIS_CLIENT = None
+            _CITY_SITUATION_REDIS_LOOP_ID = None
         if _CITY_SITUATION_REDIS_CLIENT is None:
             _CITY_SITUATION_REDIS_CLIENT = Redis.from_url(
                 settings.CELERY_BROKER_URL,
@@ -129,6 +190,7 @@ class VesselAisMixin:
                 socket_connect_timeout=0.25,
                 socket_timeout=0.8,
             )
+            _CITY_SITUATION_REDIS_LOOP_ID = current_loop_id
         return _CITY_SITUATION_REDIS_CLIENT
 
     async def _get_city_situation_response_cache(
@@ -230,6 +292,30 @@ class VesselAisMixin:
             expires_at=datetime.utcnow() + timedelta(seconds=ttl),
             response=response.model_copy(deep=True),
         )
+
+    async def _clear_ais_situation_response_caches(self) -> None:
+        _CITY_SITUATION_RESPONSE_CACHE.clear()
+        _CHANNEL_SITUATION_RESPONSE_CACHE.clear()
+        _CITY_SITUATION_VESSELS_RESPONSE_CACHE.clear()
+        _CHANNEL_SITUATION_VESSELS_RESPONSE_CACHE.clear()
+        try:
+            if await self._city_cache_backend() != "redis":
+                return
+            redis_client = await self._city_redis()
+            if redis_client is None:
+                return
+            prefixes = [
+                CITY_SITUATION_CACHE_KEY_PREFIX,
+                CHANNEL_SITUATION_CACHE_KEY_PREFIX,
+                CITY_SITUATION_VESSELS_CACHE_KEY_PREFIX,
+                CHANNEL_SITUATION_VESSELS_CACHE_KEY_PREFIX,
+            ]
+            for prefix in prefixes:
+                keys = [key async for key in redis_client.scan_iter(match=f"{prefix}*")]
+                if keys:
+                    await redis_client.delete(*keys)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("clear AIS situation response caches failed: %s", exc)
 
     async def _get_city_vessels_response_cache(
         self,
@@ -356,6 +442,7 @@ class VesselAisMixin:
                 [profile.current_mmsi],
                 batch_size=1,
                 max_concurrency=1,
+                reported_within_minutes=1440,
             )
         except Exception as exc:  # noqa: BLE001
             return {
@@ -396,10 +483,25 @@ class VesselAisMixin:
 
     async def position_monitor(self, query) -> VesselPositionMonitorResponse:
         generated_at = datetime.utcnow()
+        if not self._position_query_has_profile_filters(query):
+            snapshot_response = await self._position_monitor_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                message=None,
+            )
+            if snapshot_response is not None and snapshot_response.items:
+                return snapshot_response
         profiles = await self._position_monitor_profiles(query)
         if not profiles:
             return self._empty_position_response(generated_at, "未匹配到符合条件的船舶档案")
         if not await self._realtime_es_host():
+            fallback = await self._position_monitor_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                message="实时 ES 未配置，已返回最近一次入库 AIS 快照",
+            )
+            if fallback is not None:
+                return fallback
             return VesselPositionMonitorResponse(
                 source_status="UNCONFIGURED",
                 source_status_name=_source_status_name("UNCONFIGURED"),
@@ -418,14 +520,46 @@ class VesselAisMixin:
         if not mmsi_values:
             return self._empty_position_response(generated_at, "匹配船舶缺少可用于实时查询的 MMSI", len(profiles))
         limits = await self._ais_runtime_limits()
-        result = await self._position_monitor_items_for_profiles(
-            profiles,
-            generated_at=generated_at,
-            reported_within_minutes=query.reported_within_minutes or 1440,
-            es_batch_size=limits["es_batch_size"],
-            es_max_concurrency=limits["es_max_concurrency"],
-            include_stale=True,
-        )
+        try:
+            result = await asyncio.wait_for(
+                self._position_monitor_items_for_profiles(
+                    profiles,
+                    generated_at=generated_at,
+                    reported_within_minutes=query.reported_within_minutes or 1440,
+                    es_batch_size=limits["es_batch_size"],
+                    es_max_concurrency=limits["es_max_concurrency"],
+                    include_stale=True,
+                ),
+                timeout=await self._ais_realtime_query_budget_seconds(),
+            )
+        except asyncio.TimeoutError:
+            await self._rollback_after_realtime_abort()
+            fallback = await self._position_monitor_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                message="实时 AIS 查询超时，已返回最近一次入库 AIS 快照",
+            )
+            if fallback is not None:
+                return fallback
+            return self._position_monitor_realtime_error_response(
+                generated_at,
+                "实时 AIS 查询超时，且当前没有可用的入库 AIS 快照；请检查实时 ES 配置或先运行 local-demo/预计算任务生成快照。",
+                matched_profile_count=len(profiles),
+            )
+        except Exception as exc:
+            await self._rollback_after_realtime_abort()
+            fallback = await self._position_monitor_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                message=f"实时 AIS 查询失败，已返回最近一次入库 AIS 快照：{_public_ais_error_message(exc) or '实时源异常'}",
+            )
+            if fallback is not None:
+                return fallback
+            return self._position_monitor_realtime_error_response(
+                generated_at,
+                f"实时 AIS 查询失败，且当前没有可用的入库 AIS 快照：{_public_ais_error_message(exc) or '实时源异常'}",
+                matched_profile_count=len(profiles),
+            )
         if not result.items and not result.partial:
             return self._empty_position_response(generated_at, "实时 ES 未返回匹配船位", len(profiles))
         fresh_items = [
@@ -455,24 +589,61 @@ class VesselAisMixin:
         cache_key = _city_situation_query_cache_key(query)
         cache_backend = await self._city_cache_backend()
         force_refresh = bool(getattr(query, "force_refresh", False))
+        can_use_persisted_snapshot = not self._has_position_profile_filters(query)
         if not force_refresh:
             cached = await self._get_city_situation_response_cache(cache_key)
             if cached is not None:
                 cached_response, cache_backend = cached
-                cached_snapshot_backend = str(cached_response.snapshot_backend or "").lower()
-                if cached_snapshot_backend == "seed" and not await self._city_situation_allows_seed_snapshot():
-                    logger.info("ignore seed AIS city situation cache because realtime ES is configured")
+                if can_use_persisted_snapshot:
+                    latest_snapshot = await self._latest_persisted_ais_snapshot()
+                    cached_snapshot_id = getattr(cached_response.summary, "query_snapshot_id", None)
+                    cached_positioned = int(getattr(cached_response.summary, "positioned_count", 0) or 0)
+                    latest_positioned = int(getattr(latest_snapshot, "matched_position_count", 0) or 0) if latest_snapshot else 0
+                    if latest_snapshot is not None and (
+                        cached_snapshot_id != latest_snapshot.snapshot_id
+                        or (latest_positioned > 0 and cached_positioned == 0)
+                    ):
+                        logger.info(
+                            "ignore stale AIS city situation cache: cached_snapshot=%s latest_snapshot=%s cached_positioned=%s latest_positioned=%s",
+                            cached_snapshot_id,
+                            latest_snapshot.snapshot_id,
+                            cached_positioned,
+                            latest_positioned,
+                        )
+                        cached_response = None
+                if cached_response is None:
+                    pass
                 else:
-                    return cached_response.model_copy(
-                        update={
-                            "cache_status": "HIT",
-                            "cache_generated_at": cached_response.generated_at,
-                            "is_stale_cache": False,
-                            "snapshot_backend": cache_backend,
-                            "cache_backend_note": "memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
-                        },
-                        deep=True,
-                    )
+                    cached_snapshot_backend = str(cached_response.snapshot_backend or "").lower()
+                    if cached_snapshot_backend == "seed" and not await self._city_situation_allows_seed_snapshot():
+                        logger.info("ignore seed AIS city situation cache because realtime ES is configured")
+                    else:
+                        return cached_response.model_copy(
+                            update={
+                                "cache_status": "HIT",
+                                "cache_generated_at": cached_response.generated_at,
+                                "is_stale_cache": False,
+                                "snapshot_backend": cache_backend,
+                                "cache_backend_note": "memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
+                            },
+                            deep=True,
+                        )
+        if can_use_persisted_snapshot:
+            persisted = await self._city_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="已返回最近一次入库 AIS 城市快照；后台任务会持续刷新全量船位。",
+                total_profile_count=0,
+                scanned_profile_count=0,
+                unscanned_profile_count=0,
+            )
+            if persisted is not None:
+                if not force_refresh or not persisted.is_stale_cache:
+                    await self._store_city_situation_response_cache(cache_key, persisted)
+                    return persisted
+            if not force_refresh and persisted is not None:
+                return persisted
         limits = await self._ais_runtime_limits()
         profile_limit = limits["profile_limit"]
         es_batch_size = limits["es_batch_size"]
@@ -511,6 +682,18 @@ class VesselAisMixin:
                 cities=[],
             )
         if not await self._realtime_es_host():
+            fallback = await self._city_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="实时 ES 未配置，已返回最近一次入库 AIS 城市快照",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=unscanned_profile_count,
+            )
+            if fallback is not None:
+                await self._store_city_situation_response_cache(cache_key, fallback)
+                return fallback
             return VesselPositionCitySituationResponse(
                 source_status="UNCONFIGURED",
                 source_status_name=_source_status_name("UNCONFIGURED"),
@@ -539,22 +722,97 @@ class VesselAisMixin:
                 ),
                 cities=[],
             )
-        result = await self._position_monitor_items_for_profiles(
-            profiles,
-            generated_at=generated_at,
-            reported_within_minutes=query.reported_within_minutes or 1440,
-            es_batch_size=es_batch_size,
-            es_max_concurrency=es_max_concurrency,
-            include_stale=True,
-            include_unmatched=False,
-            unmatched_scan_limit=0,
-        )
+        use_recent_position_scan = False
+        try:
+            if use_recent_position_scan:
+                realtime_coro = self._position_monitor_items_from_recent_positions(
+                    query,
+                    generated_at=generated_at,
+                    reported_within_minutes=query.reported_within_minutes or 1440,
+                    max_hits=profile_limit,
+                    include_stale=True,
+                )
+            else:
+                realtime_coro = self._position_monitor_items_for_profiles(
+                    profiles,
+                    generated_at=generated_at,
+                    reported_within_minutes=query.reported_within_minutes or 1440,
+                    es_batch_size=es_batch_size,
+                    es_max_concurrency=es_max_concurrency,
+                    include_stale=True,
+                    include_unmatched=False,
+                    unmatched_scan_limit=0,
+                )
+            result = await asyncio.wait_for(
+                realtime_coro,
+                timeout=await self._ais_realtime_query_budget_seconds(),
+            )
+        except asyncio.TimeoutError:
+            await self._rollback_after_realtime_abort()
+            fallback = await self._city_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="实时 AIS 查询超时，已返回最近一次入库 AIS 城市快照",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+            )
+            if fallback is not None:
+                await self._store_city_situation_response_cache(cache_key, fallback)
+                return fallback
+            return self._city_situation_realtime_error_response(
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="实时 AIS 查询超时，且当前没有可用的入库 AIS 城市快照；请检查实时 ES 配置或先运行 local-demo/预计算任务生成快照。",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=0 if use_recent_position_scan else len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+            )
+        except Exception as exc:
+            await self._rollback_after_realtime_abort()
+            fallback = await self._city_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message=f"实时 AIS 查询失败，已返回最近一次入库 AIS 城市快照：{_public_ais_error_message(exc) or '实时源异常'}",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+            )
+            if fallback is not None:
+                await self._store_city_situation_response_cache(cache_key, fallback)
+                return fallback
+            return self._city_situation_realtime_error_response(
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message=f"实时 AIS 查询失败，且当前没有可用的入库 AIS 城市快照：{_public_ais_error_message(exc) or '实时源异常'}",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=0 if use_recent_position_scan else len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+            )
+        if result.partial and not result.items:
+            result_error_message = _public_ais_error_message(result.error_message)
+            fallback = await self._city_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message=f"实时 AIS 查询失败，已返回最近一次入库 AIS 城市快照：{result_error_message or '实时源异常'}",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=unscanned_profile_count,
+            )
+            if fallback is not None:
+                await self._store_city_situation_response_cache(cache_key, fallback)
+                return fallback
         partial = result.partial
         error_message = _public_ais_error_message(result.error_message)
-        if unscanned_profile_count > 0:
+        if unscanned_profile_count > 0 and not use_recent_position_scan:
             partial = True
             error_parts = [part for part in [error_message, f"服务端按扫描上限统计，未扫描档案 {unscanned_profile_count} 艘"] if part]
             error_message = "；".join(error_parts) or None
+        scanned_profile_count_for_summary = result.queried_mmsi_count if use_recent_position_scan else len(profiles)
+        unscanned_profile_count_for_summary = 0 if use_recent_position_scan else unscanned_profile_count
         risk_by_profile = await self._compliance_risk_by_profile([item.id for item in result.items])
         boundaries = await self._city_boundaries()
         boundary_codes = {boundary.code for boundary in boundaries}
@@ -619,8 +877,8 @@ class VesselAisMixin:
             cache_backend_note="memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
             summary=VesselPositionCitySituationSummary(
                 matched_profile_count=total_profile_count or len(profiles),
-                scanned_profile_count=len(profiles),
-                unscanned_profile_count=unscanned_profile_count,
+                scanned_profile_count=scanned_profile_count_for_summary,
+                unscanned_profile_count=unscanned_profile_count_for_summary,
                 queried_mmsi_count=result.queried_mmsi_count,
                 matched_position_count=result.matched_position_count,
                 unmatched_mmsi_count=len([item for item in result.unmatched_positions if item.get("match_status_code") == "UNMATCHED_MMSI"]),
@@ -759,22 +1017,57 @@ class VesselAisMixin:
         cache_key = _channel_situation_query_cache_key(query)
         cache_backend = await self._city_cache_backend()
         force_refresh = bool(getattr(query, "force_refresh", False))
+        channel_type_codes = self._channel_query_code_set(query, "channel_type_codes")
+        planning_level_codes = self._channel_query_code_set(query, "planning_level_codes")
+        can_use_persisted_snapshot = not self._has_position_profile_filters(query)
         if not force_refresh:
             cached = await self._get_channel_situation_response_cache(cache_key)
             if cached is not None:
                 cached_response, cache_backend = cached
-                return cached_response.model_copy(
-                    update={
-                        "cache_status": "HIT",
-                        "cache_generated_at": cached_response.generated_at,
-                        "is_stale_cache": False,
-                        "snapshot_backend": cache_backend,
-                        "cache_backend_note": "memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
-                    },
-                    deep=True,
-                )
-        channel_type_codes = self._channel_query_code_set(query, "channel_type_codes")
-        planning_level_codes = self._channel_query_code_set(query, "planning_level_codes")
+                if can_use_persisted_snapshot:
+                    latest_snapshot = await self._latest_persisted_ais_snapshot()
+                    cached_snapshot_id = getattr(cached_response.summary, "query_snapshot_id", None)
+                    cached_positioned = int(getattr(cached_response.summary, "positioned_count", 0) or 0)
+                    latest_positioned = int(getattr(latest_snapshot, "matched_position_count", 0) or 0) if latest_snapshot else 0
+                    if latest_snapshot is not None and (
+                        cached_snapshot_id != latest_snapshot.snapshot_id
+                        or (latest_positioned > 0 and cached_positioned == 0)
+                    ):
+                        logger.info(
+                            "ignore stale AIS channel situation cache: cached_snapshot=%s latest_snapshot=%s cached_positioned=%s latest_positioned=%s",
+                            cached_snapshot_id,
+                            latest_snapshot.snapshot_id,
+                            cached_positioned,
+                            latest_positioned,
+                        )
+                        cached_response = None
+                if cached_response is not None:
+                    return cached_response.model_copy(
+                        update={
+                            "cache_status": "HIT",
+                            "cache_generated_at": cached_response.generated_at,
+                            "is_stale_cache": False,
+                            "snapshot_backend": cache_backend,
+                            "cache_backend_note": "memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
+                        },
+                        deep=True,
+                    )
+        if can_use_persisted_snapshot:
+            persisted = await self._channel_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="已返回最近一次入库 AIS 航道快照；后台任务会持续刷新全量船位。",
+                total_profile_count=0,
+                scanned_profile_count=0,
+                unscanned_profile_count=0,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+            if persisted is not None:
+                if not force_refresh or not persisted.is_stale_cache:
+                    await self._store_channel_situation_response_cache(cache_key, persisted)
+                    return persisted
         limits = await self._ais_runtime_limits()
         profile_limit = limits["profile_limit"]
         es_batch_size = limits["es_batch_size"]
@@ -835,7 +1128,36 @@ class VesselAisMixin:
                 ),
                 channels=channels,
             )
+        if not force_refresh and can_use_persisted_snapshot:
+            persisted = await self._channel_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="已返回最近一次入库 AIS 航道快照；后台任务会持续刷新全量船位。",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=unscanned_profile_count,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+            if persisted is not None:
+                await self._store_channel_situation_response_cache(cache_key, persisted)
+                return persisted
         if not await self._realtime_es_host():
+            fallback = await self._channel_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="实时 ES 未配置，已返回最近一次入库 AIS 航道快照",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=unscanned_profile_count,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+            if fallback is not None:
+                await self._store_channel_situation_response_cache(cache_key, fallback)
+                return fallback
             channels: list[VesselPositionNavigationChannelSituationItemResponse] = []
             if bool(getattr(query, "include_empty_channels", True)):
                 filtered_boundaries = self._filter_channel_boundaries(
@@ -888,22 +1210,110 @@ class VesselAisMixin:
                 ),
                 channels=channels,
             )
-        result = await self._position_monitor_items_for_profiles(
-            profiles,
-            generated_at=generated_at,
-            reported_within_minutes=query.reported_within_minutes or 1440,
-            es_batch_size=es_batch_size,
-            es_max_concurrency=es_max_concurrency,
-            include_stale=True,
-            include_unmatched=False,
-            unmatched_scan_limit=0,
-        )
+        use_recent_position_scan = False
+        try:
+            if use_recent_position_scan:
+                realtime_coro = self._position_monitor_items_from_recent_positions(
+                    query,
+                    generated_at=generated_at,
+                    reported_within_minutes=query.reported_within_minutes or 1440,
+                    max_hits=profile_limit,
+                    include_stale=True,
+                )
+            else:
+                realtime_coro = self._position_monitor_items_for_profiles(
+                    profiles,
+                    generated_at=generated_at,
+                    reported_within_minutes=query.reported_within_minutes or 1440,
+                    es_batch_size=es_batch_size,
+                    es_max_concurrency=es_max_concurrency,
+                    include_stale=True,
+                    include_unmatched=False,
+                    unmatched_scan_limit=0,
+                    resolve_city=False,
+                )
+            result = await asyncio.wait_for(
+                realtime_coro,
+                timeout=await self._ais_realtime_query_budget_seconds(),
+            )
+        except asyncio.TimeoutError:
+            await self._rollback_after_realtime_abort()
+            fallback = await self._channel_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="实时 AIS 查询超时，已返回最近一次入库 AIS 航道快照",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+            if fallback is not None:
+                await self._store_channel_situation_response_cache(cache_key, fallback)
+                return fallback
+            return await self._channel_situation_realtime_error_response(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message="实时 AIS 查询超时，当前没有可用的航道态势快照；请检查实时 ES 配置或先运行 local-demo/预计算任务生成快照。",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=0 if use_recent_position_scan else len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+        except Exception as exc:
+            await self._rollback_after_realtime_abort()
+            fallback = await self._channel_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message=f"实时 AIS 查询失败，已返回最近一次入库 AIS 航道快照：{_public_ais_error_message(exc) or '实时源异常'}",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+            if fallback is not None:
+                await self._store_channel_situation_response_cache(cache_key, fallback)
+                return fallback
+            return await self._channel_situation_realtime_error_response(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message=f"实时 AIS 查询失败，当前没有可用的航道态势快照：{_public_ais_error_message(exc) or '实时源异常'}",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=0 if use_recent_position_scan else len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+        if result.partial and not result.items:
+            result_error_message = _public_ais_error_message(result.error_message)
+            fallback = await self._channel_situation_from_latest_snapshot(
+                query,
+                generated_at=generated_at,
+                cache_backend=cache_backend,
+                message=f"实时 AIS 查询失败，已返回最近一次入库 AIS 航道快照：{result_error_message or '实时源异常'}",
+                total_profile_count=total_profile_count or len(profiles),
+                scanned_profile_count=len(profiles),
+                unscanned_profile_count=0 if use_recent_position_scan else unscanned_profile_count,
+                channel_type_codes=channel_type_codes,
+                planning_level_codes=planning_level_codes,
+            )
+            if fallback is not None:
+                await self._store_channel_situation_response_cache(cache_key, fallback)
+                return fallback
         partial = result.partial
         error_message = _public_ais_error_message(result.error_message)
-        if unscanned_profile_count > 0:
+        if unscanned_profile_count > 0 and not use_recent_position_scan:
             partial = True
             parts = [part for part in [error_message, f"服务端按扫描上限统计，未扫描档案 {unscanned_profile_count} 艘"] if part]
             error_message = "；".join(parts) or None
+        scanned_profile_count_for_summary = result.queried_mmsi_count if use_recent_position_scan else len(profiles)
+        unscanned_profile_count_for_summary = 0 if use_recent_position_scan else unscanned_profile_count
         risk_by_profile = await self._compliance_risk_by_profile([item.id for item in result.items])
         summary_risk_by_profile = await self._summary_risk_level_by_profile([item.id for item in result.items])
         items = self._filter_channel_situation_items_by_risk(result.items, query, risk_by_profile, summary_risk_by_profile)
@@ -968,8 +1378,8 @@ class VesselAisMixin:
             cache_backend_note="memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
             summary=VesselPositionNavigationChannelSituationSummary(
                 matched_profile_count=total_profile_count or len(profiles),
-                scanned_profile_count=len(profiles),
-                unscanned_profile_count=unscanned_profile_count,
+                scanned_profile_count=scanned_profile_count_for_summary,
+                unscanned_profile_count=unscanned_profile_count_for_summary,
                 queried_mmsi_count=result.queried_mmsi_count,
                 matched_position_count=result.matched_position_count,
                 unmatched_mmsi_count=0,
@@ -1367,22 +1777,808 @@ class VesselAisMixin:
             },
         )
 
-    def _position_monitor_profile_base_stmt(self, query):
-        stmt = (
-            select(VesselProfile)
-            .outerjoin(VesselCapacityDimension, VesselCapacityDimension.vessel_profile_id == VesselProfile.id)
-            .outerjoin(VesselContact, VesselContact.vessel_profile_id == VesselProfile.id)
-            .outerjoin(
-                VesselOwnerPeriod,
-                and_(VesselOwnerPeriod.vessel_profile_id == VesselProfile.id, VesselOwnerPeriod.is_current.is_(True)),
+    def _position_query_has_profile_filters(self, query) -> bool:
+        return any(
+            getattr(query, attr, None) not in (None, "")
+            for attr in (
+                "keyword",
+                "ship_type_code",
+                "profile_status_code",
+                "deadweight_min",
+                "deadweight_max",
+                "draft_max",
+                "contact_available",
             )
-            .outerjoin(
-                VesselOperatorPeriod,
-                and_(VesselOperatorPeriod.vessel_profile_id == VesselProfile.id, VesselOperatorPeriod.is_current.is_(True)),
-            )
-            .where(VesselProfile.deleted_at.is_(None))
         )
+
+    async def _latest_persisted_ais_snapshot(self, snapshot_id: str | None = None) -> VesselAisSnapshot | None:
+        if not hasattr(self, "db") or not hasattr(self.db, "scalar"):
+            return None
+        stmt = select(VesselAisSnapshot).where(VesselAisSnapshot.status_code.in_(["READY", "PARTIAL"]))
+        if snapshot_id:
+            stmt = stmt.where(VesselAisSnapshot.snapshot_id == snapshot_id)
+        return await self.db.scalar(stmt.order_by(VesselAisSnapshot.generated_at.desc()).limit(1))
+
+    async def _position_items_from_persisted_snapshot(
+        self,
+        snapshot: VesselAisSnapshot,
+        *,
+        generated_at: datetime,
+        max_rows: int | None = None,
+        include_city_center: bool = False,
+    ) -> list[VesselPositionMonitorItemResponse]:
+        stmt = (
+            select(
+                VesselLatestPositionSnapshot,
+                VesselProfile,
+                VesselProfileSummary,
+                VesselCapacityDimension,
+            )
+            .join(
+                VesselProfile,
+                VesselProfile.id == VesselLatestPositionSnapshot.vessel_profile_id,
+            )
+            .outerjoin(
+                VesselProfileSummary,
+                VesselProfileSummary.vessel_profile_id == VesselProfile.id,
+            )
+            .outerjoin(
+                VesselCapacityDimension,
+                VesselCapacityDimension.vessel_profile_id == VesselProfile.id,
+            )
+            .where(
+                VesselLatestPositionSnapshot.snapshot_id == snapshot.snapshot_id,
+                VesselLatestPositionSnapshot.vessel_profile_id.is_not(None),
+                VesselLatestPositionSnapshot.match_status_code.in_(["MATCHED_PROFILE", "MULTI_PROFILE_CONFLICT"]),
+                VesselLatestPositionSnapshot.longitude.is_not(None),
+                VesselLatestPositionSnapshot.latitude.is_not(None),
+            )
+            .order_by(VesselLatestPositionSnapshot.position_time.desc().nullslast(), VesselLatestPositionSnapshot.id.desc())
+        )
+        if max_rows is not None:
+            stmt = stmt.limit(max_rows)
+        rows = (await self.db.execute(stmt)).all()
+        if not rows:
+            return []
+        label_map = await _load_label_map(
+            self.db,
+            [
+                "SHIP_TYPE",
+                "VESSEL_PROFILE_STATUS",
+                "VESSEL_IDENTITY_STATUS",
+                "SHIP_OPERATION_STATUS",
+                "SOURCE_TYPE",
+                "AUDIT_STATUS",
+            ],
+        )
+        boundary_by_code = {}
+        if include_city_center:
+            boundaries = await self._city_boundaries()
+            boundary_by_code = {boundary.code: boundary for boundary in boundaries}
+        items: list[VesselPositionMonitorItemResponse] = []
+        for row, profile, summary, capacity in rows:
+            position_time = row.position_time
+            age_minutes = int((generated_at - position_time).total_seconds() // 60) if position_time else None
+            boundary = boundary_by_code.get(str(row.city_code or ""))
+            city_code = str(row.city_code or "").strip() or None
+            city_name = str(row.city_name or "").strip() or (UNKNOWN_CITY_NAME if not city_code else None)
+            ship_type_code = (summary.ship_type_code if summary and summary.ship_type_code else profile.ship_type_code)
+            profile_status_code = profile.profile_status_code or "ACTIVE"
+            identity_status_code = profile.identity_status_code or "UNLINKED"
+            operation_status_code = profile.operation_status_code
+            source_type_code = profile.source_type_code or "SYSTEM"
+            audit_status = profile.audit_status or "PENDING"
+            building_year = summary.building_year if summary and summary.building_year is not None else None
+            design_draft_m = (
+                _to_decimal(summary.design_draft_m)
+                if summary and summary.design_draft_m is not None
+                else _to_decimal(capacity.design_draft_m if capacity else None)
+            )
+            deadweight_ton = (
+                _to_decimal(summary.deadweight_ton)
+                if summary and summary.deadweight_ton is not None
+                else _to_decimal(capacity.deadweight_ton if capacity else None)
+            )
+            length_m = (
+                _to_decimal(summary.length_m)
+                if summary and summary.length_m is not None
+                else _to_decimal(capacity.length_m if capacity else None)
+            )
+            width_m = (
+                _to_decimal(summary.width_m)
+                if summary and summary.width_m is not None
+                else _to_decimal(capacity.width_m if capacity else None)
+            )
+            items.append(
+                VesselPositionMonitorItemResponse(
+                    id=profile.id,
+                    vessel_profile_code=profile.vessel_profile_code,
+                    vessel_identity_id=profile.vessel_identity_id,
+                    ship_name=(summary.ship_name if summary and summary.ship_name else profile.ship_name),
+                    ship_name_en=profile.ship_name_en,
+                    current_mmsi=(summary.current_mmsi if summary and summary.current_mmsi else profile.current_mmsi),
+                    ship_type_code=ship_type_code,
+                    ship_type_name=(
+                        summary.ship_type_name
+                        if summary and summary.ship_type_name
+                        else label_map.get("SHIP_TYPE", {}).get(ship_type_code or "")
+                    ),
+                    profile_status_code=profile_status_code,
+                    profile_status_name=label_map.get("VESSEL_PROFILE_STATUS", {}).get(profile_status_code),
+                    identity_status_code=identity_status_code,
+                    identity_status_name=label_map.get("VESSEL_IDENTITY_STATUS", {}).get(identity_status_code),
+                    operation_status_code=operation_status_code,
+                    operation_status_name=label_map.get("SHIP_OPERATION_STATUS", {}).get(operation_status_code or ""),
+                    home_port_code=profile.home_port_code,
+                    home_port_name=profile.home_port_name,
+                    registry_city_code=profile.registry_city_code,
+                    registry_city_name=profile.home_port_name,
+                    business_region_id=profile.business_region_id,
+                    business_region_name=None,
+                    source_type_code=source_type_code,
+                    source_type_name=label_map.get("SOURCE_TYPE", {}).get(source_type_code),
+                    audit_status=audit_status,
+                    audit_status_name=label_map.get("AUDIT_STATUS", {}).get(audit_status),
+                    remark=profile.remark,
+                    created_at=profile.created_at,
+                    updated_at=profile.updated_at,
+                    building_year=building_year,
+                    ship_age=(summary.ship_age if summary and summary.ship_age is not None else _ship_age(building_year)),
+                    deadweight_ton=deadweight_ton,
+                    length_m=length_m,
+                    width_m=width_m,
+                    design_draft_m=design_draft_m,
+                    size_text=_size_text(capacity),
+                    primary_owner_name=summary.primary_owner_name if summary else None,
+                    primary_operator_name=summary.primary_operator_name if summary else None,
+                    primary_contact_name=summary.primary_contact_name if summary else None,
+                    primary_contact_phone=summary.primary_contact_phone_masked if summary else None,
+                    contact_available=summary.contact_available if summary else None,
+                    longitude=_to_decimal(row.longitude),
+                    latitude=_to_decimal(row.latitude),
+                    speed_kn=_to_decimal(row.speed_kn),
+                    course_deg=_to_decimal(row.course_deg),
+                    heading_deg=_to_decimal(row.heading_deg),
+                    position_time=position_time,
+                    position_age_minutes=age_minutes,
+                    city_code=city_code,
+                    city_name=city_name,
+                    current_city_code=city_code,
+                    current_city_name=city_name,
+                    current_city_source=(
+                        CURRENT_CITY_SOURCE_ADMIN_BOUNDARY
+                        if city_code
+                        else CURRENT_CITY_SOURCE_INVALID_POSITION
+                        if not row.valid_position_flag
+                        else CURRENT_CITY_SOURCE_UNKNOWN
+                    ),
+                    city_center_longitude=boundary.center_longitude if boundary else None,
+                    city_center_latitude=boundary.center_latitude if boundary else None,
+                    matched_city_candidates=None,
+                    location_text=city_name,
+                    position_source_name="入库 AIS 快照",
+                    source_index=row.source_index,
+                    freshness_level=row.freshness_level or _ais_freshness_level(age_minutes),
+                    match_status_code=row.match_status_code or "MATCHED_PROFILE",
+                    risk_level=summary.risk_level if summary else None,
+                    certificate_risk_available=(
+                        bool(
+                            (summary.certificate_missing_count or 0)
+                            + (summary.certificate_expiring_count or 0)
+                            + (summary.certificate_expired_count or 0)
+                        )
+                        if summary
+                        else None
+                    ),
+                )
+            )
+        return items
+
+    async def _position_monitor_from_latest_snapshot(
+        self,
+        query,
+        *,
+        generated_at: datetime,
+        message: str,
+    ) -> VesselPositionMonitorResponse | None:
+        snapshot = await self._latest_persisted_ais_snapshot()
+        if snapshot is None:
+            return None
+        max_items = int(getattr(query, "max_items", None) or 200)
+        items = await self._position_items_from_persisted_snapshot(
+            snapshot,
+            generated_at=generated_at,
+            max_rows=max(max_items * 3, max_items),
+        )
+        reported_within_minutes = query.reported_within_minutes or 1440
+        fresh_items = [
+            item for item in items
+            if not self._is_stale_position(item, generated_at, reported_within_minutes)
+        ][:max_items]
+        return VesselPositionMonitorResponse(
+            source_status="PARTIAL" if message else ("AVAILABLE" if fresh_items else "EMPTY"),
+            source_status_name=_source_status_name("PARTIAL" if message else ("AVAILABLE" if fresh_items else "EMPTY")),
+            generated_at=generated_at,
+            message=message,
+            summary=VesselPositionMonitorSummary(
+                matched_profile_count=int(snapshot.matched_profile_count or len(items)),
+                positioned_count=len(fresh_items),
+                stale_position_count=max(0, len(items) - len(fresh_items)),
+                contactable_position_count=sum(1 for item in fresh_items if item.contact_available),
+                unmatched_mmsi_count=int(snapshot.unmatched_mmsi_count or 0),
+                invalid_position_count=int(snapshot.invalid_position_count or 0),
+                coverage_rate=_to_decimal(snapshot.coverage_rate) or self._coverage_rate(
+                    int(snapshot.matched_position_count or len(items)),
+                    int(snapshot.queried_mmsi_count or len(items)),
+                ),
+                freshness_distribution=snapshot.freshness_distribution_json or self._position_freshness_distribution(items),
+            ),
+            items=fresh_items,
+        )
+
+    async def _city_situation_from_latest_snapshot(
+        self,
+        query,
+        *,
+        generated_at: datetime,
+        cache_backend: str,
+        message: str,
+        total_profile_count: int,
+        scanned_profile_count: int,
+        unscanned_profile_count: int,
+    ) -> VesselPositionCitySituationResponse | None:
+        snapshot = await self._latest_persisted_ais_snapshot()
+        if snapshot is None:
+            return None
+        items = await self._position_items_from_persisted_snapshot(snapshot, generated_at=generated_at)
+        reported_within_minutes = query.reported_within_minutes or 1440
+        boundaries = await self._city_boundaries() if query.include_boundary else []
+        boundary_codes = {boundary.code for boundary in boundaries}
+        boundary_paths_by_code = self._city_boundary_paths_by_code(boundaries, query.boundary_precision) if boundaries else {}
+        cities = self._city_situation_items(
+            items,
+            {},
+            generated_at,
+            reported_within_minutes,
+            int(snapshot.queried_mmsi_count or len(items)),
+            int(snapshot.matched_position_count or len(items)),
+            max(0, int(snapshot.queried_mmsi_count or len(items)) - int(snapshot.matched_position_count or len(items))),
+            int(snapshot.invalid_position_count or 0),
+            int(snapshot.unknown_city_count or 0),
+            True,
+            message,
+            boundary_paths_by_code,
+            query.boundary_precision if query.include_boundary else None,
+            boundary_codes,
+            [],
+        )
+        positioned_items = [
+            item for item in items
+            if not self._is_stale_position(item, generated_at, reported_within_minutes)
+        ]
+        missing_boundary_cities = [
+            {
+                "city_code": city.city_code,
+                "city_name": city.city_name,
+                "positioned_count": city.positioned_count,
+            }
+            for city in cities
+            if city.city_code and city.positioned_count > 0 and not city.has_boundary
+        ]
+        computed_unscanned_profile_count = max(
+            0,
+            (total_profile_count or int(snapshot.matched_profile_count or len(items)))
+            - int(snapshot.scanned_profile_count or len(items)),
+        )
+        snapshot_partial = (
+            str(snapshot.status_code or "").upper() != "READY"
+            or int(snapshot.failed_batch_count or 0) > 0
+            or computed_unscanned_profile_count > 0
+        )
+        notes = list(snapshot.uncertainty_notes_json or [])
+        if "超时" in message or "失败" in message:
+            notes.append("实时查询未在预算内完成，当前结果来自最近一次入库 AIS 快照。")
+        if computed_unscanned_profile_count > 0:
+            notes.append(f"服务端扫描上限外档案 {computed_unscanned_profile_count} 艘未参与本次实时刷新。")
+        snapshot_expires_at = snapshot.expires_at
+        status = "PARTIAL" if snapshot_partial and cities else ("AVAILABLE" if cities else "EMPTY")
+        return VesselPositionCitySituationResponse(
+            source_status=status,
+            source_status_name=_source_status_name(status),
+            generated_at=generated_at,
+            message=message,
+            cache_status="FALLBACK",
+            cache_generated_at=snapshot.generated_at,
+            is_stale_cache=snapshot.expires_at <= generated_at,
+            snapshot_backend="db_snapshot",
+            cache_backend_note=None,
+            summary=VesselPositionCitySituationSummary(
+                matched_profile_count=total_profile_count or int(snapshot.matched_profile_count or len(items)),
+                scanned_profile_count=int(snapshot.scanned_profile_count or scanned_profile_count or len(items)),
+                unscanned_profile_count=computed_unscanned_profile_count,
+                queried_mmsi_count=int(snapshot.queried_mmsi_count or len(items)),
+                matched_position_count=int(snapshot.matched_position_count or len(items)),
+                unmatched_mmsi_count=int(snapshot.unmatched_mmsi_count or 0),
+                unpositioned_count=max(0, int(snapshot.queried_mmsi_count or len(items)) - int(snapshot.matched_position_count or len(items))),
+                invalid_position_count=int(snapshot.invalid_position_count or 0),
+                unknown_city_count=int(snapshot.unknown_city_count or 0),
+                positioned_count=len(positioned_items),
+                stale_position_count=max(0, len(items) - len(positioned_items)),
+                contactable_position_count=sum(1 for item in positioned_items if item.contact_available),
+                certificate_risk_count=0,
+                city_count=sum(1 for city in cities if city.city_code),
+                boundary_city_count=sum(1 for city in cities if city.city_code and city.has_boundary),
+                missing_boundary_city_count=len(missing_boundary_cities),
+                missing_boundary_cities=missing_boundary_cities,
+                query_snapshot_id=snapshot.snapshot_id,
+                snapshot_status_code=snapshot.status_code,
+                snapshot_expires_at=snapshot_expires_at,
+                refresh_required=False,
+                coverage_rate=_to_decimal(snapshot.coverage_rate) or self._coverage_rate(
+                    int(snapshot.matched_position_count or len(items)),
+                    int(snapshot.queried_mmsi_count or len(items)),
+                ),
+                freshness_distribution=snapshot.freshness_distribution_json or self._position_freshness_distribution(items),
+                source_indices=snapshot.source_indices_json or [],
+                uncertainty_notes=notes,
+                failed_batch_count=int(snapshot.failed_batch_count or 0),
+                failed_batches=snapshot.failed_batches_json or [],
+                is_partial=snapshot_partial,
+                error_message=message if snapshot_partial else None,
+            ),
+            cities=cities,
+        )
+
+    def _position_monitor_realtime_error_response(
+        self,
+        generated_at: datetime,
+        message: str,
+        *,
+        matched_profile_count: int,
+    ) -> VesselPositionMonitorResponse:
+        return VesselPositionMonitorResponse(
+            source_status="ERROR",
+            source_status_name=_source_status_name("ERROR"),
+            generated_at=generated_at,
+            message=message,
+            summary=VesselPositionMonitorSummary(
+                matched_profile_count=matched_profile_count,
+                positioned_count=0,
+                stale_position_count=0,
+                contactable_position_count=0,
+                unmatched_mmsi_count=0,
+                invalid_position_count=0,
+                coverage_rate=None,
+                freshness_distribution={"UNKNOWN": matched_profile_count} if matched_profile_count else {},
+            ),
+            items=[],
+        )
+
+    def _city_situation_realtime_error_response(
+        self,
+        *,
+        generated_at: datetime,
+        cache_backend: str,
+        message: str,
+        total_profile_count: int,
+        scanned_profile_count: int,
+        unscanned_profile_count: int,
+    ) -> VesselPositionCitySituationResponse:
+        notes = [message]
+        if unscanned_profile_count > 0:
+            notes.append(f"服务端扫描上限外档案 {unscanned_profile_count} 艘未参与本次实时刷新。")
+        return VesselPositionCitySituationResponse(
+            source_status="ERROR",
+            source_status_name=_source_status_name("ERROR"),
+            generated_at=generated_at,
+            message=message,
+            cache_status="MISS",
+            cache_generated_at=generated_at,
+            is_stale_cache=False,
+            snapshot_backend=cache_backend,
+            cache_backend_note="memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
+            summary=VesselPositionCitySituationSummary(
+                matched_profile_count=total_profile_count,
+                scanned_profile_count=scanned_profile_count,
+                unscanned_profile_count=unscanned_profile_count,
+                queried_mmsi_count=0,
+                matched_position_count=0,
+                unmatched_mmsi_count=0,
+                unpositioned_count=scanned_profile_count,
+                invalid_position_count=0,
+                unknown_city_count=0,
+                positioned_count=0,
+                stale_position_count=0,
+                contactable_position_count=0,
+                certificate_risk_count=0,
+                city_count=0,
+                boundary_city_count=0,
+                missing_boundary_city_count=0,
+                query_snapshot_id=None,
+                snapshot_status_code="FAILED",
+                refresh_required=True,
+                coverage_rate=None,
+                freshness_distribution={"UNKNOWN": scanned_profile_count} if scanned_profile_count else {},
+                uncertainty_notes=notes,
+                failed_batch_count=0,
+                failed_batches=[],
+                is_partial=True,
+                error_message=message,
+            ),
+            cities=[],
+        )
+
+    async def _channel_situation_from_latest_snapshot(
+        self,
+        query,
+        *,
+        generated_at: datetime,
+        cache_backend: str,
+        message: str,
+        total_profile_count: int,
+        scanned_profile_count: int,
+        unscanned_profile_count: int,
+        channel_type_codes: set[str],
+        planning_level_codes: set[str],
+    ) -> VesselPositionNavigationChannelSituationResponse | None:
+        snapshot = await self._latest_persisted_ais_snapshot()
+        if snapshot is None:
+            return None
+        items = await self._position_items_from_persisted_snapshot(snapshot, generated_at=generated_at)
+        risk_by_profile = await self._compliance_risk_by_profile([item.id for item in items])
+        summary_risk_by_profile = await self._summary_risk_level_by_profile([item.id for item in items])
+        filtered_items = self._filter_channel_situation_items_by_risk(
+            items,
+            query,
+            risk_by_profile,
+            summary_risk_by_profile,
+        )
+        boundaries = await self._channel_boundaries()
+        filtered_boundaries = self._filter_channel_boundaries(
+            boundaries,
+            getattr(query, "channel_name", None),
+            channel_type_codes,
+            planning_level_codes,
+        )
+        boundary_paths_by_code = (
+            self._channel_boundary_paths_by_code(filtered_boundaries, query.boundary_precision)
+            if query.include_boundary
+            else {}
+        )
+        reported_within_minutes = query.reported_within_minutes or 1440
+        queried_mmsi_count = int(snapshot.queried_mmsi_count or len(items))
+        matched_position_count = int(snapshot.matched_position_count or len(items))
+        invalid_position_count = int(snapshot.invalid_position_count or 0)
+        unpositioned_count = max(0, queried_mmsi_count - matched_position_count)
+        channels = self._channel_situation_items(
+            filtered_items,
+            risk_by_profile,
+            summary_risk_by_profile,
+            generated_at,
+            reported_within_minutes,
+            queried_mmsi_count,
+            matched_position_count,
+            unpositioned_count,
+            invalid_position_count,
+            True,
+            message,
+            filtered_boundaries,
+            boundary_paths_by_code,
+            query.boundary_precision if query.include_boundary else None,
+            bool(getattr(query, "include_empty_channels", True)),
+        )
+        positioned_items = [
+            item for item in filtered_items
+            if not self._is_stale_position(item, generated_at, reported_within_minutes)
+        ]
+        computed_unscanned_profile_count = max(
+            0,
+            (total_profile_count or int(snapshot.matched_profile_count or len(items)))
+            - int(snapshot.scanned_profile_count or scanned_profile_count or len(items)),
+        )
+        snapshot_partial = (
+            str(snapshot.status_code or "").upper() != "READY"
+            or int(snapshot.failed_batch_count or 0) > 0
+            or computed_unscanned_profile_count > 0
+        )
+        notes = list(snapshot.uncertainty_notes_json or [])
+        if "超时" in message or "失败" in message:
+            notes.append("实时查询未在预算内完成，当前航道态势由最近一次入库 AIS 快照反算。")
+        if computed_unscanned_profile_count > 0:
+            notes.append(f"服务端扫描上限外档案 {computed_unscanned_profile_count} 艘未参与本次实时刷新。")
+        snapshot_expires_at = snapshot.expires_at
+        status = "PARTIAL" if snapshot_partial and channels else ("AVAILABLE" if channels else "EMPTY")
+        return VesselPositionNavigationChannelSituationResponse(
+            source_status=status,
+            source_status_name=_source_status_name(status),
+            generated_at=generated_at,
+            message=message,
+            cache_status="FALLBACK",
+            cache_generated_at=snapshot.generated_at,
+            is_stale_cache=snapshot.expires_at <= generated_at,
+            snapshot_backend="db_snapshot",
+            cache_backend_note=None,
+            summary=VesselPositionNavigationChannelSituationSummary(
+                matched_profile_count=total_profile_count or int(snapshot.matched_profile_count or len(items)),
+                scanned_profile_count=int(snapshot.scanned_profile_count or scanned_profile_count or len(items)),
+                unscanned_profile_count=computed_unscanned_profile_count,
+                queried_mmsi_count=queried_mmsi_count,
+                matched_position_count=matched_position_count,
+                unmatched_mmsi_count=int(snapshot.unmatched_mmsi_count or 0),
+                unpositioned_count=unpositioned_count,
+                invalid_position_count=invalid_position_count,
+                unknown_channel_count=sum(item.positioned_count for item in channels if not item.channel_code),
+                positioned_count=len(positioned_items),
+                stale_position_count=max(0, len(filtered_items) - len(positioned_items)),
+                contactable_position_count=sum(1 for item in positioned_items if item.contact_available),
+                certificate_risk_count=sum(1 for item in positioned_items if risk_by_profile.get(item.id, {}).get("has_certificate_risk")),
+                high_risk_count=sum(1 for item in positioned_items if summary_risk_by_profile.get(item.id) == "HIGH"),
+                channel_count=sum(1 for item in channels if item.channel_code),
+                boundary_channel_count=sum(1 for item in channels if item.channel_code and item.has_boundary),
+                missing_boundary_channel_count=sum(1 for item in channels if item.channel_code and not item.has_boundary),
+                query_snapshot_id=snapshot.snapshot_id,
+                snapshot_status_code=snapshot.status_code,
+                snapshot_expires_at=snapshot_expires_at,
+                refresh_required=False,
+                coverage_rate=_to_decimal(snapshot.coverage_rate) or self._coverage_rate(matched_position_count, queried_mmsi_count),
+                freshness_distribution=snapshot.freshness_distribution_json or self._position_freshness_distribution(filtered_items),
+                source_indices=snapshot.source_indices_json or [],
+                uncertainty_notes=notes,
+                failed_batch_count=int(snapshot.failed_batch_count or 0),
+                failed_batches=snapshot.failed_batches_json or [],
+                is_partial=snapshot_partial,
+                error_message=message if snapshot_partial else None,
+            ),
+            channels=channels,
+        )
+
+    async def _channel_situation_from_precomputed_items(
+        self,
+        query,
+        items: list[VesselPositionMonitorItemResponse],
+        snapshot_payload: dict[str, Any],
+        *,
+        generated_at: datetime,
+        cache_backend: str,
+        message: str,
+        channel_type_codes: set[str],
+        planning_level_codes: set[str],
+    ) -> VesselPositionNavigationChannelSituationResponse | None:
+        snapshot_id = str(snapshot_payload.get("snapshot_id") or self._FULL_AIS_SNAPSHOT_ID)
+        snapshot = await self._latest_persisted_ais_snapshot(snapshot_id=snapshot_id)
+        if snapshot is None:
+            return None
+        risk_by_profile = await self._compliance_risk_by_profile([item.id for item in items])
+        summary_risk_by_profile = await self._summary_risk_level_by_profile([item.id for item in items])
+        filtered_items = self._filter_channel_situation_items_by_risk(
+            items,
+            query,
+            risk_by_profile,
+            summary_risk_by_profile,
+        )
+        boundaries = await self._channel_boundaries()
+        filtered_boundaries = self._filter_channel_boundaries(
+            boundaries,
+            getattr(query, "channel_name", None),
+            channel_type_codes,
+            planning_level_codes,
+        )
+        boundary_paths_by_code = (
+            self._channel_boundary_paths_by_code(filtered_boundaries, query.boundary_precision)
+            if query.include_boundary
+            else {}
+        )
+        reported_within_minutes = query.reported_within_minutes or 1440
+        queried_mmsi_count = int(snapshot.queried_mmsi_count or snapshot_payload.get("queried_mmsi_count") or len(items))
+        matched_position_count = int(snapshot.matched_position_count or snapshot_payload.get("matched_position_count") or len(items))
+        invalid_position_count = int(snapshot.invalid_position_count or snapshot_payload.get("invalid_position_count") or 0)
+        unpositioned_count = max(0, queried_mmsi_count - matched_position_count)
+        channels = self._channel_situation_items(
+            filtered_items,
+            risk_by_profile,
+            summary_risk_by_profile,
+            generated_at,
+            reported_within_minutes,
+            queried_mmsi_count,
+            matched_position_count,
+            unpositioned_count,
+            invalid_position_count,
+            True,
+            message,
+            filtered_boundaries,
+            boundary_paths_by_code,
+            query.boundary_precision if query.include_boundary else None,
+            bool(getattr(query, "include_empty_channels", True)),
+        )
+        positioned_items = [
+            item for item in filtered_items
+            if not self._is_stale_position(item, generated_at, reported_within_minutes)
+        ]
+        total_profile_count = int(snapshot_payload.get("total_profile_count") or snapshot.matched_profile_count or len(items))
+        scanned_profile_count = int(snapshot.scanned_profile_count or snapshot_payload.get("scanned_profile_count") or len(items))
+        computed_unscanned_profile_count = max(0, total_profile_count - scanned_profile_count)
+        snapshot_partial = (
+            str(snapshot.status_code or "").upper() != "READY"
+            or int(snapshot.failed_batch_count or 0) > 0
+            or computed_unscanned_profile_count > 0
+        )
+        notes = list(snapshot.uncertainty_notes_json or [])
+        if computed_unscanned_profile_count > 0:
+            notes.append(f"服务端扫描上限外档案 {computed_unscanned_profile_count} 艘未参与本次实时刷新。")
+        status = "PARTIAL" if snapshot_partial and channels else ("AVAILABLE" if channels else "EMPTY")
+        response = VesselPositionNavigationChannelSituationResponse(
+            source_status=status,
+            source_status_name=_source_status_name(status),
+            generated_at=generated_at,
+            message=message,
+            cache_status="FALLBACK",
+            cache_generated_at=snapshot.generated_at,
+            is_stale_cache=snapshot.expires_at <= generated_at,
+            snapshot_backend="db_snapshot",
+            cache_backend_note=None,
+            summary=VesselPositionNavigationChannelSituationSummary(
+                matched_profile_count=total_profile_count,
+                scanned_profile_count=scanned_profile_count,
+                unscanned_profile_count=computed_unscanned_profile_count,
+                queried_mmsi_count=queried_mmsi_count,
+                matched_position_count=matched_position_count,
+                unmatched_mmsi_count=int(snapshot.unmatched_mmsi_count or 0),
+                unpositioned_count=unpositioned_count,
+                invalid_position_count=invalid_position_count,
+                unknown_channel_count=sum(item.positioned_count for item in channels if not item.channel_code),
+                positioned_count=len(positioned_items),
+                stale_position_count=max(0, len(filtered_items) - len(positioned_items)),
+                contactable_position_count=sum(1 for item in positioned_items if item.contact_available),
+                certificate_risk_count=sum(1 for item in positioned_items if risk_by_profile.get(item.id, {}).get("has_certificate_risk")),
+                high_risk_count=sum(1 for item in positioned_items if summary_risk_by_profile.get(item.id) == "HIGH"),
+                channel_count=sum(1 for item in channels if item.channel_code),
+                boundary_channel_count=sum(1 for item in channels if item.channel_code and item.has_boundary),
+                missing_boundary_channel_count=sum(1 for item in channels if item.channel_code and not item.has_boundary),
+                query_snapshot_id=snapshot.snapshot_id,
+                snapshot_status_code=snapshot.status_code,
+                snapshot_expires_at=snapshot.expires_at,
+                refresh_required=False,
+                coverage_rate=_to_decimal(snapshot.coverage_rate) or self._coverage_rate(matched_position_count, queried_mmsi_count),
+                freshness_distribution=snapshot.freshness_distribution_json or self._position_freshness_distribution(filtered_items),
+                source_indices=snapshot.source_indices_json or [],
+                uncertainty_notes=notes,
+                failed_batch_count=int(snapshot.failed_batch_count or 0),
+                failed_batches=snapshot.failed_batches_json or [],
+                is_partial=snapshot_partial,
+                error_message=message if snapshot_partial else None,
+            ),
+            channels=channels,
+        )
+        await self._store_channel_situation_response_cache(_channel_situation_query_cache_key(query), response)
+        return response
+
+    async def _channel_situation_realtime_error_response(
+        self,
+        query,
+        *,
+        generated_at: datetime,
+        cache_backend: str,
+        message: str,
+        total_profile_count: int,
+        scanned_profile_count: int,
+        unscanned_profile_count: int,
+        channel_type_codes: set[str],
+        planning_level_codes: set[str],
+    ) -> VesselPositionNavigationChannelSituationResponse:
+        channels: list[VesselPositionNavigationChannelSituationItemResponse] = []
+        if bool(getattr(query, "include_empty_channels", True)):
+            try:
+                filtered_boundaries = self._filter_channel_boundaries(
+                    await self._channel_boundaries(),
+                    getattr(query, "channel_name", None),
+                    channel_type_codes,
+                    planning_level_codes,
+                )
+                channels = self._channel_situation_items(
+                    [],
+                    {},
+                    {},
+                    generated_at,
+                    query.reported_within_minutes or 1440,
+                    0,
+                    0,
+                    scanned_profile_count,
+                    0,
+                    True,
+                    message,
+                    filtered_boundaries,
+                    {},
+                    None,
+                    True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("build empty channel situation after realtime AIS failure failed: %s", exc)
+        notes = [message]
+        if unscanned_profile_count > 0:
+            notes.append(f"服务端扫描上限外档案 {unscanned_profile_count} 艘未参与本次实时刷新。")
+        return VesselPositionNavigationChannelSituationResponse(
+            source_status="ERROR",
+            source_status_name=_source_status_name("ERROR"),
+            generated_at=generated_at,
+            message=message,
+            cache_status="MISS",
+            cache_generated_at=generated_at,
+            is_stale_cache=False,
+            snapshot_backend=cache_backend,
+            cache_backend_note="memory 仅适合本地开发；生产多实例请配置 Redis" if cache_backend == "memory" else None,
+            summary=VesselPositionNavigationChannelSituationSummary(
+                matched_profile_count=total_profile_count,
+                scanned_profile_count=scanned_profile_count,
+                unscanned_profile_count=unscanned_profile_count,
+                queried_mmsi_count=0,
+                matched_position_count=0,
+                unmatched_mmsi_count=0,
+                unpositioned_count=scanned_profile_count,
+                invalid_position_count=0,
+                unknown_channel_count=0,
+                positioned_count=0,
+                stale_position_count=0,
+                contactable_position_count=0,
+                certificate_risk_count=0,
+                high_risk_count=0,
+                channel_count=sum(1 for item in channels if item.channel_code),
+                boundary_channel_count=sum(1 for item in channels if item.channel_code and item.has_boundary),
+                missing_boundary_channel_count=sum(1 for item in channels if item.channel_code and not item.has_boundary),
+                query_snapshot_id=None,
+                snapshot_status_code="FAILED",
+                refresh_required=True,
+                coverage_rate=None,
+                freshness_distribution={"UNKNOWN": scanned_profile_count} if scanned_profile_count else {},
+                uncertainty_notes=notes,
+                failed_batch_count=0,
+                failed_batches=[],
+                is_partial=True,
+                error_message=message,
+            ),
+            channels=channels,
+        )
+
+    def _position_monitor_profile_base_stmt(self, query):
+        stmt = select(VesselProfile).where(VesselProfile.deleted_at.is_(None))
+        joined_capacity = False
+        joined_contact = False
+        joined_owner = False
+        joined_operator = False
+
+        def join_capacity():
+            nonlocal stmt, joined_capacity
+            if not joined_capacity:
+                stmt = stmt.outerjoin(VesselCapacityDimension, VesselCapacityDimension.vessel_profile_id == VesselProfile.id)
+                joined_capacity = True
+
+        def join_contact():
+            nonlocal stmt, joined_contact
+            if not joined_contact:
+                stmt = stmt.outerjoin(VesselContact, VesselContact.vessel_profile_id == VesselProfile.id)
+                joined_contact = True
+
+        def join_owner():
+            nonlocal stmt, joined_owner
+            if not joined_owner:
+                stmt = stmt.outerjoin(
+                    VesselOwnerPeriod,
+                    and_(VesselOwnerPeriod.vessel_profile_id == VesselProfile.id, VesselOwnerPeriod.is_current.is_(True)),
+                )
+                joined_owner = True
+
+        def join_operator():
+            nonlocal stmt, joined_operator
+            if not joined_operator:
+                stmt = stmt.outerjoin(
+                    VesselOperatorPeriod,
+                    and_(VesselOperatorPeriod.vessel_profile_id == VesselProfile.id, VesselOperatorPeriod.is_current.is_(True)),
+                )
+                joined_operator = True
+
         if query.keyword:
+            join_contact()
+            join_owner()
+            join_operator()
             like_value = f"%{query.keyword.strip()}%"
             stmt = stmt.where(
                 or_(
@@ -1402,12 +2598,16 @@ class VesselAisMixin:
         else:
             stmt = stmt.where(~VesselProfile.profile_status_code.in_(["INACTIVE", "TRANSFERRED", "ARCHIVED", "DECOMMISSIONED"]))
         if query.deadweight_min is not None:
+            join_capacity()
             stmt = stmt.where(VesselCapacityDimension.deadweight_ton >= query.deadweight_min)
         if query.deadweight_max is not None:
+            join_capacity()
             stmt = stmt.where(VesselCapacityDimension.deadweight_ton <= query.deadweight_max)
         if query.draft_max is not None:
+            join_capacity()
             stmt = stmt.where(VesselCapacityDimension.design_draft_m <= query.draft_max)
         if query.contact_available is not None:
+            join_contact()
             stmt = stmt.where(VesselContact.is_available.is_(query.contact_available))
         return stmt
 
@@ -1424,6 +2624,256 @@ class VesselAisMixin:
             stmt = stmt.limit(max(query.max_items * 3, query.max_items))
         rows = (await self.db.execute(stmt)).scalars().all()
         return list(rows)
+
+    async def _position_monitor_profiles_page(self, query, *, offset: int, limit: int) -> list[VesselProfile]:
+        stmt = self._position_monitor_profile_base_stmt(query)
+        stmt = (
+            stmt.group_by(VesselProfile.id)
+            .order_by(VesselProfile.updated_at.desc(), VesselProfile.id.desc())
+            .offset(max(0, offset))
+            .limit(max(1, limit))
+        )
+        rows = (await self.db.execute(stmt)).scalars().all()
+        return list(rows)
+
+    def _merge_position_build_results(self, results: list[_PositionBuildResult]) -> _PositionBuildResult:
+        items: list[VesselPositionMonitorItemResponse] = []
+        unmatched_positions: list[dict[str, Any]] = []
+        invalid_positions: list[dict[str, Any]] = []
+        failed_batches: list[dict[str, Any]] = []
+        errors: list[str] = []
+        source_indices: set[str] = set()
+        queried_mmsi_count = 0
+        matched_position_count = 0
+        unpositioned_count = 0
+        invalid_position_count = 0
+        unknown_city_count = 0
+        failed_batch_count = 0
+        partial = False
+        for result in results:
+            items.extend(result.items)
+            unmatched_positions.extend(result.unmatched_positions)
+            invalid_positions.extend(result.invalid_positions)
+            failed_batches.extend(result.failed_batches)
+            queried_mmsi_count += int(result.queried_mmsi_count or 0)
+            matched_position_count += int(result.matched_position_count or 0)
+            unpositioned_count += int(result.unpositioned_count or 0)
+            invalid_position_count += int(result.invalid_position_count or 0)
+            unknown_city_count += int(result.unknown_city_count or 0)
+            failed_batch_count += int(result.failed_batch_count or 0)
+            partial = partial or bool(result.partial)
+            if result.error_message:
+                errors.append(result.error_message)
+            source_indices.update(result.source_indices or [])
+        unique_errors = list(dict.fromkeys(errors))
+        return _PositionBuildResult(
+            items=items,
+            partial=partial,
+            error_message="；".join(unique_errors[:3]) if unique_errors else None,
+            failed_batch_count=failed_batch_count,
+            queried_mmsi_count=queried_mmsi_count,
+            matched_position_count=matched_position_count,
+            unpositioned_count=unpositioned_count,
+            invalid_position_count=invalid_position_count,
+            unknown_city_count=unknown_city_count,
+            unmatched_positions=unmatched_positions,
+            invalid_positions=invalid_positions,
+            source_indices=sorted(source_indices),
+            failed_batches=failed_batches,
+        )
+
+    async def precompute_full_ais_position_snapshot(self, query, *, snapshot_id: str | None = None) -> dict[str, Any]:
+        generated_at = datetime.utcnow()
+        limits = await self._ais_runtime_limits()
+        page_size = _safe_int(
+            int(settings.VESSEL_AIS_PRECOMPUTE_PROFILE_PAGE_SIZE or 5000),
+            5000,
+            minimum=500,
+            maximum=10000,
+        )
+        max_profiles = max(0, int(settings.VESSEL_AIS_PRECOMPUTE_MAX_PROFILES or 0))
+        total_profile_count = await self._position_monitor_profile_count(query)
+        target_profile_count = min(total_profile_count, max_profiles) if max_profiles else total_profile_count
+        results: list[_PositionBuildResult] = []
+        scanned_profile_count = 0
+        offset = 0
+        while scanned_profile_count < target_profile_count:
+            limit = min(page_size, target_profile_count - scanned_profile_count)
+            profiles = await self._position_monitor_profiles_page(query, offset=offset, limit=limit)
+            if not profiles:
+                break
+            result = await self._position_monitor_items_for_profiles(
+                profiles,
+                generated_at=generated_at,
+                reported_within_minutes=query.reported_within_minutes or 1440,
+                es_batch_size=limits["es_batch_size"],
+                es_max_concurrency=limits["es_max_concurrency"],
+                include_stale=True,
+                include_unmatched=False,
+                unmatched_scan_limit=0,
+                resolve_city=True,
+                resolve_channel=True,
+            )
+            results.append(result)
+            scanned_profile_count += len(profiles)
+            offset += len(profiles)
+        merged = self._merge_position_build_results(results)
+        unscanned_profile_count = max(0, total_profile_count - scanned_profile_count)
+        if unscanned_profile_count > 0:
+            merged.partial = True
+            note = f"后台全量预计算达到扫描上限，未扫描档案 {unscanned_profile_count} 艘"
+            merged.error_message = "；".join(part for part in [merged.error_message, note] if part)
+        snapshot_id = snapshot_id or self._FULL_AIS_SNAPSHOT_ID
+        await self._persist_ais_position_snapshot(
+            snapshot_id,
+            query,
+            merged,
+            generated_at=generated_at,
+            total_profile_count=total_profile_count,
+            scanned_profile_count=scanned_profile_count,
+            unscanned_profile_count=unscanned_profile_count,
+        )
+        await self._clear_ais_situation_response_caches()
+        self._last_full_ais_position_items = merged.items
+        self._last_full_ais_position_generated_at = generated_at
+        return {
+            "snapshot_id": snapshot_id,
+            "generated_at": generated_at.isoformat(),
+            "total_profile_count": total_profile_count,
+            "scanned_profile_count": scanned_profile_count,
+            "unscanned_profile_count": unscanned_profile_count,
+            "queried_mmsi_count": merged.queried_mmsi_count,
+            "matched_position_count": merged.matched_position_count,
+            "failed_batch_count": merged.failed_batch_count,
+            "is_partial": merged.partial,
+            "source_indices": merged.source_indices,
+        }
+
+    async def _persist_ais_position_snapshot(
+        self,
+        snapshot_id: str,
+        query,
+        result: _PositionBuildResult,
+        *,
+        generated_at: datetime,
+        total_profile_count: int,
+        scanned_profile_count: int,
+        unscanned_profile_count: int,
+    ) -> None:
+        query_params = query.model_dump(mode="json") if hasattr(query, "model_dump") else dict(getattr(query, "__dict__", {}))
+        query_params["scan_mode"] = "FULL_PROFILE_PRECOMPUTE"
+        query_params["snapshot_id"] = snapshot_id
+        query_hash = hashlib.sha256(json.dumps(query_params, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        status_code = "PARTIAL" if result.partial or unscanned_profile_count > 0 else "READY"
+        freshness_distribution = self._position_freshness_distribution(result.items, result.unmatched_positions)
+        coverage_rate = self._coverage_rate(result.matched_position_count, result.queried_mmsi_count)
+        notes: list[str] = [
+            f"后台任务已按生产船舶档案全量扫描 {scanned_profile_count} 艘。",
+        ]
+        if result.source_indices:
+            notes.append(f"实时 ES 来源索引：{', '.join(result.source_indices[:5])}")
+        if unscanned_profile_count > 0:
+            notes.append(f"后台扫描上限外档案 {unscanned_profile_count} 艘未参与本次快照。")
+        if result.partial and result.error_message:
+            notes.append(result.error_message)
+        snapshot = await self.db.scalar(select(VesselAisSnapshot).where(VesselAisSnapshot.snapshot_id == snapshot_id))
+        now = datetime.utcnow()
+        snapshot_values = {
+            "query_hash": query_hash,
+            "query_params_json": query_params,
+            "status_code": status_code,
+            "generated_at": generated_at,
+            "expires_at": generated_at + timedelta(seconds=_city_snapshot_ttl()),
+            "cache_backend_code": "db_snapshot",
+            "scanned_profile_count": scanned_profile_count,
+            "queried_mmsi_count": result.queried_mmsi_count,
+            "matched_profile_count": total_profile_count,
+            "matched_position_count": result.matched_position_count,
+            "unmatched_mmsi_count": len([item for item in result.unmatched_positions if item.get("match_status_code") == "UNMATCHED_MMSI"]),
+            "invalid_position_count": len(result.invalid_positions),
+            "unknown_city_count": result.unknown_city_count,
+            "failed_batch_count": result.failed_batch_count,
+            "failed_batches_json": result.failed_batches,
+            "coverage_rate": coverage_rate,
+            "freshness_distribution_json": freshness_distribution,
+            "source_indices_json": result.source_indices,
+            "uncertainty_notes_json": notes,
+            "refresh_error": result.error_message,
+            "updated_at": now,
+        }
+        if snapshot is None:
+            snapshot = VesselAisSnapshot(
+                snapshot_id=snapshot_id,
+                created_at=now,
+                **snapshot_values,
+            )
+            self.db.add(snapshot)
+            await self.db.flush()
+        else:
+            for key, value in snapshot_values.items():
+                setattr(snapshot, key, value)
+        await self.db.execute(delete(VesselLatestPositionSnapshot).where(VesselLatestPositionSnapshot.snapshot_id == snapshot_id))
+        await self.db.execute(delete(VesselAisCitySnapshotItem).where(VesselAisCitySnapshotItem.snapshot_id == snapshot_id))
+        boundaries = await self._city_boundaries()
+        boundary_codes = {boundary.code for boundary in boundaries}
+        city_items = self._city_situation_items(
+            result.items,
+            {},
+            generated_at,
+            query.reported_within_minutes or 1440,
+            result.queried_mmsi_count,
+            result.matched_position_count,
+            result.unpositioned_count,
+            result.invalid_position_count,
+            result.unknown_city_count,
+            result.partial,
+            result.error_message,
+            {},
+            None,
+            boundary_codes,
+            result.unmatched_positions,
+        )
+        for city in city_items:
+            self.db.add(
+                VesselAisCitySnapshotItem(
+                    snapshot_id=snapshot_id,
+                    city_code=city.city_code,
+                    city_name=city.city_name,
+                    positioned_count=city.positioned_count,
+                    matched_position_count=city.matched_position_count,
+                    unmatched_mmsi_count=city.unmatched_mmsi_count,
+                    invalid_position_count=city.invalid_position_count,
+                    stale_position_count=city.stale_position_count,
+                    freshness_distribution_json=city.freshness_distribution,
+                    boundary_status_code=city.boundary_status_code,
+                    has_boundary=city.has_boundary,
+                    boundary_precision=city.boundary_precision,
+                    latest_position_time=city.latest_position_time,
+                    created_at=now,
+                )
+            )
+        for item in result.items:
+            self.db.add(
+                VesselLatestPositionSnapshot(
+                    snapshot_id=snapshot_id,
+                    vessel_profile_id=item.id,
+                    mmsi=str(item.current_mmsi or ""),
+                    longitude=item.longitude,
+                    latitude=item.latitude,
+                    speed_kn=item.speed_kn,
+                    course_deg=item.course_deg,
+                    heading_deg=item.heading_deg,
+                    position_time=item.position_time,
+                    source_index=item.source_index,
+                    freshness_level=item.freshness_level or "UNKNOWN",
+                    match_status_code=item.match_status_code or "MATCHED_PROFILE",
+                    city_code=item.current_city_code or item.city_code,
+                    city_name=item.current_city_name or item.city_name,
+                    valid_position_flag=True,
+                    created_at=now,
+                )
+            )
+        await self.db.commit()
 
     async def _mmsi_values_by_profile(self, ids: list[int]) -> dict[int, list[str]]:
         rows = (
@@ -1445,88 +2895,53 @@ class VesselAisMixin:
                 result[row.vessel_profile_id].append(row.identifier_value)
         return result
 
-    async def _search_realtime_positions(self, mmsi_values: list[str], *, max_hits: int) -> dict[str, dict[str, Any]]:
+    async def _search_realtime_positions(
+        self,
+        mmsi_values: list[str],
+        *,
+        max_hits: int,
+        reported_within_minutes: int | None = None,
+    ) -> dict[str, dict[str, Any]]:
         terms: list[Any] = []
         for value in mmsi_values:
             text_value = str(value).strip()
             if not text_value:
                 continue
             terms.append(text_value)
-            if text_value.isdigit():
-                terms.append(int(text_value))
         terms = list(dict.fromkeys(terms))
-        mmsi_fields = [
-            "shipMmsi",
-            "shipMmsi.keyword",
-            "mmsi",
-            "mmsi.keyword",
-            "ship_mmsi",
-            "ship_mmsi.keyword",
-            "MMSI",
-            "ais",
-            "ship_ais",
-        ]
-        time_fields = ["posTime", "updateTime", "timestamp", "location_time", "update_time", "position_time", "time", "@timestamp"]
+        time_fields = ["posTime", "updateTime"]
         source_fields = [
             "shipMmsi",
-            "mmsi",
-            "ship_mmsi",
-            "MMSI",
-            "ais",
-            "ship_ais",
             "lon",
-            "lng",
-            "longitude",
-            "longitude_gcj02",
             "lat",
-            "latitude",
-            "latitude_gcj02",
             "speed",
-            "sog",
-            "speed_kn",
             "cog",
-            "course",
-            "course_deg",
             "head",
-            "heading",
-            "hdg",
-            "heading_deg",
             "posTime",
             "updateTime",
-            "timestamp",
-            "location_time",
-            "update_time",
-            "position_time",
-            "time",
-            "@timestamp",
-            "location_text",
-            "address",
-            "area_name",
-            "city_name",
-            "city",
-            "city_code",
-            "cityCode",
-            "adcode",
-            "city_adcode",
-            "region_code",
+            "shipName",
             "shipEnName",
+            "shipType",
         ]
+        filters: list[dict[str, Any]] = [{"terms": {"shipMmsi": terms}}]
+        if reported_within_minutes:
+            earliest = (datetime.utcnow() - timedelta(minutes=reported_within_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+            filters.append({"range": {"posTime": {"gte": earliest}}})
         query_body = {
-            "size": min(max_hits, 1000),
+            "size": min(max_hits, 5000),
             "track_total_hits": False,
             "_source": source_fields,
             "sort": [
                 {field: {"order": "desc", "unmapped_type": "date", "missing": "_last"}}
                 for field in time_fields
             ],
-            "query": {
-                "bool": {
-                    "should": [{"terms": {field: terms}} for field in mmsi_fields],
-                    "minimum_should_match": 1,
-                }
-            },
+            "query": {"bool": {"filter": filters}},
         }
-        client = RealtimeEsClient(runtime_config=self.runtime_config)
+        client = RealtimeEsClient(
+            runtime_config=self.runtime_config,
+            max_retries=0,
+            timeout_seconds=await self._ais_es_request_timeout_seconds(),
+        )
         index = (
             await self.runtime_config.get_value(
                 ES_R_INDEX,
@@ -1574,16 +2989,11 @@ class VesselAisMixin:
         return result
 
     async def _search_recent_realtime_positions(self, *, reported_within_minutes: int, max_hits: int) -> dict[str, dict[str, Any]]:
-        time_fields = ["posTime", "updateTime", "timestamp", "location_time", "update_time", "position_time", "time", "@timestamp"]
+        time_fields = ["posTime"]
         source_fields = [
-            "shipMmsi", "mmsi", "ship_mmsi", "MMSI", "ais", "ship_ais",
-            "lon", "lng", "longitude", "longitude_gcj02", "lat", "latitude", "latitude_gcj02",
-            "speed", "sog", "speed_kn", "cog", "course", "course_deg", "head", "heading", "hdg", "heading_deg",
-            "posTime", "updateTime", "timestamp", "location_time", "update_time", "position_time", "time", "@timestamp",
-            "location_text", "address", "area_name", "city_name", "city", "city_code", "cityCode", "adcode", "city_adcode", "region_code",
+            "shipMmsi", "lon", "lat", "speed", "cog", "head", "posTime", "updateTime", "shipName", "shipEnName", "shipType",
         ]
         earliest = (datetime.utcnow() - timedelta(minutes=reported_within_minutes)).strftime("%Y-%m-%d %H:%M:%S")
-        range_should = [{"range": {field: {"gte": earliest}}} for field in time_fields]
         query_body = {
             "size": min(max_hits, 10000),
             "track_total_hits": False,
@@ -1592,14 +3002,13 @@ class VesselAisMixin:
                 {field: {"order": "desc", "unmapped_type": "date", "missing": "_last"}}
                 for field in time_fields
             ],
-            "query": {
-                "bool": {
-                    "should": range_should,
-                    "minimum_should_match": 1,
-                }
-            },
+            "query": {"range": {"posTime": {"gte": earliest}}},
         }
-        client = RealtimeEsClient(runtime_config=self.runtime_config)
+        client = RealtimeEsClient(
+            runtime_config=self.runtime_config,
+            max_retries=0,
+            timeout_seconds=await self._ais_es_request_timeout_seconds(),
+        )
         index = (
             await self.runtime_config.get_value(
                 ES_R_INDEX,
@@ -1652,6 +3061,7 @@ class VesselAisMixin:
         *,
         batch_size: int,
         max_concurrency: int,
+        reported_within_minutes: int | None = None,
     ) -> tuple[dict[str, dict[str, Any]], bool, str | None, int, list[dict[str, Any]]]:
         positions: dict[str, dict[str, Any]] = {}
         errors: list[str] = []
@@ -1662,7 +3072,11 @@ class VesselAisMixin:
         async def run_batch(batch_index: int, batch: list[str]) -> tuple[int, list[str], dict[str, dict[str, Any]], str | None]:
             async with semaphore:
                 try:
-                    return batch_index, batch, await self._search_realtime_positions(batch, max_hits=max(len(batch) * 3, 200)), None
+                    return batch_index, batch, await self._search_realtime_positions(
+                        batch,
+                        max_hits=max(len(batch) * 3, 200),
+                        reported_within_minutes=reported_within_minutes,
+                    ), None
                 except Exception as exc:  # noqa: BLE001
                     return batch_index, batch, {}, str(exc)
 
@@ -1696,6 +3110,8 @@ class VesselAisMixin:
         include_stale: bool,
         include_unmatched: bool = False,
         unmatched_scan_limit: int = 0,
+        resolve_city: bool = True,
+        resolve_channel: bool = False,
     ) -> _PositionBuildResult:
         mmsi_by_profile = await self._mmsi_values_by_profile([row.id for row in profiles])
         mmsi_values = sorted({item for values in mmsi_by_profile.values() for item in values if item})
@@ -1705,6 +3121,7 @@ class VesselAisMixin:
             mmsi_values,
             batch_size=es_batch_size,
             max_concurrency=es_max_concurrency,
+            reported_within_minutes=reported_within_minutes,
         )
         if include_unmatched and unmatched_scan_limit > 0:
             try:
@@ -1726,8 +3143,23 @@ class VesselAisMixin:
                     "sample_mmsi": [],
                     "error_message": public_error,
                 })
-        boundaries = await self._city_boundaries()
+        if not positions:
+            return _PositionBuildResult(
+                items=[],
+                partial=partial,
+                error_message=error_message,
+                failed_batch_count=failed_batch_count,
+                queried_mmsi_count=len(mmsi_values),
+                matched_position_count=0,
+                unpositioned_count=len(mmsi_values),
+                invalid_position_count=0,
+                unknown_city_count=0,
+                failed_batches=failed_batches,
+            )
+        boundaries = await self._city_boundaries() if resolve_city else []
         boundary_grid = _CITY_BOUNDARY_CACHE.get("grid_index") or {}
+        channel_boundaries = await self._channel_boundaries() if resolve_channel else []
+        channel_grid = _CHANNEL_BOUNDARY_CACHE.get("grid_index") or {}
         profiles_by_mmsi: dict[str, list[VesselProfile]] = defaultdict(list)
         for profile in profiles:
             for mmsi in mmsi_by_profile.get(profile.id, [profile.current_mmsi]):
@@ -1746,7 +3178,10 @@ class VesselAisMixin:
                 position_time = position.get("position_time")
                 age_minutes = int((generated_at - position_time).total_seconds() // 60) if position_time else None
                 valid_position = self._valid_longitude_latitude(longitude, latitude)
-                resolved_city = self._resolve_current_city_from_boundaries(longitude, latitude, boundaries, boundary_grid) if valid_position else _ResolvedCity(None, UNKNOWN_CITY_NAME, CURRENT_CITY_SOURCE_INVALID_POSITION)
+                if resolve_city and valid_position:
+                    resolved_city = self._resolve_current_city_from_boundaries(longitude, latitude, boundaries, boundary_grid)
+                else:
+                    resolved_city = _ResolvedCity(None, UNKNOWN_CITY_NAME, CURRENT_CITY_SOURCE_INVALID_POSITION if not valid_position else CURRENT_CITY_SOURCE_UNKNOWN)
                 unmatched_positions.append({
                     **position,
                     "mmsi": mmsi,
@@ -1772,6 +3207,164 @@ class VesselAisMixin:
             position_by_profile[profile.id] = position
             match_status_by_profile[profile.id] = "MULTI_PROFILE_CONFLICT" if len(matched_profiles) > 1 else "MATCHED_PROFILE"
         positioned_profiles = [profile for profile in profiles if profile.id in position_by_profile]
+        list_items = await self._build_list_items(positioned_profiles)
+        items: list[VesselPositionMonitorItemResponse] = []
+        invalid_position_count = 0
+        unknown_city_count = 0
+        for item in list_items:
+            position = position_by_profile.get(item.id)
+            if position is None:
+                continue
+            longitude = _to_decimal(position.get("longitude"))
+            latitude = _to_decimal(position.get("latitude"))
+            if longitude is None or latitude is None or not self._valid_longitude_latitude(longitude, latitude):
+                invalid_position_count += 1
+                invalid_positions.append({**position, "mmsi": item.current_mmsi, "vessel_profile_id": item.id, "match_status_code": "INVALID_POSITION", "valid_position_flag": False})
+                continue
+            if resolve_city:
+                resolved_city = self._resolve_current_city_from_boundaries(longitude, latitude, boundaries, boundary_grid)
+            else:
+                resolved_city = _ResolvedCity(None, UNKNOWN_CITY_NAME, CURRENT_CITY_SOURCE_UNKNOWN)
+            if resolved_city.current_city_source != CURRENT_CITY_SOURCE_ADMIN_BOUNDARY:
+                unknown_city_count += 1
+            resolved_channel = None
+            if resolve_channel:
+                channel_matches = self._resolve_current_channels_from_boundaries(
+                    longitude,
+                    latitude,
+                    channel_boundaries,
+                    channel_grid,
+                    None,
+                    allow_near_match=bool(settings.VESSEL_CHANNEL_SITUATION_NEAR_MATCH),
+                )
+                resolved_channel = channel_matches[0] if channel_matches else None
+            position_time = position.get("position_time")
+            age_minutes = int((generated_at - position_time).total_seconds() // 60) if position_time else None
+            freshness_level = _ais_freshness_level(age_minutes)
+            items.append(
+                VesselPositionMonitorItemResponse(
+                    **item.model_dump(),
+                    longitude=longitude,
+                    latitude=latitude,
+                    speed_kn=_to_decimal(position.get("speed_kn")),
+                    course_deg=_to_decimal(position.get("course_deg")),
+                    heading_deg=_to_decimal(position.get("heading_deg")),
+                    position_time=position_time,
+                    position_age_minutes=age_minutes,
+                    city_code=resolved_city.city_code,
+                    city_name=resolved_city.city_name,
+                    current_city_code=resolved_city.city_code,
+                    current_city_name=resolved_city.city_name,
+                    current_city_source=resolved_city.current_city_source,
+                    current_channel_code=resolved_channel.channel_code if resolved_channel else None,
+                    current_channel_name=resolved_channel.channel_name if resolved_channel else None,
+                    current_channel_source=resolved_channel.current_channel_source if resolved_channel else None,
+                    city_center_longitude=resolved_city.city_center_longitude,
+                    city_center_latitude=resolved_city.city_center_latitude,
+                    matched_city_candidates=resolved_city.matched_city_candidates,
+                    location_text=position.get("location_text"),
+                    position_source_name="实时 ES",
+                    source_index=position.get("source_index"),
+                    freshness_level=freshness_level,
+                    match_status_code=match_status_by_profile.get(item.id, "MATCHED_PROFILE"),
+                )
+            )
+        matched_position_count = len(items)
+        source_indices = sorted({str(position.get("source_index")) for position in positions.values() if position.get("source_index")})
+        return _PositionBuildResult(
+            items=items,
+            partial=partial,
+            error_message=error_message,
+            failed_batch_count=failed_batch_count,
+            queried_mmsi_count=len(mmsi_values),
+            matched_position_count=matched_position_count,
+            unpositioned_count=max(0, len(mmsi_values) - matched_position_count - invalid_position_count),
+            invalid_position_count=invalid_position_count,
+            unknown_city_count=unknown_city_count,
+            unmatched_positions=unmatched_positions,
+            invalid_positions=invalid_positions,
+            source_indices=source_indices,
+            failed_batches=failed_batches,
+        )
+
+    async def _position_monitor_items_from_recent_positions(
+        self,
+        query,
+        *,
+        generated_at: datetime,
+        reported_within_minutes: int,
+        max_hits: int,
+        include_stale: bool,
+    ) -> _PositionBuildResult:
+        positions = await self._search_recent_realtime_positions(
+            reported_within_minutes=reported_within_minutes,
+            max_hits=max_hits,
+        )
+        if not positions:
+            return _PositionBuildResult([], False, None, 0, 0, 0, 0, 0, 0)
+
+        mmsi_values = sorted(positions)
+        profiles_by_mmsi: dict[str, list[VesselProfile]] = defaultdict(list)
+        profile_by_id: dict[int, VesselProfile] = {}
+        chunk_size = 500
+        for start in range(0, len(mmsi_values), chunk_size):
+            chunk = mmsi_values[start:start + chunk_size]
+            stmt = (
+                self._position_monitor_profile_base_stmt(query)
+                .where(VesselProfile.current_mmsi.in_(chunk))
+                .group_by(VesselProfile.id)
+            )
+            rows = (await self.db.execute(stmt)).scalars().all()
+            for profile in rows:
+                profile_by_id[profile.id] = profile
+                if profile.current_mmsi:
+                    profiles_by_mmsi[str(profile.current_mmsi).strip()].append(profile)
+
+        boundaries = await self._city_boundaries()
+        boundary_grid = _CITY_BOUNDARY_CACHE.get("grid_index") or {}
+        position_by_profile: dict[int, dict[str, Any]] = {}
+        match_status_by_profile: dict[int, str] = {}
+        freshness_limit = generated_at - timedelta(minutes=reported_within_minutes)
+        unmatched_positions: list[dict[str, Any]] = []
+        invalid_positions: list[dict[str, Any]] = []
+        for mmsi, position in positions.items():
+            longitude = _to_decimal(position.get("longitude"))
+            latitude = _to_decimal(position.get("latitude"))
+            position_time = position.get("position_time")
+            valid_position = self._valid_longitude_latitude(longitude, latitude)
+            matched_profiles = profiles_by_mmsi.get(mmsi) or []
+            if not matched_profiles:
+                age_minutes = int((generated_at - position_time).total_seconds() // 60) if position_time else None
+                resolved_city = (
+                    self._resolve_current_city_from_boundaries(longitude, latitude, boundaries, boundary_grid)
+                    if valid_position
+                    else _ResolvedCity(None, UNKNOWN_CITY_NAME, CURRENT_CITY_SOURCE_INVALID_POSITION)
+                )
+                unmatched_positions.append({
+                    **position,
+                    "mmsi": mmsi,
+                    "longitude": longitude,
+                    "latitude": latitude,
+                    "position_age_minutes": age_minutes,
+                    "freshness_level": _ais_freshness_level(age_minutes),
+                    "match_status_code": "UNMATCHED_MMSI" if valid_position else "INVALID_POSITION",
+                    "valid_position_flag": valid_position,
+                    "city_code": resolved_city.city_code,
+                    "city_name": resolved_city.city_name,
+                    "current_city_source": resolved_city.current_city_source,
+                })
+                if not valid_position:
+                    invalid_positions.append(unmatched_positions[-1])
+                continue
+            profile = matched_profiles[0]
+            if profile.id in position_by_profile:
+                continue
+            if not include_stale and position_time and position_time < freshness_limit:
+                continue
+            position_by_profile[profile.id] = position
+            match_status_by_profile[profile.id] = "MULTI_PROFILE_CONFLICT" if len(matched_profiles) > 1 else "MATCHED_PROFILE"
+
+        positioned_profiles = [profile for profile_id, profile in profile_by_id.items() if profile_id in position_by_profile]
         list_items = await self._build_list_items(positioned_profiles)
         items: list[VesselPositionMonitorItemResponse] = []
         invalid_position_count = 0
@@ -1817,22 +3410,21 @@ class VesselAisMixin:
                     match_status_code=match_status_by_profile.get(item.id, "MATCHED_PROFILE"),
                 )
             )
-        matched_position_count = len(items)
         source_indices = sorted({str(position.get("source_index")) for position in positions.values() if position.get("source_index")})
         return _PositionBuildResult(
             items=items,
-            partial=partial,
-            error_message=error_message,
-            failed_batch_count=failed_batch_count,
-            queried_mmsi_count=len(mmsi_values),
-            matched_position_count=matched_position_count,
-            unpositioned_count=max(0, len(mmsi_values) - matched_position_count - invalid_position_count),
+            partial=False,
+            error_message=None,
+            failed_batch_count=0,
+            queried_mmsi_count=len(positions),
+            matched_position_count=len(items),
+            unpositioned_count=max(0, len(positions) - len(items) - invalid_position_count),
             invalid_position_count=invalid_position_count,
             unknown_city_count=unknown_city_count,
             unmatched_positions=unmatched_positions,
             invalid_positions=invalid_positions,
             source_indices=source_indices,
-            failed_batches=failed_batches,
+            failed_batches=[],
         )
 
     def _is_stale_position(self, item: VesselPositionMonitorItemResponse, generated_at: datetime, reported_within_minutes: int) -> bool:
@@ -1882,13 +3474,16 @@ class VesselAisMixin:
         profile_ids = sorted({item for item in ids if item})
         if not profile_ids:
             return {}
-        rows = (
-            await self.db.execute(
-                select(VesselProfileSummary.vessel_profile_id, VesselProfileSummary.risk_level).where(
-                    VesselProfileSummary.vessel_profile_id.in_(profile_ids)
+        rows = []
+        for start in range(0, len(profile_ids), 900):
+            chunk = profile_ids[start:start + 900]
+            rows.extend((
+                await self.db.execute(
+                    select(VesselProfileSummary.vessel_profile_id, VesselProfileSummary.risk_level).where(
+                        VesselProfileSummary.vessel_profile_id.in_(chunk)
+                    )
                 )
-            )
-        ).all()
+            ).all())
         return {int(profile_id): str(risk_level or "UNKNOWN") for profile_id, risk_level in rows}
 
     def _filter_channel_situation_items_by_risk(
@@ -1958,13 +3553,22 @@ class VesselAisMixin:
         unmatched_items: list[VesselPositionMonitorItemResponse] = []
         grid_index = _CHANNEL_BOUNDARY_CACHE.get("grid_index") or {}
         allowed_codes = set(boundary_by_code.keys())
+        allow_near_match = bool(settings.VESSEL_CHANNEL_SITUATION_NEAR_MATCH)
         for item in items:
+            precomputed_channel_code = str(getattr(item, "current_channel_code", "") or "").strip()
+            if precomputed_channel_code:
+                if precomputed_channel_code in boundary_by_code:
+                    grouped[precomputed_channel_code].append(item)
+                else:
+                    unmatched_items.append(item)
+                continue
             matches = self._resolve_current_channels_from_boundaries(
                 _to_decimal(item.longitude),
                 _to_decimal(item.latitude),
                 boundaries,
                 grid_index,
                 allowed_codes,
+                allow_near_match=allow_near_match,
             )
             if not matches:
                 unmatched_items.append(item)
@@ -2489,6 +4093,7 @@ class VesselAisMixin:
         boundaries: list[_NavigationChannelBoundary],
         grid_index: dict[tuple[int, int], list[_NavigationChannelBoundary]] | None = None,
         allowed_codes: set[str] | None = None,
+        allow_near_match: bool = True,
     ) -> list[_ResolvedNavigationChannel]:
         if not self._valid_longitude_latitude(longitude, latitude):
             return []
@@ -2509,6 +4114,8 @@ class VesselAisMixin:
             and any(_point_in_polygon_with_holes(lon, lat, polygon) for polygon in boundary.polygons)
         ]
         if not matches:
+            if not allow_near_match:
+                return []
             near_matches: list[tuple[_NavigationChannelBoundary, Decimal]] = []
             near_candidates = boundaries
             if grid_index:
@@ -2592,12 +4199,16 @@ class VesselAisMixin:
         boundary: _NavigationChannelBoundary,
     ) -> Decimal | None:
         distances: list[float] = []
-        for polygon in boundary.polygons:
-            for ring in polygon:
-                if len(ring) < 2:
-                    continue
-                for start, end in zip(ring, ring[1:], strict=False):
-                    distances.append(self._point_segment_distance_m(lon, lat, start, end))
+        rings = []
+        if boundary.boundary_paths_by_precision:
+            rings = boundary.boundary_paths_by_precision.get("low") or []
+        if not rings:
+            rings = [ring for polygon in boundary.polygons for ring in polygon]
+        for ring in rings:
+            if len(ring) < 2:
+                continue
+            for start, end in zip(ring, ring[1:], strict=False):
+                distances.append(self._point_segment_distance_m(lon, lat, start, end))
         if not distances:
             return None
         return Decimal(str(min(distances)))
@@ -2759,6 +4370,23 @@ class VesselAisMixin:
                     )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("city situation redis snapshot read failed: %s", exc)
+        persisted = await self._latest_persisted_ais_snapshot(snapshot_id)
+        if persisted is not None:
+            generated_at = persisted.generated_at or datetime.utcnow()
+            items = await self._position_items_from_persisted_snapshot(
+                persisted,
+                generated_at=generated_at,
+            )
+            return _CitySituationSnapshot(
+                snapshot_id=persisted.snapshot_id,
+                expires_at=persisted.expires_at,
+                items=items,
+                partial=persisted.status_code == "PARTIAL",
+                error_message=persisted.refresh_error,
+                generated_at=generated_at,
+                status_code="EXPIRED" if persisted.expires_at <= datetime.utcnow() else persisted.status_code,
+                refresh_required=False,
+            )
         return None
 
     def _empty_position_response(

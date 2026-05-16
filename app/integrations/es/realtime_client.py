@@ -33,12 +33,14 @@ class RealtimeEsClient:
         max_retries: int = 1,
         retry_backoff_seconds: float = 0.4,
         concurrency_limit: int = 6,
+        timeout_seconds: float | None = None,
     ) -> None:
         self._runtime_config = runtime_config
         self._transport = transport
         self._max_retries = max(0, max_retries)
         self._retry_backoff_seconds = max(0.0, retry_backoff_seconds)
         self._semaphore = asyncio.Semaphore(max(1, concurrency_limit))
+        self._timeout_seconds = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
 
     @property
     def index_name(self) -> str:
@@ -106,6 +108,8 @@ class RealtimeEsClient:
         return settings.ES_R_PASSWORD or ""
 
     async def _timeout(self) -> float:
+        if self._timeout_seconds is not None:
+            return float(self._timeout_seconds)
         default_timeout = float(settings.ES_TIMEOUT_SECONDS or 10.0)
         if self._runtime_config is not None:
             timeout_value = await self._runtime_config.get_float(

@@ -40,7 +40,7 @@ from app.modules.vessel.schemas import (
     VesselRiskReviewRequest,
 )
 from app.modules.vessel.service import VesselService
-from scripts.seed_builtin_dicts import BUILTIN_DICTS
+from scripts.seeds.loaders.builtin_dicts import BUILTIN_DICTS
 
 
 @compiles(BigInteger, "sqlite")

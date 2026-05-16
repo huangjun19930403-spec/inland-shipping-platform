@@ -5,8 +5,24 @@
 ```bash
 .venv/bin/python -m py_compile main.py
 .venv/bin/pytest
-.venv/bin/python -m scripts.verify_local_acceptance
-.venv/bin/python -m scripts.verify_foundation_data_acceptance
+.venv/bin/python -m scripts.seeds.validation.local_acceptance
+.venv/bin/python -m scripts.seeds.validation.foundation_data_acceptance
+```
+
+Seed profile smoke checks:
+
+```bash
+# production baseline in a throwaway database
+DATABASE_URL=sqlite+aiosqlite:////private/tmp/inland_seed_production.db alembic upgrade head
+DATABASE_URL=sqlite+aiosqlite:////private/tmp/inland_seed_production.db \
+  .venv/bin/python -m scripts.seeds.cli --profile production
+
+# local debugging/demo database
+.venv/bin/python -m scripts.seeds.cli --profile local-demo
+
+# automated-test fixture database
+DATABASE_URL=sqlite+aiosqlite:////private/tmp/inland_seed_test.db \
+  .venv/bin/python -m scripts.seeds.cli --profile test
 ```
 
 Focused checks used during the final rebuild:
@@ -15,7 +31,7 @@ Focused checks used during the final rebuild:
 .venv/bin/pytest tests/test_seed_profiles.py
 .venv/bin/pytest tests/test_production_remediation.py::test_legacy_freight_list_route_is_not_business_entrypoint
 .venv/bin/pytest tests/test_vessel_routes.py::test_vessel_seed_menu_groups_keep_business_entries_visible
-.venv/bin/pytest tests/test_water_systems.py::test_water_system_backend_menus_are_initialized_for_visible_routes
+.venv/bin/pytest tests/test_navigation_channels.py::test_navigation_channel_backend_menus_are_initialized_for_visible_routes
 ```
 
 ## Frontend Commands
@@ -68,8 +84,11 @@ Production seed must produce:
 - dictionaries
 - code sequences
 - administrative regions and boundaries
-- water systems and boundaries
+- navigation channels, boundaries and segments
 - commodity taxonomy and standards
+- business regions and transport nodes
+- production vessel profiles
+- TMS historical freights
 - navigation constraints
 - roles, permissions, menus and config skeletons
 
@@ -78,9 +97,13 @@ Production seed must not produce:
 - demo freight chain
 - demo AIS tracks
 - demo vessel risk narratives
+- demo or test routes
+- demo or test analysis facts
 - `LOCAL_SAMPLE` facts used as production evidence
 
-Local-demo seed may create demo data, but it must stay visibly isolated and must not be used for production conclusions.
+Local-demo seed must create the local business experience chain from production base data: `FR-DEMO-*`, `FCA-DEMO-*`, `DEMO_ROUTE_*`, `DEMO_AIS_*`, `LOCAL_DEMO` and analysis fact rows. It must not create `TEST-FR-*`.
+
+Test seed must create only `TEST_*` / `TEST-FR-*` fixtures and deterministic test analysis facts. It must not create `FR-DEMO-*` or `LOCAL_DEMO`.
 
 ## Quality Gates
 

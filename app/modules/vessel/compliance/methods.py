@@ -13,44 +13,56 @@ class VesselComplianceMixin:
     async def _compliance_risk_by_profile(self, ids: list[int]) -> dict[int, dict[str, Any]]:
         if not ids:
             return {}
+        profile_ids = list(dict.fromkeys(ids))
+
+        def chunks(values: list[int], size: int = 900):
+            for start in range(0, len(values), size):
+                yield values[start:start + size]
+
         today = date.today()
         expiring_until = today + timedelta(days=30)
-        cert_rows = (
-            await self.db.execute(
-                select(VesselCertificate).where(
-                    VesselCertificate.vessel_profile_id.in_(ids),
-                    VesselCertificate.voided_at.is_(None),
+        cert_rows: list[VesselCertificate] = []
+        for chunk in chunks(profile_ids):
+            cert_rows.extend((
+                await self.db.execute(
+                    select(VesselCertificate).where(
+                        VesselCertificate.vessel_profile_id.in_(chunk),
+                        VesselCertificate.voided_at.is_(None),
+                    )
                 )
-            )
-        ).scalars().all()
+            ).scalars().all())
         certs_by_profile: dict[int, list[VesselCertificate]] = defaultdict(list)
         for cert in cert_rows:
             certs_by_profile[cert.vessel_profile_id].append(cert)
 
-        owner_rows = (
-            await self.db.execute(
-                select(VesselOwnerPeriod).where(
-                    VesselOwnerPeriod.vessel_profile_id.in_(ids),
-                    VesselOwnerPeriod.is_current.is_(True),
+        owner_rows: list[VesselOwnerPeriod] = []
+        for chunk in chunks(profile_ids):
+            owner_rows.extend((
+                await self.db.execute(
+                    select(VesselOwnerPeriod).where(
+                        VesselOwnerPeriod.vessel_profile_id.in_(chunk),
+                        VesselOwnerPeriod.is_current.is_(True),
+                    )
                 )
-            )
-        ).scalars().all()
+            ).scalars().all())
         owner_by_profile = {owner.vessel_profile_id: owner for owner in owner_rows}
         owner_ids = [owner.id for owner in owner_rows]
-        owner_docs = (
-            await self.db.execute(
-                select(VesselOwnerDocument).where(
-                    VesselOwnerDocument.vessel_owner_period_id.in_(owner_ids),
-                    VesselOwnerDocument.voided_at.is_(None),
+        owner_docs: list[VesselOwnerDocument] = []
+        for chunk in chunks(owner_ids):
+            owner_docs.extend((
+                await self.db.execute(
+                    select(VesselOwnerDocument).where(
+                        VesselOwnerDocument.vessel_owner_period_id.in_(chunk),
+                        VesselOwnerDocument.voided_at.is_(None),
+                    )
                 )
-            )
-        ).scalars().all() if owner_ids else []
+            ).scalars().all())
         owner_doc_types: dict[int, set[str]] = defaultdict(set)
         for document in owner_docs:
             owner_doc_types[document.vessel_owner_period_id].add(document.document_type_code)
 
         result: dict[int, dict[str, Any]] = {}
-        for profile_id in ids:
+        for profile_id in profile_ids:
             certs = certs_by_profile.get(profile_id, [])
             cert_types = {cert.certificate_type_code for cert in certs}
             missing_cert_types = [code for code in REQUIRED_VESSEL_CERTIFICATE_TYPES if code not in cert_types]

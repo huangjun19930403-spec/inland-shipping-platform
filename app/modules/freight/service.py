@@ -568,7 +568,14 @@ def _to_normalization_task_response(
         result_json=entity.result_json,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
-    )
+)
+
+
+PACKAGING_ONLY_COMMODITY_TEXTS = {"吨包", "吨袋"}
+
+
+def _is_packaging_only_commodity_text(value: str) -> bool:
+    return "".join(value.strip().lower().split()) in PACKAGING_ONLY_COMMODITY_TEXTS
 
 
 def _to_freight_response(entity, ctx: dict[str, Any] | None = None) -> FreightResponse:
@@ -1082,6 +1089,14 @@ class FreightNormalizationMixin:
         text = raw_name.strip()
         if not text:
             return None, None, None, [], {"status": "NO_TEXT"}
+        if _is_packaging_only_commodity_text(text):
+            return (
+                None,
+                Decimal("0.0"),
+                "RAW",
+                [{"level": "RAW", "name": text, "score": "0.0"}],
+                {"status": "PACKAGING_ONLY", "text": text},
+            )
         standards = (
             await self.db.execute(
                 select(CommodityStandard).where(

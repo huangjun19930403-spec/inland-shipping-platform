@@ -1,51 +1,884 @@
 [
-  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "SAND_STONE_AGGREGATE", "name": "砂石骨料", "sort_order": 10},
-  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "STONE_POWDER", "name": "石粉", "sort_order": 20},
-  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "LIMESTONE", "name": "石灰石", "sort_order": 30},
-  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "CEMENT_CLINKER", "name": "水泥熟料", "sort_order": 40},
-  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "CEMENT_RAW_MATERIAL", "name": "水泥原材料", "sort_order": 50},
-  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "GRAVEL", "name": "碎石/砾石", "sort_order": 60},
-  {"category_code": "MINERAL_BUILDING_MATERIAL", "code": "READY_MIX_DRY_MATERIAL", "name": "干混建材原料", "sort_order": 70},
-
-  {"category_code": "ENERGY_FUEL", "code": "COAL", "name": "煤炭", "sort_order": 10},
-  {"category_code": "ENERGY_FUEL", "code": "COKE", "name": "焦炭", "sort_order": 20},
-  {"category_code": "ENERGY_FUEL", "code": "COAL_PRODUCTS", "name": "煤制品", "sort_order": 30},
-  {"category_code": "ENERGY_FUEL", "code": "CRUDE_OIL", "name": "原油", "sort_order": 40},
-  {"category_code": "ENERGY_FUEL", "code": "REFINED_OIL", "name": "成品油", "sort_order": 50},
-  {"category_code": "ENERGY_FUEL", "code": "OTHER_LIQUID_FUEL", "name": "其他液体燃料", "sort_order": 60},
-
-  {"category_code": "METAL_AND_METALLURGY", "code": "IRON_ORE", "name": "铁矿石", "sort_order": 10},
-  {"category_code": "METAL_AND_METALLURGY", "code": "NONFERROUS_ORE", "name": "有色矿石", "sort_order": 20},
-  {"category_code": "METAL_AND_METALLURGY", "code": "STEEL", "name": "钢材", "sort_order": 30},
-  {"category_code": "METAL_AND_METALLURGY", "code": "SCRAP_STEEL", "name": "废钢", "sort_order": 40},
-  {"category_code": "METAL_AND_METALLURGY", "code": "FERROALLOY", "name": "铁合金", "sort_order": 50},
-  {"category_code": "METAL_AND_METALLURGY", "code": "NONFERROUS_METAL", "name": "有色金属材料", "sort_order": 60},
-
-  {"category_code": "GRAIN_AND_AGRI", "code": "GRAIN", "name": "粮食", "sort_order": 10},
-  {"category_code": "GRAIN_AND_AGRI", "code": "RICE", "name": "稻谷/大米", "sort_order": 20},
-  {"category_code": "GRAIN_AND_AGRI", "code": "WHEAT_CORN", "name": "小麦玉米", "sort_order": 30},
-  {"category_code": "GRAIN_AND_AGRI", "code": "SOYBEAN_FEED", "name": "大豆及饲料原料", "sort_order": 40},
-  {"category_code": "GRAIN_AND_AGRI", "code": "AGRICULTURAL_PRODUCTS", "name": "农产品", "sort_order": 50},
-  {"category_code": "GRAIN_AND_AGRI", "code": "COTTON", "name": "棉花", "sort_order": 60},
-
-  {"category_code": "WOOD_AND_PAPER", "code": "LOG_TIMBER", "name": "原木/木材", "sort_order": 10},
-  {"category_code": "WOOD_AND_PAPER", "code": "WOOD_PRODUCTS", "name": "木制品", "sort_order": 20},
-  {"category_code": "WOOD_AND_PAPER", "code": "PULP", "name": "纸浆", "sort_order": 30},
-  {"category_code": "WOOD_AND_PAPER", "code": "PAPER_PRODUCTS", "name": "纸品", "sort_order": 40},
-
-  {"category_code": "CHEMICALS", "code": "CHEMICAL_RAW_MATERIAL", "name": "化工原料", "sort_order": 10},
-  {"category_code": "CHEMICALS", "code": "CHEMICAL_PRODUCTS", "name": "化工制品", "sort_order": 20},
-  {"category_code": "CHEMICALS", "code": "FERTILIZER", "name": "化肥", "sort_order": 30},
-  {"category_code": "CHEMICALS", "code": "SALT_CHEMICAL", "name": "盐化工原料", "sort_order": 40},
-  {"category_code": "CHEMICALS", "code": "HAZARDOUS_CHEMICAL", "name": "危化货物", "sort_order": 50},
-
-  {"category_code": "CONTAINERIZED_CARGO", "code": "CONTAINER", "name": "集装箱货", "sort_order": 10},
-  {"category_code": "CONTAINERIZED_CARGO", "code": "OPEN_TOP_CONTAINER_CARGO", "name": "开顶箱货物", "sort_order": 20},
-  {"category_code": "CONTAINERIZED_CARGO", "code": "PALLETIZED_CARGO", "name": "托盘化货物", "sort_order": 30},
-  {"category_code": "CONTAINERIZED_CARGO", "code": "UNITIZED_GENERAL_CARGO", "name": "单元化件杂货", "sort_order": 40},
-
-  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "GENERAL_CARGO", "name": "件杂货", "sort_order": 10},
-  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "MACHINERY_EQUIPMENT", "name": "机械设备", "sort_order": 20},
-  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "PROJECT_CARGO", "name": "工程项目货", "sort_order": 30},
-  {"category_code": "GENERAL_CARGO_AND_EQUIPMENT", "code": "VEHICLE_CARGO", "name": "车辆类货物", "sort_order": 40}
+  {
+    "category_code": "MTC_01_COAL_PRODUCTS",
+    "code": "MTC_011_COKE",
+    "name": "焦炭",
+    "description": "多式联运货物分类中类代码 011。",
+    "sort_order": 10
+  },
+  {
+    "category_code": "MTC_01_COAL_PRODUCTS",
+    "code": "MTC_012_RAW_COAL",
+    "name": "原煤",
+    "description": "多式联运货物分类中类代码 012。",
+    "sort_order": 20
+  },
+  {
+    "category_code": "MTC_01_COAL_PRODUCTS",
+    "code": "MTC_013_CLEAN_COAL",
+    "name": "洗精煤",
+    "description": "多式联运货物分类中类代码 013。",
+    "sort_order": 30
+  },
+  {
+    "category_code": "MTC_01_COAL_PRODUCTS",
+    "code": "MTC_014_SCREENED_COKING_COAL",
+    "name": "筛选(炼焦)煤",
+    "description": "多式联运货物分类中类代码 014。",
+    "sort_order": 40
+  },
+  {
+    "category_code": "MTC_01_COAL_PRODUCTS",
+    "code": "MTC_015_COAL_PRODUCTS",
+    "name": "煤制品",
+    "description": "多式联运货物分类中类代码 015。",
+    "sort_order": 50
+  },
+  {
+    "category_code": "MTC_01_COAL_PRODUCTS",
+    "code": "MTC_016_COAL_GAS",
+    "name": "煤气",
+    "description": "多式联运货物分类中类代码 016。",
+    "sort_order": 60
+  },
+  {
+    "category_code": "MTC_01_COAL_PRODUCTS",
+    "code": "MTC_019_OTHER_COAL",
+    "name": "其他煤炭及制品",
+    "description": "多式联运货物分类中类代码 019。",
+    "sort_order": 70
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_021_CRUDE_OIL",
+    "name": "原油",
+    "description": "多式联运货物分类中类代码 021。",
+    "sort_order": 80
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_022_GASOLINE",
+    "name": "汽油",
+    "description": "多式联运货物分类中类代码 022。",
+    "sort_order": 90
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_023_KEROSENE",
+    "name": "煤油",
+    "description": "多式联运货物分类中类代码 023。",
+    "sort_order": 100
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_024_DIESEL",
+    "name": "柴油",
+    "description": "多式联运货物分类中类代码 024。",
+    "sort_order": 110
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_025_FUEL_LUBRICATING_OIL",
+    "name": "燃料油、润滑油(脂)",
+    "description": "多式联运货物分类中类代码 025。",
+    "sort_order": 120
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_026_PETROLEUM_COKE_ASPHALT",
+    "name": "石油焦、沥青焦",
+    "description": "多式联运货物分类中类代码 026。",
+    "sort_order": 130
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_027_NATURAL_GAS",
+    "name": "天然气",
+    "description": "多式联运货物分类中类代码 027。",
+    "sort_order": 140
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_028_LPG",
+    "name": "液化石油气",
+    "description": "多式联运货物分类中类代码 028。",
+    "sort_order": 150
+  },
+  {
+    "category_code": "MTC_02_PETROLEUM_GAS",
+    "code": "MTC_029_OTHER_PETROLEUM",
+    "name": "其他石油制品",
+    "description": "多式联运货物分类中类代码 029。",
+    "sort_order": 160
+  },
+  {
+    "category_code": "MTC_03_METAL_ORE",
+    "code": "MTC_031_IRON_ORE",
+    "name": "铁矿石",
+    "description": "多式联运货物分类中类代码 031。",
+    "sort_order": 170
+  },
+  {
+    "category_code": "MTC_03_METAL_ORE",
+    "code": "MTC_032_RARE_PRECIOUS_ORE",
+    "name": "稀有、贵金属矿石(砂)",
+    "description": "多式联运货物分类中类代码 032。",
+    "sort_order": 180
+  },
+  {
+    "category_code": "MTC_03_METAL_ORE",
+    "code": "MTC_033_RADIOACTIVE_ORE",
+    "name": "放射性矿石",
+    "description": "多式联运货物分类中类代码 033。",
+    "sort_order": 190
+  },
+  {
+    "category_code": "MTC_03_METAL_ORE",
+    "code": "MTC_039_OTHER_METAL_ORE",
+    "name": "其他金属矿石",
+    "description": "多式联运货物分类中类代码 039。",
+    "sort_order": 200
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_041_PIG_IRON",
+    "name": "生铁",
+    "description": "多式联运货物分类中类代码 041。",
+    "sort_order": 210
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_042_STEEL_MATERIAL",
+    "name": "钢材",
+    "description": "多式联运货物分类中类代码 042。",
+    "sort_order": 220
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_043_STEEL_INGOT_BILLET",
+    "name": "钢锭、坯",
+    "description": "多式联运货物分类中类代码 043。",
+    "sort_order": 230
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_044_SCRAP_STEEL",
+    "name": "废钢铁",
+    "description": "多式联运货物分类中类代码 044。",
+    "sort_order": 240
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_045_STEEL_PRODUCTS",
+    "name": "钢铁制品",
+    "description": "多式联运货物分类中类代码 045。",
+    "sort_order": 250
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_046_NONFERROUS_ALLOY",
+    "name": "有色金属及其合金",
+    "description": "多式联运货物分类中类代码 046。",
+    "sort_order": 260
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_047_PRECIOUS_METAL",
+    "name": "贵金属",
+    "description": "多式联运货物分类中类代码 047。",
+    "sort_order": 270
+  },
+  {
+    "category_code": "MTC_04_STEEL_NONFERROUS",
+    "code": "MTC_049_FERROALLOY_OTHER_STEEL",
+    "name": "铁合金及其他钢铁",
+    "description": "多式联运货物分类中类代码 049。",
+    "sort_order": 280
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_051_BRICK_TILE_BLOCK",
+    "name": "砖、瓦、砌块",
+    "description": "多式联运货物分类中类代码 051。",
+    "sort_order": 290
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_052_SOIL_STONE",
+    "name": "土、石",
+    "description": "多式联运货物分类中类代码 052。",
+    "sort_order": 300
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_053_SAND",
+    "name": "砂",
+    "description": "多式联运货物分类中类代码 053。",
+    "sort_order": 310
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_054_LIME_PLASTER",
+    "name": "石灰和熟石膏",
+    "description": "多式联运货物分类中类代码 054。",
+    "sort_order": 320
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_055_CEMENT_PRODUCTS",
+    "name": "水泥制品",
+    "description": "多式联运货物分类中类代码 055。",
+    "sort_order": 330
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_056_GLASS",
+    "name": "玻璃",
+    "description": "多式联运货物分类中类代码 056。",
+    "sort_order": 340
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_057_GLASS_FIBER",
+    "name": "玻璃纤维及制品",
+    "description": "多式联运货物分类中类代码 057。",
+    "sort_order": 350
+  },
+  {
+    "category_code": "MTC_05_MINERAL_BUILDING",
+    "code": "MTC_059_OTHER_MINERAL_BUILDING",
+    "name": "其他矿建材料",
+    "description": "多式联运货物分类中类代码 059。",
+    "sort_order": 360
+  },
+  {
+    "category_code": "MTC_06_CEMENT",
+    "code": "MTC_061_CEMENT",
+    "name": "水泥",
+    "description": "多式联运货物分类中类代码 061。",
+    "sort_order": 370
+  },
+  {
+    "category_code": "MTC_06_CEMENT",
+    "code": "MTC_062_CEMENT_CLINKER",
+    "name": "水泥熟料",
+    "description": "多式联运货物分类中类代码 062。",
+    "sort_order": 380
+  },
+  {
+    "category_code": "MTC_06_CEMENT",
+    "code": "MTC_069_OTHER_CEMENT",
+    "name": "其他水泥",
+    "description": "多式联运货物分类中类代码 069。",
+    "sort_order": 390
+  },
+  {
+    "category_code": "MTC_07_WOOD",
+    "code": "MTC_071_LOG_TIMBER",
+    "name": "原木",
+    "description": "多式联运货物分类中类代码 071。",
+    "sort_order": 400
+  },
+  {
+    "category_code": "MTC_07_WOOD",
+    "code": "MTC_072_SAWN_TIMBER",
+    "name": "锯材",
+    "description": "多式联运货物分类中类代码 072。",
+    "sort_order": 410
+  },
+  {
+    "category_code": "MTC_07_WOOD",
+    "code": "MTC_073_WOOD_BASED_PANEL",
+    "name": "人造板材",
+    "description": "多式联运货物分类中类代码 073。",
+    "sort_order": 420
+  },
+  {
+    "category_code": "MTC_07_WOOD",
+    "code": "MTC_074_WOOD_PRODUCTS",
+    "name": "木制品",
+    "description": "多式联运货物分类中类代码 074。",
+    "sort_order": 430
+  },
+  {
+    "category_code": "MTC_07_WOOD",
+    "code": "MTC_075_FIREWOOD_CHARCOAL",
+    "name": "薪柴、木炭",
+    "description": "多式联运货物分类中类代码 075。",
+    "sort_order": 440
+  },
+  {
+    "category_code": "MTC_07_WOOD",
+    "code": "MTC_076_WOOD_PULP",
+    "name": "木浆",
+    "description": "多式联运货物分类中类代码 076。",
+    "sort_order": 450
+  },
+  {
+    "category_code": "MTC_07_WOOD",
+    "code": "MTC_079_OTHER_WOOD",
+    "name": "其他木材及制品",
+    "description": "多式联运货物分类中类代码 079。",
+    "sort_order": 460
+  },
+  {
+    "category_code": "MTC_08_NON_METAL_ORE",
+    "code": "MTC_081_PHOSPHATE_ORE",
+    "name": "磷矿石",
+    "description": "多式联运货物分类中类代码 081。",
+    "sort_order": 470
+  },
+  {
+    "category_code": "MTC_08_NON_METAL_ORE",
+    "code": "MTC_082_SULFUR_ORE",
+    "name": "硫矿石",
+    "description": "多式联运货物分类中类代码 082。",
+    "sort_order": 480
+  },
+  {
+    "category_code": "MTC_08_NON_METAL_ORE",
+    "code": "MTC_083_LIMESTONE",
+    "name": "石灰石",
+    "description": "多式联运货物分类中类代码 083。",
+    "sort_order": 490
+  },
+  {
+    "category_code": "MTC_08_NON_METAL_ORE",
+    "code": "MTC_084_BAUXITE",
+    "name": "铝矾土",
+    "description": "多式联运货物分类中类代码 084。",
+    "sort_order": 500
+  },
+  {
+    "category_code": "MTC_08_NON_METAL_ORE",
+    "code": "MTC_085_GYPSUM",
+    "name": "石膏",
+    "description": "多式联运货物分类中类代码 085。",
+    "sort_order": 510
+  },
+  {
+    "category_code": "MTC_08_NON_METAL_ORE",
+    "code": "MTC_089_OTHER_NON_METAL_ORE",
+    "name": "其他非金属矿石",
+    "description": "多式联运货物分类中类代码 089。",
+    "sort_order": 520
+  },
+  {
+    "category_code": "MTC_09_FERTILIZER_PESTICIDE",
+    "code": "MTC_091_FERTILIZER",
+    "name": "化肥",
+    "description": "多式联运货物分类中类代码 091。",
+    "sort_order": 530
+  },
+  {
+    "category_code": "MTC_09_FERTILIZER_PESTICIDE",
+    "code": "MTC_092_PESTICIDE",
+    "name": "农药",
+    "description": "多式联运货物分类中类代码 092。",
+    "sort_order": 540
+  },
+  {
+    "category_code": "MTC_09_FERTILIZER_PESTICIDE",
+    "code": "MTC_093_ANIMAL_PLANT_FERTILIZER",
+    "name": "动植物肥料",
+    "description": "多式联运货物分类中类代码 093。",
+    "sort_order": 550
+  },
+  {
+    "category_code": "MTC_10_SALT",
+    "code": "MTC_101_RAW_SALT",
+    "name": "原盐",
+    "description": "多式联运货物分类中类代码 101。",
+    "sort_order": 560
+  },
+  {
+    "category_code": "MTC_10_SALT",
+    "code": "MTC_102_EDIBLE_SALT",
+    "name": "食用盐",
+    "description": "多式联运货物分类中类代码 102。",
+    "sort_order": 570
+  },
+  {
+    "category_code": "MTC_10_SALT",
+    "code": "MTC_103_INEDIBLE_SALT",
+    "name": "非食用盐",
+    "description": "多式联运货物分类中类代码 103。",
+    "sort_order": 580
+  },
+  {
+    "category_code": "MTC_10_SALT",
+    "code": "MTC_109_OTHER_SALT",
+    "name": "其他盐",
+    "description": "多式联运货物分类中类代码 109。",
+    "sort_order": 590
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_111_WHEAT",
+    "name": "小麦",
+    "description": "多式联运货物分类中类代码 111。",
+    "sort_order": 600
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_112_CORN",
+    "name": "玉米",
+    "description": "多式联运货物分类中类代码 112。",
+    "sort_order": 610
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_113_SOYBEAN",
+    "name": "黄豆",
+    "description": "多式联运货物分类中类代码 113。",
+    "sort_order": 620
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_114_RICE",
+    "name": "大米",
+    "description": "多式联运货物分类中类代码 114。",
+    "sort_order": 630
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_115_PADDY",
+    "name": "稻谷",
+    "description": "多式联运货物分类中类代码 115。",
+    "sort_order": 640
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_116_FLOUR",
+    "name": "面粉",
+    "description": "多式联运货物分类中类代码 116。",
+    "sort_order": 650
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_117_POTATO",
+    "name": "薯类",
+    "description": "多式联运货物分类中类代码 117。",
+    "sort_order": 660
+  },
+  {
+    "category_code": "MTC_11_GRAIN",
+    "code": "MTC_119_OTHER_GRAIN",
+    "name": "其他粮食",
+    "description": "多式联运货物分类中类代码 119。",
+    "sort_order": 670
+  },
+  {
+    "category_code": "MTC_12_MACHINERY",
+    "code": "MTC_121_GENERAL_MACHINERY",
+    "name": "通用机械设备及其零部件",
+    "description": "多式联运货物分类中类代码 121。",
+    "sort_order": 680
+  },
+  {
+    "category_code": "MTC_12_MACHINERY",
+    "code": "MTC_122_SPECIAL_MACHINERY",
+    "name": "专用机械设备及其零部件",
+    "description": "多式联运货物分类中类代码 122。",
+    "sort_order": 690
+  },
+  {
+    "category_code": "MTC_12_MACHINERY",
+    "code": "MTC_123_ELECTRICAL_MACHINERY",
+    "name": "电气机械和器材",
+    "description": "多式联运货物分类中类代码 123。",
+    "sort_order": 700
+  },
+  {
+    "category_code": "MTC_12_MACHINERY",
+    "code": "MTC_124_TRANSPORT_EQUIPMENT",
+    "name": "交通运输设备",
+    "description": "多式联运货物分类中类代码 124。",
+    "sort_order": 710
+  },
+  {
+    "category_code": "MTC_12_MACHINERY",
+    "code": "MTC_125_NUCLEAR_REACTOR_PARTS",
+    "name": "核反应堆及其元件、机器及装置",
+    "description": "多式联运货物分类中类代码 125。",
+    "sort_order": 720
+  },
+  {
+    "category_code": "MTC_12_MACHINERY",
+    "code": "MTC_129_OTHER_MACHINERY",
+    "name": "其他机械设备",
+    "description": "多式联运货物分类中类代码 129。",
+    "sort_order": 730
+  },
+  {
+    "category_code": "MTC_13_ELECTRONICS",
+    "code": "MTC_131_COMMUNICATION_EQUIPMENT",
+    "name": "通信、广播设备",
+    "description": "多式联运货物分类中类代码 131。",
+    "sort_order": 740
+  },
+  {
+    "category_code": "MTC_13_ELECTRONICS",
+    "code": "MTC_132_COMPUTER_EQUIPMENT",
+    "name": "电子计算机及外部设备",
+    "description": "多式联运货物分类中类代码 132。",
+    "sort_order": 750
+  },
+  {
+    "category_code": "MTC_13_ELECTRONICS",
+    "code": "MTC_133_ELECTRONIC_COMPONENTS",
+    "name": "电子元器件",
+    "description": "多式联运货物分类中类代码 133。",
+    "sort_order": 760
+  },
+  {
+    "category_code": "MTC_13_ELECTRONICS",
+    "code": "MTC_134_INSTRUMENTS_METERS",
+    "name": "仪器仪表、计量器具",
+    "description": "多式联运货物分类中类代码 134。",
+    "sort_order": 770
+  },
+  {
+    "category_code": "MTC_13_ELECTRONICS",
+    "code": "MTC_135_HOME_APPLIANCES",
+    "name": "家用电器",
+    "description": "多式联运货物分类中类代码 135。",
+    "sort_order": 780
+  },
+  {
+    "category_code": "MTC_13_ELECTRONICS",
+    "code": "MTC_139_OTHER_ELECTRONICS",
+    "name": "其他电子设备仪器及元器件",
+    "description": "多式联运货物分类中类代码 139。",
+    "sort_order": 790
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_141_RUBBER_PRODUCTS",
+    "name": "橡胶及制品",
+    "description": "多式联运货物分类中类代码 141。",
+    "sort_order": 800
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_142_SODA_ASH",
+    "name": "纯碱",
+    "description": "多式联运货物分类中类代码 142。",
+    "sort_order": 810
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_143_INORGANIC_CHEMICALS",
+    "name": "无机化学品",
+    "description": "多式联运货物分类中类代码 143。",
+    "sort_order": 820
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_144_ORGANIC_CHEMICALS",
+    "name": "有机化学品及其料剂",
+    "description": "多式联运货物分类中类代码 144。",
+    "sort_order": 830
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_145_RESIN_PLASTIC_PRODUCTS",
+    "name": "树脂、塑料及制品",
+    "description": "多式联运货物分类中类代码 145。",
+    "sort_order": 840
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_146_EXPLOSIVE_RADIOACTIVE",
+    "name": "爆炸品、放射性物品",
+    "description": "多式联运货物分类中类代码 146。",
+    "sort_order": 850
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_147_DAILY_CHEMICALS",
+    "name": "日用化工品",
+    "description": "多式联运货物分类中类代码 147。",
+    "sort_order": 860
+  },
+  {
+    "category_code": "MTC_14_CHEMICALS",
+    "code": "MTC_149_OTHER_CHEMICALS",
+    "name": "其他化工品",
+    "description": "多式联运货物分类中类代码 149。",
+    "sort_order": 870
+  },
+  {
+    "category_code": "MTC_15_DAILY_INDUSTRY",
+    "code": "MTC_151_PAPER_PRODUCTS",
+    "name": "纸及制品",
+    "description": "多式联运货物分类中类代码 151。",
+    "sort_order": 880
+  },
+  {
+    "category_code": "MTC_15_DAILY_INDUSTRY",
+    "code": "MTC_152_DAILY_INDUSTRIAL_GOODS",
+    "name": "日用工业品",
+    "description": "多式联运货物分类中类代码 152。",
+    "sort_order": 890
+  },
+  {
+    "category_code": "MTC_15_DAILY_INDUSTRY",
+    "code": "MTC_153_CULTURAL_SPORTS_GOODS",
+    "name": "文化体育用品",
+    "description": "多式联运货物分类中类代码 153。",
+    "sort_order": 900
+  },
+  {
+    "category_code": "MTC_15_DAILY_INDUSTRY",
+    "code": "MTC_154_ART_CRAFTS",
+    "name": "工艺美术品",
+    "description": "多式联运货物分类中类代码 154。",
+    "sort_order": 910
+  },
+  {
+    "category_code": "MTC_15_DAILY_INDUSTRY",
+    "code": "MTC_159_OTHER_DAILY_GOODS",
+    "name": "其他日用工业品及文体用品",
+    "description": "多式联运货物分类中类代码 159。",
+    "sort_order": 920
+  },
+  {
+    "category_code": "MTC_16_FOOD_TOBACCO",
+    "code": "MTC_161_SUGAR",
+    "name": "糖",
+    "description": "多式联运货物分类中类代码 161。",
+    "sort_order": 930
+  },
+  {
+    "category_code": "MTC_16_FOOD_TOBACCO",
+    "code": "MTC_162_TOBACCO_PRODUCTS",
+    "name": "烟草制品",
+    "description": "多式联运货物分类中类代码 162。",
+    "sort_order": 940
+  },
+  {
+    "category_code": "MTC_16_FOOD_TOBACCO",
+    "code": "MTC_163_BEVERAGE_WINE",
+    "name": "饮料、酒",
+    "description": "多式联运货物分类中类代码 163。",
+    "sort_order": 950
+  },
+  {
+    "category_code": "MTC_16_FOOD_TOBACCO",
+    "code": "MTC_164_FOOD",
+    "name": "食品",
+    "description": "多式联运货物分类中类代码 164。",
+    "sort_order": 960
+  },
+  {
+    "category_code": "MTC_16_FOOD_TOBACCO",
+    "code": "MTC_165_DAIRY_PRODUCTS",
+    "name": "乳制品",
+    "description": "多式联运货物分类中类代码 165。",
+    "sort_order": 970
+  },
+  {
+    "category_code": "MTC_16_FOOD_TOBACCO",
+    "code": "MTC_169_OTHER_FOOD",
+    "name": "其他饮食品",
+    "description": "多式联运货物分类中类代码 169。",
+    "sort_order": 980
+  },
+  {
+    "category_code": "MTC_17_TEXTILE",
+    "code": "MTC_171_YARN_FIBER",
+    "name": "纱、线、丝、纤维",
+    "description": "多式联运货物分类中类代码 171。",
+    "sort_order": 990
+  },
+  {
+    "category_code": "MTC_17_TEXTILE",
+    "code": "MTC_172_CLOTH",
+    "name": "布匹",
+    "description": "多式联运货物分类中类代码 172。",
+    "sort_order": 1000
+  },
+  {
+    "category_code": "MTC_17_TEXTILE",
+    "code": "MTC_173_CLOTHING_SHOES_HATS",
+    "name": "服装、鞋帽",
+    "description": "多式联运货物分类中类代码 173。",
+    "sort_order": 1010
+  },
+  {
+    "category_code": "MTC_17_TEXTILE",
+    "code": "MTC_174_KNITTED_TEXTILES",
+    "name": "针织、纺织制品",
+    "description": "多式联运货物分类中类代码 174。",
+    "sort_order": 1020
+  },
+  {
+    "category_code": "MTC_17_TEXTILE",
+    "code": "MTC_175_FUR_PRODUCTS",
+    "name": "皮毛制品",
+    "description": "多式联运货物分类中类代码 175。",
+    "sort_order": 1030
+  },
+  {
+    "category_code": "MTC_17_TEXTILE",
+    "code": "MTC_179_OTHER_TEXTILES",
+    "name": "其他纺织制品",
+    "description": "多式联运货物分类中类代码 179。",
+    "sort_order": 1040
+  },
+  {
+    "category_code": "MTC_18_MEDICINE",
+    "code": "MTC_181_CHINESE_MEDICINAL",
+    "name": "中药材",
+    "description": "多式联运货物分类中类代码 181。",
+    "sort_order": 1050
+  },
+  {
+    "category_code": "MTC_18_MEDICINE",
+    "code": "MTC_182_CHINESE_PATENT_MEDICINE",
+    "name": "中成药",
+    "description": "多式联运货物分类中类代码 182。",
+    "sort_order": 1060
+  },
+  {
+    "category_code": "MTC_18_MEDICINE",
+    "code": "MTC_183_WESTERN_MEDICINE",
+    "name": "西药",
+    "description": "多式联运货物分类中类代码 183。",
+    "sort_order": 1070
+  },
+  {
+    "category_code": "MTC_18_MEDICINE",
+    "code": "MTC_184_BIOLOGICAL_PRODUCTS",
+    "name": "生物制品",
+    "description": "多式联运货物分类中类代码 184。",
+    "sort_order": 1080
+  },
+  {
+    "category_code": "MTC_18_MEDICINE",
+    "code": "MTC_189_OTHER_MEDICINE",
+    "name": "其他医药品",
+    "description": "多式联运货物分类中类代码 189。",
+    "sort_order": 1090
+  },
+  {
+    "category_code": "MTC_19_AGRI_FORESTRY",
+    "code": "MTC_191_COTTON",
+    "name": "棉花",
+    "description": "多式联运货物分类中类代码 191。",
+    "sort_order": 1100
+  },
+  {
+    "category_code": "MTC_19_AGRI_FORESTRY",
+    "code": "MTC_192_CASH_CROPS",
+    "name": "经济作物及制品",
+    "description": "多式联运货物分类中类代码 192。",
+    "sort_order": 1110
+  },
+  {
+    "category_code": "MTC_19_AGRI_FORESTRY",
+    "code": "MTC_193_FORESTRY_PRODUCTS",
+    "name": "林业产品",
+    "description": "多式联运货物分类中类代码 193。",
+    "sort_order": 1120
+  },
+  {
+    "category_code": "MTC_19_AGRI_FORESTRY",
+    "code": "MTC_194_LIVESTOCK_PRODUCTS",
+    "name": "牧业产品",
+    "description": "多式联运货物分类中类代码 194。",
+    "sort_order": 1130
+  },
+  {
+    "category_code": "MTC_19_AGRI_FORESTRY",
+    "code": "MTC_195_AQUATIC_PRODUCTS",
+    "name": "水产品",
+    "description": "多式联运货物分类中类代码 195。",
+    "sort_order": 1140
+  },
+  {
+    "category_code": "MTC_19_AGRI_FORESTRY",
+    "code": "MTC_199_OTHER_AGRI_FORESTRY",
+    "name": "其他农、林、牧、渔业产品",
+    "description": "多式联运货物分类中类代码 199。",
+    "sort_order": 1150
+  },
+  {
+    "category_code": "MTC_20_CONTAINER",
+    "code": "MTC_200_CONTAINERIZED_CARGO",
+    "name": "集装箱货物",
+    "description": "多式联运货物分类中类代码 200。",
+    "sort_order": 1160
+  },
+  {
+    "category_code": "MTC_20_CONTAINER",
+    "code": "MTC_201_OPEN_TOP_CONTAINER",
+    "name": "开顶箱货物",
+    "description": "多式联运货物分类中类代码 201。",
+    "sort_order": 1170
+  },
+  {
+    "category_code": "MTC_20_CONTAINER",
+    "code": "MTC_202_UNITIZED_CARGO",
+    "name": "单元化件杂货",
+    "description": "多式联运货物分类中类代码 202。",
+    "sort_order": 1180
+  },
+  {
+    "category_code": "MTC_90_OTHER",
+    "code": "MTC_901_MILITARY_SUPPLIES",
+    "name": "军用物资、武器及用具",
+    "description": "多式联运货物分类中类代码 901。",
+    "sort_order": 1190
+  },
+  {
+    "category_code": "MTC_90_OTHER",
+    "code": "MTC_902_BAGGAGE_PARCEL_MAIL",
+    "name": "行李、包裹、邮件",
+    "description": "多式联运货物分类中类代码 902。",
+    "sort_order": 1200
+  },
+  {
+    "category_code": "MTC_90_OTHER",
+    "code": "MTC_903_FEED",
+    "name": "饲料",
+    "description": "多式联运货物分类中类代码 903。",
+    "sort_order": 1210
+  },
+  {
+    "category_code": "MTC_90_OTHER",
+    "code": "MTC_904_WATER",
+    "name": "水",
+    "description": "多式联运货物分类中类代码 904。",
+    "sort_order": 1220
+  },
+  {
+    "category_code": "MTC_90_OTHER",
+    "code": "MTC_905_ICE_PRODUCTS",
+    "name": "冰及制品",
+    "description": "多式联运货物分类中类代码 905。",
+    "sort_order": 1230
+  },
+  {
+    "category_code": "MTC_90_OTHER",
+    "code": "MTC_906_GARBAGE",
+    "name": "垃圾",
+    "description": "多式联运货物分类中类代码 906。",
+    "sort_order": 1240
+  },
+  {
+    "category_code": "MTC_90_OTHER",
+    "code": "MTC_909_RECYCLABLE_WASTE",
+    "name": "各种废旧物品",
+    "description": "多式联运货物分类中类代码 909。",
+    "sort_order": 1250
+  },
+  {
+    "category_code": "MTC_99_UNCLASSIFIED",
+    "code": "MTC_990_UNCLASSIFIED",
+    "name": "未分类物品",
+    "description": "多式联运货物分类中类代码 990。",
+    "sort_order": 1260
+  }
 ]

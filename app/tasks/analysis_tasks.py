@@ -117,13 +117,7 @@ async def _run_analysis_job(
             run.affected_rows = result.affected_rows
             run.result_summary_json = result.as_summary()
             run.error_message = None
-            definition = await db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == job_code))
-            if definition is not None:
-                definition.last_run_id = run.id
-                definition.last_status_code = run.status_code
-                definition.last_finished_at = run.finished_at
-                definition.last_result_summary_json = run.result_summary_json
-                definition.updated_at = finished
+            await _update_analysis_definition_run_state(db, run, result.as_summary(), finished)
             await db.commit()
             return result.as_summary()
         except Exception as exc:
@@ -145,6 +139,40 @@ async def _run_analysis_job(
                     definition.updated_at = finished
                 await db.commit()
             raise
+
+
+async def _update_analysis_definition_run_state(
+    db,
+    run: AnalysisJobRun,
+    summary: dict[str, Any],
+    finished_at: datetime,
+) -> None:
+    definition = await db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == run.job_code))
+    if definition is not None:
+        definition.last_run_id = run.id
+        definition.last_status_code = run.status_code
+        definition.last_finished_at = finished_at
+        definition.last_result_summary_json = summary
+        definition.updated_at = finished_at
+
+    child_summaries = summary.get("children") if isinstance(summary, dict) else None
+    if isinstance(child_summaries, list):
+        for child in child_summaries:
+            if not isinstance(child, dict):
+                continue
+            child_code = str(child.get("job_code") or "")
+            if not child_code:
+                continue
+            child_definition = await db.scalar(
+                select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == child_code)
+            )
+            if child_definition is None:
+                continue
+            child_definition.last_run_id = run.id
+            child_definition.last_status_code = "SUCCESS"
+            child_definition.last_finished_at = finished_at
+            child_definition.last_result_summary_json = child
+            child_definition.updated_at = finished_at
 
 
 @celery_app.task(name="analysis.run_job")

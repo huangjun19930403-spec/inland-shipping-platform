@@ -55,7 +55,7 @@ def setup_logging() -> None:
     root_logger.addHandler(handler)
 
     # 抑制第三方库冗余日志
-    for noisy in ("httpx", "httpcore", "sqlalchemy.engine"):
+    for noisy in ("aiosqlite", "httpx", "httpcore", "sqlalchemy.engine"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)

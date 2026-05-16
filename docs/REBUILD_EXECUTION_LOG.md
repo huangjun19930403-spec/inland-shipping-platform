@@ -296,7 +296,7 @@ Round 11 Verification Notes:
 
 - `scripts.seed_experience_scenarios` ran successfully on the current local database and produced 42 `FR-DEMO-*` rows, 6 freight candidate analyses and `DEMO_AIS_EXPERIENCE_CURRENT`.
 - The new Round 11 verification checks pass on the current local database.
-- Full `scripts.verify_local_acceptance` still fails on pre-existing local environment conditions: one old automation constraint row, missing history ES local values, external connection test statuses and an existing role-menu hierarchy issue. A full local-demo reset should clear the automation row; the remaining config and role-menu issues are not caused by Round 11.
+- Full `scripts.seeds.validation.local_acceptance` still fails on pre-existing local environment conditions: one old automation constraint row, missing history ES local values, external connection test statuses and an existing role-menu hierarchy issue. A full local-demo reset should clear the automation row; the remaining config and role-menu issues are not caused by Round 11.
 
 Round 12 Plan:
 
@@ -332,7 +332,7 @@ Round 12 Verification Notes:
 - `pnpm type-check` passed in the frontend repo.
 - `pnpm build` passed in the frontend repo.
 - The current local SQLite database was non-destructively patched with the new `pricing_decision_record` table because it already had the rebuilt `001` revision stamped before this round changed the baseline. Production seed was rerun to sync menus without resetting demo data.
-- `scripts.verify_local_acceptance` now passes the Round 12 schema, menu, experience quote parsing and pollution checks. Remaining local failures are external/environmental: missing history ES local values (`ES_HOST`, `ES_PASSWORD`) and external connection test statuses for AMAP, ES_HISTORY, ES_REALTIME and HIFLEET.
+- `scripts.seeds.validation.local_acceptance` now passes the Round 12 schema, menu, experience quote parsing and pollution checks. Remaining local failures are external/environmental: missing history ES local values (`ES_HOST`, `ES_PASSWORD`) and external connection test statuses for AMAP, ES_HISTORY, ES_REALTIME and HIFLEET.
 
 Round 13 Plan:
 
@@ -365,7 +365,7 @@ Round 13 Verification Notes:
 - Frontend checks passed: `pnpm type-check` and `pnpm build`.
 - Production seed was rerun to refresh the local menu tree; the visible freight menu now appears in the expected order and `补录样本` remains hidden.
 - Browser verification confirmed `/freight` redirects to `/analysis/freight`, old freight submenu names are not visible, and `/freight/supply-demand-fit` can list `FREIGHT_SAMPLE` histories and open candidate-ship rows.
-- `scripts.verify_local_acceptance` passes the Round 13 menu, hidden supplement route and supply-demand entry checks. Remaining failures are external/environmental: missing history ES local values (`ES_HOST`, `ES_PASSWORD`) and external connection test statuses for AMAP, ES_HISTORY, ES_REALTIME and HIFLEET.
+- `scripts.seeds.validation.local_acceptance` passes the Round 13 menu, hidden supplement route and supply-demand entry checks. Remaining failures are external/environmental: missing history ES local values (`ES_HOST`, `ES_PASSWORD`) and external connection test statuses for AMAP, ES_HISTORY, ES_REALTIME and HIFLEET.
 
 Round 14 Plan:
 
@@ -391,8 +391,8 @@ Round 14 Final Report:
 
 Round 14 Final Verification Notes:
 
-- `scripts.seed_system_init --profile local-demo` completed successfully after local DB reset.
-- `scripts.verify_local_acceptance` passed. External AMAP/HIFLEET/ES checks are recorded as degraded local provider states instead of blocking local-demo seed.
+- `scripts.seeds.cli --profile local-demo` completed successfully after local DB reset.
+- `scripts.seeds.validation.local_acceptance` passed. External AMAP/HIFLEET/ES checks are recorded as degraded local provider states instead of blocking local-demo seed.
 - Backend focused tests passed for seed profiles, quote decision, rate estimator, opportunity service, vessel candidate analysis, vessel spatial analysis and vessel facts.
 - Frontend `pnpm type-check` and `pnpm build` passed.
 - Browser verification on the locally running frontend confirmed:

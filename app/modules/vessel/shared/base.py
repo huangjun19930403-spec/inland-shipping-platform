@@ -433,6 +433,8 @@ _CHANNEL_SITUATION_RESPONSE_CACHE: dict[str, _NavigationChannelSituationResponse
 _CITY_SITUATION_VESSELS_RESPONSE_CACHE: dict[str, _CitySituationVesselsResponseCacheEntry] = {}
 _CHANNEL_SITUATION_VESSELS_RESPONSE_CACHE: dict[str, _NavigationChannelSituationVesselsResponseCacheEntry] = {}
 _CITY_SITUATION_REDIS_CLIENT: Any | None = None
+_CITY_SITUATION_REDIS_LOOP_ID: int | None = None
+_CITY_SITUATION_REDIS_BACKEND_CHECK: dict[str, Any] = {"checked_at": None, "backend": None}
 
 
 def _dispatch_certificate_recognition_task(recognition_id: int) -> None:

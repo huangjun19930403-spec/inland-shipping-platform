@@ -35,7 +35,7 @@ from app.modules.vessel.schemas import (
     VesselCandidateAnalysisCreateRequest,
     VesselCandidateAnalysisFilters,
 )
-from scripts.seed_builtin_dicts import BUILTIN_DICTS
+from scripts.seeds.loaders.builtin_dicts import BUILTIN_DICTS
 
 
 @compiles(BigInteger, "sqlite")

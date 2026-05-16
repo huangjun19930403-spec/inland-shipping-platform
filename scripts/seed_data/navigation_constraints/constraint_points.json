@@ -1,0 +1,63 @@
+[
+  {
+    "point": {
+      "code": "NC_CHANGZHOU_BENNIU_LOCK",
+      "name": "常州奔牛船闸通航限制点",
+      "constraint_type_code": "LOCK",
+      "province_code": "320000",
+      "city_code": "320500",
+      "longitude": "120.52000000",
+      "latitude": "31.36000000",
+      "severity_level": 2,
+      "description": "江南运河常州段船闸通行限制点。",
+      "status": 1
+    },
+    "profile": {
+      "max_tonnage": "1000.00",
+      "max_allowed_draft_m": "2.80",
+      "max_beam_m": "16.00",
+      "max_length_m": "90.00",
+      "allowed_time_window": "08:00-18:00",
+      "rule_description": "1000 吨级以下船舶白天排队通行，重载船需提前复核闸室尺度。"
+    }
+  },
+  {
+    "point": {
+      "code": "NC_JIANGYIN_BRIDGE_CLEARANCE",
+      "name": "江阴长江大桥净空约束点",
+      "constraint_type_code": "BRIDGE",
+      "province_code": "320000",
+      "city_code": "320500",
+      "longitude": "120.44000000",
+      "latitude": "31.42000000",
+      "severity_level": 2,
+      "description": "长江下游桥区净空约束点。",
+      "status": 1
+    },
+    "profile": {
+      "max_air_draft_m": "7.50",
+      "max_beam_m": "18.00",
+      "rule_description": "高水位期间需复核空载高度和船宽，超限船舶不得通过桥区。"
+    }
+  },
+  {
+    "point": {
+      "code": "NC_TAICANG_WATER_DEPTH",
+      "name": "太仓港上游浅水约束点",
+      "constraint_type_code": "SHALLOW",
+      "province_code": "320000",
+      "city_code": "320200",
+      "longitude": "120.34000000",
+      "latitude": "31.50000000",
+      "severity_level": 3,
+      "description": "长江下游局部浅水航段水深约束点。",
+      "status": 1
+    },
+    "profile": {
+      "min_water_depth_m": "3.20",
+      "max_allowed_draft_m": "2.50",
+      "under_keel_clearance_m": "0.50",
+      "warning_message": "低水位期间需复核吃水。"
+    }
+  }
+]

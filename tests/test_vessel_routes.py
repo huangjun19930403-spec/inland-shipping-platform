@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -43,6 +44,7 @@ from app.modules.vessel.schemas import (
     VesselPositionNavigationChannelSituationResponse,
     VesselPositionNavigationChannelSituationSummary,
     VesselPositionNavigationChannelVesselsResponse,
+    VesselPositionMonitorQuery,
 )
 
 
@@ -260,7 +262,7 @@ def test_vessel_compliance_actions_use_backend_rule_map() -> None:
 
 
 def test_vessel_seed_menu_groups_keep_business_entries_visible() -> None:
-    from scripts.seed_system_base import MENUS, ROLE_MENU_CODES
+    from scripts.seeds.loaders.system_base import MENUS, ROLE_MENU_CODES
 
     menu_by_code = {item["menu_code"]: item for item in MENUS}
     assert "VESSEL_SHIP_ANALYSIS" not in menu_by_code
@@ -1089,6 +1091,271 @@ async def test_vessel_channel_situation_force_refresh_skips_response_cache() -> 
 
 
 @pytest.mark.asyncio
+async def test_vessel_position_monitor_timeout_without_snapshot_returns_error_response() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+
+    class FakeDb:
+        async def rollback(self) -> None:
+            events.append("rollback")
+
+    async def no_snapshot(*args, **kwargs):
+        events.append("snapshot")
+        return None
+
+    async def profiles(_query):
+        return [
+            SimpleNamespace(id=1, current_mmsi="413000001"),
+            SimpleNamespace(id=2, current_mmsi="413000002"),
+        ]
+
+    async def realtime_host() -> str:
+        return "http://localhost:9200"
+
+    async def mmsi_values(_ids):
+        return {1: ["413000001"], 2: ["413000002"]}
+
+    async def limits() -> dict[str, int]:
+        return {"profile_limit": 2000, "es_batch_size": 500, "es_max_concurrency": 4, "unmatched_scan_limit": 1000}
+
+    async def positions_for_profiles(*args, **kwargs):
+        raise asyncio.TimeoutError
+
+    service.db = FakeDb()
+    service._position_monitor_from_latest_snapshot = no_snapshot  # type: ignore[method-assign]
+    service._position_monitor_profiles = profiles  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._mmsi_values_by_profile = mmsi_values  # type: ignore[method-assign]
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_items_for_profiles = positions_for_profiles  # type: ignore[method-assign]
+
+    result = await service.position_monitor(VesselPositionMonitorQuery(reported_within_minutes=1440))
+
+    assert result.source_status == "ERROR"
+    assert result.summary.matched_profile_count == 2
+    assert result.summary.positioned_count == 0
+    assert "实时 AIS 查询超时" in (result.message or "")
+    assert events == ["snapshot", "rollback", "snapshot"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_city_situation_timeout_without_snapshot_returns_error_response() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+
+    class FakeDb:
+        async def rollback(self) -> None:
+            events.append("rollback")
+
+    async def cache_backend() -> str:
+        return "memory"
+
+    async def limits() -> dict[str, int]:
+        return {"profile_limit": 2, "es_batch_size": 500, "es_max_concurrency": 4, "unmatched_scan_limit": 1000}
+
+    async def profile_count(_query) -> int:
+        return 5
+
+    async def profiles(_query, limit: int | None = None):
+        events.append(f"profiles:{limit}")
+        return [
+            SimpleNamespace(id=1, current_mmsi="413000001"),
+            SimpleNamespace(id=2, current_mmsi="413000002"),
+        ]
+
+    async def realtime_host() -> str:
+        return "http://localhost:9200"
+
+    async def positions_for_profiles(*args, **kwargs):
+        raise asyncio.TimeoutError
+
+    async def no_snapshot(*args, **kwargs):
+        events.append("snapshot")
+        return None
+
+    service.db = FakeDb()
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
+    service._position_monitor_profiles = profiles  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._position_monitor_items_for_profiles = positions_for_profiles  # type: ignore[method-assign]
+    service._city_situation_from_latest_snapshot = no_snapshot  # type: ignore[method-assign]
+
+    query = VesselPositionCitySituationQuery(reported_within_minutes=1440, include_boundary=False)
+    object.__setattr__(query, "force_refresh", True)
+    result = await service.position_city_situation(query)
+
+    assert result.source_status == "ERROR"
+    assert result.summary.snapshot_status_code == "FAILED"
+    assert result.summary.refresh_required is True
+    assert result.summary.matched_profile_count == 5
+    assert result.summary.scanned_profile_count == 2
+    assert result.summary.unscanned_profile_count == 3
+    assert result.cities == []
+    assert "实时 AIS 查询超时" in (result.message or "")
+    assert events == ["snapshot", "profiles:2", "rollback", "snapshot"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_channel_situation_timeout_returns_error_response() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+
+    class FakeDb:
+        async def rollback(self) -> None:
+            events.append("rollback")
+
+    async def cache_backend() -> str:
+        return "memory"
+
+    async def limits() -> dict[str, int]:
+        return {"profile_limit": 2, "es_batch_size": 500, "es_max_concurrency": 4, "unmatched_scan_limit": 1000}
+
+    async def profile_count(_query) -> int:
+        return 4
+
+    async def profiles(_query, limit: int | None = None):
+        events.append(f"profiles:{limit}")
+        return [
+            SimpleNamespace(id=1, current_mmsi="413000001"),
+            SimpleNamespace(id=2, current_mmsi="413000002"),
+        ]
+
+    async def realtime_host() -> str:
+        return "http://localhost:9200"
+
+    async def positions_for_profiles(*args, **kwargs):
+        raise asyncio.TimeoutError
+
+    async def boundaries():
+        events.append("boundaries")
+        return []
+
+    service.db = FakeDb()
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
+    service._position_monitor_profiles = profiles  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._position_monitor_items_for_profiles = positions_for_profiles  # type: ignore[method-assign]
+    service._channel_boundaries = boundaries  # type: ignore[method-assign]
+
+    query = VesselPositionNavigationChannelSituationQuery(
+        reported_within_minutes=1440,
+        include_boundary=False,
+        include_empty_channels=True,
+    )
+    object.__setattr__(query, "force_refresh", True)
+    result = await service.position_channel_situation(query)
+
+    assert result.source_status == "ERROR"
+    assert result.summary.snapshot_status_code == "FAILED"
+    assert result.summary.refresh_required is True
+    assert result.summary.matched_profile_count == 4
+    assert result.summary.scanned_profile_count == 2
+    assert result.summary.unscanned_profile_count == 2
+    assert result.channels == []
+    assert "实时 AIS 查询超时" in (result.message or "")
+    assert events == ["profiles:2", "rollback", "boundaries"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_channel_situation_timeout_uses_persisted_snapshot_fallback() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    generated_at = datetime(2026, 5, 10, 8, 0, 0)
+    fallback_response = VesselPositionNavigationChannelSituationResponse(
+        source_status="PARTIAL",
+        source_status_name="实时船位部分可用",
+        generated_at=generated_at,
+        message="实时 AIS 查询超时，已返回最近一次入库 AIS 航道快照",
+        cache_status="FALLBACK",
+        cache_generated_at=generated_at,
+        snapshot_backend="db_snapshot",
+        summary=VesselPositionNavigationChannelSituationSummary(
+            matched_profile_count=4,
+            scanned_profile_count=2,
+            unscanned_profile_count=2,
+            queried_mmsi_count=2,
+            matched_position_count=2,
+            unpositioned_count=0,
+            positioned_count=2,
+            stale_position_count=0,
+            contactable_position_count=1,
+            certificate_risk_count=0,
+            channel_count=1,
+            query_snapshot_id="DEMO_AIS_EXPERIENCE_CURRENT",
+            snapshot_status_code="PARTIAL",
+            refresh_required=False,
+            is_partial=True,
+        ),
+        channels=[],
+    )
+
+    class FakeDb:
+        async def rollback(self) -> None:
+            events.append("rollback")
+
+    async def cache_backend() -> str:
+        return "memory"
+
+    async def limits() -> dict[str, int]:
+        return {"profile_limit": 2, "es_batch_size": 500, "es_max_concurrency": 4, "unmatched_scan_limit": 1000}
+
+    async def profile_count(_query) -> int:
+        return 4
+
+    async def profiles(_query, limit: int | None = None):
+        events.append(f"profiles:{limit}")
+        return [
+            SimpleNamespace(id=1, current_mmsi="413000001"),
+            SimpleNamespace(id=2, current_mmsi="413000002"),
+        ]
+
+    async def realtime_host() -> str:
+        return "http://localhost:9200"
+
+    async def positions_for_profiles(*args, **kwargs):
+        raise asyncio.TimeoutError
+
+    snapshot_calls = 0
+
+    async def snapshot_fallback(*args, **kwargs):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        events.append("snapshot")
+        return None if snapshot_calls == 1 else fallback_response
+
+    async def store_response_cache(*args, **kwargs) -> None:
+        events.append("response-cache")
+
+    service.db = FakeDb()
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
+    service._position_monitor_profiles = profiles  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._position_monitor_items_for_profiles = positions_for_profiles  # type: ignore[method-assign]
+    service._channel_situation_from_latest_snapshot = snapshot_fallback  # type: ignore[method-assign]
+    service._store_channel_situation_response_cache = store_response_cache  # type: ignore[method-assign]
+
+    query = VesselPositionNavigationChannelSituationQuery(
+        reported_within_minutes=1440,
+        include_boundary=False,
+        include_empty_channels=False,
+    )
+    object.__setattr__(query, "force_refresh", True)
+    result = await service.position_channel_situation(query)
+
+    assert result.source_status == "PARTIAL"
+    assert result.cache_status == "FALLBACK"
+    assert result.summary.query_snapshot_id == "DEMO_AIS_EXPERIENCE_CURRENT"
+    assert result.summary.refresh_required is False
+    assert events == ["snapshot", "profiles:2", "rollback", "snapshot", "response-cache"]
+
+
+@pytest.mark.asyncio
 async def test_vessel_channel_precompute_uses_default_fast_query(monkeypatch) -> None:
     captured: dict[str, object] = {}
     drilldowns: list[object] = []
@@ -1104,6 +1371,27 @@ async def test_vessel_channel_precompute_uses_default_fast_query(monkeypatch) ->
     class FakeVesselService:
         def __init__(self, db) -> None:
             captured["db"] = db
+
+        async def _city_redis(self):
+            return None
+
+        async def precompute_full_ais_position_snapshot(self, query):
+            captured["snapshot_query"] = query
+            return {"snapshot_id": "AIS-PRODUCTION-CURRENT"}
+
+        async def position_city_situation(self, query):
+            return SimpleNamespace(
+                source_status="AVAILABLE",
+                generated_at=generated_at,
+                summary=SimpleNamespace(
+                    positioned_count=0,
+                    city_count=0,
+                    query_snapshot_id=None,
+                    is_partial=False,
+                ),
+                cities=[],
+                snapshot_backend="memory",
+            )
 
         async def position_channel_situation(self, query):
             captured["query"] = query
@@ -1128,6 +1416,7 @@ async def test_vessel_channel_precompute_uses_default_fast_query(monkeypatch) ->
 
     monkeypatch.setattr(vessel_position_tasks, "AsyncSessionLocal", lambda: FakeSessionContext())
     monkeypatch.setattr(vessel_position_tasks, "VesselService", FakeVesselService)
+    monkeypatch.setattr(vessel_position_tasks.settings, "VESSEL_CHANNEL_SITUATION_PRECOMPUTE_GROUP_LIMIT", 5)
 
     result = await vessel_position_tasks._precompute_channel_situation()
     query = captured["query"]
@@ -1144,7 +1433,8 @@ async def test_vessel_channel_precompute_uses_default_fast_query(monkeypatch) ->
     assert query.include_boundary is False
     assert query.include_empty_channels is False
     assert query.planning_level_codes == "NATIONAL_CORE,NATIONAL_NETWORK,NATIONAL_IMPORTANT,PROVINCIAL_HIGH_GRADE,REGIONAL_IMPORTANT,REVIEW"
-    assert getattr(query, "force_refresh") is True
+    assert query.channel_type_codes == "MAIN_LINE,MAIN_RIVER_CHANNEL,TRIBUTARY_CHANNEL,CANAL,CHANNEL_NETWORK,DELTA_WATERWAY"
+    assert getattr(query, "force_refresh") is False
     assert len(drilldowns) == 1
     assert drilldowns[0].channel_code == "NC-YANGTZE"
     assert drilldowns[0].query_snapshot_id == "channel-snapshot"
@@ -1168,6 +1458,13 @@ async def test_vessel_city_precompute_uses_default_cache_query_and_drilldown(mon
         def __init__(self, db) -> None:
             captured["db"] = db
 
+        async def _city_redis(self):
+            return None
+
+        async def precompute_full_ais_position_snapshot(self, query):
+            captured["snapshot_query"] = query
+            return {"snapshot_id": "AIS-PRODUCTION-CURRENT"}
+
         async def position_city_situation(self, query):
             captured["query"] = query
             return SimpleNamespace(
@@ -1189,6 +1486,20 @@ async def test_vessel_city_precompute_uses_default_cache_query_and_drilldown(mon
             drilldowns.append(query)
             return SimpleNamespace(total=6, items=[])
 
+        async def position_channel_situation(self, query):
+            return SimpleNamespace(
+                source_status="AVAILABLE",
+                generated_at=generated_at,
+                summary=SimpleNamespace(
+                    positioned_count=0,
+                    channel_count=0,
+                    query_snapshot_id=None,
+                    is_partial=False,
+                ),
+                channels=[],
+                snapshot_backend="memory",
+            )
+
     monkeypatch.setattr(vessel_position_tasks, "AsyncSessionLocal", lambda: FakeSessionContext())
     monkeypatch.setattr(vessel_position_tasks, "VesselService", FakeVesselService)
 
@@ -1205,7 +1516,7 @@ async def test_vessel_city_precompute_uses_default_cache_query_and_drilldown(mon
         "snapshot_backend": "memory",
     }
     assert query.include_boundary is False
-    assert getattr(query, "force_refresh") is True
+    assert getattr(query, "force_refresh") is False
     assert len(drilldowns) == 1
     assert drilldowns[0].city_code == "320500"
     assert drilldowns[0].query_snapshot_id == "city-snapshot"
@@ -1873,9 +2184,8 @@ def test_vessel_precompute_worker_ready_queues_analysis_tasks(monkeypatch) -> No
             queued.append((self.name, queue))
 
     monkeypatch.setattr(vessel_position_tasks.settings, "VESSEL_SITUATION_PRECOMPUTE_ON_WORKER_START", True)
-    monkeypatch.setattr(vessel_position_tasks, "precompute_city_situation_task", FakeTask("city"))
-    monkeypatch.setattr(vessel_position_tasks, "precompute_channel_situation_task", FakeTask("channel"))
+    monkeypatch.setattr(vessel_position_tasks, "precompute_ais_situation_task", FakeTask("ais"))
 
     vessel_position_tasks.precompute_situations_on_worker_ready()
 
-    assert queued == [("city", "analysis"), ("channel", "analysis")]
+    assert queued == [("ais", "analysis")]

@@ -9,15 +9,16 @@ from app.modules.vessel.service import (
     _NavigationChannelBoundary,
     _build_channel_boundary_grid,
 )
-from scripts.seed_data.navigation_channels_v7 import (
+from scripts.seeds.loaders.navigation_channels import (
     BOUNDARY_COUNT,
     CHANNEL_COUNT,
     DATA_VERSION,
+    NAVIGATION_CHANNEL_DATA_FILE,
     SEGMENT_COUNT,
     SOURCE_AUDIT_COUNT,
     load_navigation_channel_seed,
 )
-from scripts.seed_system_base import MENUS, ROLE_MENU_CODES
+from scripts.seeds.loaders.system_base import MENUS, ROLE_MENU_CODES
 
 
 def test_navigation_channel_openapi_replaces_legacy_routes() -> None:
@@ -63,6 +64,8 @@ def test_navigation_channel_seed_is_final_business_seed() -> None:
     records = payload["records"]
     audits = payload["excluded_source_audit"]
     assert DATA_VERSION == "revier_navigation_channel_v7"
+    assert NAVIGATION_CHANNEL_DATA_FILE.name == "navigation_channels.json"
+    assert NAVIGATION_CHANNEL_DATA_FILE.exists()
     assert len(records) == CHANNEL_COUNT
     assert sum(1 for item in records if item["boundary"]["geometry_status_code"] == "AVAILABLE") == BOUNDARY_COUNT
     assert sum(len(item["segments"]) for item in records) == SEGMENT_COUNT

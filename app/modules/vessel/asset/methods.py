@@ -408,6 +408,14 @@ class VesselAssetMixin:
 
     def _asset_order_by(self, query: Any) -> list[Any]:
         sort = getattr(query, "sort", None)
+        source_priority = case(
+            (VesselProfile.source_type_code == "TMS_HIGH_VALUE", 0),
+            (VesselProfile.source_type_code == "TMS", 1),
+            (VesselProfile.source_type_code == "HIGH_VALUE_INLAND", 2),
+            else_=9,
+        )
+        profile_completeness = VesselProfileSummary.profile_completeness_rate.desc().nullslast()
+        contact_priority = case((VesselProfileSummary.contact_available.is_(True), 0), else_=1)
         if sort == "quality_score_asc":
             return [VesselProfileSummary.data_quality_score.asc().nullslast(), VesselProfile.updated_at.desc(), VesselProfile.id.desc()]
         if sort == "quality_score_desc":
@@ -416,7 +424,15 @@ class VesselAssetMixin:
             return [VesselProfileSummary.refreshed_at.desc().nullslast(), VesselProfile.updated_at.desc(), VesselProfile.id.desc()]
         if sort == "ais_time_desc":
             return [VesselProfileSummary.latest_position_time.desc().nullslast(), VesselProfile.updated_at.desc(), VesselProfile.id.desc()]
-        return [VesselProfile.updated_at.desc(), VesselProfile.id.desc()]
+        return [
+            source_priority.asc(),
+            profile_completeness,
+            VesselProfileSummary.data_quality_score.desc().nullslast(),
+            contact_priority.asc(),
+            VesselCapacityDimension.deadweight_ton.desc().nullslast(),
+            VesselProfile.updated_at.desc(),
+            VesselProfile.id.desc(),
+        ]
 
     async def _summary_distribution(
         self,

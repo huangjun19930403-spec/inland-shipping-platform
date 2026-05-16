@@ -44,7 +44,7 @@ from app.models.vessel import (
 from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
 from app.modules.analysis.service import AnalysisDashboardService
 from app.modules.analysis.statistics import AnalysisStatisticsService
-from scripts.seed_builtin_dicts import BUILTIN_DICTS
+from scripts.seeds.loaders.builtin_dicts import BUILTIN_DICTS
 
 
 @compiles(BigInteger, "sqlite")

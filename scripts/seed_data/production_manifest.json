@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "profile": "production",
+  "description": "Production seed reads only curated result data files listed here.",
+  "resources": [
+    {
+      "resource": "admin_regions",
+      "path": "scripts/seed_data/admin_region/admin_region_raw.json",
+      "loader": "scripts.seeds.loaders.admin_regions.seed_admin_regions"
+    },
+    {
+      "resource": "admin_region_city_boundaries",
+      "path": "scripts/seed_data/admin_region/admin_region_boundary_city_raw.json",
+      "loader": "scripts.seeds.loaders.admin_regions.seed_admin_regions"
+    },
+    {
+      "resource": "navigation_channels",
+      "path": "scripts/seed_data/navigation/navigation_channels.json",
+      "loader": "scripts.seeds.loaders.navigation_channels.seed_navigation_channels"
+    },
+    {
+      "resource": "navigation_constraints",
+      "path": "scripts/seed_data/navigation_constraints/constraint_points.json",
+      "loader": "scripts.seeds.loaders.navigation_constraints.seed_navigation_constraints"
+    },
+    {
+      "resource": "commodity_categories",
+      "path": "scripts/seed_data/commodity/commodity_categories.json",
+      "loader": "scripts.seeds.loaders.commodity_taxonomy.seed_commodity_taxonomy"
+    },
+    {
+      "resource": "commodity_types",
+      "path": "scripts/seed_data/commodity/commodity_types.json",
+      "loader": "scripts.seeds.loaders.commodity_taxonomy.seed_commodity_taxonomy"
+    },
+    {
+      "resource": "commodity_standards",
+      "path": "scripts/seed_data/commodity/commodity_standards.json",
+      "loader": "scripts.seeds.loaders.commodity_standards.seed_commodity_standards"
+    },
+    {
+      "resource": "business_regions",
+      "path": "scripts/seed_data/address/business_regions.json",
+      "loader": "scripts.seeds.loaders.business_regions.seed_business_regions"
+    },
+    {
+      "resource": "transport_nodes",
+      "path": "scripts/seed_data/address/transport_nodes.json",
+      "loader": "scripts.seeds.loaders.transport_nodes.seed_transport_nodes"
+    },
+    {
+      "resource": "production_vessels",
+      "path": "scripts/seed_data/vessel/production_vessels.json",
+      "loader": "scripts.seeds.loaders.production_vessels.seed_production_vessels"
+    },
+    {
+      "resource": "tms_freights",
+      "path": "scripts/seed_data/freight/tms_freights.json",
+      "loader": "scripts.seeds.loaders.production_freights.seed_production_freights"
+    }
+  ]
+}

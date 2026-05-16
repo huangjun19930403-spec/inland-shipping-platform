@@ -1,0 +1,142 @@
+{
+  "version": "round6_demo_test_seed_v1",
+  "source_layer_code": "LOCAL_DEMO",
+  "nodes": {
+    "TAICANG": "MT202508090010443",
+    "JIANGYIN": "MT202508270010525",
+    "NANJING": "MT202508090010179",
+    "WUHU": "MT202512190010817",
+    "CHANGXING": "MT202508090010379",
+    "CHANGZHOU": "MT202512130010725"
+  },
+  "constraints": {
+    "JIANGYIN_BRIDGE": "NC_JIANGYIN_BRIDGE_CLEARANCE",
+    "CHANGZHOU_BENNIU_LOCK": "NC_CHANGZHOU_BENNIU_LOCK",
+    "TAICANG_WATER_DEPTH": "NC_TAICANG_WATER_DEPTH"
+  },
+  "routes": [
+    {
+      "key": "TAICANG_WUHU",
+      "code": "DEMO_ROUTE_TAICANG_WUHU",
+      "name": "太仓至芜湖矿建材料演示航线",
+      "plan_code": "DEMO_PLAN_TAICANG_WUHU",
+      "line_code": "DEMO_LINE_TAICANG_WUHU",
+      "line_name": "太仓-江阴-南京龙潭-芜湖演示主线",
+      "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
+      "destination_region_code": "REGION_TMS_WANJIANG",
+      "node_codes": [
+        "MT202508090010443",
+        "NC_JIANGYIN_BRIDGE_CLEARANCE",
+        "MT202508270010525",
+        "MT202508090010179",
+        "MT202512190010817"
+      ]
+    },
+    {
+      "key": "TAICANG_NANJING",
+      "code": "DEMO_ROUTE_TAICANG_NANJING",
+      "name": "太仓至南京龙潭钢材演示航线",
+      "plan_code": "DEMO_PLAN_TAICANG_NANJING",
+      "line_code": "DEMO_LINE_TAICANG_NANJING",
+      "line_name": "太仓-江阴桥区-南京龙潭演示线",
+      "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
+      "destination_region_code": "REGION_TMS_YANGTZE_DELTA",
+      "node_codes": [
+        "MT202508090010443",
+        "NC_JIANGYIN_BRIDGE_CLEARANCE",
+        "MT202508090010179"
+      ]
+    },
+    {
+      "key": "CHANGXING_WUHU",
+      "code": "DEMO_ROUTE_CHANGXING_WUHU",
+      "name": "长兴至芜湖水泥熟料演示航线",
+      "plan_code": "DEMO_PLAN_CHANGXING_WUHU",
+      "line_code": "DEMO_LINE_CHANGXING_WUHU",
+      "line_name": "长兴-常州奔牛-南京龙潭-芜湖演示线",
+      "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
+      "destination_region_code": "REGION_TMS_WANJIANG",
+      "node_codes": [
+        "MT202508090010379",
+        "NC_CHANGZHOU_BENNIU_LOCK",
+        "MT202512130010725",
+        "MT202508090010179",
+        "MT202512190010817"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "code": "SCN_TCWUHU_AGG",
+      "route_key": "TAICANG_WUHU",
+      "count": 12,
+      "origin_node_code": "MT202508090010443",
+      "destination_node_code": "MT202512190010817",
+      "commodity_codes": [
+        "STD_SAND_STONE_AGGREGATE",
+        "STD_MACHINE_SAND",
+        "STD_RIVER_SAND"
+      ],
+      "cargo_label": "砂石/机制砂/矿建材料",
+      "tonnage_start": 2600,
+      "tonnage_step": 180,
+      "shipper_price_start": 39,
+      "owner_price_delta": 4,
+      "publisher_prefix": "太仓港矿建材料集配"
+    },
+    {
+      "code": "SCN_TCNJ_STEEL",
+      "route_key": "TAICANG_NANJING",
+      "count": 10,
+      "origin_node_code": "MT202508090010443",
+      "destination_node_code": "MT202508090010179",
+      "commodity_codes": [
+        "STD_STEEL",
+        "STD_REBAR"
+      ],
+      "cargo_label": "钢材/螺纹钢",
+      "tonnage_start": 900,
+      "tonnage_step": 120,
+      "shipper_price_start": 58,
+      "owner_price_delta": 5,
+      "publisher_prefix": "太仓钢材贸易"
+    },
+    {
+      "code": "SCN_CXWUHU_CEMENT",
+      "route_key": "CHANGXING_WUHU",
+      "count": 10,
+      "origin_node_code": "MT202508090010379",
+      "destination_node_code": "MT202512190010817",
+      "commodity_codes": [
+        "STD_BULK_CEMENT_PO425",
+        "STD_LIMESTONE_POWDER",
+        "STD_CEMENT_CLINKER"
+      ],
+      "cargo_label": "水泥/石灰石粉",
+      "tonnage_start": 1500,
+      "tonnage_step": 160,
+      "shipper_price_start": 45,
+      "owner_price_delta": 4,
+      "publisher_prefix": "长兴建材供应链"
+    },
+    {
+      "code": "SCN_RISK_NOT_COMPUTABLE",
+      "route_key": "TAICANG_WUHU",
+      "count": 10,
+      "origin_node_code": "MT202508090010443",
+      "destination_node_code": "MT202512190010817",
+      "commodity_codes": [
+        "STD_MACHINE_SAND",
+        "STD_REBAR",
+        "STD_LIMESTONE"
+      ],
+      "cargo_label": "风险/不可计算样例",
+      "tonnage_start": 3200,
+      "tonnage_step": 220,
+      "shipper_price_start": 42,
+      "owner_price_delta": 8,
+      "publisher_prefix": "风险复核样例货主",
+      "risk_mode": "RISK"
+    }
+  ]
+}

@@ -71,7 +71,7 @@ def _allow_local_sample_analysis() -> bool:
     """Allow deterministic sample facts only for explicit demo/debug profiles."""
     seed_profile = (os.getenv("SEED_PROFILE") or "").strip().lower()
     allow_flag = (os.getenv("ALLOW_LOCAL_SAMPLE_ANALYSIS") or "").strip().lower()
-    return seed_profile == "local-demo" or allow_flag in {"1", "true", "yes", "on"}
+    return seed_profile in {"local-demo", "test"} or allow_flag in {"1", "true", "yes", "on"}
 
 
 def _local_sample_disabled(job_code: str, input_rows: int, target_table: str) -> AggregationResult:
@@ -84,6 +84,25 @@ def _local_sample_disabled(job_code: str, input_rows: int, target_table: str) ->
         {
             "source_mode": "NOT_COMPUTABLE",
             "not_computable_reasons": ["LOCAL_SAMPLE_DISABLED_FOR_PRODUCTION"],
+        },
+    )
+
+
+def _not_computable_result(
+    job_code: str,
+    input_rows: int,
+    target_table: str,
+    reasons: list[str],
+) -> AggregationResult:
+    return AggregationResult(
+        job_code,
+        input_rows,
+        0,
+        0,
+        [target_table],
+        {
+            "source_mode": "NOT_COMPUTABLE",
+            "not_computable_reasons": reasons,
         },
     )
 
@@ -734,8 +753,95 @@ class AnalysisStatisticsService:
         if force_rebuild:
             await self._clear(FactShipCityDaily, start, end)
         ships, capacities, _, _, city_by_code, primary_region = await self._ship_context()
+        snapshot = await self.db.scalar(
+            select(VesselAisSnapshot)
+            .where(VesselAisSnapshot.matched_position_count > 0)
+            .order_by(VesselAisSnapshot.generated_at.desc(), VesselAisSnapshot.id.desc())
+            .limit(1)
+        )
+        if snapshot is not None:
+            position_rows = (
+                await self.db.execute(
+                    select(VesselLatestPositionSnapshot, VesselProfileSummary)
+                    .outerjoin(
+                        VesselProfileSummary,
+                        VesselProfileSummary.vessel_profile_id == VesselLatestPositionSnapshot.vessel_profile_id,
+                    )
+                    .where(VesselLatestPositionSnapshot.snapshot_id == snapshot.snapshot_id)
+                    .where(VesselLatestPositionSnapshot.valid_position_flag.is_(True))
+                )
+            ).all()
+            acc: dict[str, dict[str, Any]] = defaultdict(
+                lambda: {
+                    "name": None,
+                    "count": 0,
+                    "active": 0,
+                    "dwt": Decimal("0"),
+                    "freshness": defaultdict(int),
+                }
+            )
+            for position, summary in position_rows:
+                city_code = position.city_code or (summary.latest_city_code if summary else None)
+                if not city_code:
+                    continue
+                city_code = str(city_code)
+                item = acc[city_code]
+                item["name"] = position.city_name or (summary.latest_city_name if summary else None) or getattr(city_by_code.get(city_code), "name", None)
+                item["count"] = int(item["count"]) + 1
+                freshness = str(position.freshness_level or "UNKNOWN").upper()
+                active = 0 if freshness in {"STALE", "EXPIRED"} else 1
+                item["active"] = int(item["active"]) + active
+                if summary and summary.deadweight_ton is not None:
+                    item["dwt"] = item["dwt"] + _money(summary.deadweight_ton)
+                item["freshness"][freshness] += 1
+            output = 0
+            now = datetime.utcnow()
+            for stat_date in _dates(start, end):
+                for city_code, item in acc.items():
+                    self.db.add(
+                        FactShipCityDaily(
+                            stat_date=stat_date,
+                            city_code=city_code,
+                            city_name=item["name"],
+                            primary_region_id=primary_region.get(city_code),
+                            ship_count=int(item["count"]),
+                            active_ship_count=int(item["active"]),
+                            total_deadweight_ton=item["dwt"],
+                            heat_value=Decimal(int(item["active"]))
+                            + (item["dwt"] / Decimal("10000") if item["dwt"] else Decimal("0")),
+                            data_version=DATA_VERSION,
+                            source_layer_code="AIS_LATEST_POSITION",
+                            sample_count=int(snapshot.scanned_profile_count or len(position_rows)),
+                            coverage_rate=snapshot.coverage_rate,
+                            confidence_level=_coverage_confidence(snapshot.coverage_rate),
+                            not_computable_reasons_json=[],
+                            uncertainty_reasons_json=snapshot.uncertainty_notes_json or [],
+                            source_versions_json={
+                                "snapshot_id": snapshot.snapshot_id,
+                                "source_indices": snapshot.source_indices_json or [],
+                                "freshness_distribution": dict(item["freshness"]),
+                            },
+                            source_updated_at=snapshot.generated_at,
+                            generated_at=now,
+                        )
+                    )
+                    output += 1
+            await self.db.flush()
+            return AggregationResult(
+                "ANALYSIS_SHIP_CITY_DAILY",
+                len(position_rows),
+                output,
+                output,
+                ["fact_ship_city_daily"],
+                {"source_mode": "AIS_LATEST_POSITION", "snapshot_id": snapshot.snapshot_id},
+            )
         if not _allow_local_sample_analysis():
-            return _local_sample_disabled("ANALYSIS_SHIP_CITY_DAILY", len(ships), "fact_ship_city_daily")
+            return _not_computable_result(
+                "ANALYSIS_SHIP_CITY_DAILY",
+                len(ships),
+                "fact_ship_city_daily",
+                ["AIS_POSITION_SNAPSHOT_MISSING"],
+            )
         city_codes = sorted(city_by_code)
         output = 0
         now = datetime.utcnow()
@@ -778,7 +884,12 @@ class AnalysisStatisticsService:
             await self._clear(FactShipFlowDaily, start, end)
         ships, capacities, _, _, _, primary_region = await self._ship_context()
         if not _allow_local_sample_analysis():
-            return _local_sample_disabled("ANALYSIS_SHIP_FLOW_DAILY", len(ships), "fact_ship_flow_daily")
+            return _not_computable_result(
+                "ANALYSIS_SHIP_FLOW_DAILY",
+                len(ships),
+                "fact_ship_flow_daily",
+                ["HISTORICAL_AIS_TRAJECTORY_SOURCE_MISSING"],
+            )
         nodes = list((await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None), TransportNode.status == 1).order_by(TransportNode.id.asc()))).scalars().all())
         if len(nodes) < 2:
             return AggregationResult("ANALYSIS_SHIP_FLOW_DAILY", len(ships), 0, 0, ["fact_ship_flow_daily"], {"source_mode": "LOCAL_SAMPLE"})
@@ -1690,6 +1801,7 @@ class AnalysisStatisticsService:
                 select(FactVesselAssetDaily).where(FactVesselAssetDaily.stat_date >= start, FactVesselAssetDaily.stat_date <= end)
             )
         ).scalars().all()
+        _, primary_region = await self._city_context()
         acc: dict[tuple[date, int | None, str | None, str | None], dict[str, Any]] = defaultdict(
             lambda: {
                 "demand": 0,
@@ -1715,7 +1827,10 @@ class AnalysisStatisticsService:
             if row.generated_at and (item["source_updated"] is None or row.generated_at > item["source_updated"]):
                 item["source_updated"] = row.generated_at
         for row in ais_rows:
-            key = (row.stat_date, region_by_city_date.get((row.stat_date, row.city_code)), row.city_code, row.ship_type_code)
+            region_id = region_by_city_date.get((row.stat_date, row.city_code))
+            if region_id is None and row.city_code:
+                region_id = primary_region.get(row.city_code)
+            key = (row.stat_date, region_id, row.city_code, row.ship_type_code)
             item = acc[key]
             item["ais"] += int(row.vessel_count or 0)
             item["unmatched"] += int(row.unmatched_mmsi_count or 0)
@@ -1773,8 +1888,8 @@ class AnalysisStatisticsService:
                     city_code=key[2],
                     cargo_category_code=None,
                     ship_type_code=key[3],
-                    demand_layer_code="STANDARD_FREIGHT_SAMPLE" if demand else "NOT_AVAILABLE",
-                    supply_layer_code="AIS_SUPPLY_SAMPLE" if int(item["ais"]) else "TRUSTED_PROFILE_SAMPLE" if trusted_supply else "NOT_AVAILABLE",
+                    demand_layer_code="TMS_PRODUCTION_FREIGHT" if demand else "NOT_AVAILABLE",
+                    supply_layer_code="AIS_LATEST_POSITION" if int(item["ais"]) else "TRUSTED_PROFILE" if trusted_supply else "NOT_AVAILABLE",
                     demand_sample_count=demand,
                     demand_tonnage=item["tonnage"],
                     ais_supply_count=int(item["ais"]),

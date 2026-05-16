@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.tasks.freight_ai_tasks",
         "app.tasks.vessel_ai_tasks",
         "app.tasks.vessel_position_tasks",
+        "app.tasks.vessel_candidate_tasks",
     ],
 )
 
@@ -57,8 +58,10 @@ celery_app.conf.update(
         "vessel.recognize_certificate_image": {"queue": "vessel_ai"},
         "vessel.recognize_person_certificate_image": {"queue": "vessel_ai"},
         "vessel.recognize_owner_document_image": {"queue": "vessel_ai"},
+        "vessel.precompute_ais_situation": {"queue": "analysis"},
         "vessel.precompute_city_situation": {"queue": "analysis"},
         "vessel.precompute_channel_situation": {"queue": "analysis"},
+        "vessel.precompute_production_candidate_analyses": {"queue": "analysis"},
         "analysis.precompute_flow_route_cache": {"queue": "analysis"},
     },
 )
@@ -69,18 +72,19 @@ celery_app.conf.beat_schedule = {
         "schedule": _daily_crontab(),
         "args": ("ANALYSIS_ALL_DAILY", None, None, True, {"triggered_by": "celery_beat"}),
     },
-    "vessel-city-situation-precompute": {
-        "task": "vessel.precompute_city_situation",
-        "schedule": max(30, int(settings.VESSEL_CITY_SITUATION_PRECOMPUTE_SECONDS or 60)),
-    },
-    "vessel-channel-situation-precompute": {
-        "task": "vessel.precompute_channel_situation",
-        "schedule": max(30, int(settings.VESSEL_CHANNEL_SITUATION_PRECOMPUTE_SECONDS or 60)),
+    "vessel-ais-situation-precompute": {
+        "task": "vessel.precompute_ais_situation",
+        "schedule": max(60, int(settings.VESSEL_AIS_SITUATION_PRECOMPUTE_SECONDS or 300)),
     },
     "analysis-flow-route-cache-precompute": {
         "task": "analysis.precompute_flow_route_cache",
         "schedule": max(60, int(settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_SECONDS or 300)),
         "args": (None, None, ["freight", "ship"], settings.ANALYSIS_FLOW_ROUTE_PRECOMPUTE_LIMIT, False),
+    },
+    "vessel-production-candidate-analysis-precompute": {
+        "task": "vessel.precompute_production_candidate_analyses",
+        "schedule": max(600, int(settings.VESSEL_CANDIDATE_PRECOMPUTE_SECONDS or 1800)),
+        "args": (settings.VESSEL_CANDIDATE_PRECOMPUTE_LIMIT,),
     },
 }
 
