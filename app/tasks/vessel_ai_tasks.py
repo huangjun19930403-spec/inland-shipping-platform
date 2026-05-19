@@ -7,7 +7,7 @@ from threading import Thread
 from typing import Any
 
 from app.core.database import AsyncSessionLocal
-from app.modules.vessel.service import VesselService
+from app.modules.vessel.recognition.service import VesselRecognitionService
 from app.tasks.celery_app import celery_app
 
 
@@ -37,17 +37,17 @@ def _run_coro_sync(coro):
 
 async def _recognize_certificate_image(recognition_id: int) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
-        return await VesselService(db).process_certificate_image_recognition(recognition_id)
+        return await VesselRecognitionService(db).process_certificate_image_recognition(recognition_id)
 
 
 async def _recognize_person_certificate_image(recognition_id: int) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
-        return await VesselService(db).process_person_certificate_image_recognition(recognition_id)
+        return await VesselRecognitionService(db).process_person_certificate_image_recognition(recognition_id)
 
 
 async def _recognize_owner_document_image(recognition_id: int) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
-        return await VesselService(db).process_owner_document_image_recognition(recognition_id)
+        return await VesselRecognitionService(db).process_owner_document_image_recognition(recognition_id)
 
 
 @celery_app.task(name="vessel.recognize_certificate_image")

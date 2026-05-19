@@ -280,10 +280,21 @@ def test_system_base_uses_analysis_platform_information_architecture() -> None:
     ]
     root_names = [item["menu_name"] for item in sorted(visible_roots, key=lambda item: item["sort_order"])]
 
-    assert root_names == ["经营总览", "数据资产中心", "分析中心", "数据质量与治理", "系统管理"]
+    assert root_names == [
+        "经营总览",
+        "数据资产中心",
+        "分析中心",
+        "运力中心",
+        "航线与区域中心",
+        "数据质量与治理",
+        "系统管理",
+    ]
     assert menu_by_code["COMMODITY_STANDARDS"]["parent_code"] == "DATA_MASTER_GROUP"
     assert menu_by_code["FREIGHT_LIST"]["parent_code"] == "DATA_BUSINESS_GROUP"
-    assert menu_by_code["VESSEL_AIS_SITUATION"]["parent_code"] == "ANALYSIS_SITUATION_GROUP"
+    assert menu_by_code["ROUTE_LIST"]["parent_code"] == "ROUTE_ROOT"
+    assert menu_by_code["ANALYSIS_SHIPS"]["parent_code"] == "VESSEL_ASSET_GROUP"
+    assert menu_by_code["VESSEL_AIS_SITUATION"]["parent_code"] == "VESSEL_ANALYSIS_GROUP"
+    assert menu_by_code["ADDRESS_NAVIGATION_CHANNELS"]["parent_code"] == "ROUTE_REGION_FOUNDATION_GROUP"
     assert menu_by_code["FREIGHT_SUPPLY_DEMAND_FIT"]["parent_code"] == "ANALYSIS_OPERATION_GROUP"
     assert menu_by_code["FREIGHT_NORMALIZATION"]["parent_code"] == "AUDIT_ROOT"
     assert menu_by_code["SYSTEM_MENU"]["parent_code"] == "SYSTEM_SECURITY_GROUP"
@@ -294,3 +305,5 @@ def test_system_base_uses_analysis_platform_information_architecture() -> None:
     assert "FREIGHT_SUPPLY_DEMAND_FIT" in ROLE_MENU_CODES["DATA_STEWARD"]
     assert "FREIGHT_SUPPLY_DEMAND_FIT" in ROLE_MENU_CODES["OPS_ANALYST"]
     assert "FREIGHT_SUPPLY_DEMAND_FIT" not in ROLE_MENU_CODES["BUSINESS_INPUTTER"]
+    menu_order = [item["menu_code"] for item in MENUS]
+    assert menu_order.index("ROUTE_ROOT") < menu_order.index("ROUTE_LIST")

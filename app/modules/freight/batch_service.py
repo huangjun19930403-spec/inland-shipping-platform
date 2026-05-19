@@ -4,6 +4,6 @@
 legacy service 中逐步搬迁到这里。
 """
 
-from app.modules.freight.service import FreightBatchTaskService
+from app.modules.freight.legacy_service import FreightBatchTaskService
 
 __all__ = ["FreightBatchTaskService"]

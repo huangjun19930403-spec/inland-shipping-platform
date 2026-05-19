@@ -48,7 +48,7 @@ from app.modules.vessel.schemas import (
 )
 from app.modules.vessel.asset.service import VesselAssetService
 from app.modules.vessel.quality.service import VesselQualityService
-from app.modules.vessel.service import (
+from app.modules.vessel.shared.base import (
     COMPLIANCE_ACTIVE_STATUSES,
     COMPLIANCE_CLOSED_STATUSES,
     _load_label_map,

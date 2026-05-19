@@ -44,8 +44,8 @@ from app.modules.analysis.schemas import (
     VesselRiskAnalysisResponse,
     VesselTrajectoryAnalysisResponse,
 )
+from app.modules.analysis.dashboard_service import AnalysisDashboardService, QuoteRouteEstimateService
 from app.modules.analysis.pricing_decision_service import PricingDecisionService
-from app.modules.analysis.service import AnalysisDashboardService, QuoteRouteEstimateService
 
 router = APIRouter()
 

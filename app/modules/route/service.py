@@ -304,10 +304,10 @@ class ShippingRouteService:
         data = payload.model_dump(exclude_none=True)
         code = (payload.code or "").strip() or await self.sequence_service.next_code("ROUTE_CODE")
         data["code"] = code
+        data["audit_status"] = "APPROVED"
         if await self.route_repo.exists_route_code(code):
             raise ConflictError(f"route code already exists: {code}")
         row = await self.route_repo.create_route({**data, "name": payload.name.strip()})
-        row.audit_status = "APPROVED"
         await self.db.commit()
         return _to_route_response(row)
 

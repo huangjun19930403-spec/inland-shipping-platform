@@ -63,7 +63,7 @@ from app.integrations.config_keys import (
     HIFLEET_USERNAME,
 )
 from app.modules.analysis.schemas import FlowAnalysisQuery
-from app.modules.analysis.service import AnalysisDashboardService
+from app.modules.analysis.dashboard_service import AnalysisDashboardService
 from app.models.address import NavigationConstraintPoint, NodeAlias, Region, TransportNode, TransportNodeContact
 from app.models.analysis import (
     AnalysisJobDefinition,
@@ -123,7 +123,7 @@ from app.models.vessel import (
     VesselRouteSegmentObservationItem,
     VesselSpatialObservationSnapshot,
 )
-from app.modules.analysis.service import AnalysisDashboardService
+from app.modules.analysis.dashboard_service import AnalysisDashboardService
 from app.modules.analysis.pricing_decision_service import PricingDecisionService
 from app.modules.analysis.schemas import QuoteDecisionRequest, RateEstimateRequest
 from app.modules.vessel.candidate_service import VesselCandidateAnalysisService
@@ -1142,33 +1142,78 @@ async def verify() -> list[CheckResult]:
                 "all present" if not missing_pricing_paths else ", ".join(missing_pricing_paths),
             )
         )
+        menu_rows = (await session.execute(select(SysMenu.id, SysMenu.menu_code, SysMenu.parent_id))).all()
+        menu_code_by_id = {menu_id: menu_code for menu_id, menu_code, _ in menu_rows}
+        parent_by_id = {menu_id: parent_id for menu_id, _, parent_id in menu_rows}
         freight_menu_rows = (
             await session.execute(
-                select(SysMenu.menu_code, SysMenu.menu_name, SysMenu.route_path, SysMenu.sort_order, SysMenu.visible_flag)
-                .where(SysMenu.parent_id == select(SysMenu.id).where(SysMenu.menu_code == "FREIGHT_ROOT").scalar_subquery())
+                select(
+                    SysMenu.menu_code,
+                    SysMenu.menu_name,
+                    SysMenu.route_path,
+                    SysMenu.sort_order,
+                    SysMenu.visible_flag,
+                    SysMenu.parent_id,
+                )
+                .where(
+                    SysMenu.menu_code.in_(
+                        (
+                            "FREIGHT_LIST",
+                            "FREIGHT_WECHAT_WORKBENCH",
+                            "FREIGHT_TMS_INBOUNDS",
+                            "FREIGHT_BATCHES",
+                            "FREIGHT_CANDIDATES",
+                            "FREIGHT_SUPPLY_DEMAND_FIT",
+                            "FREIGHT_NORMALIZATION",
+                            "FREIGHT_MANUAL_CREATE",
+                        )
+                    )
+                )
                 .order_by(SysMenu.sort_order)
             )
         ).all()
-        visible_freight_names = [row.menu_name for row in freight_menu_rows if row.visible_flag == 1]
-        required_freight_names = [
-            "货源态势总览",
-            "微信语义解析",
-            "TMS 结构化入站",
-            "解析批次监控",
-            "候选证据池",
-            "机会样本库",
-            "供需适配分析",
-            "质量治理与回算",
+        freight_menu_map = {row.menu_code: row for row in freight_menu_rows}
+        parent_code_by_menu_code = {
+            menu_code: menu_code_by_id.get(parent_id)
+            for _menu_id, menu_code, parent_id in menu_rows
+        }
+        visible_freight_names = [
+            freight_menu_map[code].menu_name
+            for code in (
+                "FREIGHT_LIST",
+                "FREIGHT_WECHAT_WORKBENCH",
+                "FREIGHT_TMS_INBOUNDS",
+                "FREIGHT_BATCHES",
+                "FREIGHT_CANDIDATES",
+                "FREIGHT_SUPPLY_DEMAND_FIT",
+                "FREIGHT_NORMALIZATION",
+            )
+            if code in freight_menu_map and freight_menu_map[code].visible_flag == 1
+        ]
+        expected_freight_parent = {
+            "FREIGHT_LIST": "DATA_BUSINESS_GROUP",
+            "FREIGHT_WECHAT_WORKBENCH": "DATA_INGEST_GROUP",
+            "FREIGHT_TMS_INBOUNDS": "DATA_INGEST_GROUP",
+            "FREIGHT_BATCHES": "DATA_INGEST_GROUP",
+            "FREIGHT_CANDIDATES": "DATA_INGEST_GROUP",
+            "FREIGHT_SUPPLY_DEMAND_FIT": "ANALYSIS_OPERATION_GROUP",
+            "FREIGHT_NORMALIZATION": "AUDIT_ROOT",
+        }
+        freight_parent_mismatches = [
+            f"{code}->{parent_code_by_menu_code.get(code)}"
+            for code, expected_parent in expected_freight_parent.items()
+            if parent_code_by_menu_code.get(code) != expected_parent
         ]
         stale_freight_names = {"货源分析", "微信采集", "TMS 入站", "采集批次", "候选确认", "运输机会", "数据清洗", "手工录入"}
         results.append(
             _result(
                 "freight insight menu IA renamed",
-                visible_freight_names == required_freight_names and not stale_freight_names.intersection(visible_freight_names),
-                " > ".join(visible_freight_names),
+                not freight_parent_mismatches
+                and len(visible_freight_names) == len(expected_freight_parent)
+                and not stale_freight_names.intersection(visible_freight_names),
+                " > ".join(visible_freight_names) if not freight_parent_mismatches else ", ".join(freight_parent_mismatches),
             )
         )
-        freight_menu_map = {row.menu_code: row for row in freight_menu_rows}
         manual_menu = freight_menu_map.get("FREIGHT_MANUAL_CREATE")
         fit_menu = freight_menu_map.get("FREIGHT_SUPPLY_DEMAND_FIT")
         results.append(
@@ -1211,9 +1256,6 @@ async def verify() -> list[CheckResult]:
             )
         )
 
-        menu_rows = (await session.execute(select(SysMenu.id, SysMenu.menu_code, SysMenu.parent_id))).all()
-        menu_code_by_id = {menu_id: menu_code for menu_id, menu_code, _ in menu_rows}
-        parent_by_id = {menu_id: parent_id for menu_id, _, parent_id in menu_rows}
         role_menu_rows = (
             await session.execute(
                 select(SysRole.role_code, SysRoleMenu.menu_id)

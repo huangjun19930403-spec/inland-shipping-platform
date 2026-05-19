@@ -4,7 +4,7 @@
 AI 编排、证据门控、主数据匹配和候选生成迁出 service.py 预留稳定入口。
 """
 
-from app.modules.freight.service import FreightBatchTaskService
+from app.modules.freight.legacy_service import FreightBatchTaskService
 
 FreightWechatParserPipeline = FreightBatchTaskService
 

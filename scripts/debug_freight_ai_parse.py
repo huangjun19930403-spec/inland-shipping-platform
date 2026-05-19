@@ -16,7 +16,7 @@ from typing import Any
 
 from app.core.database import AsyncSessionLocal
 from app.integrations.ai import DashScopeQwenFreightParserClient
-from app.modules.freight.service import FreightBatchTaskService
+from app.modules.freight.batch_service import FreightBatchTaskService
 from app.modules.system.runtime_config import RuntimeConfigService
 
 SAMPLE_TEXT = """建德—平湖：塘渣

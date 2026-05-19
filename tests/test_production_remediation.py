@@ -19,7 +19,7 @@ from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLine
 from app.modules.address.schemas import TransportNodeCreateRequest
 from app.modules.address.service import TransportNodeService
 from app.modules.freight.service import FreightService
-from app.modules.route.schemas import RouteListQuery
+from app.modules.route.schemas import RouteCreateRequest, RouteListQuery
 from app.modules.route.service import ShippingRouteService
 
 
@@ -67,6 +67,21 @@ def _node_sequence() -> CodeSequence:
     )
 
 
+def _route_sequence() -> CodeSequence:
+    return CodeSequence(
+        biz_code="ROUTE_CODE",
+        biz_name="航线编码",
+        target_table="shipping_route",
+        target_column="code",
+        prefix="RT",
+        current_value=0,
+        value_length=4,
+        step=1,
+        reset_rule="NONE",
+        is_enabled=True,
+    )
+
+
 async def _seed_regions(session: AsyncSession) -> None:
     session.add_all(
         [
@@ -95,6 +110,27 @@ async def test_transport_node_rejects_mismatched_province_city(session: AsyncSes
 
     with pytest.raises(ValidationError, match="行政区层级不一致"):
         await TransportNodeService(session).create_node(payload)
+
+
+@pytest.mark.asyncio
+async def test_route_create_returns_loaded_response_after_commit(session: AsyncSession) -> None:
+    session.add(_route_sequence())
+    await session.commit()
+
+    response = await ShippingRouteService(session).create_route(
+        RouteCreateRequest(
+            name="审计测试新增航线",
+            transport_org_type_code="SINGLE_MODE",
+            origin_region_id=1,
+            destination_region_id=2,
+            description="创建后应直接返回完整响应",
+        )
+    )
+
+    assert response.code == "RT0001"
+    assert response.audit_status == "APPROVED"
+    assert response.created_at is not None
+    assert response.updated_at is not None
 
 
 @pytest.mark.asyncio

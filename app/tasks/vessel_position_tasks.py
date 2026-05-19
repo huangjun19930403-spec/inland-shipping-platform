@@ -18,7 +18,7 @@ from app.modules.vessel.schemas import (
     VesselPositionNavigationChannelSituationQuery,
     VesselPositionNavigationChannelVesselsQuery,
 )
-from app.modules.vessel.service import VesselService
+from app.modules.vessel.ais.service import VesselAisService as VesselService
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)

@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Any
 
 from app.core.database import AsyncSessionLocal
-from app.modules.freight.service import FreightBatchTaskService, FreightNormalizationSuggestionService, FreightTmsInboundService
+from app.modules.freight.batch_service import FreightBatchTaskService
+from app.modules.freight.normalization_service import FreightNormalizationSuggestionService
+from app.modules.freight.tms_service import FreightTmsInboundService
 from app.modules.tasks.service import AsyncTaskRunService
 from app.tasks.celery_app import celery_app
 from app.tasks.utils import run_coro_sync
