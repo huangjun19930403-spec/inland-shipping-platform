@@ -1459,8 +1459,8 @@ class AnalysisStatisticsService:
                     FactVesselRouteSegmentDaily(
                         stat_date=stat_date,
                         route_id=None,
-                        line_id=None,
-                        route_segment_id=None,
+                        plan_id=None,
+                        segment_id=None,
                         segment_name=None,
                         direction_code="UNKNOWN",
                         ship_type_code=None,
@@ -1520,8 +1520,8 @@ class AnalysisStatisticsService:
                     FactVesselRouteSegmentDaily(
                         stat_date=stat_date,
                         route_id=item.route_id,
-                        line_id=item.line_id,
-                        route_segment_id=item.segment_id,
+                        plan_id=item.plan_id,
+                        segment_id=item.segment_id,
                         segment_name=item.segment_name,
                         direction_code="FORWARD" if item.segment_id else "UNKNOWN",
                         ship_type_code=ship_type,

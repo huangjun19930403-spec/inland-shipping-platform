@@ -22,7 +22,15 @@ from app.models.freight import (
     FreightClue,
     FreightNormalizationSuggestion,
 )
-from app.models.route import ShippingRoute
+from app.models.route import (
+    ShippingRoute,
+    ShippingRoutePlan,
+    ShippingRoutePlanPoint,
+    ShippingRoutePlanSegment,
+    ShippingRoutePlanSegmentResult,
+    ShippingRoutePlanTrackVersion,
+    ShippingRoutePlanTrackVersionSegment,
+)
 from app.models.vessel import VesselCandidateAnalysis
 from app.modules.freight.opportunity_service import ShippingOpportunityService
 
@@ -79,8 +87,61 @@ async def test_opportunity_detail_includes_source_quality_route_capacity_and_pri
                 code="R-44",
                 name="南京-芜湖",
                 transport_org_type_code="WATERWAY",
+                origin_endpoint_type_code="REGION",
                 origin_region_id=101,
+                destination_endpoint_type_code="REGION",
                 destination_region_id=202,
+            ),
+            ShippingRoutePlan(
+                id=45,
+                route_id=44,
+                plan_code="RP-45",
+                plan_name="默认方案",
+                plan_type_code="MANUAL",
+                is_default=True,
+                status_code="ACTIVE",
+                display_order=1,
+            ),
+            ShippingRoutePlanPoint(
+                id=46,
+                plan_id=45,
+                point_order=1,
+                point_type_code="MANUAL_POINT",
+                manual_name="南京港",
+                longitude=Decimal("118.780000"),
+                latitude=Decimal("32.040000"),
+                display_name="南京港",
+                transport_mode_after_code="WATER",
+            ),
+            ShippingRoutePlanPoint(
+                id=47,
+                plan_id=45,
+                point_order=2,
+                point_type_code="MANUAL_POINT",
+                manual_name="芜湖港",
+                longitude=Decimal("118.380000"),
+                latitude=Decimal("31.330000"),
+                display_name="芜湖港",
+            ),
+            ShippingRoutePlanSegment(
+                id=48,
+                plan_id=45,
+                segment_no=1,
+                start_plan_point_id=46,
+                end_plan_point_id=47,
+                transport_mode_code="WATER",
+                generation_status_code="READY",
+                selected_result_id=49,
+            ),
+            ShippingRoutePlanSegmentResult(
+                id=49,
+                segment_id=48,
+                result_no=1,
+                provider_type_code="MANUAL",
+                result_status_code="READY",
+                is_selected=True,
+                geometry_json={"type": "LineString", "coordinates": [[118.78, 32.04], [118.38, 31.33]]},
+                distance_km=Decimal("88.00"),
             ),
             FreightBatchTask(
                 id=55,
@@ -190,6 +251,33 @@ async def test_opportunity_detail_includes_source_quality_route_capacity_and_pri
             ),
         ]
     )
+    session.add_all(
+        [
+            ShippingRoutePlanTrackVersion(
+                id=50,
+                plan_id=45,
+                version_no=1,
+                source_type_code="MANUAL",
+                is_current=True,
+                version_status_code="READY",
+                distance_km=Decimal("88.00"),
+                point_count=2,
+                segment_count=1,
+                generated_at=now,
+            ),
+            ShippingRoutePlanTrackVersionSegment(
+                version_id=50,
+                segment_id=48,
+                segment_no=1,
+                geometry_json={"type": "LineString", "coordinates": [[118.78, 32.04], [118.38, 31.33]]},
+                distance_km=Decimal("88.00"),
+                point_count=2,
+                edit_status_code="ORIGINAL",
+            ),
+        ]
+    )
+    plan = await session.get(ShippingRoutePlan, 45)
+    plan.current_track_version_id = 50
     await session.commit()
 
     detail = await ShippingOpportunityService(session).get_opportunity(88)

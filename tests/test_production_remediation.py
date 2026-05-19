@@ -15,7 +15,15 @@ from app.models.address import AdminRegion
 from app.models.base import Base
 from app.models.common import CodeSequence
 from app.models.freight import Freight
-from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineTrack, ShippingRoutePlan
+from app.models.route import (
+    ShippingRoute,
+    ShippingRoutePlan,
+    ShippingRoutePlanPoint,
+    ShippingRoutePlanSegment,
+    ShippingRoutePlanSegmentResult,
+    ShippingRoutePlanTrackVersion,
+    ShippingRoutePlanTrackVersionSegment,
+)
 from app.modules.address.schemas import TransportNodeCreateRequest
 from app.modules.address.service import TransportNodeService
 from app.modules.freight.service import FreightService
@@ -120,9 +128,11 @@ async def test_route_create_returns_loaded_response_after_commit(session: AsyncS
     response = await ShippingRouteService(session).create_route(
         RouteCreateRequest(
             name="审计测试新增航线",
+            origin_endpoint_type_code="CITY",
+            origin_city_code="320100",
+            destination_endpoint_type_code="CITY",
+            destination_city_code="340200",
             transport_org_type_code="SINGLE_MODE",
-            origin_region_id=1,
-            destination_region_id=2,
             description="创建后应直接返回完整响应",
         )
     )
@@ -137,7 +147,9 @@ async def test_route_create_returns_loaded_response_after_commit(session: AsyncS
 async def test_route_list_filters_and_totals_are_query_level(session: AsyncSession) -> None:
     route_a = ShippingRoute(
         code="RT-A",
-        name="审计测试有主路线",
+        name="审计测试有默认方案",
+        origin_endpoint_type_code="REGION",
+        destination_endpoint_type_code="REGION",
         transport_org_type_code="SINGLE_MODE",
         origin_region_id=1,
         destination_region_id=2,
@@ -146,6 +158,8 @@ async def test_route_list_filters_and_totals_are_query_level(session: AsyncSessi
     route_b = ShippingRoute(
         code="RT-B",
         name="审计测试失败轨迹",
+        origin_endpoint_type_code="REGION",
+        destination_endpoint_type_code="REGION",
         transport_org_type_code="SINGLE_MODE",
         origin_region_id=1,
         destination_region_id=3,
@@ -154,6 +168,8 @@ async def test_route_list_filters_and_totals_are_query_level(session: AsyncSessi
     route_c = ShippingRoute(
         code="RT-C",
         name="审计测试无方案",
+        origin_endpoint_type_code="REGION",
+        destination_endpoint_type_code="REGION",
         transport_org_type_code="SINGLE_MODE",
         origin_region_id=2,
         destination_region_id=3,
@@ -161,29 +177,112 @@ async def test_route_list_filters_and_totals_are_query_level(session: AsyncSessi
     )
     session.add_all([route_a, route_b, route_c])
     await session.flush()
-    plan_a = ShippingRoutePlan(route_id=route_a.id, plan_code="PA", plan_name="标准方案", plan_type_code="STANDARD")
-    plan_b = ShippingRoutePlan(route_id=route_b.id, plan_code="PB", plan_name="低水位方案", plan_type_code="SEASONAL")
+    plan_a = ShippingRoutePlan(route_id=route_a.id, plan_code="PA", plan_name="标准方案", plan_type_code="STANDARD", is_default=True, status_code="ACTIVE", display_order=1)
+    plan_b = ShippingRoutePlan(route_id=route_b.id, plan_code="PB", plan_name="低水位方案", plan_type_code="SEASONAL", is_default=True, status_code="ACTIVE", display_order=1)
     session.add_all([plan_a, plan_b])
     await session.flush()
-    line_a = ShippingRouteLine(
+    point_a1 = ShippingRoutePlanPoint(
         plan_id=plan_a.id,
-        line_code="LA",
-        line_name="主路线",
-        line_role_code="MAIN",
-        track_status="READY",
-        track_generated_at=datetime(2026, 5, 1, 8, 0, 0),
+        point_order=1,
+        point_type_code="MANUAL_POINT",
+        manual_name="A",
+        longitude=120,
+        latitude=31,
+        display_name="A",
+        transport_mode_after_code="WATER",
     )
-    line_b = ShippingRouteLine(
+    point_a2 = ShippingRoutePlanPoint(
+        plan_id=plan_a.id,
+        point_order=2,
+        point_type_code="MANUAL_POINT",
+        manual_name="B",
+        longitude=121,
+        latitude=32,
+        display_name="B",
+    )
+    point_b1 = ShippingRoutePlanPoint(
         plan_id=plan_b.id,
-        line_code="LB",
-        line_name="失败路线",
-        line_role_code="ALTERNATE",
-        track_status="FAILED",
-        track_generated_at=datetime(2026, 5, 2, 8, 0, 0),
+        point_order=1,
+        point_type_code="MANUAL_POINT",
+        manual_name="C",
+        longitude=120,
+        latitude=31,
+        display_name="C",
+        transport_mode_after_code="WATER",
     )
-    session.add_all([line_a, line_b])
+    point_b2 = ShippingRoutePlanPoint(
+        plan_id=plan_b.id,
+        point_order=2,
+        point_type_code="MANUAL_POINT",
+        manual_name="D",
+        longitude=121,
+        latitude=32,
+        display_name="D",
+    )
+    session.add_all([point_a1, point_a2, point_b1, point_b2])
     await session.flush()
-    session.add(ShippingRouteLineTrack(line_id=line_b.id, track_status="FAILED", error_message="AMMS 返回失败", generated_at=datetime(2026, 5, 2, 8, 0, 0)))
+    seg_a = ShippingRoutePlanSegment(
+        plan_id=plan_a.id,
+        segment_no=1,
+        start_plan_point_id=point_a1.id,
+        end_plan_point_id=point_a2.id,
+        transport_mode_code="WATER",
+        generation_status_code="READY",
+        generated_at=datetime(2026, 5, 1, 8, 0, 0),
+    )
+    seg_b = ShippingRoutePlanSegment(
+        plan_id=plan_b.id,
+        segment_no=1,
+        start_plan_point_id=point_b1.id,
+        end_plan_point_id=point_b2.id,
+        transport_mode_code="WATER",
+        generation_status_code="FAILED",
+        error_message="AMMS 返回失败",
+        generated_at=datetime(2026, 5, 2, 8, 0, 0),
+    )
+    session.add_all([seg_a, seg_b])
+    await session.flush()
+    result_a = ShippingRoutePlanSegmentResult(segment_id=seg_a.id, result_no=1, provider_type_code="HIFLEET", result_status_code="READY", is_selected=True)
+    session.add(result_a)
+    await session.flush()
+    seg_a.selected_result_id = result_a.id
+    version_a = ShippingRoutePlanTrackVersion(
+        plan_id=plan_a.id,
+        version_no=1,
+        source_type_code="HIFLEET",
+        provider_type_code="HIFLEET",
+        is_current=True,
+        version_status_code="READY",
+        point_count=2,
+        segment_count=1,
+        generated_at=datetime(2026, 5, 1, 8, 0, 0),
+    )
+    version_b = ShippingRoutePlanTrackVersion(
+        plan_id=plan_b.id,
+        version_no=1,
+        source_type_code="HIFLEET",
+        provider_type_code="HIFLEET",
+        is_current=True,
+        version_status_code="FAILED",
+        point_count=0,
+        segment_count=0,
+        error_message="AMMS 返回失败",
+        generated_at=datetime(2026, 5, 2, 8, 0, 0),
+    )
+    session.add_all([version_a, version_b])
+    await session.flush()
+    session.add(
+        ShippingRoutePlanTrackVersionSegment(
+            version_id=version_a.id,
+            segment_id=seg_a.id,
+            segment_no=1,
+            geometry_json={"type": "LineString", "coordinates": [[120, 31], [121, 32]]},
+            point_count=2,
+            edit_status_code="ORIGINAL",
+        )
+    )
+    plan_a.current_track_version_id = version_a.id
+    plan_b.current_track_version_id = version_b.id
     await session.commit()
 
     service = ShippingRouteService(session)
@@ -195,9 +294,9 @@ async def test_route_list_filters_and_totals_are_query_level(session: AsyncSessi
     assert failed_page.total == 1
     assert failed_page.items[0].track_error_message == "AMMS 返回失败"
 
-    main_line_page = await service.list_routes(RouteListQuery(has_main_line=True, page=1, page_size=10))
-    assert main_line_page.total == 1
-    assert main_line_page.items[0].main_line_name == "主路线"
+    default_plan_page = await service.list_routes(RouteListQuery(has_default_plan=True, page=1, page_size=10))
+    assert default_plan_page.total == 2
+    assert default_plan_page.items[0].default_plan_name in {"标准方案", "低水位方案"}
 
 
 @pytest.mark.asyncio

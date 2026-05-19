@@ -16,7 +16,7 @@ from app.models.freight import (
     FreightTagRelation,
     FreightTmsInbound,
 )
-from scripts.seeds.demo.experience.shared import NODE_CODES, SCENARIOS, RouteInfo, _business_region_id, _commodity, _money, _node
+from scripts.seeds.demo.experience.shared import NODE_CODES, SCENARIOS, _business_region_id, _commodity, _money, _node
 
 def _raw_text(
     *,
@@ -44,7 +44,6 @@ async def _seed_freight_scenarios(
     session,
     *,
     now: datetime,
-    route_infos: dict[str, RouteInfo],
 ) -> list[Freight]:
     freight_rows: list[Freight] = []
     seq = 0

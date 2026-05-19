@@ -20,8 +20,6 @@
       "code": "DEMO_ROUTE_TAICANG_WUHU",
       "name": "太仓至芜湖矿建材料演示航线",
       "plan_code": "DEMO_PLAN_TAICANG_WUHU",
-      "line_code": "DEMO_LINE_TAICANG_WUHU",
-      "line_name": "太仓-江阴-南京龙潭-芜湖演示主线",
       "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
       "destination_region_code": "REGION_TMS_WANJIANG",
       "node_codes": [
@@ -37,8 +35,6 @@
       "code": "DEMO_ROUTE_TAICANG_NANJING",
       "name": "太仓至南京龙潭钢材演示航线",
       "plan_code": "DEMO_PLAN_TAICANG_NANJING",
-      "line_code": "DEMO_LINE_TAICANG_NANJING",
-      "line_name": "太仓-江阴桥区-南京龙潭演示线",
       "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
       "destination_region_code": "REGION_TMS_YANGTZE_DELTA",
       "node_codes": [
@@ -52,8 +48,6 @@
       "code": "DEMO_ROUTE_CHANGXING_WUHU",
       "name": "长兴至芜湖水泥熟料演示航线",
       "plan_code": "DEMO_PLAN_CHANGXING_WUHU",
-      "line_code": "DEMO_LINE_CHANGXING_WUHU",
-      "line_name": "长兴-常州奔牛-南京龙潭-芜湖演示线",
       "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
       "destination_region_code": "REGION_TMS_WANJIANG",
       "node_codes": [

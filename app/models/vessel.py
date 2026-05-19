@@ -736,8 +736,8 @@ class VesselRouteSegmentObservationItem(Base):
         String(64), ForeignKey("vessel_spatial_observation_snapshot.snapshot_id"), nullable=False, index=True
     )
     route_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("shipping_route.id"), nullable=True, index=True)
-    line_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_line.id"), nullable=False, index=True)
-    segment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_line_segment.id"), nullable=False, index=True)
+    plan_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan.id"), nullable=False, index=True)
+    segment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan_segment.id"), nullable=False, index=True)
     segment_no: Mapped[int] = mapped_column(Integer, nullable=False)
     segment_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     geometry_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN")
@@ -762,7 +762,7 @@ class VesselRouteSegmentMatchSample(Base):
     snapshot_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("vessel_spatial_observation_snapshot.snapshot_id"), nullable=False, index=True
     )
-    segment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_line_segment.id"), nullable=False, index=True)
+    segment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan_segment.id"), nullable=False, index=True)
     vessel_profile_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("vessel_profile.id"), nullable=True, index=True)
     mmsi: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     ship_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -819,7 +819,7 @@ class VesselCandidateAnalysis(Base):
         BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True
     )
     route_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("shipping_route.id"), nullable=True, index=True)
-    line_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("shipping_route_line.id"), nullable=True, index=True)
+    plan_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("shipping_route_plan.id"), nullable=True, index=True)
     origin_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
     destination_city_code: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
     region_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("region.id"), nullable=True, index=True)

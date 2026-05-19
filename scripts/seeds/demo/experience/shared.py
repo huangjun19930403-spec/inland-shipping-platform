@@ -14,7 +14,6 @@ from sqlalchemy import select
 
 from app.models.address import NavigationConstraintPoint, Region, RegionCityRelation, TransportNode
 from app.models.commodity import CommodityStandard
-from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment
 from app.models.vessel import VesselProfileSummary
 
 AIS_SNAPSHOT_ID = "DEMO_AIS_EXPERIENCE_CURRENT"
@@ -56,19 +55,9 @@ class RouteDef:
     code: str
     name: str
     plan_code: str
-    line_code: str
-    line_name: str
     origin_region_code: str
     destination_region_code: str
     node_codes: tuple[str, ...]
-
-
-@dataclass
-class RouteInfo:
-    key: str
-    route: ShippingRoute
-    line: ShippingRouteLine
-    segments: list[ShippingRouteLineSegment]
 
 
 @dataclass
@@ -117,8 +106,6 @@ def _route_from_config(row: dict[str, Any]) -> RouteDef:
         code=str(row["code"]),
         name=str(row["name"]),
         plan_code=str(row["plan_code"]),
-        line_code=str(row["line_code"]),
-        line_name=str(row["line_name"]),
         origin_region_code=str(row["origin_region_code"]),
         destination_region_code=str(row["destination_region_code"]),
         node_codes=tuple(str(code) for code in row["node_codes"]),

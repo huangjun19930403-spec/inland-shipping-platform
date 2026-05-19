@@ -31,7 +31,7 @@ class VesselCandidateAnalysisCreateRequest(StrictBaseModel):
     origin_node_id: int | None = Field(default=None, ge=1)
     destination_node_id: int | None = Field(default=None, ge=1)
     route_id: int | None = Field(default=None, ge=1)
-    line_id: int | None = Field(default=None, ge=1)
+    plan_id: int | None = Field(default=None, ge=1)
     origin_city_code: str | None = None
     destination_city_code: str | None = None
     region_id: int | None = Field(default=None, ge=1)
@@ -126,7 +126,7 @@ class VesselCandidateAnalysisResponse(BaseModel):
     origin_node_id: int | None = None
     destination_node_id: int | None = None
     route_id: int | None = None
-    line_id: int | None = None
+    plan_id: int | None = None
     origin_city_code: str | None = None
     destination_city_code: str | None = None
     region_id: int | None = None

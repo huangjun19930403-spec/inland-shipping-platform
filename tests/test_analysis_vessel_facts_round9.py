@@ -399,7 +399,7 @@ async def _seed_round9_inputs(session: AsyncSession, now: datetime) -> None:
             VesselRouteSegmentObservationItem(
                 snapshot_id="spatial-route-1",
                 route_id=20,
-                line_id=21,
+                plan_id=21,
                 segment_id=22,
                 segment_no=1,
                 segment_name="测试航段",

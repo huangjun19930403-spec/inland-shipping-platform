@@ -25,11 +25,10 @@ from app.models.address import (
 from app.models.storage import StorageFile
 from app.models.route import (
     ShippingRoute,
-    ShippingRouteLine,
-    ShippingRouteLineNode,
-    ShippingRouteLineSegment,
-    ShippingRouteLineTrack,
     ShippingRoutePlan,
+    ShippingRoutePlanPoint,
+    ShippingRoutePlanSegment,
+    ShippingRoutePlanSegmentResult,
 )
 
 
@@ -52,19 +51,16 @@ async def purge_legacy_e2e_data() -> None:
                 .scalars()
                 .all()
             )
-            e2e_lines = (
-                (await session.execute(select(ShippingRouteLine.id).where(ShippingRouteLine.plan_id.in_(e2e_plans))))
-                .scalars()
-                .all()
-                if e2e_plans
-                else []
-            )
-            if e2e_lines:
-                await session.execute(delete(ShippingRouteLineTrack).where(ShippingRouteLineTrack.line_id.in_(e2e_lines)))
-                await session.execute(delete(ShippingRouteLineSegment).where(ShippingRouteLineSegment.line_id.in_(e2e_lines)))
-                await session.execute(delete(ShippingRouteLineNode).where(ShippingRouteLineNode.line_id.in_(e2e_lines)))
-                await session.execute(delete(ShippingRouteLine).where(ShippingRouteLine.id.in_(e2e_lines)))
             if e2e_plans:
+                segment_ids = (
+                    (await session.execute(select(ShippingRoutePlanSegment.id).where(ShippingRoutePlanSegment.plan_id.in_(e2e_plans))))
+                    .scalars()
+                    .all()
+                )
+                if segment_ids:
+                    await session.execute(delete(ShippingRoutePlanSegmentResult).where(ShippingRoutePlanSegmentResult.segment_id.in_(segment_ids)))
+                await session.execute(delete(ShippingRoutePlanSegment).where(ShippingRoutePlanSegment.plan_id.in_(e2e_plans)))
+                await session.execute(delete(ShippingRoutePlanPoint).where(ShippingRoutePlanPoint.plan_id.in_(e2e_plans)))
                 await session.execute(delete(ShippingRoutePlan).where(ShippingRoutePlan.id.in_(e2e_plans)))
             await session.execute(delete(ShippingRoute).where(ShippingRoute.id.in_(e2e_routes)))
 

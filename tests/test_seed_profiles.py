@@ -141,7 +141,8 @@ def test_demo_scenario_config_references_production_seed_data() -> None:
         assert set(route["node_codes"]) <= nodes | constraints
         assert route["code"].startswith("DEMO_ROUTE_")
         assert route["plan_code"].startswith("DEMO_PLAN_")
-        assert route["line_code"].startswith("DEMO_LINE_")
+        for forbidden_key in ("line" + "_code", "line" + "_name"):
+            assert forbidden_key not in route
     for scenario in config["scenarios"]:
         assert scenario["origin_node_code"] in nodes
         assert scenario["destination_node_code"] in nodes

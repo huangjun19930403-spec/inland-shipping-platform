@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -20,33 +20,56 @@ class PageResponse(BaseModel, Generic[T]):
 
 class RouteListQuery(BaseModel):
     keyword: str | None = None
+    origin_endpoint_type_code: str | None = None
     origin_region_id: int | None = None
+    origin_city_code: str | None = None
+    origin_node_id: int | None = None
+    destination_endpoint_type_code: str | None = None
     destination_region_id: int | None = None
+    destination_city_code: str | None = None
+    destination_node_id: int | None = None
     transport_org_type_code: str | None = None
     plan_type_code: str | None = None
     has_plan: bool | None = None
-    has_main_line: bool | None = None
+    has_default_plan: bool | None = None
     track_status: str | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=200)
 
 
-class RouteCreateRequest(BaseModel):
+class RouteEndpointMixin(BaseModel):
+    origin_endpoint_type_code: str = Field(default="REGION", max_length=32)
+    origin_region_id: int | None = None
+    origin_city_code: str | None = Field(default=None, max_length=12)
+    origin_node_id: int | None = None
+    destination_endpoint_type_code: str = Field(default="REGION", max_length=32)
+    destination_region_id: int | None = None
+    destination_city_code: str | None = Field(default=None, max_length=12)
+    destination_node_id: int | None = None
+
+
+class RouteCreateRequest(RouteEndpointMixin):
     code: str | None = Field(default=None, max_length=32)
     name: str = Field(min_length=1, max_length=128)
     transport_org_type_code: str = Field(min_length=1, max_length=64)
     multimodal_combination_code: str | None = Field(default=None, max_length=64)
-    origin_region_id: int
-    destination_region_id: int
+    status_code: str = Field(default="ACTIVE", max_length=32)
     description: str | None = Field(default=None, max_length=512)
 
 
 class RouteUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
+    origin_endpoint_type_code: str | None = Field(default=None, max_length=32)
+    origin_region_id: int | None = None
+    origin_city_code: str | None = Field(default=None, max_length=12)
+    origin_node_id: int | None = None
+    destination_endpoint_type_code: str | None = Field(default=None, max_length=32)
+    destination_region_id: int | None = None
+    destination_city_code: str | None = Field(default=None, max_length=12)
+    destination_node_id: int | None = None
     transport_org_type_code: str | None = Field(default=None, min_length=1, max_length=64)
     multimodal_combination_code: str | None = Field(default=None, max_length=64)
-    origin_region_id: int | None = None
-    destination_region_id: int | None = None
+    status_code: str | None = Field(default=None, max_length=32)
     description: str | None = Field(default=None, max_length=512)
 
 
@@ -54,10 +77,17 @@ class RouteResponse(BaseModel):
     id: int
     code: str
     name: str
+    origin_endpoint_type_code: str
+    origin_region_id: int | None
+    origin_city_code: str | None
+    origin_node_id: int | None
+    destination_endpoint_type_code: str
+    destination_region_id: int | None
+    destination_city_code: str | None
+    destination_node_id: int | None
     transport_org_type_code: str
     multimodal_combination_code: str | None
-    origin_region_id: int
-    destination_region_id: int
+    status_code: str
     description: str | None
     audit_status: str
     submitter_id: int | None
@@ -66,8 +96,15 @@ class RouteResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     plan_count: int = 0
-    line_count: int = 0
-    main_line_name: str | None = None
+    point_count: int = 0
+    segment_count: int = 0
+    selected_result_count: int = 0
+    current_track_version_id: int | None = None
+    current_track_version_no: int | None = None
+    current_track_source_type_code: str | None = None
+    track_version_count: int = 0
+    default_plan_id: int | None = None
+    default_plan_name: str | None = None
     track_status: str = "NOT_GENERATED"
     track_error_message: str | None = None
     track_generated_at: datetime | None = None
@@ -79,12 +116,21 @@ class RoutePlanResponse(BaseModel):
     plan_code: str
     plan_name: str
     plan_type_code: str
-    description: str | None
+    is_default: bool
+    status_code: str
+    display_order: int
+    applicable_condition: str | None
     remark: str | None
     created_at: datetime
     updated_at: datetime
-    line_count: int = 0
-    main_line_name: str | None = None
+    point_count: int = 0
+    segment_count: int = 0
+    selected_result_count: int = 0
+    current_track_version_id: int | None = None
+    current_track_version_no: int | None = None
+    current_track_source_type_code: str | None = None
+    track_version_count: int = 0
+    track_status: str = "NOT_GENERATED"
 
 
 class RouteDetailResponse(BaseModel):
@@ -94,6 +140,7 @@ class RouteDetailResponse(BaseModel):
 
 class RoutePlanListQuery(BaseModel):
     plan_type_code: str | None = None
+    status_code: str | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=200)
 
@@ -102,61 +149,35 @@ class RoutePlanCreateRequest(BaseModel):
     plan_code: str | None = Field(default=None, max_length=32)
     plan_name: str = Field(min_length=1, max_length=128)
     plan_type_code: str = Field(min_length=1, max_length=64)
-    description: str | None = Field(default=None, max_length=512)
+    is_default: bool = False
+    status_code: str = Field(default="DRAFT", max_length=32)
+    display_order: int = Field(default=1, ge=1)
+    applicable_condition: str | None = Field(default=None, max_length=512)
     remark: str | None = Field(default=None, max_length=512)
 
 
 class RoutePlanUpdateRequest(BaseModel):
     plan_name: str | None = Field(default=None, min_length=1, max_length=128)
     plan_type_code: str | None = Field(default=None, min_length=1, max_length=64)
-    description: str | None = Field(default=None, max_length=512)
+    is_default: bool | None = None
+    status_code: str | None = Field(default=None, max_length=32)
+    display_order: int | None = Field(default=None, ge=1)
+    applicable_condition: str | None = Field(default=None, max_length=512)
     remark: str | None = Field(default=None, max_length=512)
 
 
-class RouteLineResponse(BaseModel):
+class RoutePlanPointResponse(BaseModel):
     id: int
     plan_id: int
-    line_code: str
-    line_name: str
-    line_role_code: str
-    priority: int
-    trigger_condition: str | None
-    description: str | None
-    track_status: str
-    track_generated_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
-    segment_count: int = 0
-
-
-class RouteLineCreateRequest(BaseModel):
-    line_code: str | None = Field(default=None, max_length=32)
-    line_name: str = Field(min_length=1, max_length=128)
-    line_role_code: str = Field(min_length=1, max_length=64)
-    priority: int = 0
-    trigger_condition: str | None = Field(default=None, max_length=256)
-    description: str | None = Field(default=None, max_length=512)
-
-
-class RouteLineUpdateRequest(BaseModel):
-    line_name: str | None = Field(default=None, min_length=1, max_length=128)
-    line_role_code: str | None = Field(default=None, min_length=1, max_length=64)
-    priority: int | None = None
-    trigger_condition: str | None = Field(default=None, max_length=256)
-    description: str | None = Field(default=None, max_length=512)
-
-
-class RouteLineNodeResponse(BaseModel):
-    id: int
-    line_id: int
-    node_order: int
-    node_type_code: str
+    point_order: int
+    point_type_code: str
     transport_node_id: int | None
     constraint_point_id: int | None
     manual_name: str | None
     longitude: Decimal | None
     latitude: Decimal | None
     display_name: str
+    transport_mode_after_code: str | None
     resolved_name: str | None = None
     resolved_code: str | None = None
     resolved_node_type_code: str | None = None
@@ -166,80 +187,103 @@ class RouteLineNodeResponse(BaseModel):
     updated_at: datetime
 
 
-class RouteLineNodeUpsertItem(BaseModel):
-    node_order: int = Field(ge=1)
-    node_type_code: str = Field(min_length=1, max_length=64)
+class RoutePlanPointUpsertItem(BaseModel):
+    point_order: int | None = Field(default=None, ge=1)
+    point_type_code: str = Field(min_length=1, max_length=64)
     transport_node_id: int | None = None
     constraint_point_id: int | None = None
     manual_name: str | None = Field(default=None, max_length=128)
     longitude: Decimal | None = None
     latitude: Decimal | None = None
     display_name: str = Field(min_length=1, max_length=128)
+    transport_mode_after_code: str | None = Field(default=None, max_length=64)
     remark: str | None = Field(default=None, max_length=512)
 
 
-class RouteLineSegmentResponse(BaseModel):
+class RoutePlanSegmentResponse(BaseModel):
     id: int
-    line_id: int
+    plan_id: int
     segment_no: int
-    start_line_node_id: int
-    end_line_node_id: int
+    start_plan_point_id: int
+    end_plan_point_id: int
+    start_point_order: int | None = None
+    end_point_order: int | None = None
     transport_mode_code: str
-    distance_km: Decimal | None
-    estimated_duration_hour: Decimal | None
-    segment_track_status: str
-    geometry_source: str | None
-    geometry_json: dict | None
+    generation_status_code: str
+    error_message: str | None
+    generated_at: datetime | None
     remark: str | None
     created_at: datetime
     updated_at: datetime
 
 
-class RouteLineSegmentUpsertItem(BaseModel):
-    segment_no: int = Field(ge=1)
-    start_node_order: int = Field(ge=1)
-    end_node_order: int = Field(ge=1)
-    transport_mode_code: str = Field(min_length=1, max_length=64)
-    distance_km: Decimal | None = None
-    estimated_duration_hour: Decimal | None = None
-    segment_track_status: str | None = Field(default=None, max_length=64)
-    geometry_source: str | None = Field(default=None, max_length=64)
-    geometry_json: dict | None = None
-    remark: str | None = Field(default=None, max_length=512)
+class RoutePlanStructureResponse(BaseModel):
+    plan: RoutePlanResponse
+    points: list[RoutePlanPointResponse]
+    segments: list[RoutePlanSegmentResponse]
 
 
-class RouteLineTrackResponse(BaseModel):
+class RoutePlanStructureReplaceRequest(BaseModel):
+    points: list[RoutePlanPointUpsertItem] = Field(default_factory=list)
+
+
+class RouteTrackGenerateRequest(BaseModel):
+    provider_code: str | None = Field(default=None, max_length=64)
+
+
+class RoutePlanTrackVersionSegmentResponse(BaseModel):
     id: int
-    line_id: int
-    track_status: str
-    geometry_json: dict | None
+    version_id: int
+    segment_id: int
+    segment_no: int
+    geometry_json: dict[str, Any]
     distance_km: Decimal | None
     estimated_duration_hour: Decimal | None
-    provider_summary_json: dict | None
-    error_message: str | None
-    generated_at: datetime | None
+    point_count: int
+    edit_status_code: str
     created_at: datetime
     updated_at: datetime
 
 
-class RouteLineStructureResponse(BaseModel):
-    line: RouteLineResponse
-    nodes: list[RouteLineNodeResponse]
-    segments: list[RouteLineSegmentResponse]
-    track: RouteLineTrackResponse | None
+class RoutePlanTrackVersionResponse(BaseModel):
+    id: int
+    plan_id: int
+    version_no: int
+    version_name: str | None
+    source_type_code: str
+    provider_type_code: str | None
+    parent_version_id: int | None
+    is_current: bool
+    version_status_code: str
+    distance_km: Decimal | None
+    estimated_duration_hour: Decimal | None
+    point_count: int
+    segment_count: int
+    summary_json: dict[str, Any] | None
+    error_message: str | None
+    generated_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    segments: list[RoutePlanTrackVersionSegmentResponse] = Field(default_factory=list)
 
 
-class RouteLineStructureReplaceRequest(BaseModel):
-    nodes: list[RouteLineNodeUpsertItem] = Field(min_length=2)
-    segments: list[RouteLineSegmentUpsertItem] = Field(min_length=1)
-
-
-class RouteLineTrackGenerateRequest(BaseModel):
-    provider_code: str | None = Field(default=None, max_length=64)
-
-
-class RouteLineTrackGenerateResponse(BaseModel):
-    line_id: int
+class RouteTrackVersionGenerateResponse(BaseModel):
+    plan_id: int
     status: str
     message: str
-    track: RouteLineTrackResponse | None = None
+    version: RoutePlanTrackVersionResponse | None = None
+
+
+class RouteTrackVersionSegmentSaveItem(BaseModel):
+    segment_id: int
+    geometry_json: dict[str, Any]
+    distance_km: Decimal | None = None
+    estimated_duration_hour: Decimal | None = None
+    edit_status_code: str = Field(default="EDITED", max_length=64)
+
+
+class RouteTrackVersionSaveRequest(BaseModel):
+    parent_version_id: int | None = None
+    version_name: str | None = Field(default=None, max_length=128)
+    summary_json: dict[str, Any] | None = None
+    segments: list[RouteTrackVersionSegmentSaveItem] = Field(default_factory=list)

@@ -19,11 +19,10 @@ from app.models.freight import (
 )
 from app.models.route import (
     ShippingRoute,
-    ShippingRouteLine,
-    ShippingRouteLineNode,
-    ShippingRouteLineSegment,
-    ShippingRouteLineTrack,
     ShippingRoutePlan,
+    ShippingRoutePlanPoint,
+    ShippingRoutePlanSegment,
+    ShippingRoutePlanSegmentResult,
 )
 from app.models.vessel import (
     VesselAisCitySnapshotItem,
@@ -140,16 +139,13 @@ async def _delete_route_codes(session, route_codes: list[str]) -> None:
     plan_ids = (
         await session.execute(select(ShippingRoutePlan.id).where(ShippingRoutePlan.route_id.in_(route_ids)))
     ).scalars().all()
-    line_ids: list[int] = []
     if plan_ids:
-        line_ids = (
-            await session.execute(select(ShippingRouteLine.id).where(ShippingRouteLine.plan_id.in_(plan_ids)))
+        segment_ids = (
+            await session.execute(select(ShippingRoutePlanSegment.id).where(ShippingRoutePlanSegment.plan_id.in_(plan_ids)))
         ).scalars().all()
-    if line_ids:
-        await session.execute(delete(ShippingRouteLineTrack).where(ShippingRouteLineTrack.line_id.in_(line_ids)))
-        await session.execute(delete(ShippingRouteLineSegment).where(ShippingRouteLineSegment.line_id.in_(line_ids)))
-        await session.execute(delete(ShippingRouteLineNode).where(ShippingRouteLineNode.line_id.in_(line_ids)))
-        await session.execute(delete(ShippingRouteLine).where(ShippingRouteLine.id.in_(line_ids)))
-    if plan_ids:
+        if segment_ids:
+            await session.execute(delete(ShippingRoutePlanSegmentResult).where(ShippingRoutePlanSegmentResult.segment_id.in_(segment_ids)))
+        await session.execute(delete(ShippingRoutePlanSegment).where(ShippingRoutePlanSegment.plan_id.in_(plan_ids)))
+        await session.execute(delete(ShippingRoutePlanPoint).where(ShippingRoutePlanPoint.plan_id.in_(plan_ids)))
         await session.execute(delete(ShippingRoutePlan).where(ShippingRoutePlan.id.in_(plan_ids)))
     await session.execute(delete(ShippingRoute).where(ShippingRoute.id.in_(route_ids)))

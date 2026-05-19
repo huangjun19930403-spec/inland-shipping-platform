@@ -960,6 +960,13 @@ class BusinessRegionService:
             return None
         return _to_boundary_response(row, labels)
 
+    async def list_region_cities(self, region_id: int) -> list[RegionCityRelationResponse]:
+        region = await self.repo.get_business_region(region_id)
+        if region is None:
+            raise NotFoundError("Region", region_id)
+        rows = await self.repo.list_region_city_relations(region_id)
+        return await self._region_city_relation_responses(rows)
+
     async def create_region_boundary_version(
         self,
         region_id: int,
@@ -987,13 +994,16 @@ class BusinessRegionService:
             raise NotFoundError("Region", region_id)
         rows = await self.repo.replace_region_cities(region_id, city_codes)
         await self.db.commit()
+        return await self._region_city_relation_responses(rows)
 
+    async def _region_city_relation_responses(self, rows) -> list[RegionCityRelationResponse]:
+        city_ids = [row.city_region_id for row in rows]
         city_map = {}
-        if city_codes:
+        if city_ids:
             from app.models.address import AdminRegion
             from sqlalchemy import select
 
-            result = await self.db.execute(select(AdminRegion).where(AdminRegion.code.in_(city_codes)))
+            result = await self.db.execute(select(AdminRegion).where(AdminRegion.id.in_(city_ids)))
             city_map = {row.id: row for row in result.scalars().all()}
 
         return [

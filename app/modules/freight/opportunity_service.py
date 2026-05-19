@@ -20,7 +20,14 @@ from app.models.freight import (
     FreightNormalizationSuggestion,
     FreightTmsInbound,
 )
-from app.models.route import ShippingRoute
+from app.models.route import (
+    ShippingRoute,
+    ShippingRoutePlan,
+    ShippingRoutePlanPoint,
+    ShippingRoutePlanSegment,
+    ShippingRoutePlanTrackVersion,
+    ShippingRoutePlanTrackVersionSegment,
+)
 from app.models.vessel import VesselCandidateAnalysis
 from app.modules.freight.opportunity_actions import ShippingOpportunityActionEvaluator
 from app.modules.freight.schemas import (
@@ -187,11 +194,40 @@ class ShippingOpportunityService:
             await self.db.execute(
                 select(ShippingRoute).where(
                     ShippingRoute.deleted_at.is_(None),
+                    ShippingRoute.origin_endpoint_type_code == "REGION",
+                    ShippingRoute.destination_endpoint_type_code == "REGION",
                     tuple_(ShippingRoute.origin_region_id, ShippingRoute.destination_region_id).in_(region_pairs),
                 )
             )
         ).scalars().all()
+        for row in rows:
+            setattr(row, "_route_available", await self._default_plan_available(row.id))
         return {(row.origin_region_id, row.destination_region_id): row for row in rows}
+
+    async def _default_plan_available(self, route_id: int) -> bool:
+        plan = await self.db.scalar(
+            select(ShippingRoutePlan)
+            .where(ShippingRoutePlan.route_id == route_id, ShippingRoutePlan.is_default.is_(True), ShippingRoutePlan.status_code != "ARCHIVED")
+            .order_by(ShippingRoutePlan.display_order.asc(), ShippingRoutePlan.id.asc())
+            .limit(1)
+        )
+        if plan is None:
+            return False
+        point_count = await self.db.scalar(select(func.count(ShippingRoutePlanPoint.id)).where(ShippingRoutePlanPoint.plan_id == plan.id)) or 0
+        segment_count = await self.db.scalar(select(func.count(ShippingRoutePlanSegment.id)).where(ShippingRoutePlanSegment.plan_id == plan.id)) or 0
+        current_segment_count = (
+            await self.db.scalar(
+                select(func.count(ShippingRoutePlanTrackVersionSegment.id))
+                .select_from(ShippingRoutePlanTrackVersionSegment)
+                .join(ShippingRoutePlanTrackVersion, ShippingRoutePlanTrackVersion.id == ShippingRoutePlanTrackVersionSegment.version_id)
+                .where(
+                    ShippingRoutePlanTrackVersion.id == plan.current_track_version_id,
+                    ShippingRoutePlanTrackVersion.version_status_code == "READY",
+                )
+            )
+            or 0
+        )
+        return point_count >= 2 and segment_count > 0 and current_segment_count == segment_count
 
     async def _candidate_analyses(self, freight_ids: list[int]) -> dict[int, VesselCandidateAnalysis]:
         if not freight_ids:
@@ -417,7 +453,7 @@ class ShippingOpportunityService:
     def _route_status(row: Freight, route: ShippingRoute | None) -> str:
         if not row.origin_node_id or not row.destination_node_id:
             return "NOT_COMPUTABLE"
-        return "READY" if route else "PENDING_ROUTE_MODEL"
+        return "READY" if route and getattr(route, "_route_available", False) else "PENDING_ROUTE_MODEL"
 
     @staticmethod
     def _capacity_status(row: Freight, analysis: VesselCandidateAnalysis | None) -> str:

@@ -1518,7 +1518,7 @@ class AnalysisDashboardService:
             **self._workbench_meta(
                 start,
                 end,
-                source_tables=["fact_freight_flow_daily", "fact_ship_flow_daily", "shipping_route_line_track"],
+                source_tables=["fact_freight_flow_daily", "fact_ship_flow_daily", "shipping_route_plan_track_version_segment"],
                 sample_count=len(freight_flows) + len(ship_flows),
                 actions=[
                     AnalysisActionBlock(action_code="PRECOMPUTE_FLOW_ROUTES", title="生成 AMMS 流向轨迹", target_route="/analysis/flows"),

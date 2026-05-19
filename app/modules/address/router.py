@@ -34,6 +34,7 @@ from app.modules.address.schemas import (
     RegionBoundaryVersionCreateRequest,
     RegionBoundaryVersionResponse,
     RegionCityRelationReplaceRequest,
+    RegionCityRelationResponse,
     TransportNodeContactReplaceRequest,
     TransportNodeContactResponse,
     TransportNodeCreateRequest,
@@ -259,6 +260,15 @@ async def get_current_region_boundary(
 ):
     service = BusinessRegionService(db)
     return await service.get_current_region_boundary(region_id)
+
+
+@router.get("/regions/{region_id}/cities", response_model=list[RegionCityRelationResponse])
+async def list_region_cities(
+    region_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = BusinessRegionService(db)
+    return await service.list_region_cities(region_id)
 
 
 @router.post("/regions/{region_id}/boundaries", response_model=RegionBoundaryVersionResponse)

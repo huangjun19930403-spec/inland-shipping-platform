@@ -5,8 +5,6 @@
     "code": "TEST_ROUTE_TAICANG_WUHU",
     "name": "测试夹具太仓至芜湖航线",
     "plan_code": "TEST_PLAN_TAICANG_WUHU",
-    "line_code": "TEST_LINE_TAICANG_WUHU",
-    "line_name": "测试夹具太仓-芜湖主线",
     "origin_region_code": "REGION_TMS_YANGTZE_DELTA",
     "destination_region_code": "REGION_TMS_WANJIANG",
     "node_keys": ["TAICANG", "NANJING", "WUHU"]

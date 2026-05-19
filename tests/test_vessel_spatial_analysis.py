@@ -15,7 +15,15 @@ from main import app
 from app.core.config import settings
 from app.models.address import NavigationConstraintPoint, NavigationConstraintProfile, TransportNode
 from app.models.base import Base
-from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineNode, ShippingRouteLineSegment, ShippingRoutePlan
+from app.models.route import (
+    ShippingRoute,
+    ShippingRoutePlan,
+    ShippingRoutePlanPoint,
+    ShippingRoutePlanSegment,
+    ShippingRoutePlanSegmentResult,
+    ShippingRoutePlanTrackVersion,
+    ShippingRoutePlanTrackVersionSegment,
+)
 from app.models.vessel import (
     VesselAisSnapshot,
     VesselCapacityDimension,
@@ -70,7 +78,7 @@ def test_round7_openapi_contracts_exist() -> None:
     node_params = {item["name"] for item in paths["/api/v1/vessels/ais/node-situation"]["get"]["parameters"]}
     assert {"node_id", "radius_km", "time_window_hours", "reported_within_minutes"}.issubset(node_params)
     route_params = {item["name"] for item in paths["/api/v1/vessels/ais/route-situation"]["get"]["parameters"]}
-    assert {"route_id", "line_id", "time_window_hours"}.issubset(route_params)
+    assert {"route_id", "plan_id", "time_window_hours"}.issubset(route_params)
 
 
 def test_round7_dict_and_config_defaults_are_seeded() -> None:
@@ -158,7 +166,7 @@ async def test_node_snapshot_drilldown_reuses_same_snapshot_and_failed_batches(s
 @pytest.mark.asyncio
 async def test_route_without_ready_geometry_is_not_computable(session: AsyncSession) -> None:
     now = datetime.utcnow()
-    route_id = await _seed_route_with_segment(session, segment_track_status="NOT_GENERATED", geometry_json=None)
+    route_id = await _seed_route_with_segment(session, generation_status_code="NOT_GENERATED", geometry_json=None)
     await _seed_vessel_with_position(session, now=now)
     await session.commit()
     service = VesselSpatialAnalysisService(session)
@@ -501,7 +509,7 @@ async def _seed_vessel_with_position(
 async def _seed_route_with_segment(
     session: AsyncSession,
     *,
-    segment_track_status: str = "READY",
+    generation_status_code: str = "READY",
     geometry_json: dict | None = None,
 ) -> int:
     now = datetime.utcnow()
@@ -512,6 +520,8 @@ async def _seed_route_with_segment(
                 id=200,
                 code="R200",
                 name="南京-镇江",
+                origin_endpoint_type_code="REGION",
+                destination_endpoint_type_code="REGION",
                 transport_org_type_code="WATER",
                 origin_region_id=1,
                 destination_region_id=2,
@@ -522,48 +532,81 @@ async def _seed_route_with_segment(
                 route_id=200,
                 plan_code="P200",
                 plan_name="主方案",
-                plan_type_code="MAIN",
+                plan_type_code="STANDARD",
+                is_default=True,
+                status_code="ACTIVE",
+                display_order=1,
             ),
-            ShippingRouteLine(
-                id=202,
-                plan_id=201,
-                line_code="L200",
-                line_name="主线",
-                line_role_code="MAIN",
-                priority=10,
-                track_status="READY",
-            ),
-            ShippingRouteLineNode(
+            ShippingRoutePlanPoint(
                 id=203,
-                line_id=202,
-                node_order=1,
-                node_type_code="MANUAL",
+                plan_id=201,
+                point_order=1,
+                point_type_code="MANUAL_POINT",
                 display_name="起点",
+                manual_name="起点",
                 longitude=Decimal("118.70"),
                 latitude=Decimal("32.00"),
+                transport_mode_after_code="WATER",
             ),
-            ShippingRouteLineNode(
+            ShippingRoutePlanPoint(
                 id=204,
-                line_id=202,
-                node_order=2,
-                node_type_code="MANUAL",
+                plan_id=201,
+                point_order=2,
+                point_type_code="MANUAL_POINT",
                 display_name="终点",
+                manual_name="终点",
                 longitude=Decimal("118.90"),
                 latitude=Decimal("32.08"),
             ),
-            ShippingRouteLineSegment(
+            ShippingRoutePlanSegment(
                 id=205,
-                line_id=202,
+                plan_id=201,
                 segment_no=1,
-                start_line_node_id=203,
-                end_line_node_id=204,
+                start_plan_point_id=203,
+                end_plan_point_id=204,
                 transport_mode_code="WATER",
-                segment_track_status=segment_track_status,
-                geometry_source="TEST",
-                geometry_json=geometry if segment_track_status == "READY" else None,
+                generation_status_code=generation_status_code,
             ),
         ]
     )
     await session.flush()
+    if generation_status_code == "READY":
+        result = ShippingRoutePlanSegmentResult(
+            segment_id=205,
+            result_no=1,
+            provider_type_code="TEST",
+            result_status_code="READY",
+            is_selected=True,
+            geometry_json=geometry,
+        )
+        session.add(result)
+        await session.flush()
+        segment = await session.get(ShippingRoutePlanSegment, 205)
+        segment.selected_result_id = result.id
+        version = ShippingRoutePlanTrackVersion(
+            plan_id=201,
+            version_no=1,
+            source_type_code="TEST",
+            provider_type_code="TEST",
+            is_current=True,
+            version_status_code="READY",
+            point_count=len(geometry.get("coordinates") or []),
+            segment_count=1,
+            generated_at=now,
+        )
+        session.add(version)
+        await session.flush()
+        session.add(
+            ShippingRoutePlanTrackVersionSegment(
+                version_id=version.id,
+                segment_id=205,
+                segment_no=1,
+                geometry_json=geometry,
+                point_count=len(geometry.get("coordinates") or []),
+                edit_status_code="ORIGINAL",
+            )
+        )
+        plan = await session.get(ShippingRoutePlan, 201)
+        plan.current_track_version_id = version.id
     _ = now, geometry
     return 200

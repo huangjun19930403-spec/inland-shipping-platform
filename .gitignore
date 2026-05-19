@@ -51,3 +51,6 @@ htmlcov/
 logs/
 *.pid
 *.tmp
+
+# Runtime uploads
+storage_files/

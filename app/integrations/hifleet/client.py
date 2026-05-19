@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
@@ -126,6 +127,22 @@ class HifleetRouteClient:
         return None
 
     @classmethod
+    def _extract_points_from_text(cls, value: str) -> list[list[float]]:
+        text = value.strip()
+        if "," not in text:
+            return []
+        points: list[list[float]] = []
+        for pair in re.split(r"[;|]", text):
+            if "," not in pair:
+                continue
+            lon_text, lat_text, *_ = pair.split(",")
+            lon = cls._to_float(lon_text.strip())
+            lat = cls._to_float(lat_text.strip())
+            if lon is not None and lat is not None:
+                points.append([lon, lat])
+        return points
+
+    @classmethod
     def _extract_points(cls, payload: Any) -> list[list[float]]:
         points: list[list[float]] = []
 
@@ -134,15 +151,17 @@ class HifleetRouteClient:
                 point = cls._extract_point_from_dict(item)
                 if point:
                     points.append(point)
-                for key in ("waypoints", "points", "path", "route", "data", "list"):
-                    if key in item:
-                        walk(item.get(key))
+                for value in item.values():
+                    if isinstance(value, dict | list | str):
+                        walk(value)
             elif isinstance(item, list):
                 if len(item) >= 2 and cls._to_float(item[0]) is not None and cls._to_float(item[1]) is not None:
                     points.append([float(item[0]), float(item[1])])
                 else:
                     for sub in item:
                         walk(sub)
+            elif isinstance(item, str):
+                points.extend(cls._extract_points_from_text(item))
 
         walk(payload)
 

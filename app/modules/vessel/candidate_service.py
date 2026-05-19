@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.address import Region, RegionBoundaryVersion, TransportNode
 from app.models.freight import Freight, FreightCandidate
-from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack, ShippingRoutePlan
+from app.models.route import ShippingRoute, ShippingRoutePlan, ShippingRoutePlanSegment, ShippingRoutePlanTrackVersion, ShippingRoutePlanTrackVersionSegment
 from app.models.vessel import (
     VesselCandidateAnalysis,
     VesselCandidateAnalysisAnnotation,
@@ -82,7 +82,7 @@ class _AnalysisContext:
     origin_node_id: int | None = None
     destination_node_id: int | None = None
     route_id: int | None = None
-    line_id: int | None = None
+    plan_id: int | None = None
     origin_city_code: str | None = None
     destination_city_code: str | None = None
     region_id: int | None = None
@@ -124,7 +124,7 @@ class VesselCandidateAnalysisService:
                 uncertainty_notes.append("SPATIAL_SNAPSHOT_EXPIRED")
             if spatial_snapshot.status_code == "PARTIAL":
                 uncertainty_notes.append("SPATIAL_SNAPSHOT_PARTIAL")
-        elif context.origin_node_id or context.route_id or context.line_id:
+        elif context.origin_node_id or context.route_id or context.plan_id:
             not_computable.append("SPATIAL_SNAPSHOT_MISSING")
 
         source_ais_snapshot_id = payload.source_ais_snapshot_id or (spatial_snapshot.source_snapshot_id if spatial_snapshot else None)
@@ -185,7 +185,7 @@ class VesselCandidateAnalysisService:
             origin_node_id=context.origin_node_id,
             destination_node_id=context.destination_node_id,
             route_id=context.route_id,
-            line_id=context.line_id,
+            plan_id=context.plan_id,
             origin_city_code=context.origin_city_code,
             destination_city_code=context.destination_city_code,
             region_id=context.region_id,
@@ -346,7 +346,7 @@ class VesselCandidateAnalysisService:
                 origin_node_id=payload.origin_node_id or (first.origin_node_id if first else None),
                 destination_node_id=payload.destination_node_id or (first.destination_node_id if first else None),
                 route_id=payload.route_id,
-                line_id=payload.line_id,
+                plan_id=payload.plan_id,
                 origin_city_code=payload.origin_city_code or (first.origin_city_code if first else None),
                 destination_city_code=payload.destination_city_code or (first.destination_city_code if first else None),
                 tonnage=payload.tonnage or (self._freight_tonnage(first) if first else None),
@@ -358,7 +358,7 @@ class VesselCandidateAnalysisService:
             origin_node_id=payload.origin_node_id,
             destination_node_id=payload.destination_node_id,
             route_id=payload.route_id,
-            line_id=payload.line_id,
+            plan_id=payload.plan_id,
             origin_city_code=payload.origin_city_code,
             destination_city_code=payload.destination_city_code,
             region_id=payload.region_id,
@@ -373,14 +373,14 @@ class VesselCandidateAnalysisService:
         context: _AnalysisContext,
     ) -> VesselSpatialObservationSnapshot | None:
         service = VesselSpatialAnalysisService(self.db)
-        if context.route_id or context.line_id:
+        if context.route_id or context.plan_id:
             cached = await self._cached_route_snapshot(context)
             if cached is not None:
                 return cached
             response = await service.route_situation(
                 VesselAisRouteSituationQuery(
                     route_id=context.route_id,
-                    line_id=context.line_id,
+                    plan_id=context.plan_id,
                     reported_within_minutes=payload.reported_within_minutes,
                     ship_type_code=self._single_ship_type(payload),
                     deadweight_min=payload.filters.min_deadweight_ton,
@@ -436,8 +436,8 @@ class VesselCandidateAnalysisService:
         )
         if context.route_id:
             stmt = stmt.where(VesselRouteSegmentObservationItem.route_id == context.route_id)
-        if context.line_id:
-            stmt = stmt.where(VesselRouteSegmentObservationItem.line_id == context.line_id)
+        if context.plan_id:
+            stmt = stmt.where(VesselRouteSegmentObservationItem.plan_id == context.plan_id)
         return await self.db.scalar(
             stmt.order_by(desc(VesselSpatialObservationSnapshot.generated_at), desc(VesselSpatialObservationSnapshot.id)).limit(1)
         )
@@ -653,7 +653,7 @@ class VesselCandidateAnalysisService:
         uncertainty: list[str],
         not_computable: list[str],
     ) -> tuple[Decimal, Decimal | None, Decimal | None]:
-        if context.route_id is None and context.line_id is None:
+        if context.route_id is None and context.plan_id is None:
             return Decimal("15"), None, None
         if route_sample is None:
             not_computable.append("TRACK_COVERAGE_INSUFFICIENT")
@@ -820,7 +820,7 @@ class VesselCandidateAnalysisService:
             origin_node_id=analysis.origin_node_id,
             destination_node_id=analysis.destination_node_id,
             route_id=analysis.route_id,
-            line_id=analysis.line_id,
+            plan_id=analysis.plan_id,
             origin_city_code=analysis.origin_city_code,
             destination_city_code=analysis.destination_city_code,
             region_id=analysis.region_id,
@@ -1008,9 +1008,8 @@ class VesselCandidateAnalysisService:
     async def _route_segment_count(self, route_id: int) -> int:
         return int(
             await self.db.scalar(
-                select(func.count(ShippingRouteLineSegment.id))
-                .join(ShippingRouteLine, ShippingRouteLine.id == ShippingRouteLineSegment.line_id)
-                .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
+                select(func.count(ShippingRoutePlanSegment.id))
+                .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRoutePlanSegment.plan_id)
                 .where(ShippingRoutePlan.route_id == route_id)
             )
             or 0
@@ -1019,10 +1018,15 @@ class VesselCandidateAnalysisService:
     async def _route_track_count(self, route_id: int) -> int:
         return int(
             await self.db.scalar(
-                select(func.count(ShippingRouteLineTrack.id))
-                .join(ShippingRouteLine, ShippingRouteLine.id == ShippingRouteLineTrack.line_id)
-                .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
-                .where(ShippingRoutePlan.route_id == route_id)
+                select(func.count(ShippingRoutePlanTrackVersionSegment.id))
+                .select_from(ShippingRoutePlanTrackVersionSegment)
+                .join(ShippingRoutePlanTrackVersion, ShippingRoutePlanTrackVersion.id == ShippingRoutePlanTrackVersionSegment.version_id)
+                .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRoutePlanTrackVersion.plan_id)
+                .where(
+                    ShippingRoutePlan.route_id == route_id,
+                    ShippingRoutePlan.current_track_version_id == ShippingRoutePlanTrackVersion.id,
+                    ShippingRoutePlanTrackVersion.version_status_code == "READY",
+                )
             )
             or 0
         )

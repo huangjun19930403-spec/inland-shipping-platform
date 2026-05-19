@@ -31,7 +31,14 @@ from app.integrations.config_keys import (
 )
 from app.integrations.es.history_client import HistoryEsClient
 from app.models.address import NavigationConstraintPoint, NavigationConstraintProfile, TransportNode
-from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineNode, ShippingRouteLineSegment, ShippingRoutePlan
+from app.models.route import (
+    ShippingRoute,
+    ShippingRoutePlan,
+    ShippingRoutePlanPoint,
+    ShippingRoutePlanSegment,
+    ShippingRoutePlanTrackVersion,
+    ShippingRoutePlanTrackVersionSegment,
+)
 from app.models.vessel import (
     VesselAisSnapshot,
     VesselCapacityDimension,
@@ -524,12 +531,12 @@ class VesselSpatialAnalysisService:
 
     async def route_situation(self, query: VesselAisRouteSituationQuery) -> VesselAisRouteSituationResponse:
         now = _utcnow()
-        if query.line_id is None and query.route_id is None:
-            raise ValidationError("line_id 或 route_id 必须至少提供一个")
-        line, route_id, route_reason = await self._resolve_route_line(query)
+        if query.plan_id is None and query.route_id is None:
+            raise ValidationError("plan_id 或 route_id 必须至少提供一个")
+        plan, route_id, route_reason = await self._resolve_route_plan(query)
         query_payload = query.model_dump(mode="json")
         source_snapshot = await self._latest_ais_snapshot()
-        if line is None:
+        if plan is None:
             snapshot = await self._persist_spatial_snapshot(
                 observation_type_code="ROUTE",
                 query_payload=query_payload,
@@ -550,7 +557,7 @@ class VesselSpatialAnalysisService:
                 generated_at=now,
                 message=route_reason,
                 snapshot=self._snapshot_meta(snapshot),
-                summary=VesselRouteSituationSummary(route_id=query.route_id, line_id=0, not_computable_reasons=[route_reason or "MAIN_LINE_MISSING"]),
+                summary=VesselRouteSituationSummary(route_id=query.route_id, plan_id=0, not_computable_reasons=[route_reason or "DEFAULT_PLAN_MISSING"]),
                 segments=[],
                 samples=[],
                 constraints=[],
@@ -576,7 +583,7 @@ class VesselSpatialAnalysisService:
                 generated_at=now,
                 message="缺少可用 AIS 快照",
                 snapshot=self._snapshot_meta(snapshot),
-                summary=VesselRouteSituationSummary(route_id=route_id, line_id=line.id, line_name=line.line_name, not_computable_reasons=["LATEST_AIS_SNAPSHOT_MISSING"]),
+                summary=VesselRouteSituationSummary(route_id=route_id, plan_id=plan.id, plan_name=plan.plan_name, not_computable_reasons=["LATEST_AIS_SNAPSHOT_MISSING"]),
             )
 
         latest_rows_all = await self._latest_position_rows(source_snapshot.snapshot_id, query)
@@ -594,10 +601,27 @@ class VesselSpatialAnalysisService:
             now,
         )
         segments = (await self.db.scalars(
-            select(ShippingRouteLineSegment)
-            .where(ShippingRouteLineSegment.line_id == line.id)
-            .order_by(ShippingRouteLineSegment.segment_no.asc(), ShippingRouteLineSegment.id.asc())
+            select(ShippingRoutePlanSegment)
+            .where(ShippingRoutePlanSegment.plan_id == plan.id)
+            .order_by(ShippingRoutePlanSegment.segment_no.asc(), ShippingRoutePlanSegment.id.asc())
         )).all()
+        current_version = (
+            await self.db.scalar(select(ShippingRoutePlanTrackVersion).where(ShippingRoutePlanTrackVersion.id == plan.current_track_version_id))
+            if plan.current_track_version_id
+            else None
+        )
+        version_segment_rows = (
+            (
+                await self.db.scalars(
+                    select(ShippingRoutePlanTrackVersionSegment)
+                    .where(ShippingRoutePlanTrackVersionSegment.version_id == current_version.id)
+                    .order_by(ShippingRoutePlanTrackVersionSegment.segment_no.asc())
+                )
+            ).all()
+            if current_version and current_version.version_status_code == "READY"
+            else []
+        )
+        version_segment_by_segment_id = {row.segment_id: row for row in version_segment_rows}
         buffer_km = await self._route_buffer_km()
         direction_tolerance_deg = await self._direction_tolerance_deg()
         active_vessel_count = len({row.position.mmsi for row in latest_rows})
@@ -605,13 +629,16 @@ class VesselSpatialAnalysisService:
         sample_rows: list[VesselRouteSegmentMatchSample] = []
         not_computable: set[str] = set()
         for segment in segments:
-            geometry = _parse_linestring(segment.geometry_json)
-            if segment.segment_track_status != "READY" or len(geometry) < 2:
+            version_segment = version_segment_by_segment_id.get(segment.id)
+            geometry = _parse_linestring(version_segment.geometry_json if version_segment else None)
+            if version_segment is None or len(geometry) < 2:
                 not_computable.add("ROUTE_GEOMETRY_MISSING")
                 observation_rows.append(self._route_segment_item(
                     route_id,
-                    line.id,
+                    plan.id,
                     segment,
+                    geometry_source=current_version.source_type_code if current_version else None,
+                    geometry_json=version_segment.geometry_json if version_segment else None,
                     active_vessel_count=active_vessel_count,
                     geometry_status_code="MISSING",
                     not_computable_reasons=["ROUTE_GEOMETRY_MISSING"],
@@ -622,8 +649,10 @@ class VesselSpatialAnalysisService:
             sample_rows.extend(matches)
             observation_rows.append(self._route_segment_item(
                 route_id,
-                line.id,
+                plan.id,
                 segment,
+                geometry_source=current_version.source_type_code if current_version else None,
+                geometry_json=version_segment.geometry_json,
                 active_vessel_count=active_vessel_count,
                 geometry_status_code="READY",
                 matched_vessel_count=len({item.mmsi for item in reliable_matches}),
@@ -698,7 +727,7 @@ class VesselSpatialAnalysisService:
             item.snapshot_id = snapshot.snapshot_id
             self.db.add(item)
         await self.db.flush()
-        constraints = await self._navigation_constraint_items("ROUTE_LINE", line_id=line.id, snapshot_id=snapshot.snapshot_id)
+        constraints = await self._navigation_constraint_items("ROUTE_PLAN", plan_id=plan.id, snapshot_id=snapshot.snapshot_id)
         await self.db.commit()
         return VesselAisRouteSituationResponse(
             source_status=snapshot.source_status_code,
@@ -707,8 +736,8 @@ class VesselSpatialAnalysisService:
             snapshot=self._snapshot_meta(snapshot),
             summary=VesselRouteSituationSummary(
                 route_id=route_id,
-                line_id=line.id,
-                line_name=line.line_name,
+                plan_id=plan.id,
+                plan_name=plan.plan_name,
                 segment_count=len(segments),
                 matched_segment_count=sum(1 for item in observation_rows if item.matched_vessel_count > 0),
                 matched_vessel_count=matched_vessels,
@@ -755,10 +784,10 @@ class VesselSpatialAnalysisService:
 
     async def navigation_constraints(self, query: VesselNavigationConstraintQuery) -> VesselNavigationConstraintResponse:
         context_type = query.context_type
-        context_id = query.node_id if context_type == "NODE" else query.line_id if context_type == "ROUTE_LINE" else query.segment_id
+        context_id = query.node_id if context_type == "NODE" else query.plan_id if context_type == "ROUTE_PLAN" else query.segment_id
         if context_id is None:
             raise ValidationError("context_type 与对应 id 参数不匹配")
-        items = await self._navigation_constraint_items(context_type, node_id=query.node_id, line_id=query.line_id, segment_id=query.segment_id)
+        items = await self._navigation_constraint_items(context_type, node_id=query.node_id, plan_id=query.plan_id, segment_id=query.segment_id)
         source_status = "AVAILABLE" if any(item.status_code != "MISSING_SOURCE" for item in items) else "EMPTY"
         return VesselNavigationConstraintResponse(
             generated_at=_utcnow(),
@@ -781,7 +810,7 @@ class VesselSpatialAnalysisService:
             first = route_items[0]
             route_summary = VesselRouteSituationSummary(
                 route_id=first.route_id,
-                line_id=first.line_id,
+                plan_id=first.plan_id,
                 segment_count=len(route_items),
                 matched_segment_count=sum(1 for item in route_items if item.matched_vessel_count > 0),
                 matched_vessel_count=snapshot.matched_position_count,
@@ -1102,28 +1131,26 @@ class VesselSpatialAnalysisService:
             return "STAYING"
         return "PASSBY"
 
-    async def _resolve_route_line(self, query: VesselAisRouteSituationQuery) -> tuple[ShippingRouteLine | None, int | None, str | None]:
-        if query.line_id is not None:
-            line = await self.db.get(ShippingRouteLine, query.line_id)
-            if line is None:
-                return None, query.route_id, "ROUTE_LINE_NOT_FOUND"
-            plan = await self.db.get(ShippingRoutePlan, line.plan_id)
-            return line, plan.route_id if plan else query.route_id, None
+    async def _resolve_route_plan(self, query: VesselAisRouteSituationQuery) -> tuple[ShippingRoutePlan | None, int | None, str | None]:
+        if query.plan_id is not None:
+            plan = await self.db.get(ShippingRoutePlan, query.plan_id)
+            if plan is None:
+                return None, query.route_id, "ROUTE_PLAN_NOT_FOUND"
+            return plan, plan.route_id, None
         route = await self.db.get(ShippingRoute, query.route_id)
         if route is None:
             raise NotFoundError("ShippingRoute", query.route_id)
-        line = await self.db.scalar(
-            select(ShippingRouteLine)
-            .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRouteLine.plan_id)
-            .where(ShippingRoutePlan.route_id == query.route_id, ShippingRouteLine.line_role_code == "MAIN")
-            .order_by(ShippingRouteLine.priority.desc(), ShippingRouteLine.id.asc())
+        plan = await self.db.scalar(
+            select(ShippingRoutePlan)
+            .where(ShippingRoutePlan.route_id == query.route_id, ShippingRoutePlan.is_default.is_(True))
+            .order_by(ShippingRoutePlan.display_order.asc(), ShippingRoutePlan.id.asc())
             .limit(1)
         )
-        return line, query.route_id, None if line else "MAIN_LINE_MISSING"
+        return plan, query.route_id, None if plan else "DEFAULT_PLAN_MISSING"
 
     def _match_segment_samples(
         self,
-        segment: ShippingRouteLineSegment,
+        segment: ShippingRoutePlanSegment,
         geometry: list[tuple[float, float]],
         latest_rows: list[_LatestPositionRow],
         history_points: dict[str, list[dict[str, Any]]],
@@ -1186,9 +1213,11 @@ class VesselSpatialAnalysisService:
     def _route_segment_item(
         self,
         route_id: int | None,
-        line_id: int,
-        segment: ShippingRouteLineSegment,
+        plan_id: int,
+        segment: ShippingRoutePlanSegment,
         *,
+        geometry_source: str | None,
+        geometry_json: dict[str, Any] | None,
         active_vessel_count: int,
         geometry_status_code: str,
         matched_vessel_count: int = 0,
@@ -1203,13 +1232,13 @@ class VesselSpatialAnalysisService:
         return VesselRouteSegmentObservationItem(
             snapshot_id="",
             route_id=route_id,
-            line_id=line_id,
+            plan_id=plan_id,
             segment_id=segment.id,
             segment_no=segment.segment_no,
             segment_name=f"航段 {segment.segment_no}",
             geometry_status_code=geometry_status_code,
-            geometry_source=segment.geometry_source,
-            geometry_json=segment.geometry_json,
+            geometry_source=geometry_source,
+            geometry_json=geometry_json,
             matched_vessel_count=matched_vessel_count,
             active_vessel_count=active_vessel_count,
             point_count=point_count,
@@ -1227,12 +1256,12 @@ class VesselSpatialAnalysisService:
         context_type: str,
         *,
         node_id: int | None = None,
-        line_id: int | None = None,
+        plan_id: int | None = None,
         segment_id: int | None = None,
         radius_km: float | None = None,
         snapshot_id: str | None = None,
     ) -> list[VesselNavigationConstraintEvidenceResponse]:
-        context_id = node_id if context_type == "NODE" else line_id if context_type == "ROUTE_LINE" else segment_id
+        context_id = node_id if context_type == "NODE" else plan_id if context_type == "ROUTE_PLAN" else segment_id
         if context_id is None:
             raise ValidationError("context_type 与对应 id 参数不匹配")
         points: list[NavigationConstraintPoint] = []
@@ -1244,19 +1273,22 @@ class VesselSpatialAnalysisService:
                     points = [point for point in candidates if _within_distance_km(node.longitude, node.latitude, point.longitude, point.latitude, radius_km)]
                 else:
                     points = list(candidates)
-        elif context_type == "ROUTE_LINE":
+        elif context_type == "ROUTE_PLAN":
             constraint_ids = (await self.db.scalars(
-                select(ShippingRouteLineNode.constraint_point_id)
-                .where(ShippingRouteLineNode.line_id == line_id, ShippingRouteLineNode.constraint_point_id.is_not(None))
+                select(ShippingRoutePlanPoint.constraint_point_id)
+                .where(ShippingRoutePlanPoint.plan_id == plan_id, ShippingRoutePlanPoint.constraint_point_id.is_not(None))
             )).all()
             if constraint_ids:
                 points = list((await self.db.scalars(select(NavigationConstraintPoint).where(NavigationConstraintPoint.id.in_(constraint_ids)))).all())
         else:
-            segment = await self.db.get(ShippingRouteLineSegment, segment_id)
+            segment = await self.db.get(ShippingRoutePlanSegment, segment_id)
             if segment:
                 constraint_ids = (await self.db.scalars(
-                    select(ShippingRouteLineNode.constraint_point_id)
-                    .where(ShippingRouteLineNode.id.in_([segment.start_line_node_id, segment.end_line_node_id]), ShippingRouteLineNode.constraint_point_id.is_not(None))
+                    select(ShippingRoutePlanPoint.constraint_point_id)
+                    .where(
+                        ShippingRoutePlanPoint.id.in_([segment.start_plan_point_id, segment.end_plan_point_id]),
+                        ShippingRoutePlanPoint.constraint_point_id.is_not(None),
+                    )
                 )).all()
                 if constraint_ids:
                     points = list((await self.db.scalars(select(NavigationConstraintPoint).where(NavigationConstraintPoint.id.in_(constraint_ids)))).all())
@@ -1466,7 +1498,7 @@ class VesselSpatialAnalysisService:
         return VesselRouteSegmentObservationResponse(
             id=row.id,
             route_id=row.route_id,
-            line_id=row.line_id,
+            plan_id=row.plan_id,
             segment_id=row.segment_id,
             segment_no=row.segment_no,
             segment_name=row.segment_name,

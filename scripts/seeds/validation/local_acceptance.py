@@ -79,7 +79,7 @@ from app.models.analysis import (
 from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightNormalizationSuggestion, FreightNormalizationTask, FreightTmsInbound
-from app.models.route import ShippingRoute, ShippingRouteLine, ShippingRouteLineSegment, ShippingRouteLineTrack
+from app.models.route import ShippingRoute, ShippingRoutePlanSegment, ShippingRoutePlanSegmentResult
 from app.models.system import SysMenu, SysRole, SysRoleMenu, SystemConfig
 from app.models.vessel import (
     VesselAffiliationEvidence,
@@ -1433,39 +1433,16 @@ async def verify() -> list[CheckResult]:
             )
         )
 
-        invalid_line_statuses = (
-            (
-                await session.execute(
-                    select(ShippingRouteLine.line_code, ShippingRouteLine.track_status).where(
-                        ~ShippingRouteLine.track_status.in_(ROUTE_TRACK_STATUSES)
-                    )
-                )
-            )
-            .all()
-        )
-        results.append(
-            _result(
-                "route line track statuses valid",
-                not invalid_line_statuses,
-                str(invalid_line_statuses or "none"),
-            )
-        )
-
         invalid_segment_values = (
             (
                 await session.execute(
                     select(
-                        ShippingRouteLineSegment.segment_no,
-                        ShippingRouteLineSegment.transport_mode_code,
-                        ShippingRouteLineSegment.segment_track_status,
-                        ShippingRouteLineSegment.geometry_source,
+                        ShippingRoutePlanSegment.segment_no,
+                        ShippingRoutePlanSegment.transport_mode_code,
+                        ShippingRoutePlanSegment.generation_status_code,
                     ).where(
-                        (~ShippingRouteLineSegment.transport_mode_code.in_(ROUTE_TRANSPORT_MODES))
-                        | (~ShippingRouteLineSegment.segment_track_status.in_(ROUTE_TRACK_STATUSES))
-                        | (
-                            ShippingRouteLineSegment.geometry_source.is_not(None)
-                            & (~ShippingRouteLineSegment.geometry_source.in_(ROUTE_GEOMETRY_SOURCES))
-                        )
+                        (~ShippingRoutePlanSegment.transport_mode_code.in_(ROUTE_TRANSPORT_MODES))
+                        | (~ShippingRoutePlanSegment.generation_status_code.in_(ROUTE_TRACK_STATUSES))
                     )
                 )
             )
@@ -1479,11 +1456,16 @@ async def verify() -> list[CheckResult]:
             )
         )
 
-        invalid_track_statuses = (
+        invalid_result_values = (
             (
                 await session.execute(
-                    select(ShippingRouteLineTrack.line_id, ShippingRouteLineTrack.track_status).where(
-                        ~ShippingRouteLineTrack.track_status.in_(ROUTE_TRACK_STATUSES)
+                    select(
+                        ShippingRoutePlanSegmentResult.segment_id,
+                        ShippingRoutePlanSegmentResult.provider_type_code,
+                        ShippingRoutePlanSegmentResult.result_status_code,
+                    ).where(
+                        (~ShippingRoutePlanSegmentResult.result_status_code.in_(ROUTE_TRACK_STATUSES))
+                        | (~ShippingRoutePlanSegmentResult.provider_type_code.in_(ROUTE_GEOMETRY_SOURCES | {"AUTO"}))
                     )
                 )
             )
@@ -1491,9 +1473,9 @@ async def verify() -> list[CheckResult]:
         )
         results.append(
             _result(
-                "stored route track statuses valid",
-                not invalid_track_statuses,
-                str(invalid_track_statuses or "none"),
+                "route segment result enums valid",
+                not invalid_result_values,
+                str(invalid_result_values or "none"),
             )
         )
 

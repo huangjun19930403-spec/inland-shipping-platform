@@ -170,7 +170,7 @@ class VesselAisNodeVesselsQuery(VesselAisNodeSituationQuery):
 
 class VesselAisRouteSituationQuery(BaseModel):
     route_id: int | None = Field(default=None, ge=1)
-    line_id: int | None = Field(default=None, ge=1)
+    plan_id: int | None = Field(default=None, ge=1)
     time_window_hours: int = Field(default=24, ge=1, le=168)
     reported_within_minutes: int | None = Field(default=1440, ge=5, le=43200)
     ship_type_code: str | None = None
@@ -187,9 +187,9 @@ class VesselAisRouteSegmentVesselsQuery(BaseModel):
     page_size: int = Field(default=20, ge=1, le=100)
 
 class VesselNavigationConstraintQuery(BaseModel):
-    context_type: str = Field(pattern="^(NODE|ROUTE_LINE|ROUTE_SEGMENT)$")
+    context_type: str = Field(pattern="^(NODE|ROUTE_PLAN|ROUTE_SEGMENT)$")
     node_id: int | None = Field(default=None, ge=1)
-    line_id: int | None = Field(default=None, ge=1)
+    plan_id: int | None = Field(default=None, ge=1)
     segment_id: int | None = Field(default=None, ge=1)
 
 class VesselPositionMonitorItemResponse(VesselListItemResponse):
@@ -621,7 +621,7 @@ class VesselAisNodeVesselsResponse(PageResponse[VesselNodeObservationVesselRespo
 class VesselRouteSegmentObservationResponse(BaseModel):
     id: int | None = None
     route_id: int | None = None
-    line_id: int
+    plan_id: int
     segment_id: int
     segment_no: int
     segment_name: str | None = None
@@ -659,8 +659,8 @@ class VesselRouteSegmentMatchSampleResponse(BaseModel):
 
 class VesselRouteSituationSummary(BaseModel):
     route_id: int | None = None
-    line_id: int
-    line_name: str | None = None
+    plan_id: int
+    plan_name: str | None = None
     segment_count: int = 0
     matched_segment_count: int = 0
     matched_vessel_count: int = 0

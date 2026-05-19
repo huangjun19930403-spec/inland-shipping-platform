@@ -34,7 +34,6 @@ from scripts.seeds.demo.experience.shared import (
     ROUTE_SNAPSHOT_IDS,
     SCENARIO_VERSION,
     DemoPosition,
-    RouteInfo,
     _constraint,
     _coord,
     _hash,
@@ -418,106 +417,15 @@ async def _seed_route_segment_observations(
     session,
     *,
     now: datetime,
-    route_infos: dict[str, RouteInfo],
     demo_positions: list[DemoPosition],
 ) -> None:
-    sample_cursor = 0
-    for route_key, snapshot_id in ROUTE_SNAPSHOT_IDS.items():
-        route_info = route_infos[route_key]
-        segment_count = len(route_info.segments)
-        session.add(
-            VesselSpatialObservationSnapshot(
-                snapshot_id=snapshot_id,
-                source_snapshot_id=AIS_SNAPSHOT_ID,
-                observation_type_code="ROUTE_SEGMENT",
-                query_hash=_hash(f"demo-route-{route_info.route.code}"),
-                query_params_json={
-                    "route_id": route_info.route.id,
-                    "route_code": route_info.route.code,
-                    "line_id": route_info.line.id,
-                    "source_layer": "LOCAL_DEMO",
-                },
-                status_code="READY",
-                source_status_code="AVAILABLE",
-                stat_time=now,
-                window_start=now - timedelta(hours=12),
-                window_end=now,
-                generated_at=now,
-                expires_at=now + timedelta(days=30),
-                coverage_rate=Decimal("92.00"),
-                confidence_level="HIGH",
-                freshness_distribution_json={"FRESH": 18, "STALE": 5, "EXPIRED": 1},
-                source_indices_json=[DEMO_SOURCE_INDEX],
-                stale_position_count=6,
-                matched_position_count=segment_count * 8,
-                active_vessel_count=segment_count * 8,
-                uncertainty_notes_json=["Route segment samples are local-demo mirror observations."],
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        await session.flush()
-        for segment in route_info.segments:
-            geometry = segment.geometry_json or {}
-            coords = geometry.get("coordinates") or []
-            start = (_coord(coords[0][0]), _coord(coords[0][1])) if coords else (Decimal("0"), Decimal("0"))
-            end = (_coord(coords[-1][0]), _coord(coords[-1][1])) if coords else start
-            session.add(
-                VesselRouteSegmentObservationItem(
-                    snapshot_id=snapshot_id,
-                    route_id=route_info.route.id,
-                    line_id=route_info.line.id,
-                    segment_id=segment.id,
-                    segment_no=segment.segment_no,
-                    segment_name=f"{route_info.line.line_name}-{segment.segment_no}",
-                    geometry_status_code="READY",
-                    geometry_source=segment.geometry_source,
-                    geometry_json=segment.geometry_json,
-                    matched_vessel_count=8,
-                    active_vessel_count=7,
-                    point_count=44 + segment.segment_no,
-                    gap_count=segment.segment_no % 2,
-                    covered_ratio=Decimal("0.87"),
-                    average_match_score=Decimal("83.50"),
-                    coverage_rate=Decimal("91.00"),
-                    confidence_level="HIGH",
-                    created_at=now,
-                )
-            )
-            for index in range(8):
-                item = demo_positions[(sample_cursor + index) % len(demo_positions)]
-                ratio = Decimal(str((index + 1) / 9)).quantize(Decimal("0.0001"))
-                lng, lat = _interpolate(start, end, ratio, index)
-                session.add(
-                    VesselRouteSegmentMatchSample(
-                        snapshot_id=snapshot_id,
-                        segment_id=segment.id,
-                        vessel_profile_id=item.summary.vessel_profile_id,
-                        mmsi=str(item.summary.current_mmsi or ""),
-                        ship_name=item.summary.ship_name,
-                        ship_type_code=item.summary.ship_type_code,
-                        deadweight_ton=item.summary.deadweight_ton,
-                        match_score=Decimal(str(88 - index * 3)).quantize(Decimal("0.01")),
-                        covered_ratio=Decimal(str(0.93 - index * 0.035)).quantize(Decimal("0.01")),
-                        direction_consistency=Decimal(str(0.95 - index * 0.025)).quantize(Decimal("0.01")),
-                        point_count=8 + index,
-                        gap_count=1 if index in {6, 7} else 0,
-                        latest_position_time=item.position_time,
-                        source_index=item.source_index,
-                        freshness_level=item.freshness_level,
-                        confidence_level="HIGH" if index < 5 else "MEDIUM",
-                        match_status_code="MATCHED" if index < 7 else "LOW_CONFIDENCE",
-                        created_at=now,
-                    )
-                )
-            sample_cursor += 8
+    return
 
 
 async def _seed_constraint_evidence(
     session,
     *,
     now: datetime,
-    route_infos: dict[str, RouteInfo],
     nodes_by_key: dict[str, TransportNode],
 ) -> None:
     constraints = [
@@ -530,13 +438,9 @@ async def _seed_constraint_evidence(
     for node_key, snapshot_id in NODE_SNAPSHOT_IDS.items():
         node = nodes_by_key[node_key]
         contexts.append((snapshot_id, "NODE", node.id, constraints[len(contexts) % len(constraints)]))
-    for route_key, snapshot_id in ROUTE_SNAPSHOT_IDS.items():
-        for segment in route_infos[route_key].segments[:5]:
-            contexts.append((snapshot_id, "ROUTE_SEGMENT", segment.id, constraints[len(contexts) % len(constraints)]))
     while len(contexts) < 18:
-        route_info = route_infos["TAICANG_WUHU"]
-        segment = route_info.segments[len(contexts) % len(route_info.segments)]
-        contexts.append((ROUTE_SNAPSHOT_IDS["TAICANG_WUHU"], "ROUTE_SEGMENT", segment.id, constraints[len(contexts) % len(constraints)]))
+        node = list(nodes_by_key.values())[len(contexts) % len(nodes_by_key)]
+        contexts.append((NODE_SNAPSHOT_IDS["TAICANG"], "NODE", node.id, constraints[len(contexts) % len(constraints)]))
     for index, (snapshot_id, context_type, context_id, constraint) in enumerate(contexts[:18], start=1):
         status = statuses[(index - 1) % len(statuses)]
         value = {
@@ -571,135 +475,6 @@ async def _seed_candidate_analyses(
     *,
     now: datetime,
     freight_rows: list[Freight],
-    route_infos: dict[str, RouteInfo],
     demo_positions: list[DemoPosition],
 ) -> None:
-    profile_positions = _position_by_profile(demo_positions)
-    selected_freights = [
-        freight
-        for freight in freight_rows
-        if freight.origin_node_id
-        and freight.destination_node_id
-        and freight.commodity_standard_id
-        and freight.estimated_tonnage
-    ]
-    if len(selected_freights) < 6:
-        selected_freights = [freight for freight in freight_rows if freight.origin_node_id and freight.destination_node_id][:6]
-    for analysis_index, freight in enumerate(selected_freights, start=1):
-        route_key = "TAICANG_WUHU"
-        if freight.destination_city_code == "320100":
-            route_key = "TAICANG_NANJING"
-        elif freight.origin_city_code == "330500":
-            route_key = "CHANGXING_WUHU"
-        route_info = route_infos[route_key]
-        route_snapshot_id = ROUTE_SNAPSHOT_IDS[route_key]
-        analysis = VesselCandidateAnalysis(
-            context_type_code="FREIGHT_SAMPLE",
-            source_layer_code="LOCAL_DEMO",
-            freight_id=freight.id,
-            origin_node_id=freight.origin_node_id,
-            destination_node_id=freight.destination_node_id,
-            route_id=route_info.route.id,
-            line_id=route_info.line.id,
-            origin_city_code=freight.origin_city_code,
-            destination_city_code=freight.destination_city_code,
-            context_json={
-                "freight_no": freight.freight_no,
-                "scenario_version": SCENARIO_VERSION,
-                "tonnage": float(freight.estimated_tonnage or 0),
-                "commodity_standard_id": freight.commodity_standard_id,
-                "shipper_quote": float(freight.unit_price or 0),
-                "owner_quote_location": "raw source evidence only in local-demo seed",
-            },
-            filters_json={"source_layer": "LOCAL_DEMO", "route_code": route_info.route.code},
-            source_ais_snapshot_id=AIS_SNAPSHOT_ID,
-            source_spatial_snapshot_id=route_snapshot_id,
-            query_hash=f"demo-experience-freight-{freight.freight_no}",
-            status_code="READY",
-            coverage_rate=Decimal("92.00"),
-            confidence_level="HIGH",
-            candidate_count=10,
-            low_confidence_count=3,
-            uncertainty_notes_json=["包含高匹配、中匹配、AIS 过期、高风险、约束失败和不适配船型样例。"],
-            data_sources_json=[
-                {"source_layer": "LOCAL_DEMO", "snapshot_id": AIS_SNAPSHOT_ID},
-                {"source_layer": "DEMO_ES_MIRROR", "source_index": DEMO_SOURCE_INDEX},
-            ],
-            generated_at=now,
-            expires_at=now + timedelta(days=30),
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(analysis)
-        await session.flush()
-        for rank in range(1, 11):
-            item_position = demo_positions[(analysis_index * 10 + rank) % len(demo_positions)]
-            summary = item_position.summary
-            fit = 96 - rank * 5
-            risk_level = summary.risk_level or "LOW"
-            quality_level = summary.data_quality_level or "GOOD"
-            freshness = item_position.freshness_level
-            constraint_status = "PASS"
-            value_level = "HIGH" if rank <= 4 else "MEDIUM" if rank <= 7 else "LOW"
-            risk_reasons: list[str] = []
-            uncertainty: list[str] = []
-            not_computable: list[str] = []
-            ship_type_code = summary.ship_type_code
-            if rank in {5, 6}:
-                constraint_status = "WARNING"
-                uncertainty.append("桥区/吃水余量不足，需要二次复核。")
-            if rank == 7:
-                freshness = "STALE"
-                uncertainty.append("AIS 超过 4 小时未刷新。")
-            if rank == 8:
-                risk_level = "HIGH"
-                risk_reasons.append("证照或主体一致性风险偏高。")
-            if rank == 9:
-                constraint_status = "BLOCKED"
-                fit = 38
-                not_computable.append("当前吃水或桥梁净空约束阻断，不能推荐。")
-            if rank == 10:
-                ship_type_code = "CONTAINER"
-                fit = 31
-                not_computable.append("船型不适配散货/矿建材料运输。")
-            session.add(
-                VesselCandidateAnalysisItem(
-                    analysis_id=analysis.id,
-                    vessel_profile_id=summary.vessel_profile_id,
-                    mmsi=str(summary.current_mmsi or ""),
-                    ship_name=summary.ship_name,
-                    ship_type_code=ship_type_code,
-                    deadweight_ton=summary.deadweight_ton,
-                    design_draft_m=summary.design_draft_m,
-                    latest_position_time=item_position.position_time,
-                    ais_freshness_level=freshness,
-                    risk_level=risk_level,
-                    quality_level=quality_level,
-                    fit_score=Decimal(str(max(fit, 0))).quantize(Decimal("0.01")),
-                    candidate_value_level=value_level,
-                    confidence_level="HIGH" if rank <= 4 else "MEDIUM" if rank <= 7 else "LOW",
-                    node_distance_km=Decimal(str(rank * 1.7)).quantize(Decimal("0.001")),
-                    route_match_score=Decimal(str(max(92 - rank * 4, 20))).quantize(Decimal("0.01")),
-                    direction_consistency=Decimal(str(max(0.94 - rank * 0.04, 0.35))).quantize(Decimal("0.01")),
-                    constraint_status_code=constraint_status,
-                    score_parts_json={
-                        "capacity": max(20, 32 - rank),
-                        "distance": max(10, 28 - rank * 2),
-                        "route": max(8, 24 - rank),
-                        "risk": 18 if not risk_reasons else 6,
-                        "freshness": 16 if freshness == "FRESH" else 8,
-                    },
-                    risk_reasons_json=risk_reasons,
-                    uncertainty_reasons_json=uncertainty,
-                    not_computable_reasons_json=not_computable,
-                    data_sources_json=[
-                        {
-                            "source_layer": "LOCAL_DEMO",
-                            "source_index": profile_positions[int(summary.vessel_profile_id)].source_index,
-                            "ais_snapshot_id": AIS_SNAPSHOT_ID,
-                            "route_snapshot_id": route_snapshot_id,
-                        }
-                    ],
-                    created_at=now,
-                )
-            )
+    return
