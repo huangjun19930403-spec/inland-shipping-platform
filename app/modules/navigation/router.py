@@ -5,9 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.modules.navigation.annotation_service import NavigationAnnotationTaskService
 from app.modules.navigation.map_layer_service import NavigationMapLayerService
 from app.modules.navigation.routing_service import NavigationRoutingEngineService
 from app.modules.navigation.schemas import (
+    NavigationAnnotationSuggestionResponse,
+    NavigationAnnotationTaskBatchCreateResponse,
+    NavigationAnnotationTaskListResponse,
+    NavigationAnnotationTaskResolveRequest,
+    NavigationAnnotationTaskResponse,
     NavigationMapLayerResponse,
     NavigationRouteGenerateRequest,
     NavigationRouteGenerateResponse,
@@ -54,3 +60,85 @@ async def get_navigation_map_layers(
         include_graph_edge=include_graph_edge,
         limit=limit,
     )
+
+
+@router.get("/annotation-tasks", response_model=NavigationAnnotationTaskListResponse)
+async def list_navigation_annotation_tasks(
+    status_code: str | None = None,
+    task_type_code: str | None = None,
+    target_type_code: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).list_tasks(
+        status_code=status_code,
+        task_type_code=task_type_code,
+        target_type_code=target_type_code,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/annotation-tasks/from-route-result/{route_result_id}", response_model=NavigationAnnotationTaskBatchCreateResponse)
+async def create_navigation_annotation_tasks_from_route_result(
+    route_result_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).create_from_route_result(
+        route_result_id,
+        created_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/annotation-tasks/from-graph-version/{graph_version_id}", response_model=NavigationAnnotationTaskBatchCreateResponse)
+async def create_navigation_annotation_tasks_from_graph_version(
+    graph_version_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).create_from_graph_version(
+        graph_version_id,
+        created_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/annotation-tasks/from-centerlines", response_model=NavigationAnnotationTaskBatchCreateResponse)
+async def create_navigation_annotation_tasks_from_centerlines(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).create_from_centerline_quality(
+        created_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/annotation-tasks/{task_id}/suggestion", response_model=NavigationAnnotationSuggestionResponse)
+async def generate_navigation_annotation_task_suggestion(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).generate_suggestion(task_id)
+
+
+@router.post("/annotation-tasks/{task_id}/resolve", response_model=NavigationAnnotationTaskResponse)
+async def resolve_navigation_annotation_task(
+    task_id: int,
+    body: NavigationAnnotationTaskResolveRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).resolve_task(
+        task_id,
+        body,
+        reviewed_by=getattr(current_user, "id", None),
+    )
+
+
+@router.get("/annotation-tasks/{task_id}", response_model=NavigationAnnotationTaskResponse)
+async def get_navigation_annotation_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).get_task(task_id)

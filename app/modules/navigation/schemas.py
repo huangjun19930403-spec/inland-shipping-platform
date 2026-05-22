@@ -93,3 +93,51 @@ class NavigationMapLayerResponse(BaseModel):
     quality_issues: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     truncated_layers: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class NavigationAnnotationTaskResponse(BaseModel):
+    id: int
+    task_no: str
+    task_type_code: str
+    target_type_code: str
+    target_id: int | None = None
+    channel_id: int | None = None
+    graph_version_id: int | None = None
+    geometry_json: dict[str, Any] | None = None
+    priority_code: str
+    status_code: str
+    issue_summary: str
+    suggestion_json: dict[str, Any] | None = None
+    assigned_to: int | None = None
+    reviewed_by: int | None = None
+    resolution_type_code: str | None = None
+    resolution_target_type_code: str | None = None
+    resolution_target_id: int | None = None
+    created_by: int | None = None
+
+
+class NavigationAnnotationTaskListResponse(BaseModel):
+    items: list[NavigationAnnotationTaskResponse] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+
+
+class NavigationAnnotationTaskBatchCreateResponse(BaseModel):
+    created_count: int
+    existing_count: int
+    task_ids: list[int] = Field(default_factory=list)
+    source_type_code: str
+
+
+class NavigationAnnotationSuggestionResponse(BaseModel):
+    task_id: int
+    suggestion_json: dict[str, Any]
+
+
+class NavigationAnnotationTaskResolveRequest(BaseModel):
+    resolution_type_code: str = Field(max_length=64)
+    resolution_target_type_code: str | None = Field(default=None, max_length=64)
+    resolution_target_id: int | None = None
+    suggestion_json: dict[str, Any] | None = None
+    status_code: str = Field(default="RESOLVED", max_length=64)
