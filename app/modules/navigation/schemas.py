@@ -73,3 +73,23 @@ class NavigationRouteGenerateResponse(BaseModel):
     issues: list[NavigationRouteIssueResponse] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None
+
+
+class NavigationMapLayerFeatureResponse(BaseModel):
+    id: int | str
+    layer_type_code: str
+    name: str | None = None
+    geometry_json: dict[str, Any] | None = None
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class NavigationMapLayerResponse(BaseModel):
+    bbox: dict[str, float] | None = None
+    water_areas: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
+    channel_boundaries: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
+    centerlines: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
+    graph_edges: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
+    route_results: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
+    quality_issues: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
+    truncated_layers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
