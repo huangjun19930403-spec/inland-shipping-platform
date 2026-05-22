@@ -31,8 +31,10 @@
 航道和 seed：
 
 - `scripts/seed_data/navigation/navigation_channels.json`: 当前 104 个航道 seed 来源。
+- `scripts/seed_data/navigation/navigation_real_scope.json`: 真实江苏/长三角生产 scope 配置。
 - `scripts/seed_data/`: seed 和初始化相关脚本。
 - `data_audit/navigation_channel_match_report.json`: 当前航道/边界审计摘要。
+- `tests/fixtures/navigation/navigation_mvp_acceptance.json`: 历史/测试 fixture，只能用于测试，不得进入本地演示数据库、生产 seed 或 active graph。
 
 Route 链路：
 
@@ -88,6 +90,9 @@ rg "NO_APPROVED_CENTERLINE|UNKNOWN_CONSTRAINT_DATA|ROUTE_WATER_FALLBACK_MODE|REF
 - 生产默认禁用水路 fallback 假路线；演示或测试必须显式标识。
 - 第一阶段不要迁移旧 `NavigationChannel*` 类到 `app/models/navigation.py`；先新增新表，避免破坏 address API、seed 和 imports。
 - 约束缺失允许路径生成，但必须产生 `UNKNOWN_CONSTRAINT_DATA`、扣分、前端提示，结果最高 `READY_WITH_WARNING`。
+- 本地演示和页面默认体验必须使用真实 `revier.zip` 水系资产、清洗 seed 航道/边界/运输节点；不得运行 `seed_mvp_navigation_data` 作为默认演示数据。
+- 测试 fixture 可以保留在 `tests/fixtures`，但不得写入生产 seed、页面默认值或 active graph。
+- Graph build 默认 scope 使用 `REAL-JS-YRD` 等真实业务命名，不得默认 `MVP`。
 
 ## 5. 每轮最终回复
 

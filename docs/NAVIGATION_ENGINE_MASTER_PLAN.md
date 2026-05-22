@@ -49,7 +49,7 @@ river 原始水域面
 - 没有路径请求、路径结果、质量问题落表。
 - 没有起终点吸附、路径搜索、轨迹拼接、水域/边界校验、质量评分。
 - 当前 `WATER` 默认走 HiFleet，失败时可能走 fallback 曲线；这不能作为生产级自研水路能力。
-- 当前没有可直接生成 graph 的 approved/current centerline；中心线是 MVP 最大数据风险点。
+- 当前没有可直接生成真实生产 graph 的 approved/current centerline；中心线是第一阶段最大数据风险点。
 
 ## 3. 核心资产边界
 
@@ -71,7 +71,7 @@ river 原始水域面
 
 ## 3.1 中心线主源和发布边界
 
-江苏/长三角 MVP 第一阶段中心线主源：
+江苏/长三角真实生产第一阶段中心线主源：
 
 ```text
 MANUAL / SEED_CENTERLINE 为主
@@ -194,9 +194,9 @@ WATER_SKELETON / HIFLEET_REFERENCE 不得自动发布
 - 图搜索用 `networkx`。
 - 后续当图规模、空间查询性能或并发压力上来，再迁移核心空间查询到 PostGIS/pgRouting。
 
-## 6. 江苏/长三角 MVP 范围
+## 6. 江苏/长三角真实生产第一阶段范围
 
-第一阶段优先覆盖业务高频区域，不一开始做全国。
+第一阶段优先覆盖业务高频区域，不一开始做全国。默认数据源必须是真实 `revier.zip` 水域资产，以及当前清洗 seed 航道、边界、运输节点和约束点；历史 MVP/示例数据只能保留在 `tests/fixtures` 作为测试 fixture，不得写入本地演示库、页面默认值、生产 seed 或 active graph。
 
 优先航道：
 
@@ -218,7 +218,7 @@ WATER_SKELETON / HIFLEET_REFERENCE 不得自动发布
 太湖周边航道
 ```
 
-第一阶段验收路线：
+第一阶段真实业务验收路线：
 
 ```text
 靖江 -> 苏州
@@ -237,6 +237,7 @@ WATER_SKELETON / HIFLEET_REFERENCE 不得自动发布
 - 必须返回质量评分和问题列表。
 - 图断裂、无 graph、吸附过远、约束阻断必须解释原因。
 - 可保存为 `ShippingRoutePlanTrackVersion`。
+- 在真实中心线发布前，graph build 和路径生成应明确失败并暴露 `NO_APPROVED_CENTERLINE` / `NO_ACTIVE_GRAPH_VERSION` 等原因，不能用测试 fixture 或 polygon 补线。
 
 ## 7. 数据质量策略
 

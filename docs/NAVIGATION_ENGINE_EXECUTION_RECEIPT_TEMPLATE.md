@@ -33,6 +33,7 @@
 - 是否让未审核 centerline 入 graph: 否 / 是，说明:
 - 是否跳过 fixture 或验收说明: 否 / 是，说明:
 - 是否未说明 UNKNOWN_CONSTRAINT_DATA 处理: 否 / 是，说明:
+- 是否把 MVP/示例/实验数据写入本地演示库、页面默认值、生产 seed 或 active graph: 否 / 是，说明:
 - 是否提前实现后续轮次: 否 / 是，说明:
 
 【测试和检查】

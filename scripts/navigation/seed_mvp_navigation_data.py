@@ -1,9 +1,10 @@
 """Seed the controlled Jiangsu/Yangtze Delta MVP navigation graph.
 
 Round 12 uses this script to create a small, explicit MVP water/centerline/graph
-asset set for business acceptance. It does not import full river shapefiles,
-does not overwrite seed channel boundaries, and does not create fake fallback
-route geometry.
+asset set for automated tests and historical acceptance only. It does not import
+full river shapefiles, does not overwrite seed channel boundaries, and does not
+create fake fallback route geometry. Do not use this script for local production
+demonstration data.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ from app.models.address import NavigationChannel, TransportNode
 from scripts.navigation.validate_navigation_graph import validate_navigation_graph
 
 GEOD = Geod(ellps="WGS84")
-DEFAULT_DATA_PATH = Path("scripts/seed_data/navigation/navigation_mvp_acceptance.json")
+DEFAULT_DATA_PATH = Path("tests/fixtures/navigation/navigation_mvp_acceptance.json")
 
 
 @dataclass(slots=True)

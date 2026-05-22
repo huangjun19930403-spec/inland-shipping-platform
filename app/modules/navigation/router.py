@@ -100,7 +100,7 @@ async def list_navigation_geometry_drafts(
 @router.post("/geometry-drafts", response_model=NavigationGeometryDraftResponse)
 async def create_navigation_geometry_draft(
     body: NavigationGeometryDraftCreateRequest,
-    current_user=Depends(require_permission("ROUTE:READ")),
+    current_user=Depends(require_permission("ROUTE:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).create_geometry_draft(
@@ -113,7 +113,7 @@ async def create_navigation_geometry_draft(
 async def update_navigation_geometry_draft(
     draft_id: int,
     body: NavigationGeometryDraftUpdateRequest,
-    current_user=Depends(require_permission("ROUTE:READ")),
+    current_user=Depends(require_permission("ROUTE:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).update_geometry_draft(draft_id, body)
@@ -122,7 +122,7 @@ async def update_navigation_geometry_draft(
 @router.post("/geometry-drafts/{draft_id}/submit", response_model=NavigationGeometryDraftResponse)
 async def submit_navigation_geometry_draft(
     draft_id: int,
-    current_user=Depends(require_permission("ROUTE:READ")),
+    current_user=Depends(require_permission("ROUTE:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).submit_geometry_draft(
@@ -135,7 +135,7 @@ async def submit_navigation_geometry_draft(
 async def approve_navigation_geometry_draft(
     draft_id: int,
     body: NavigationGeometryDraftApproveRequest | None = None,
-    current_user=Depends(require_permission("ROUTE:READ")),
+    current_user=Depends(require_permission("ROUTE:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).approve_geometry_draft(
@@ -148,7 +148,7 @@ async def approve_navigation_geometry_draft(
 @router.post("/geometry-drafts/{draft_id}/publish", response_model=NavigationGeometryDraftResponse)
 async def publish_navigation_geometry_draft(
     draft_id: int,
-    current_user=Depends(require_permission("ROUTE:READ")),
+    current_user=Depends(require_permission("ROUTE:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).publish_geometry_draft(
@@ -160,7 +160,7 @@ async def publish_navigation_geometry_draft(
 @router.post("/graph-versions/build", response_model=NavigationGraphBuildResponse)
 async def build_navigation_graph_version(
     body: NavigationGraphBuildRequest,
-    current_user=Depends(require_permission("ROUTE:READ")),
+    current_user=Depends(require_permission("ROUTE:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).build_graph_version(
@@ -172,7 +172,7 @@ async def build_navigation_graph_version(
 @router.post("/graph-versions/{graph_version_id}/activate", response_model=NavigationGraphActivateResponse)
 async def activate_navigation_graph_version(
     graph_version_id: int,
-    current_user=Depends(require_permission("ROUTE:READ")),
+    current_user=Depends(require_permission("ROUTE:WRITE")),
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).activate_graph_version(graph_version_id)

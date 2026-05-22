@@ -459,7 +459,7 @@ async def build_graph_from_centerlines(
     session: AsyncSession,
     version_code: str,
     version_name: str | None = None,
-    scope_code: str = "MVP",
+    scope_code: str = "REAL-JS-YRD",
     channel_codes: list[str] | None = None,
     activate: bool = False,
     config: GraphBuildConfig | None = None,
@@ -943,7 +943,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build navigation graph from approved centerlines.")
     parser.add_argument("--version-code", required=True)
     parser.add_argument("--version-name", default=None)
-    parser.add_argument("--scope-code", default="MVP")
+    parser.add_argument("--scope-code", default="REAL-JS-YRD")
     parser.add_argument("--channel-code", action="append", dest="channel_codes")
     parser.add_argument("--activate", action="store_true")
     parser.add_argument("--output", type=Path, default=None)

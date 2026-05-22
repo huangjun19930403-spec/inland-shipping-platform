@@ -42,6 +42,8 @@ DRAFT_GEOMETRY_TYPES = {
     "WATER_AREA": {"POLYGON", "MULTIPOLYGON"},
 }
 FINAL_DRAFT_STATUSES = {"PUBLISHED", "REJECTED"}
+REAL_WATER_SOURCE_CODE = "RIVER_SHAPEFILE_2026"
+DEFAULT_REAL_GRAPH_SCOPE = "REAL-JS-YRD"
 
 
 class NavigationWorkbenchService:
@@ -122,6 +124,16 @@ class NavigationWorkbenchService:
         ]
         stats = {
             "channel_count": len(channels),
+            "water_area_count": int(await self.session.scalar(select(func.count()).select_from(NavigationWaterArea)) or 0),
+            "real_water_area_count": int(
+                await self.session.scalar(
+                    select(func.count()).select_from(NavigationWaterArea).where(
+                        NavigationWaterArea.source_code == REAL_WATER_SOURCE_CODE,
+                        NavigationWaterArea.is_enabled.is_(True),
+                    )
+                )
+                or 0
+            ),
             "current_boundary_channel_count": sum(1 for row in channel_rows if row.current_boundary_count > 0),
             "approved_centerline_channel_count": sum(1 for row in channel_rows if row.approved_current_centerline_count > 0),
             "active_graph_channel_count": sum(1 for row in channel_rows if row.active_graph_edge_count > 0),
@@ -140,6 +152,7 @@ class NavigationWorkbenchService:
             active_graph_version=self._graph_version_dict(active_graph_version) if active_graph_version else None,
             channels=channel_rows,
             warnings=[
+                "生产体验默认使用真实 revier 水系资产和清洗 seed 数据；MVP/示例数据不得作为 active graph。",
                 "READY 只代表业务路径图和几何结果可用，不代表官方安全通航确认。",
                 "无 approved/current centerline 的航道不会进入 graph，polygon/boundary 不能替代路径搜索。",
             ],
@@ -420,13 +433,14 @@ class NavigationWorkbenchService:
         *,
         created_by: int | None,
     ) -> NavigationGraphBuildResponse:
-        version_code = body.version_code or f"MANUAL-GRAPH-{self._now().strftime('%Y%m%d%H%M%S')}"
+        scope_code = (body.scope_code or DEFAULT_REAL_GRAPH_SCOPE).upper()
+        version_code = body.version_code or f"{scope_code}-GRAPH-{self._now().strftime('%Y%m%d%H%M%S')}"
         try:
             summary = await build_graph_from_centerlines(
                 session=self.session,
                 version_code=version_code,
                 version_name=body.version_name,
-                scope_code=body.scope_code,
+                scope_code=scope_code,
                 channel_codes=body.channel_codes,
                 activate=body.activate,
             )

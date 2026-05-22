@@ -273,7 +273,7 @@ class NavigationGeometryDraftApproveRequest(BaseModel):
 class NavigationGraphBuildRequest(BaseModel):
     version_code: str | None = Field(default=None, max_length=96)
     version_name: str | None = Field(default=None, max_length=128)
-    scope_code: str = Field(default="MVP", max_length=64)
+    scope_code: str = Field(default="REAL-JS-YRD", max_length=64)
     channel_codes: list[str] | None = None
     activate: bool = False
 

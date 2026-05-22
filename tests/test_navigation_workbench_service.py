@@ -58,7 +58,7 @@ async def _seed_channel(session: AsyncSession) -> None:
             channel_code="TEST-CHANNEL",
             channel_name="测试航道",
             channel_type_code="CANAL",
-            planning_level_code="MVP",
+            planning_level_code="REAL_TEST",
             ais_scope_code="INCLUDED",
             source_version="test",
             is_enabled=True,
@@ -158,3 +158,23 @@ async def test_boundary_publish_preserves_seed_history_and_switches_current(sess
     assert boundaries[1].coverage_policy_code == "MANUAL_DRAW"
     assert boundaries[1].is_current is True
     assert drafts[0].status_code == "PUBLISHED"
+
+
+@pytest.mark.asyncio
+async def test_graph_build_without_approved_centerline_fails_with_real_scope(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        service = NavigationWorkbenchService(session)
+
+        build = await service.build_graph_version(
+            NavigationGraphBuildRequest(version_code="TEST-REAL-NO-CENTERLINE", activate=False),
+            created_by=8,
+        )
+        graph_version = await session.get(NavigationGraphVersion, build.graph_version_id)
+
+    assert build.status_code == "FAILED"
+    assert build.node_count == 0
+    assert build.edge_count == 0
+    assert graph_version is not None
+    assert graph_version.scope_code == "REAL-JS-YRD"
+    assert graph_version.validation_report_json["issues"][0]["issue_code"] == "NO_APPROVED_CENTERLINE"

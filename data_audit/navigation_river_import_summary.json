@@ -1,0 +1,91 @@
+{
+  "source_code": "RIVER_SHAPEFILE_2026",
+  "input_path": "/Users/hj/Documents/河道数据/revier.zip",
+  "generated_at": "2026-05-22",
+  "dry_run": false,
+  "layers": [
+    {
+      "layer_name": "rx",
+      "rows_read": 48192,
+      "rows_inserted": 48192,
+      "rows_updated": 0,
+      "rows_named": 13374,
+      "rows_invalid": 319,
+      "rows_repaired": 140
+    },
+    {
+      "layer_name": "一级水系",
+      "rows_read": 234,
+      "rows_inserted": 234,
+      "rows_updated": 0,
+      "rows_named": 209,
+      "rows_invalid": 25,
+      "rows_repaired": 9
+    },
+    {
+      "layer_name": "二级水系",
+      "rows_read": 285,
+      "rows_inserted": 285,
+      "rows_updated": 0,
+      "rows_named": 225,
+      "rows_invalid": 18,
+      "rows_repaired": 10
+    },
+    {
+      "layer_name": "三级水系",
+      "rows_read": 608,
+      "rows_inserted": 608,
+      "rows_updated": 0,
+      "rows_named": 529,
+      "rows_invalid": 24,
+      "rows_repaired": 18
+    },
+    {
+      "layer_name": "四级水系",
+      "rows_read": 1407,
+      "rows_inserted": 1407,
+      "rows_updated": 0,
+      "rows_named": 1144,
+      "rows_invalid": 29,
+      "rows_repaired": 21
+    },
+    {
+      "layer_name": "五级水系",
+      "rows_read": 4541,
+      "rows_inserted": 4541,
+      "rows_updated": 0,
+      "rows_named": 2598,
+      "rows_invalid": 48,
+      "rows_repaired": 20
+    },
+    {
+      "layer_name": "六级水系",
+      "rows_read": 5175,
+      "rows_inserted": 5175,
+      "rows_updated": 0,
+      "rows_named": 2338,
+      "rows_invalid": 14,
+      "rows_repaired": 10
+    },
+    {
+      "layer_name": "七级水系",
+      "rows_read": 27181,
+      "rows_inserted": 27181,
+      "rows_updated": 0,
+      "rows_named": 4833,
+      "rows_invalid": 68,
+      "rows_repaired": 25
+    }
+  ],
+  "totals": {
+    "layers": 8,
+    "rows_read": 87623,
+    "rows_inserted": 87623,
+    "rows_updated": 0,
+    "rows_named": 25250,
+    "rows_invalid": 545,
+    "rows_repaired": 253,
+    "rows_enabled": 87078
+  },
+  "asset_boundary": "river water areas were imported only into navigation_water_area; seed channel boundaries, centerlines, graph versions, and route results were not overwritten."
+}

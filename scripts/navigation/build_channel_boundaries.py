@@ -28,7 +28,7 @@ from app.models.base import Base
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ALIAS_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_channel_aliases.json"
-DEFAULT_MVP_SCOPE_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_mvp_scope.json"
+DEFAULT_SCOPE_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_real_scope.json"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data_audit" / "navigation_channel_boundary_match_report.json"
 
 
@@ -76,7 +76,7 @@ class BuildBoundaryReport:
     write_candidate_boundaries: bool
     source_code: str | None
     alias_config_path: str
-    mvp_scope_config_path: str
+    scope_config_path: str
     output_path: str | None
     channel_count: int
     water_area_count: int
@@ -317,7 +317,7 @@ async def build_channel_boundary_report(
     *,
     session: AsyncSession,
     alias_config_path: Path = DEFAULT_ALIAS_CONFIG,
-    mvp_scope_config_path: Path = DEFAULT_MVP_SCOPE_CONFIG,
+    scope_config_path: Path = DEFAULT_SCOPE_CONFIG,
     output_path: Path | None = DEFAULT_OUTPUT,
     source_code: str | None = None,
     channel_codes: Sequence[str] | None = None,
@@ -325,8 +325,8 @@ async def build_channel_boundary_report(
     write_candidate_boundaries: bool = False,
 ) -> BuildBoundaryReport:
     alias_config = load_json(alias_config_path)
-    mvp_scope_config = load_json(mvp_scope_config_path)
-    scope_bbox = _scope_bbox(mvp_scope_config)
+    scope_config = load_json(scope_config_path)
+    scope_bbox = _scope_bbox(scope_config)
 
     channel_query = select(NavigationChannel).where(NavigationChannel.is_enabled.is_(True)).order_by(NavigationChannel.sort_order, NavigationChannel.id)
     if channel_codes:
@@ -416,7 +416,7 @@ async def build_channel_boundary_report(
         write_candidate_boundaries=write_candidate_boundaries,
         source_code=source_code,
         alias_config_path=str(alias_config_path),
-        mvp_scope_config_path=str(mvp_scope_config_path),
+        scope_config_path=str(scope_config_path),
         output_path=str(output_path) if output_path else None,
         channel_count=len(channels),
         water_area_count=len(water_areas),
@@ -441,7 +441,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--source-code", default=None, help="Optional navigation_water_area source_code filter.")
     parser.add_argument("--channel-codes", nargs="*", default=None, help="Optional channel_code subset.")
     parser.add_argument("--alias-config", type=Path, default=DEFAULT_ALIAS_CONFIG)
-    parser.add_argument("--mvp-scope-config", type=Path, default=DEFAULT_MVP_SCOPE_CONFIG)
+    parser.add_argument("--scope-config", type=Path, default=DEFAULT_SCOPE_CONFIG)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--dry-run", action="store_true", help="Build report without writing candidate boundaries.")
     parser.add_argument(
@@ -459,7 +459,7 @@ async def _main() -> None:
         report = await build_channel_boundary_report(
             session=session,
             alias_config_path=args.alias_config,
-            mvp_scope_config_path=args.mvp_scope_config,
+            scope_config_path=args.scope_config,
             output_path=args.output,
             source_code=args.source_code,
             channel_codes=args.channel_codes,
