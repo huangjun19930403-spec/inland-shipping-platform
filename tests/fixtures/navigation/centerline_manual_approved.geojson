@@ -1,0 +1,63 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "centerline_code": "CL-TEST-MAIN-001",
+        "centerline_name": "Test main approved centerline",
+        "channel_code": "TEST-MAIN",
+        "source_type_code": "MANUAL",
+        "direction_code": "BIDIRECTIONAL",
+        "is_main_line": true,
+        "review_status_code": "APPROVED",
+        "quality_code": "READY",
+        "confidence_score": 95,
+        "version_no": 1
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[120.02, 31.04], [120.3, 31.04], [120.58, 31.04]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "centerline_code": "CL-TEST-BRANCH-001",
+        "centerline_name": "Test branch approved centerline",
+        "channel_code": "TEST-BRANCH",
+        "source_type_code": "MANUAL",
+        "direction_code": "BIDIRECTIONAL",
+        "is_main_line": true,
+        "review_status_code": "APPROVED",
+        "quality_code": "READY",
+        "confidence_score": 92,
+        "version_no": 1
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[120.58, 31.04], [120.59, 31.2], [120.59, 31.42]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "centerline_code": "CL-TEST-SNAP-001",
+        "centerline_name": "Test endpoint snap centerline",
+        "channel_code": "TEST-MAIN",
+        "source_type_code": "MANUAL",
+        "direction_code": "BIDIRECTIONAL",
+        "is_main_line": false,
+        "review_status_code": "APPROVED",
+        "quality_code": "READY_WITH_WARNING",
+        "confidence_score": 85,
+        "version_no": 1,
+        "fixture_note": "Endpoint is close enough to test automatic snap threshold."
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[120.5801, 31.041], [120.65, 31.08]]
+      }
+    }
+  ]
+}

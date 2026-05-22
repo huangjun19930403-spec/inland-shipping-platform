@@ -1,0 +1,42 @@
+[
+  {
+    "case_code": "SUCCESS_RECOMMENDED",
+    "origin": {"ref_type": "TRANSPORT_NODE", "ref_id": 1001},
+    "destination": {"ref_type": "TRANSPORT_NODE", "ref_id": 1002},
+    "vessel_profile_json": {"draft_m": 2.0, "deadweight_ton": 1000},
+    "routing_preference_code": "RECOMMENDED",
+    "expected_status_code": "SUCCESS",
+    "expected_quality_code": "READY",
+    "expected_issue_types": []
+  },
+  {
+    "case_code": "ORIGIN_TOO_FAR_FROM_GRAPH",
+    "origin": {"ref_type": "TRANSPORT_NODE", "ref_id": 1003},
+    "destination": {"ref_type": "TRANSPORT_NODE", "ref_id": 1002},
+    "vessel_profile_json": {"draft_m": 2.0},
+    "routing_preference_code": "RECOMMENDED",
+    "expected_status_code": "FAILED",
+    "expected_quality_code": "FAILED",
+    "expected_issue_types": ["ORIGIN_TOO_FAR_FROM_GRAPH"]
+  },
+  {
+    "case_code": "GRAPH_DISCONNECTED",
+    "origin": {"ref_type": "MANUAL_POINT", "lng": 120.02, "lat": 31.04},
+    "destination": {"ref_type": "MANUAL_POINT", "lng": 121.2, "lat": 31.4},
+    "vessel_profile_json": {"draft_m": 2.0},
+    "routing_preference_code": "RECOMMENDED",
+    "expected_status_code": "FAILED",
+    "expected_quality_code": "FAILED",
+    "expected_issue_types": ["GRAPH_DISCONNECTED"]
+  },
+  {
+    "case_code": "UNKNOWN_CONSTRAINT_READY_WITH_WARNING",
+    "origin": {"ref_type": "TRANSPORT_NODE", "ref_id": 1001},
+    "destination": {"ref_type": "TRANSPORT_NODE", "ref_id": 1002},
+    "vessel_profile_json": {"draft_m": 2.0},
+    "routing_preference_code": "RECOMMENDED",
+    "expected_status_code": "SUCCESS",
+    "expected_quality_code": "READY_WITH_WARNING",
+    "expected_issue_types": ["UNKNOWN_CONSTRAINT_DATA"]
+  }
+]

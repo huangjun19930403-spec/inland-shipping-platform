@@ -1,0 +1,14 @@
+{
+  "SUCCESS_RECOMMENDED": {
+    "required_fields": ["graph_version_id", "edge_ids", "channel_ids", "quality_score", "quality_code"],
+    "forbidden_result_types": ["FALLBACK_CURVE", "REFERENCE_HIFLEET_AS_CURRENT"]
+  },
+  "NO_APPROVED_CENTERLINE": {
+    "expected_status_code": "FAILED",
+    "expected_error_code": "NO_APPROVED_CENTERLINE"
+  },
+  "VESSEL_CONSTRAINT_BLOCKED": {
+    "expected_status_code": "FAILED",
+    "expected_error_code": "VESSEL_CONSTRAINT_BLOCKED"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "graph_version": {
+    "version_code": "GV-TEST-DISCONNECTED",
+    "scope_code": "TEST",
+    "status_code": "NEED_REVIEW",
+    "expected_issue": "GRAPH_DISCONNECTED"
+  },
+  "components": [
+    {"node_ids": [1, 2], "edge_ids": [11]},
+    {"node_ids": [101, 102], "edge_ids": [111]}
+  ]
+}

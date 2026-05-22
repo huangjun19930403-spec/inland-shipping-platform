@@ -1,0 +1,32 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "channel_code": "TEST-MAIN",
+        "boundary_type_code": "SEED_BOUNDARY",
+        "review_status_code": "APPROVED",
+        "quality_code": "READY"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[119.98, 30.98], [120.65, 30.98], [120.65, 31.1], [119.98, 31.1], [119.98, 30.98]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "channel_code": "TEST-NO-CENTERLINE",
+        "boundary_type_code": "SEED_BOUNDARY",
+        "review_status_code": "APPROVED",
+        "quality_code": "READY",
+        "expected_failure": "NO_APPROVED_CENTERLINE"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[120.9, 30.9], [121.2, 30.9], [121.2, 31.2], [120.9, 31.2], [120.9, 30.9]]]
+      }
+    }
+  ]
+}

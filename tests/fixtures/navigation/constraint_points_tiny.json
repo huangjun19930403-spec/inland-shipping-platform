@@ -1,0 +1,20 @@
+[
+  {
+    "id": 2001,
+    "constraint_code": "CP-TEST-LOCK",
+    "constraint_name": "Test Lock",
+    "constraint_type_code": "LOCK",
+    "longitude": 120.58,
+    "latitude": 31.04,
+    "expected_node_type_code": "LOCK"
+  },
+  {
+    "id": 2002,
+    "constraint_code": "CP-TEST-BRIDGE",
+    "constraint_name": "Test Bridge Unknown Clearance",
+    "constraint_type_code": "BRIDGE",
+    "longitude": 120.59,
+    "latitude": 31.2,
+    "expected_issue_type": "UNKNOWN_CONSTRAINT_DATA"
+  }
+]

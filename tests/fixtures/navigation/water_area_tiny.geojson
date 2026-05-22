@@ -1,0 +1,62 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "source_code": "TEST_WATER_AREA",
+        "source_layer_name": "rx",
+        "source_object_id": "wa-001",
+        "water_name": "Test Main River",
+        "normalized_water_name": "test_main_river",
+        "water_type_code": "RIVER",
+        "bbox_min_lng": 120.0,
+        "bbox_min_lat": 31.0,
+        "bbox_max_lng": 120.6,
+        "bbox_max_lat": 31.08
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[120.0, 31.0], [120.6, 31.0], [120.6, 31.08], [120.0, 31.08], [120.0, 31.0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "source_code": "TEST_WATER_AREA",
+        "source_layer_name": "rx",
+        "source_object_id": "wa-002",
+        "water_name": "Test Branch Canal",
+        "normalized_water_name": "test_branch_canal",
+        "water_type_code": "CANAL",
+        "bbox_min_lng": 120.55,
+        "bbox_min_lat": 31.0,
+        "bbox_max_lng": 120.63,
+        "bbox_max_lat": 31.45
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[120.55, 31.0], [120.63, 31.0], [120.63, 31.45], [120.55, 31.45], [120.55, 31.0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "source_code": "TEST_WATER_AREA",
+        "source_layer_name": "rx",
+        "source_object_id": "wa-003",
+        "water_name": "Test Lake Skeleton Candidate",
+        "normalized_water_name": "test_lake_skeleton_candidate",
+        "water_type_code": "LAKE",
+        "bbox_min_lng": 121.0,
+        "bbox_min_lat": 32.0,
+        "bbox_max_lng": 121.4,
+        "bbox_max_lat": 32.3
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[121.0, 32.0], [121.4, 32.0], [121.4, 32.3], [121.0, 32.3], [121.0, 32.0]]]
+      }
+    }
+  ]
+}

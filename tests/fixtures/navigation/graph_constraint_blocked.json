@@ -1,0 +1,17 @@
+{
+  "graph_version": {
+    "version_code": "GV-TEST-CONSTRAINT-BLOCKED",
+    "scope_code": "TEST",
+    "status_code": "READY"
+  },
+  "blocked_edge": {
+    "edge_code": "E-CLOSED",
+    "constraint_type_code": "CLOSED",
+    "is_blocking": true,
+    "expected_failure": "VESSEL_CONSTRAINT_BLOCKED"
+  },
+  "vessel_profile": {
+    "draft_m": 4.5,
+    "deadweight_ton": 3000
+  }
+}

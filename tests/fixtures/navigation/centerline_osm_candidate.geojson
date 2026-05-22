@@ -1,0 +1,53 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "centerline_code": "CL-OSM-NAME-001",
+        "channel_code": "TEST-MAIN",
+        "osm_name": "Test Main River",
+        "source_type_code": "OSM_WATERWAY",
+        "review_status_code": "NEED_REVIEW",
+        "quality_code": "NEED_REVIEW",
+        "confidence_score": 70
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[120.02, 31.045], [120.58, 31.045]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "centerline_code": "CL-OSM-SPATIAL-001",
+        "channel_code": "TEST-BRANCH",
+        "source_type_code": "OSM_WATERWAY",
+        "review_status_code": "NEED_REVIEW",
+        "quality_code": "NEED_REVIEW",
+        "confidence_score": 55,
+        "match_reason": "spatial_only"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[120.6, 31.05], [120.6, 31.4]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "centerline_code": "CL-OSM-CONFLICT-001",
+        "channel_code": null,
+        "source_type_code": "OSM_WATERWAY",
+        "review_status_code": "NEED_REVIEW",
+        "quality_code": "DUPLICATED",
+        "confidence_score": 40,
+        "match_reason": "multiple_channel_conflict"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[120.55, 31.0], [120.62, 31.08]]
+      }
+    }
+  ]
+}

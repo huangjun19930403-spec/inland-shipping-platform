@@ -1,0 +1,21 @@
+{
+  "graph_version": {
+    "version_code": "GV-TEST-WARNING",
+    "scope_code": "TEST",
+    "status_code": "READY_WITH_WARNING"
+  },
+  "edges": [
+    {
+      "edge_code": "E-LOW-CONFIDENCE",
+      "quality_code": "LOW_CONFIDENCE",
+      "confidence_score": 45,
+      "expected_issue": "LOW_CONFIDENCE_EDGE"
+    },
+    {
+      "edge_code": "E-UNKNOWN-BRIDGE",
+      "unknown_constraint_flag": true,
+      "expected_issue": "UNKNOWN_CONSTRAINT_DATA",
+      "max_quality_code": "READY_WITH_WARNING"
+    }
+  ]
+}

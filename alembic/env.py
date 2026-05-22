@@ -23,6 +23,7 @@ from app.models import (  # noqa: F401
     common,
     dictionary,
     freight,
+    navigation,
     operation,
     approval,
     route,

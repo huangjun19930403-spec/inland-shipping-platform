@@ -1,0 +1,20 @@
+{
+  "graph_version": {
+    "version_code": "GV-TEST-READY",
+    "scope_code": "TEST",
+    "status_code": "READY"
+  },
+  "nodes": [
+    {"id": 1, "node_code": "N-ORIGIN", "node_type_code": "TERMINAL", "longitude": 120.02, "latitude": 31.05},
+    {"id": 2, "node_code": "N-MAIN-A", "node_type_code": "CENTERLINE_VERTEX", "longitude": 120.02, "latitude": 31.04},
+    {"id": 3, "node_code": "N-JUNCTION", "node_type_code": "CHANNEL_JUNCTION", "longitude": 120.58, "latitude": 31.04},
+    {"id": 4, "node_code": "N-BRANCH-B", "node_type_code": "CENTERLINE_VERTEX", "longitude": 120.59, "latitude": 31.2},
+    {"id": 5, "node_code": "N-DESTINATION", "node_type_code": "TERMINAL", "longitude": 120.59, "latitude": 31.41}
+  ],
+  "edges": [
+    {"id": 11, "edge_code": "E-SNAP-ORIGIN", "from_node_id": 1, "to_node_id": 2, "source_type_code": "SNAP_CONNECTOR", "length_km": 0.12, "direction_code": "BIDIRECTIONAL", "channel_id": 1, "centerline_id": 1},
+    {"id": 12, "edge_code": "E-MAIN", "from_node_id": 2, "to_node_id": 3, "source_type_code": "MANUAL", "length_km": 52.0, "direction_code": "BIDIRECTIONAL", "channel_id": 1, "centerline_id": 1},
+    {"id": 13, "edge_code": "E-BRANCH", "from_node_id": 3, "to_node_id": 4, "source_type_code": "MANUAL", "length_km": 18.0, "direction_code": "BIDIRECTIONAL", "channel_id": 2, "centerline_id": 2},
+    {"id": 14, "edge_code": "E-SNAP-DESTINATION", "from_node_id": 4, "to_node_id": 5, "source_type_code": "SNAP_CONNECTOR", "length_km": 0.25, "direction_code": "BIDIRECTIONAL", "channel_id": 2, "centerline_id": 2}
+  ]
+}

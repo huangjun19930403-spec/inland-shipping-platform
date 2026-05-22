@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1001,
+    "code": "TN-TEST-ORIGIN",
+    "name": "Test Origin Terminal",
+    "node_type_code": "TERMINAL",
+    "longitude": 120.02,
+    "latitude": 31.05,
+    "expected_snap_confidence": "HIGH"
+  },
+  {
+    "id": 1002,
+    "code": "TN-TEST-DESTINATION",
+    "name": "Test Destination Terminal",
+    "node_type_code": "TERMINAL",
+    "longitude": 120.59,
+    "latitude": 31.41,
+    "expected_snap_confidence": "HIGH"
+  },
+  {
+    "id": 1003,
+    "code": "TN-TEST-FAR",
+    "name": "Test Far Terminal",
+    "node_type_code": "TERMINAL",
+    "longitude": 121.8,
+    "latitude": 32.8,
+    "expected_failure": "ORIGIN_TOO_FAR_FROM_GRAPH"
+  }
+]
