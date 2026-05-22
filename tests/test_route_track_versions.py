@@ -280,7 +280,7 @@ async def test_generate_provider_version_rejects_same_coordinate_segment_without
 
     assert response.status == "FAILED"
     assert response.version is not None
-    assert response.version.source_type_code == "HIFLEET"
+    assert response.version.source_type_code == "REFERENCE_HIFLEET"
     assert response.version.segment_count == 0
     assert response.version.summary_json.get("fallback_notes") == []
     assert "起终点坐标相同" in (response.version.error_message or "")

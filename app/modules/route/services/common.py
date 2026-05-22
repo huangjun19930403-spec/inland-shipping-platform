@@ -51,13 +51,15 @@ PLAN_STATUSES = {"DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"}
 POINT_TYPES = {"TRANSPORT_NODE", "CONSTRAINT_POINT", "MANUAL_POINT"}
 TRANSPORT_MODES = {"WATER", "ROAD", "RAIL"}
 TRACK_STATUSES = {"NOT_GENERATED", "READY", "PARTIAL", "FAILED"}
-GEOMETRY_SOURCES = {"AMAP", "HIFLEET", "MANUAL", "FALLBACK"}
-TRACK_VERSION_SOURCES = {"AMAP", "HIFLEET", "MANUAL", "FALLBACK"}
+GEOMETRY_SOURCES = {"AMAP", "HIFLEET", "REFERENCE_HIFLEET", "NAVIGATION_ENGINE", "MANUAL", "FALLBACK"}
+TRACK_VERSION_SOURCES = {"AMAP", "HIFLEET", "REFERENCE_HIFLEET", "NAVIGATION_ENGINE", "MANUAL", "FALLBACK"}
 TRACK_VERSION_STATUSES = {"READY", "PARTIAL", "FAILED"}
 TRACK_EDIT_STATUSES = {"ORIGINAL", "EDITED", "REDRAWN"}
 ROUTE_TRACK_GENERATION_TASK_NAME = "route.generate_track_version"
 ROUTE_TRACK_GENERATION_BUSINESS_TYPE = "ROUTE_PLAN_TRACK_VERSION"
 ROUTE_TRACK_GENERATION_STALE_SECONDS = 900
+ROUTE_WATER_FALLBACK_MODE_KEY = "ROUTE_WATER_FALLBACK_MODE"
+ROUTE_WATER_FALLBACK_ALLOWED_MODES = {"local_demo", "test"}
 PLAN_POINT_COMPARE_FIELDS = (
     "point_order",
     "point_type_code",
@@ -167,6 +169,8 @@ def _track_source_display(value: str | None) -> str:
     source = str(value or "").strip().upper()
     return {
         "HIFLEET": "AMMS",
+        "REFERENCE_HIFLEET": "AMMS参考",
+        "NAVIGATION_ENGINE": "自研航道引擎",
         "AMAP": "高德",
         "FALLBACK": "降级轨迹",
         "MANUAL": "人工修线",
@@ -535,4 +539,3 @@ def _to_track_version_response(
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
-
