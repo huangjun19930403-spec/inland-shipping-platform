@@ -66,7 +66,10 @@ class ShippingRouteRepository:
             select(func.count(ShippingRoutePlanPoint.id))
             .select_from(ShippingRoutePlanPoint)
             .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRoutePlanPoint.plan_id)
-            .where(ShippingRoutePlan.route_id == ShippingRoute.id)
+            .where(
+                ShippingRoutePlan.route_id == ShippingRoute.id,
+                ShippingRoutePlanPoint.structure_revision == ShippingRoutePlan.structure_revision,
+            )
             .correlate(ShippingRoute)
             .scalar_subquery()
         )
@@ -74,7 +77,10 @@ class ShippingRouteRepository:
             select(func.count(ShippingRoutePlanSegment.id))
             .select_from(ShippingRoutePlanSegment)
             .join(ShippingRoutePlan, ShippingRoutePlan.id == ShippingRoutePlanSegment.plan_id)
-            .where(ShippingRoutePlan.route_id == ShippingRoute.id)
+            .where(
+                ShippingRoutePlan.route_id == ShippingRoute.id,
+                ShippingRoutePlanSegment.structure_revision == ShippingRoutePlan.structure_revision,
+            )
             .correlate(ShippingRoute)
             .scalar_subquery()
         )
@@ -473,22 +479,24 @@ class ShippingRoutePlanStructureRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def list_points(self, plan_id: int) -> list[ShippingRoutePlanPoint]:
+    async def list_points(self, plan_id: int, structure_revision: int | None = None) -> list[ShippingRoutePlanPoint]:
+        stmt = select(ShippingRoutePlanPoint).where(ShippingRoutePlanPoint.plan_id == plan_id)
+        if structure_revision is not None:
+            stmt = stmt.where(ShippingRoutePlanPoint.structure_revision == structure_revision)
         rows = (
             await self.db.execute(
-                select(ShippingRoutePlanPoint)
-                .where(ShippingRoutePlanPoint.plan_id == plan_id)
-                .order_by(ShippingRoutePlanPoint.point_order.asc(), ShippingRoutePlanPoint.id.asc())
+                stmt.order_by(ShippingRoutePlanPoint.point_order.asc(), ShippingRoutePlanPoint.id.asc())
             )
         ).scalars().all()
         return list(rows)
 
-    async def list_segments(self, plan_id: int) -> list[ShippingRoutePlanSegment]:
+    async def list_segments(self, plan_id: int, structure_revision: int | None = None) -> list[ShippingRoutePlanSegment]:
+        stmt = select(ShippingRoutePlanSegment).where(ShippingRoutePlanSegment.plan_id == plan_id)
+        if structure_revision is not None:
+            stmt = stmt.where(ShippingRoutePlanSegment.structure_revision == structure_revision)
         rows = (
             await self.db.execute(
-                select(ShippingRoutePlanSegment)
-                .where(ShippingRoutePlanSegment.plan_id == plan_id)
-                .order_by(ShippingRoutePlanSegment.segment_no.asc(), ShippingRoutePlanSegment.id.asc())
+                stmt.order_by(ShippingRoutePlanSegment.segment_no.asc(), ShippingRoutePlanSegment.id.asc())
             )
         ).scalars().all()
         return list(rows)
@@ -592,21 +600,27 @@ class ShippingRoutePlanStructureRepository:
         await self.db.execute(update(ShippingRoutePlan).where(ShippingRoutePlan.id == plan_id).values(current_track_version_id=None))
         await self.db.flush()
 
+    async def clear_current_track_version(self, plan: ShippingRoutePlan) -> None:
+        await self.db.execute(
+            update(ShippingRoutePlanTrackVersion)
+            .where(ShippingRoutePlanTrackVersion.plan_id == plan.id)
+            .values(is_current=False)
+        )
+        plan.current_track_version_id = None
+        await self.db.flush()
+
     async def replace_structure(
         self,
-        plan_id: int,
+        plan: ShippingRoutePlan,
         points: list[dict[str, Any]],
     ) -> tuple[list[ShippingRoutePlanPoint], list[ShippingRoutePlanSegment]]:
-        await self.clear_track_versions(plan_id)
-        segment_ids = [row.id for row in await self.list_segments(plan_id)]
-        if segment_ids:
-            await self.db.execute(delete(ShippingRoutePlanSegmentResult).where(ShippingRoutePlanSegmentResult.segment_id.in_(segment_ids)))
-        await self.db.execute(delete(ShippingRoutePlanSegment).where(ShippingRoutePlanSegment.plan_id == plan_id))
-        await self.db.execute(delete(ShippingRoutePlanPoint).where(ShippingRoutePlanPoint.plan_id == plan_id))
+        new_revision = int(plan.structure_revision or 1) + 1
+        await self.clear_current_track_version(plan)
+        plan.structure_revision = new_revision
 
         point_entities: list[ShippingRoutePlanPoint] = []
         for item in points:
-            row = ShippingRoutePlanPoint(plan_id=plan_id, **item)
+            row = ShippingRoutePlanPoint(plan_id=plan.id, structure_revision=new_revision, **item)
             self.db.add(row)
             point_entities.append(row)
         await self.db.flush()
@@ -618,7 +632,8 @@ class ShippingRoutePlanStructureRepository:
             start = point_entities[idx]
             end = point_entities[idx + 1]
             row = ShippingRoutePlanSegment(
-                plan_id=plan_id,
+                plan_id=plan.id,
+                structure_revision=new_revision,
                 segment_no=idx + 1,
                 start_plan_point_id=start.id,
                 end_plan_point_id=end.id,
@@ -630,7 +645,7 @@ class ShippingRoutePlanStructureRepository:
         await self.db.flush()
         for row in segment_entities:
             await self.db.refresh(row)
-        return await self.list_points(plan_id), await self.list_segments(plan_id)
+        return await self.list_points(plan.id, new_revision), await self.list_segments(plan.id, new_revision)
 
     async def delete_plan_structure(self, plan_id: int) -> None:
         await self.clear_track_versions(plan_id)

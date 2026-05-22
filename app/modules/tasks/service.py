@@ -284,6 +284,17 @@ class AsyncTaskRunService:
 
             result = clean_freight_normalization_task.delay(row.business_id, row.requested_by, row.id)
             return str(result.id)
+        if row.task_name == "route.generate_track_version":
+            from app.tasks.route_tasks import generate_route_track_version_task
+
+            extra = row.extra_json or {}
+            result = generate_route_track_version_task.delay(
+                row.business_id,
+                {"provider_code": extra.get("provider_code")},
+                row.requested_by,
+                row.id,
+            )
+            return str(result.id)
         raise ValidationError(f"暂不支持自动重试任务：{row.task_name}")
 
     def _from_async_task(self, row: AsyncTaskRun) -> AsyncTaskRunResponse:
@@ -319,6 +330,7 @@ class AsyncTaskRunService:
                 "freight.parse_wechat_batch",
                 "freight.parse_tms_inbound",
                 "freight.clean_normalization",
+                "route.generate_track_version",
             },
             created_at=row.created_at,
             updated_at=row.updated_at,

@@ -261,6 +261,31 @@ async def test_generate_provider_version_rejects_anchor_only_segments(session: A
 
 
 @pytest.mark.asyncio
+async def test_generate_provider_version_rejects_same_coordinate_segment_without_fallback(session: AsyncSession) -> None:
+    plan_id = await _seed_plan(session)
+    duplicate_point = await session.get(ShippingRoutePlanPoint, 13)
+    extra_segment = await session.get(ShippingRoutePlanSegment, 16)
+    assert duplicate_point is not None
+    assert extra_segment is not None
+    duplicate_point.longitude = Decimal("120.00000000")
+    duplicate_point.latitude = Decimal("31.00000000")
+    await session.delete(extra_segment)
+    await session.commit()
+
+    response = await ShippingRoutePlanStructureService(session).generate_track_version(
+        plan_id,
+        RouteTrackGenerateRequest(provider_code="HIFLEET"),
+    )
+
+    assert response.status == "FAILED"
+    assert response.version is not None
+    assert response.version.source_type_code == "HIFLEET"
+    assert response.version.segment_count == 0
+    assert response.version.summary_json.get("fallback_notes") == []
+    assert "起终点坐标相同" in (response.version.error_message or "")
+
+
+@pytest.mark.asyncio
 async def test_delete_current_track_version_clears_plan_current_and_keeps_history(session: AsyncSession) -> None:
     plan_id = await _seed_plan(session)
     service = ShippingRoutePlanStructureService(session)
@@ -437,7 +462,7 @@ async def test_delete_route_hard_deletes_plans_tracks_and_route_derivatives(sess
 
 
 @pytest.mark.asyncio
-async def test_replace_structure_clears_track_versions_only_when_structure_changes(session: AsyncSession) -> None:
+async def test_replace_structure_preserves_history_and_invalidates_current_on_change(session: AsyncSession) -> None:
     plan_id = await _seed_plan(session)
     service = ShippingRoutePlanStructureService(session)
     structure = await service.get_structure(plan_id)
@@ -484,6 +509,7 @@ async def test_replace_structure_clears_track_versions_only_when_structure_chang
 
     assert plan.current_track_version_id == saved.id
     assert len(versions_after_same_save) == 1
+    assert plan.structure_revision == 1
 
     changed_payload = RoutePlanStructureReplaceRequest(
         points=[
@@ -506,15 +532,168 @@ async def test_replace_structure_clears_track_versions_only_when_structure_chang
             ),
         ]
     )
-    await service.replace_structure(plan_id, changed_payload)
+    new_structure = await service.replace_structure(plan_id, changed_payload)
     await session.refresh(plan)
     version_count = await session.scalar(select(func.count(ShippingRoutePlanTrackVersion.id)))
     version_segment_count = await session.scalar(select(func.count(ShippingRoutePlanTrackVersionSegment.id)))
+    point_count = await session.scalar(select(func.count(ShippingRoutePlanPoint.id)))
+    segment_count = await session.scalar(select(func.count(ShippingRoutePlanSegment.id)))
+    versions_after_change = await service.list_track_versions(plan_id)
 
     assert plan.current_track_version_id is None
-    assert await service.list_track_versions(plan_id) == []
-    assert version_count == 0
-    assert version_segment_count == 0
+    assert plan.structure_revision == 2
+    assert new_structure.plan.structure_revision == 2
+    assert len(new_structure.points) == 2
+    assert len(new_structure.segments) == 1
+    assert len(versions_after_change) == 1
+    assert versions_after_change[0].id == saved.id
+    assert versions_after_change[0].is_current is False
+    assert versions_after_change[0].is_compatible_with_current_structure is False
+    assert version_count == 1
+    assert version_segment_count == 2
+    assert point_count == 5
+    assert segment_count == 3
+
+    with pytest.raises(Exception, match="历史结构轨迹不能设为当前"):
+        await service.set_current_track_version(plan_id, saved.id)
+
+    new_saved = await service.save_track_version(
+        plan_id,
+        RouteTrackVersionSaveRequest(
+            segments=[
+                RouteTrackVersionSegmentSaveItem(
+                    segment_id=new_structure.segments[0].id,
+                    geometry_json={
+                        "type": "LineString",
+                        "coordinates": [[120.0, 31.0], [120.5, 31.25], [121.0, 31.5]],
+                    },
+                    edit_status_code="REDRAWN",
+                )
+            ],
+        ),
+    )
+    await session.refresh(plan)
+    final_versions = await service.list_track_versions(plan_id)
+
+    assert new_saved.is_current is True
+    assert new_saved.structure_revision == 2
+    assert plan.current_track_version_id == new_saved.id
+    assert len(final_versions) == 2
+    assert any(item.id == saved.id and not item.is_current and not item.is_compatible_with_current_structure for item in final_versions)
+
+
+@pytest.mark.asyncio
+async def test_adding_structure_point_preserves_history_until_new_track_saved(session: AsyncSession) -> None:
+    plan_id = await _seed_plan(session)
+    service = ShippingRoutePlanStructureService(session)
+    structure = await service.get_structure(plan_id)
+    saved = await service.save_track_version(
+        plan_id,
+        RouteTrackVersionSaveRequest(
+            segments=[
+                RouteTrackVersionSegmentSaveItem(
+                    segment_id=segment.id,
+                    geometry_json={
+                        "type": "LineString",
+                        "coordinates": (
+                            [[120.0, 31.0], [120.25, 31.12], [120.5, 31.2]]
+                            if segment.segment_no == 1
+                            else [[120.5, 31.2], [120.75, 31.36], [121.0, 31.5]]
+                        ),
+                    },
+                    edit_status_code="EDITED",
+                )
+                for segment in structure.segments
+            ],
+        ),
+    )
+
+    changed_payload = RoutePlanStructureReplaceRequest(
+        points=[
+            RoutePlanPointUpsertItem(
+                point_type_code=structure.points[0].point_type_code,
+                manual_name=structure.points[0].manual_name,
+                longitude=structure.points[0].longitude,
+                latitude=structure.points[0].latitude,
+                display_name=structure.points[0].display_name,
+                transport_mode_after_code="WATER",
+                remark=structure.points[0].remark,
+            ),
+            RoutePlanPointUpsertItem(
+                point_type_code=structure.points[1].point_type_code,
+                manual_name=structure.points[1].manual_name,
+                longitude=structure.points[1].longitude,
+                latitude=structure.points[1].latitude,
+                display_name=structure.points[1].display_name,
+                transport_mode_after_code="WATER",
+                remark=structure.points[1].remark,
+            ),
+            RoutePlanPointUpsertItem(
+                point_type_code="MANUAL_POINT",
+                manual_name="B2",
+                longitude=Decimal("120.75000000"),
+                latitude=Decimal("31.35000000"),
+                display_name="B2",
+                transport_mode_after_code="WATER",
+            ),
+            RoutePlanPointUpsertItem(
+                point_type_code=structure.points[2].point_type_code,
+                manual_name=structure.points[2].manual_name,
+                longitude=structure.points[2].longitude,
+                latitude=structure.points[2].latitude,
+                display_name=structure.points[2].display_name,
+                remark=structure.points[2].remark,
+            ),
+        ]
+    )
+    new_structure = await service.replace_structure(plan_id, changed_payload)
+    plan = await session.get(ShippingRoutePlan, plan_id)
+    versions = await service.list_track_versions(plan_id)
+
+    assert plan.current_track_version_id is None
+    assert plan.structure_revision == 2
+    assert len(new_structure.points) == 4
+    assert len(new_structure.segments) == 3
+    assert len(versions) == 1
+    assert versions[0].id == saved.id
+    assert versions[0].is_current is False
+    assert versions[0].is_compatible_with_current_structure is False
+
+
+@pytest.mark.asyncio
+async def test_enqueue_generate_track_version_creates_idempotent_async_task(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    plan_id = await _seed_plan(session)
+    service = ShippingRoutePlanStructureService(session)
+    calls: list[tuple[int, dict, int | None, int | None]] = []
+
+    class FakeAsyncResult:
+        id = "celery-route-test-1"
+
+    def fake_delay(plan_id_arg: int, payload: dict, requested_by: int | None, task_run_id: int | None) -> FakeAsyncResult:
+        calls.append((plan_id_arg, payload, requested_by, task_run_id))
+        return FakeAsyncResult()
+
+    from app.tasks import route_tasks
+
+    monkeypatch.setattr(route_tasks.generate_route_track_version_task, "delay", fake_delay)
+
+    first = await service.enqueue_generate_track_version(
+        plan_id,
+        RouteTrackGenerateRequest(provider_code="HIFLEET"),
+        requested_by=99,
+    )
+    second = await service.enqueue_generate_track_version(
+        plan_id,
+        RouteTrackGenerateRequest(provider_code="HIFLEET"),
+        requested_by=99,
+    )
+
+    assert first.id == second.id
+    assert first.status_code == "QUEUED"
+    assert first.celery_task_id == "celery-route-test-1"
+    assert first.business_type == "ROUTE_PLAN_TRACK_VERSION"
+    assert first.extra_json["structure_revision"] == 1
+    assert calls == [(plan_id, {"provider_code": "HIFLEET"}, 99, first.id)]
 
 
 @pytest.mark.asyncio

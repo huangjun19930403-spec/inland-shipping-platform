@@ -119,6 +119,7 @@ class RoutePlanResponse(BaseModel):
     is_default: bool
     status_code: str
     display_order: int
+    structure_revision: int = 1
     applicable_condition: str | None
     remark: str | None
     created_at: datetime
@@ -248,6 +249,7 @@ class RoutePlanTrackVersionSegmentResponse(BaseModel):
 class RoutePlanTrackVersionResponse(BaseModel):
     id: int
     plan_id: int
+    structure_revision: int = 1
     version_no: int
     version_name: str | None
     source_type_code: str
@@ -264,6 +266,7 @@ class RoutePlanTrackVersionResponse(BaseModel):
     generated_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    is_compatible_with_current_structure: bool = True
     segments: list[RoutePlanTrackVersionSegmentResponse] = Field(default_factory=list)
 
 

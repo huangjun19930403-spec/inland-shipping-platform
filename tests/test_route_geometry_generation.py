@@ -17,7 +17,13 @@ from app.integrations.config_keys import (
 )
 from app.integrations.hifleet.client import HifleetRouteClient
 from app.integrations.http.route_geometry_types import RouteGeometryQuery
-from app.modules.route.service import _line_string_points, _to_point_response, _track_status
+from app.modules.route.service import (
+    _line_string_points,
+    _safe_error_message,
+    _should_use_fallback_track,
+    _to_point_response,
+    _track_status,
+)
 
 
 class FakeRuntimeConfig:
@@ -57,6 +63,16 @@ class FakeHifleetSession:
 
     def invalidate(self) -> None:
         pass
+
+
+class CountingHifleetSession(FakeHifleetSession):
+    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
+        super().__init__(transport)
+        self.force_login_count = 0
+
+    async def ensure_session(self, *, force_login: bool = False) -> None:
+        if force_login:
+            self.force_login_count += 1
 
 
 def route_query() -> RouteGeometryQuery:
@@ -182,6 +198,40 @@ async def test_hifleet_route_client_parses_nested_polyline_response() -> None:
     result = await client.generate(route_query())
 
     assert result.geometry["coordinates"] == [[120.0, 31.0], [120.3, 31.2], [121.0, 32.0]]
+
+
+@pytest.mark.asyncio
+async def test_hifleet_timeout_is_not_retried_as_login_expiry() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("mock route timeout", request=request)
+
+    session = CountingHifleetSession(httpx.MockTransport(handler))
+    client = HifleetRouteClient(
+        runtime_config=FakeRuntimeConfig(
+            {
+                HIFLEET_BASE_URL: "https://www.hifleet.com",
+                HIFLEET_ROUTE_URL: "/hifleetrouteapi/getNewRoute",
+                HIFLEET_TIMEOUT_SECONDS: "1",
+            }
+        ),
+        session_manager=session,
+        max_retries=2,
+    )
+
+    with pytest.raises(httpx.ReadTimeout):
+        await client.generate(route_query())
+
+    assert session.force_login_count == 0
+
+
+def test_route_provider_timeout_and_network_errors_use_clear_messages_and_fallback() -> None:
+    timeout = httpx.ReadTimeout("mock route timeout")
+    network = httpx.ConnectError("mock connect failed")
+
+    assert _safe_error_message(timeout) == "外部轨迹服务请求超时"
+    assert _safe_error_message(network) == "外部轨迹服务网络连接失败"
+    assert _should_use_fallback_track(timeout) is True
+    assert _should_use_fallback_track(network) is True
 
 
 def test_route_track_status_from_selected_segment_counts() -> None:

@@ -42,6 +42,7 @@ class ShippingRoutePlan(Base, TimestampMixin):
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT", index=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    structure_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     current_track_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     applicable_condition: Mapped[str | None] = mapped_column(String(512), nullable=True)
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -50,11 +51,12 @@ class ShippingRoutePlan(Base, TimestampMixin):
 class ShippingRoutePlanPoint(Base, TimestampMixin):
     __tablename__ = "shipping_route_plan_point"
     __table_args__ = (
-        UniqueConstraint("plan_id", "point_order", name="uk_route_plan_point_order"),
+        UniqueConstraint("plan_id", "structure_revision", "point_order", name="uk_route_plan_point_order"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     plan_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan.id"), nullable=False, index=True)
+    structure_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     point_order: Mapped[int] = mapped_column(Integer, nullable=False)
     point_type_code: Mapped[str] = mapped_column(String(64), nullable=False)
     transport_node_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("transport_node.id"), nullable=True, index=True)
@@ -70,11 +72,12 @@ class ShippingRoutePlanPoint(Base, TimestampMixin):
 class ShippingRoutePlanSegment(Base, TimestampMixin):
     __tablename__ = "shipping_route_plan_segment"
     __table_args__ = (
-        UniqueConstraint("plan_id", "segment_no", name="uk_route_plan_segment_no"),
+        UniqueConstraint("plan_id", "structure_revision", "segment_no", name="uk_route_plan_segment_no"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     plan_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan.id"), nullable=False, index=True)
+    structure_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     segment_no: Mapped[int] = mapped_column(Integer, nullable=False)
     start_plan_point_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan_point.id"), nullable=False, index=True)
     end_plan_point_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan_point.id"), nullable=False, index=True)
@@ -115,6 +118,7 @@ class ShippingRoutePlanTrackVersion(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     plan_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("shipping_route_plan.id"), nullable=False, index=True)
+    structure_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     version_no: Mapped[int] = mapped_column(Integer, nullable=False)
     version_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)

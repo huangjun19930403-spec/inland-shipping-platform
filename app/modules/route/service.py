@@ -7,6 +7,7 @@ from decimal import Decimal
 import math
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +41,8 @@ from app.modules.route.schemas import (
     RouteTrackVersionGenerateResponse,
 )
 from app.modules.system.runtime_config import RuntimeConfigService
+from app.modules.tasks.schemas import AsyncTaskRunResponse
+from app.modules.tasks.service import AsyncTaskRunService
 
 ENDPOINT_TYPES = {"REGION", "CITY", "NODE"}
 PLAN_TYPES = {"STANDARD", "SEASONAL", "EMERGENCY", "MANUAL"}
@@ -143,8 +146,82 @@ def _to_decimal(value) -> Decimal | None:
 
 
 def _safe_error_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "外部轨迹服务请求超时"
+    if isinstance(exc, httpx.NetworkError):
+        return "外部轨迹服务网络连接失败"
+    if isinstance(exc, TimeoutError):
+        return "外部轨迹服务请求超时"
+    message = getattr(exc, "message", None)
+    if message:
+        return str(message).replace("\r", " ").replace("\n", " ").strip()[:180]
     text = str(exc or "").replace("\r", " ").replace("\n", " ").strip()
     return (text or "未知错误")[:180]
+
+
+def _track_source_display(value: str | None) -> str:
+    source = str(value or "").strip().upper()
+    return {
+        "HIFLEET": "AMMS",
+        "AMAP": "高德",
+        "FALLBACK": "降级轨迹",
+        "MANUAL": "人工修线",
+    }.get(source, source or "轨迹")
+
+
+def _fallback_geometry(start: tuple[float, float], end: tuple[float, float]) -> dict[str, Any]:
+    start_lon, start_lat = float(start[0]), float(start[1])
+    end_lon, end_lat = float(end[0]), float(end[1])
+    mid_lon = (start_lon + end_lon) / 2
+    mid_lat = (start_lat + end_lat) / 2
+    dx = end_lon - start_lon
+    dy = end_lat - start_lat
+    length = math.hypot(dx, dy)
+    if length < 0.000001:
+        offset = 0.02
+        return _line_string_geometry(
+            [
+                [start_lon, start_lat],
+                [start_lon + offset * 0.45, start_lat + offset * 0.12],
+                [start_lon + offset, start_lat + offset * 0.55],
+                [start_lon + offset * 0.35, start_lat + offset],
+                [end_lon, end_lat],
+            ]
+        )
+    offset = min(0.18, max(0.03, length * 0.08))
+    control = [mid_lon - dy / length * offset, mid_lat + dx / length * offset]
+    return _line_string_geometry(
+        [
+            [start_lon, start_lat],
+            [(start_lon + control[0]) / 2, (start_lat + control[1]) / 2],
+            control,
+            [(control[0] + end_lon) / 2, (control[1] + end_lat) / 2],
+            [end_lon, end_lat],
+        ]
+    )
+
+
+def _should_use_fallback_track(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, TimeoutError)):
+        return True
+    text = str(exc or "").lower()
+    fallback_markers = (
+        "userkey_plat_nomatch",
+        "userkey",
+        "未配置 route_amap_web_api_key",
+        "amms 路径服务未启用",
+        "未配置 amms",
+        "登录退避",
+        "登录失败",
+        "请求失败",
+        "nodename",
+        "network",
+        "timeout",
+        "timed out",
+        "connection",
+        "event loop is closed",
+    )
+    return any(marker in text for marker in fallback_markers)
 
 
 def _point_compare_value(field: str, value: Any) -> Any:
@@ -262,6 +339,7 @@ def _to_plan_response(
         is_default=entity.is_default,
         status_code=entity.status_code,
         display_order=entity.display_order,
+        structure_revision=int(entity.structure_revision or 1),
         applicable_condition=entity.applicable_condition,
         remark=entity.remark,
         created_at=entity.created_at,
@@ -378,10 +456,14 @@ def _to_track_version_response(
     entity: ShippingRoutePlanTrackVersion,
     *,
     segments: list[ShippingRoutePlanTrackVersionSegment] | None = None,
+    current_structure_revision: int | None = None,
 ) -> RoutePlanTrackVersionResponse:
+    structure_revision = int(entity.structure_revision or 1)
+    compatible_revision = current_structure_revision is None or structure_revision == int(current_structure_revision or 1)
     return RoutePlanTrackVersionResponse(
         id=entity.id,
         plan_id=entity.plan_id,
+        structure_revision=structure_revision,
         version_no=entity.version_no,
         version_name=entity.version_name,
         source_type_code=entity.source_type_code,
@@ -398,6 +480,7 @@ def _to_track_version_response(
         generated_at=entity.generated_at,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
+        is_compatible_with_current_structure=compatible_revision,
         segments=[_to_track_version_segment_response(item) for item in (segments or [])],
     )
 
@@ -430,8 +513,8 @@ class ShippingRouteService:
                 default_plan_id = plan.id
                 default_plan_name = plan.plan_name
                 current_track_version_id = plan.current_track_version_id
-            points = await self.structure_repo.list_points(plan.id)
-            segments = await self.structure_repo.list_segments(plan.id)
+            points = await self.structure_repo.list_points(plan.id, plan.structure_revision)
+            segments = await self.structure_repo.list_segments(plan.id, plan.structure_revision)
             versions = await self.structure_repo.list_track_versions(plan.id)
             track_version_count += len(versions)
             current_version = next((item for item in versions if item.id == plan.current_track_version_id), None)
@@ -465,8 +548,8 @@ class ShippingRouteService:
         }
 
     async def _plan_response(self, plan) -> RoutePlanResponse:
-        points = await self.structure_repo.list_points(plan.id)
-        segments = await self.structure_repo.list_segments(plan.id)
+        points = await self.structure_repo.list_points(plan.id, plan.structure_revision)
+        segments = await self.structure_repo.list_segments(plan.id, plan.structure_revision)
         versions = await self.structure_repo.list_track_versions(plan.id)
         current_version = next((item for item in versions if item.id == plan.current_track_version_id), None)
         current_version_segments = await self.structure_repo.list_track_version_segments([current_version.id]) if current_version else []
@@ -637,8 +720,8 @@ class ShippingRoutePlanService:
         self.sequence_service = CodeSequenceService(db)
 
     async def _plan_response(self, plan) -> RoutePlanResponse:
-        points = await self.structure_repo.list_points(plan.id)
-        segments = await self.structure_repo.list_segments(plan.id)
+        points = await self.structure_repo.list_points(plan.id, plan.structure_revision)
+        segments = await self.structure_repo.list_segments(plan.id, plan.structure_revision)
         versions = await self.structure_repo.list_track_versions(plan.id)
         current_version = next((item for item in versions if item.id == plan.current_track_version_id), None)
         current_version_segments = await self.structure_repo.list_track_version_segments([current_version.id]) if current_version else []
@@ -738,10 +821,10 @@ class ShippingRoutePlanStructureService:
             raise NotFoundError("ShippingRoutePlan", plan_id)
         points = self._normalize_points(payload.points)
         await self._validate_point_refs(points)
-        existing_points = await self.structure_repo.list_points(plan_id)
+        existing_points = await self.structure_repo.list_points(plan_id, plan.structure_revision)
         if [_point_compare_signature(point) for point in existing_points] == [_point_compare_signature(point) for point in points]:
             return await self._structure_response(plan)
-        await self.structure_repo.replace_structure(plan_id, points)
+        await self.structure_repo.replace_structure(plan, points)
         await self.db.commit()
         await self.db.refresh(plan)
         return await self._structure_response(plan)
@@ -751,7 +834,7 @@ class ShippingRoutePlanStructureService:
         if plan is None:
             raise NotFoundError("ShippingRoutePlan", plan_id)
         versions = await self.structure_repo.list_track_versions(plan_id)
-        return [_to_track_version_response(item) for item in versions]
+        return [_to_track_version_response(item, current_structure_revision=plan.structure_revision) for item in versions]
 
     async def get_track_version(self, plan_id: int, version_id: int) -> RoutePlanTrackVersionResponse:
         plan = await self.plan_repo.get_plan_by_id(plan_id)
@@ -761,21 +844,74 @@ class ShippingRoutePlanStructureService:
         if version is None or version.plan_id != plan_id:
             raise NotFoundError("ShippingRoutePlanTrackVersion", version_id)
         segments = await self.structure_repo.list_track_version_segments([version.id])
-        return _to_track_version_response(version, segments=segments)
+        return _to_track_version_response(version, segments=segments, current_structure_revision=plan.structure_revision)
+
+    async def enqueue_generate_track_version(
+        self,
+        plan_id: int,
+        payload,
+        *,
+        requested_by: int | None = None,
+    ) -> AsyncTaskRunResponse:
+        plan = await self.plan_repo.get_plan_by_id(plan_id)
+        if plan is None:
+            raise NotFoundError("ShippingRoutePlan", plan_id)
+        provider_code = str(payload.provider_code or "AUTO").strip().upper() or "AUTO"
+        task_run_service = AsyncTaskRunService(self.db)
+        task_run = await task_run_service.create_queued(
+            task_name="route.generate_track_version",
+            task_title=f"航线轨迹生成：{plan.plan_name}",
+            queue_name="analysis",
+            business_type="ROUTE_PLAN_TRACK_VERSION",
+            business_id=plan.id,
+            business_no=plan.plan_code,
+            idempotency_key=f"route.generate_track_version:{plan.id}:{int(plan.structure_revision or 1)}:{provider_code}",
+            requested_by=requested_by,
+            triggered_by="manual",
+            max_retries=0,
+            extra_json={
+                "plan_id": plan.id,
+                "plan_code": plan.plan_code,
+                "structure_revision": int(plan.structure_revision or 1),
+                "provider_code": provider_code,
+            },
+        )
+        should_dispatch = not (
+            task_run.celery_task_id
+            and task_run.status_code in {"QUEUED", "STARTED", "RUNNING", "RETRYING"}
+        )
+        await self.db.commit()
+        if should_dispatch:
+            try:
+                from app.tasks.route_tasks import generate_route_track_version_task
+
+                async_result = generate_route_track_version_task.delay(
+                    plan.id,
+                    payload.model_dump(mode="json"),
+                    requested_by,
+                    task_run.id,
+                )
+                await task_run_service.bind_celery_task_id(task_run.id, str(async_result.id))
+            except Exception as exc:  # noqa: BLE001
+                await task_run_service.mark_failed(task_run.id, f"轨迹生成任务投递失败：{exc}")
+                raise ValidationError(f"轨迹生成任务投递失败：{exc}") from exc
+        return await task_run_service.get_run(task_run.id)
 
     async def generate_track_version(self, plan_id: int, payload) -> RouteTrackVersionGenerateResponse:
         plan = await self.plan_repo.get_plan_by_id(plan_id)
         if plan is None:
             raise NotFoundError("ShippingRoutePlan", plan_id)
-        points = await self.structure_repo.list_points(plan_id)
-        segments = await self.structure_repo.list_segments(plan_id)
+        points = await self.structure_repo.list_points(plan_id, plan.structure_revision)
+        segments = await self.structure_repo.list_segments(plan_id, plan.structure_revision)
         if not segments:
             raise ValidationError("请先维护至少两个点位，系统才能生成逻辑段")
         point_by_id = {point.id: point for point in points}
         now = datetime.utcnow()
         version_segments: list[dict[str, Any]] = []
         errors: list[str] = []
+        fallback_notes: list[str] = []
         provider_codes: set[str] = set()
+        source_codes: set[str] = set()
         total_distance = Decimal("0")
         total_duration = Decimal("0")
         total_points = 0
@@ -811,6 +947,11 @@ class ShippingRoutePlanStructureService:
                 total_duration += duration or Decimal("0")
                 total_points += point_count
                 provider_codes.add(result.provider or source)
+                source_codes.add(source)
+                if source == "FALLBACK":
+                    raw_summary = result.raw_summary or {}
+                    fallback_reason = raw_summary.get("fallback_reason") if isinstance(raw_summary, dict) else None
+                    fallback_notes.append(f"航段 {segment.segment_no}: {fallback_reason or '外部轨迹服务不可用，已生成可编辑降级轨迹'}")
                 version_segments.append(
                     {
                         "segment_id": segment.id,
@@ -833,13 +974,17 @@ class ShippingRoutePlanStructureService:
                 segment.generated_at = now
         status = _track_status(len(segments), len(version_segments), len(errors))
         source_type = str(payload.provider_code or "").strip().upper()
-        if source_type not in TRACK_VERSION_SOURCES:
+        if source_codes and source_codes == {"FALLBACK"}:
+            source_type = "FALLBACK"
+        elif source_type not in TRACK_VERSION_SOURCES:
             source_type = next(iter(provider_codes), None) or "HIFLEET"
         provider_type = ",".join(sorted(provider_codes)) if provider_codes else source_type
+        version_no = await self.structure_repo.next_track_version_no(plan_id)
         version = await self.structure_repo.create_track_version(
             plan_id,
             {
-                "version_name": f"{source_type} 生成 V{await self.structure_repo.next_track_version_no(plan_id)}",
+                "version_name": f"{_track_source_display(source_type)}生成 V{version_no}",
+                "structure_revision": plan.structure_revision,
                 "source_type_code": source_type,
                 "provider_type_code": provider_type,
                 "parent_version_id": None,
@@ -854,6 +999,7 @@ class ShippingRoutePlanStructureService:
                     "success_count": len(version_segments),
                     "segment_count": len(segments),
                     "errors": errors[:5],
+                    "fallback_notes": fallback_notes[:5],
                 },
                 "error_message": "；".join(errors)[:512] if errors else None,
                 "generated_at": now,
@@ -874,12 +1020,18 @@ class ShippingRoutePlanStructureService:
         plan = await self.plan_repo.get_plan_by_id(plan_id)
         if plan is None:
             raise NotFoundError("ShippingRoutePlan", plan_id)
-        points = await self.structure_repo.list_points(plan_id)
-        segments = await self.structure_repo.list_segments(plan_id)
+        points = await self.structure_repo.list_points(plan_id, plan.structure_revision)
+        segments = await self.structure_repo.list_segments(plan_id, plan.structure_revision)
         if not segments:
             raise ValidationError("请先维护至少两个点位，系统才能保存轨迹")
         if len(payload.segments) != len(segments):
             raise ValidationError("保存轨迹前必须补齐所有逻辑段")
+        if payload.parent_version_id is not None:
+            parent = await self.structure_repo.get_track_version_by_id(payload.parent_version_id)
+            if parent is None or parent.plan_id != plan_id:
+                raise NotFoundError("ShippingRoutePlanTrackVersion", payload.parent_version_id)
+            if int(parent.structure_revision or 1) != int(plan.structure_revision or 1):
+                raise ValidationError("历史结构轨迹不能作为当前结构的修线来源")
         segment_by_id = {segment.id: segment for segment in segments}
         point_by_id = {point.id: point for point in points}
         seen_segment_ids: set[int] = set()
@@ -925,6 +1077,7 @@ class ShippingRoutePlanStructureService:
             plan_id,
             {
                 "version_name": (payload.version_name or "").strip() or f"人工修线 V{await self.structure_repo.next_track_version_no(plan_id)}",
+                "structure_revision": plan.structure_revision,
                 "source_type_code": "MANUAL",
                 "provider_type_code": None,
                 "parent_version_id": payload.parent_version_id,
@@ -953,9 +1106,13 @@ class ShippingRoutePlanStructureService:
             raise NotFoundError("ShippingRoutePlanTrackVersion", version_id)
         if version.version_status_code != "READY":
             raise ValidationError("只能把 READY 状态的轨迹版本设为当前")
-        expected_count = len(await self.structure_repo.list_segments(plan_id))
-        version_segment_count = len(await self.structure_repo.list_track_version_segments([version.id]))
-        if expected_count <= 0 or version_segment_count != expected_count:
+        if int(version.structure_revision or 1) != int(plan.structure_revision or 1):
+            raise ValidationError("历史结构轨迹不能设为当前，请先基于当前结构重新生成轨迹")
+        current_segments = await self.structure_repo.list_segments(plan_id, plan.structure_revision)
+        expected_segment_ids = {int(item.id) for item in current_segments}
+        version_segments = await self.structure_repo.list_track_version_segments([version.id])
+        version_segment_ids = {int(item.segment_id) for item in version_segments}
+        if not expected_segment_ids or version_segment_ids != expected_segment_ids:
             raise ValidationError("该轨迹版本没有覆盖全部逻辑段，不能设为当前")
         await self.structure_repo.set_current_track_version(plan, version)
         await self.db.commit()
@@ -972,8 +1129,8 @@ class ShippingRoutePlanStructureService:
         await self.db.commit()
 
     async def _structure_response(self, plan) -> RoutePlanStructureResponse:
-        points = await self.structure_repo.list_points(plan.id)
-        segments = await self.structure_repo.list_segments(plan.id)
+        points = await self.structure_repo.list_points(plan.id, plan.structure_revision)
+        segments = await self.structure_repo.list_segments(plan.id, plan.structure_revision)
         point_responses = await self._point_responses(points)
         versions = await self.structure_repo.list_track_versions(plan.id)
         current_version = next((item for item in versions if item.id == plan.current_track_version_id), None)
@@ -1139,14 +1296,36 @@ class ShippingRoutePlanStructureService:
     ) -> RouteGeometryResult:
         origin_lon, origin_lat = await self._resolve_point(start_point)
         dest_lon, dest_lat = await self._resolve_point(end_point)
+        if _haversine_km((origin_lon, origin_lat), (dest_lon, dest_lat)) < 0.05:
+            raise ValidationError("航段起终点坐标相同或过近，AMMS 无法规划真实航线；请调整点位后再生成轨迹")
         client = self._geometry_client_for_segment(segment.transport_mode_code, provider_code)
-        return await client.generate(
-            RouteGeometryQuery(
-                origin_lon=origin_lon,
-                origin_lat=origin_lat,
-                dest_lon=dest_lon,
-                dest_lat=dest_lat,
-                transport_mode=segment.transport_mode_code,
-                segment_type="ROUTE_PLAN_SEGMENT",
-            )
+        query = RouteGeometryQuery(
+            origin_lon=origin_lon,
+            origin_lat=origin_lat,
+            dest_lon=dest_lon,
+            dest_lat=dest_lat,
+            transport_mode=segment.transport_mode_code,
+            segment_type="ROUTE_PLAN_SEGMENT",
         )
+        try:
+            return await client.generate(query)
+        except Exception as exc:  # noqa: BLE001
+            provider = getattr(client, "provider_name", None) or str(provider_code or "UNKNOWN").upper()
+            message = _safe_error_message(exc)
+            if _should_use_fallback_track(exc):
+                geometry = _fallback_geometry((origin_lon, origin_lat), (dest_lon, dest_lat))
+                distance = _line_distance_km(geometry)
+                return RouteGeometryResult(
+                    geometry=geometry,
+                    source="fallback",
+                    provider=provider,
+                    provider_trace_id="local-fallback",
+                    status="ready",
+                    distance_km=float(distance) if distance is not None else None,
+                    estimated_duration_hour=None,
+                    raw_summary={
+                        "fallback_reason": message,
+                        "requested_provider": provider,
+                    },
+                )
+            raise

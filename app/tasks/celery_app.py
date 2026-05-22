@@ -32,6 +32,7 @@ celery_app = Celery(
         "app.tasks.vessel_ai_tasks",
         "app.tasks.vessel_position_tasks",
         "app.tasks.vessel_candidate_tasks",
+        "app.tasks.route_tasks",
     ],
 )
 
@@ -63,6 +64,7 @@ celery_app.conf.update(
         "vessel.precompute_channel_situation": {"queue": "analysis"},
         "vessel.precompute_production_candidate_analyses": {"queue": "analysis"},
         "analysis.precompute_flow_route_cache": {"queue": "analysis"},
+        "route.generate_track_version": {"queue": "analysis"},
     },
 )
 

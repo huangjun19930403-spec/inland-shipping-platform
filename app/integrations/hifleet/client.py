@@ -303,6 +303,8 @@ class HifleetRouteClient:
                         last_error = exc
                         continue
                     raise
+                except (httpx.TimeoutException, httpx.NetworkError):
+                    raise
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
                     if attempt < self._max_retries:

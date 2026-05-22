@@ -21,11 +21,12 @@ from app.modules.route.schemas import (
     RoutePlanUpdateRequest,
     RouteResponse,
     RouteTrackGenerateRequest,
-    RouteTrackVersionGenerateResponse,
     RouteTrackVersionSaveRequest,
     RouteUpdateRequest,
 )
 from app.modules.route.service import ShippingRoutePlanService, ShippingRoutePlanStructureService, ShippingRouteService
+from app.modules.tasks.schemas import AsyncTaskRunResponse
+from app.modules.tasks.service import AsyncTaskRunService
 
 router = APIRouter()
 
@@ -157,15 +158,34 @@ async def list_route_plan_track_versions(
     return await ShippingRoutePlanStructureService(db).list_track_versions(plan_id)
 
 
-@router.post("/plans/{plan_id}/track-versions/generate", response_model=RouteTrackVersionGenerateResponse)
+@router.post("/plans/{plan_id}/track-versions/generate", response_model=AsyncTaskRunResponse)
 async def generate_route_plan_track_version(
     plan_id: int,
     body: RouteTrackGenerateRequest | None = None,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    requested_by = getattr(current_user, "id", None)
+    return await ShippingRoutePlanStructureService(db).enqueue_generate_track_version(
+        plan_id,
+        body or RouteTrackGenerateRequest(),
+        requested_by=requested_by,
+    )
+
+
+@router.get("/track-generation-tasks/{task_run_id}", response_model=AsyncTaskRunResponse)
+async def get_route_track_generation_task(
+    task_run_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     _ = current_user
-    return await ShippingRoutePlanStructureService(db).generate_track_version(plan_id, body or RouteTrackGenerateRequest())
+    row = await AsyncTaskRunService(db).get_run(task_run_id)
+    if row.business_type != "ROUTE_PLAN_TRACK_VERSION":
+        from app.core.exceptions import NotFoundError
+
+        raise NotFoundError("AsyncTaskRun", task_run_id)
+    return row
 
 
 @router.get("/plans/{plan_id}/track-versions/{version_id}", response_model=RoutePlanTrackVersionResponse)
