@@ -205,6 +205,7 @@ ROLE_MENU_CODES = {
         "VESSEL_CANDIDATE_ANALYSIS",
         "ROUTE_ROOT",
         "ROUTE_LIST",
+        "NAVIGATION_ROUTE_TEST",
         "ANALYSIS_REGIONS",
         "ANALYSIS_FLOWS",
         "ROUTE_REGION_FOUNDATION_GROUP",
@@ -257,6 +258,7 @@ ROLE_MENU_CODES = {
         "VESSEL_CANDIDATE_ANALYSIS",
         "ROUTE_ROOT",
         "ROUTE_LIST",
+        "NAVIGATION_ROUTE_TEST",
         "ANALYSIS_REGIONS",
         "ANALYSIS_FLOWS",
         "ROUTE_REGION_FOUNDATION_GROUP",
@@ -285,6 +287,7 @@ ROLE_MENU_CODES = {
         "FREIGHT_NORMALIZATION_ENTRY",
         "APPROVAL_ROOT",
         "ROUTE_ROOT",
+        "NAVIGATION_ROUTE_TEST",
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NODES",
         "ADDRESS_NAVIGATION_CHANNELS",
@@ -1116,6 +1119,18 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
+        "menu_code": "NAVIGATION_ROUTE_TEST",
+        "menu_name": "航道路径测试",
+        "menu_type_code": "MENU",
+        "parent_code": "ROUTE_ROOT",
+        "route_path": "/navigation/routes",
+        "component_path": "modules/navigation/pages/NavigationRouteTestPage",
+        "icon": "Promotion",
+        "sort_order": 2,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
         "menu_code": "ANALYSIS_ROOT",
         "menu_name": "数据分析",
         "menu_type_code": "DIRECTORY",
@@ -1544,6 +1559,7 @@ def _apply_production_menu_information_architecture() -> None:
         sort_order=2,
     )
     update("ADDRESS_NAVIGATION_CHANNELS", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=3)
+    update("NAVIGATION_ROUTE_TEST", parent_code="ROUTE_ROOT", sort_order=2)
     update("VESSEL_CANDIDATE_ANALYSIS", parent_code="VESSEL_ROOT", visible_flag=1)
     hide_if_exists("FREIGHT_NORMALIZATION_ENTRY")
     update("FREIGHT_MANUAL_CREATE", visible_flag=0)
@@ -1598,6 +1614,7 @@ def _apply_production_menu_information_architecture() -> None:
         "TASK_RUNS_CENTER",
         "ROUTE_ROOT",
         "ROUTE_LIST",
+        "NAVIGATION_ROUTE_TEST",
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NAVIGATION_CHANNELS",
         "APPROVAL_ROOT",
@@ -1668,6 +1685,7 @@ def infer_menu_permission_code(item: dict) -> str | None:
         ("/vessels", "VESSEL:READ"),
         ("/freight", "FREIGHT:READ"),
         ("/route", "ROUTE:READ"),
+        ("/navigation", "ROUTE:READ"),
         ("/analysis", "ANALYSIS:READ"),
         ("/tasks", "ANALYSIS:READ"),
         ("/approvals/config", "APPROVAL:CONFIG"),
