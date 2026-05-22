@@ -1,0 +1,286 @@
+{
+  "report_version": "round1_navigation_audit_v1",
+  "report_date": "2026-05-22",
+  "workspace": "/Users/hj/Documents/paltform_data_V2/inland-shipping-platform",
+  "source_zip": "/Users/hj/Documents/河道数据/revier.zip",
+  "database": "inland_shipping.db",
+  "seed_file": "scripts/seed_data/navigation/navigation_channels.json",
+  "seed_version": "revier_navigation_channel_v7",
+  "scope": "Round 1 audit only. No API, model, migration, seed execution, or business logic changes.",
+  "river_shapefile": {
+    "encoding": "UTF-8",
+    "reader": "pyshp==2.3.1",
+    "missing_runtime_geo_dependencies": [
+      "shapely",
+      "networkx",
+      "geopandas",
+      "fiona",
+      "pyogrio"
+    ],
+    "layers": [
+      {
+        "layer": "rx",
+        "records": 48192,
+        "shape_type": "POLYGON",
+        "bbox": [73.6756, 16.0536, 135.106, 53.5592],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 13374,
+        "unnamed_records": 34818,
+        "multipart_shapes": 2222,
+        "total_points": 3394844
+      },
+      {
+        "layer": "rx8",
+        "records": 4857,
+        "shape_type": "POLYGON",
+        "bbox": [73.9016, 18.2342, 134.9952, 49.1756],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 1473,
+        "unnamed_records": 3384,
+        "multipart_shapes": 115,
+        "total_points": 266987
+      },
+      {
+        "layer": "一级水系",
+        "records": 234,
+        "shape_type": "POLYGON",
+        "bbox": [75.9462, 21.5636, 135.0652, 53.5592],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 209,
+        "unnamed_records": 25,
+        "multipart_shapes": 94,
+        "total_points": 493685
+      },
+      {
+        "layer": "二级水系",
+        "records": 285,
+        "shape_type": "POLYGON",
+        "bbox": [75.0434, 22.5378, 135.106, 50.7224],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 225,
+        "unnamed_records": 60,
+        "multipart_shapes": 133,
+        "total_points": 268974
+      },
+      {
+        "layer": "三级水系",
+        "records": 608,
+        "shape_type": "POLYGON",
+        "bbox": [75.5002, 22.2142, 134.1578, 53.4586],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 529,
+        "unnamed_records": 79,
+        "multipart_shapes": 227,
+        "total_points": 363586
+      },
+      {
+        "layer": "四级水系",
+        "records": 1407,
+        "shape_type": "POLYGON",
+        "bbox": [74.4042, 18.7508, 134.7174, 49.404],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 1144,
+        "unnamed_records": 263,
+        "multipart_shapes": 398,
+        "total_points": 411644
+      },
+      {
+        "layer": "五级水系",
+        "records": 4541,
+        "shape_type": "POLYGON",
+        "bbox": [74.9612, 18.2278, 134.7528, 49.943],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 2598,
+        "unnamed_records": 1943,
+        "multipart_shapes": 525,
+        "total_points": 534371
+      },
+      {
+        "layer": "六级水系",
+        "records": 5175,
+        "shape_type": "POLYGON",
+        "bbox": [73.6756, 18.3882, 133.4282, 50.3084],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 2338,
+        "unnamed_records": 2837,
+        "multipart_shapes": 280,
+        "total_points": 289416
+      },
+      {
+        "layer": "七级水系",
+        "records": 27181,
+        "shape_type": "POLYGON",
+        "bbox": [74.4042, 18.3406, 134.8188, 53.4954],
+        "fields": ["OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area"],
+        "named_records": 4833,
+        "unnamed_records": 22348,
+        "multipart_shapes": 406,
+        "total_points": 652709
+      }
+    ]
+  },
+  "database_counts": {
+    "navigation_channel": 104,
+    "navigation_channel_boundary": 104,
+    "navigation_channel_segment": 200,
+    "navigation_channel_source_audit": 294,
+    "transport_node": 1181,
+    "navigation_constraint_point": 3,
+    "shipping_route_plan_track_version": 0,
+    "shipping_route_plan_segment_result": 0
+  },
+  "existing_navigation_tables": [
+    "navigation_channel",
+    "navigation_channel_boundary",
+    "navigation_channel_segment",
+    "navigation_channel_source_audit",
+    "navigation_constraint_point",
+    "navigation_constraint_profile"
+  ],
+  "missing_navigation_engine_tables": [
+    "navigation_water_area",
+    "navigation_channel_centerline",
+    "navigation_graph_version",
+    "navigation_graph_node",
+    "navigation_graph_edge",
+    "navigation_graph_edge_constraint",
+    "navigation_route_request",
+    "navigation_route_result",
+    "navigation_route_quality_issue",
+    "navigation_annotation_task"
+  ],
+  "navigation_seed_summary": {
+    "channel_type_counts": {
+      "TRIBUTARY_CHANNEL": 39,
+      "CANAL": 23,
+      "DELTA_WATERWAY": 15,
+      "MAIN_RIVER_CHANNEL": 14,
+      "PLANNED_CHANNEL": 9,
+      "CHANNEL_NETWORK": 2,
+      "MAIN_LINE": 2
+    },
+    "planning_level_counts": {
+      "PROVINCIAL_HIGH_GRADE": 32,
+      "REGIONAL_IMPORTANT": 28,
+      "NATIONAL_IMPORTANT": 19,
+      "NATIONAL_CORE": 12,
+      "PLANNED_GAP": 9,
+      "NATIONAL_NETWORK": 2,
+      "REVIEW": 2
+    },
+    "review_required_counts": {
+      "false": 85,
+      "true": 19
+    },
+    "boundary_status_counts": [
+      {
+        "geometry_status_code": "AVAILABLE",
+        "boundary_quality_code": "HIGH_CONFIDENCE",
+        "repair_status_code": "NONE",
+        "count": 84
+      },
+      {
+        "geometry_status_code": "MISSING",
+        "boundary_quality_code": "MISSING",
+        "repair_status_code": "MISSING",
+        "count": 9
+      },
+      {
+        "geometry_status_code": "AVAILABLE",
+        "boundary_quality_code": "REVIEW",
+        "repair_status_code": "REVIEW_FALLBACK",
+        "count": 8
+      },
+      {
+        "geometry_status_code": "AVAILABLE",
+        "boundary_quality_code": "MEDIUM_CONFIDENCE",
+        "repair_status_code": "NONE",
+        "count": 2
+      },
+      {
+        "geometry_status_code": "AVAILABLE",
+        "boundary_quality_code": "REVIEW",
+        "repair_status_code": "REVIEW_CORRIDOR",
+        "count": 1
+      }
+    ]
+  },
+  "missing_boundaries": [
+    {"channel_code": "NC-JIANGHAN-CANAL", "channel_name": "江汉运河", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-SHAYING-RIVER", "channel_name": "沙颍河航道", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-SUNAN-CANAL", "channel_name": "苏南运河", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-SUBEI-CANAL", "channel_name": "苏北运河", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-SUSHEN-INNER-PORT-LINE", "channel_name": "苏申内港线", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-XUSULIAN-CORRIDOR", "channel_name": "徐宿连通道", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-ZHAJIAGOU", "channel_name": "赵家沟", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-DALU-LINE", "channel_name": "大芦线", "planning_level_code": "PLANNED_GAP", "review_required": true},
+    {"channel_code": "NC-DAPU-LINE", "channel_name": "大浦线", "planning_level_code": "PLANNED_GAP", "review_required": true}
+  ],
+  "review_required_or_review_boundary_channels": [
+    {"channel_code": "NC-GRAND-CANAL", "channel_name": "京杭运河", "planning_level_code": "NATIONAL_CORE", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_CORRIDOR"},
+    {"channel_code": "NC-YANGTZE-DELTA-HIGH-GRADE-NETWORK", "channel_name": "长三角高等级航道网", "planning_level_code": "NATIONAL_NETWORK", "boundary_quality_code": "MEDIUM_CONFIDENCE", "repair_status_code": "NONE"},
+    {"channel_code": "NC-JIANGHAN-CANAL", "channel_name": "江汉运河", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-HEYU-LINE", "channel_name": "合裕线", "planning_level_code": "REGIONAL_IMPORTANT", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"},
+    {"channel_code": "NC-SHAYING-RIVER", "channel_name": "沙颍河航道", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-SUNAN-CANAL", "channel_name": "苏南运河", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-SUBEI-CANAL", "channel_name": "苏北运河", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-SUSHEN-INNER-PORT-LINE", "channel_name": "苏申内港线", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-XUSULIAN-CORRIDOR", "channel_name": "徐宿连通道", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-ZHAJIAGOU", "channel_name": "赵家沟", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-DALU-LINE", "channel_name": "大芦线", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-DAPU-LINE", "channel_name": "大浦线", "planning_level_code": "PLANNED_GAP", "boundary_quality_code": "MISSING", "repair_status_code": "MISSING"},
+    {"channel_code": "NC-HANGHUXI-LINE", "channel_name": "杭湖锡线", "planning_level_code": "PROVINCIAL_HIGH_GRADE", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"},
+    {"channel_code": "NC-LIANSHEN-LINE", "channel_name": "连申线", "planning_level_code": "PROVINCIAL_HIGH_GRADE", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"},
+    {"channel_code": "NC-WUSHEN-LINE", "channel_name": "芜申线—苏申外港线", "planning_level_code": "NATIONAL_IMPORTANT", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"},
+    {"channel_code": "NC-CHANGHUSHEN-LINE", "channel_name": "长湖申线—黄浦江—大浦线", "planning_level_code": "PROVINCIAL_HIGH_GRADE", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"},
+    {"channel_code": "NC-HUAIHE-SEA-CHANNEL", "channel_name": "淮河出海航道—盐河", "planning_level_code": "REGIONAL_IMPORTANT", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"},
+    {"channel_code": "NC-HUJIASHEN-LINE", "channel_name": "湖嘉申线", "planning_level_code": "NATIONAL_IMPORTANT", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"},
+    {"channel_code": "NC-SUSHEN-OUTER-PORT-LINE", "channel_name": "苏申外港线—苏申内港线", "planning_level_code": "PROVINCIAL_HIGH_GRADE", "boundary_quality_code": "REVIEW", "repair_status_code": "REVIEW_FALLBACK"}
+  ],
+  "mvp_channel_probe": [
+    {"keyword": "长江", "matches": [{"channel_code": "NC-YANGTZE", "channel_name": "长江干线", "geometry_status_code": "AVAILABLE", "boundary_quality_code": "HIGH_CONFIDENCE"}]},
+    {"keyword": "京杭运河", "matches": [{"channel_code": "NC-GRAND-CANAL", "channel_name": "京杭运河", "geometry_status_code": "AVAILABLE", "boundary_quality_code": "REVIEW"}]},
+    {"keyword": "通扬线", "matches": [{"channel_code": "NC-TONGYANG-LINE", "channel_name": "通扬线", "geometry_status_code": "AVAILABLE", "boundary_quality_code": "HIGH_CONFIDENCE"}]},
+    {"keyword": "连申线", "matches": [{"channel_code": "NC-LIANSHEN-LINE", "channel_name": "连申线", "geometry_status_code": "AVAILABLE", "boundary_quality_code": "REVIEW"}]},
+    {"keyword": "苏申内港线", "matches": [{"channel_code": "NC-SUSHEN-INNER-PORT-LINE", "channel_name": "苏申内港线", "geometry_status_code": "MISSING", "boundary_quality_code": "MISSING"}]},
+    {"keyword": "赵家沟", "matches": [{"channel_code": "NC-ZHAJIAGOU", "channel_name": "赵家沟", "geometry_status_code": "MISSING", "boundary_quality_code": "MISSING"}]},
+    {"keyword": "大芦线", "matches": [{"channel_code": "NC-DALU-LINE", "channel_name": "大芦线", "geometry_status_code": "MISSING", "boundary_quality_code": "MISSING"}]},
+    {"keyword": "大浦线", "matches": [{"channel_code": "NC-DAPU-LINE", "channel_name": "大浦线", "geometry_status_code": "MISSING", "boundary_quality_code": "MISSING"}]}
+  ],
+  "route_generation_current_state": {
+    "task_name": "route.generate_track_version",
+    "service": "ShippingRoutePlanStructureService.generate_track_version",
+    "current_default_provider_by_mode": {
+      "WATER": "HIFLEET",
+      "ROAD": "AMAP",
+      "RAIL": "unsupported"
+    },
+    "track_version_sources": ["AMAP", "HIFLEET", "MANUAL", "FALLBACK"],
+    "fallback_curve_exists": true,
+    "navigation_engine_exists": false
+  },
+  "round2_model_boundary": [
+    "NavigationWaterArea",
+    "NavigationChannelCenterline",
+    "NavigationGraphVersion",
+    "NavigationGraphNode",
+    "NavigationGraphEdge",
+    "NavigationGraphEdgeConstraint",
+    "NavigationRouteRequest",
+    "NavigationRouteResult",
+    "NavigationRouteQualityIssue"
+  ],
+  "api_boundary": {
+    "keep_existing": [
+      "/api/v1/address/navigation-channels/summary",
+      "/api/v1/address/navigation-channels",
+      "/api/v1/address/navigation-channels/{channel_code}",
+      "/api/v1/address/navigation-channels/{channel_code}/boundary",
+      "/api/v1/address/navigation-channels/{channel_code}/segments",
+      "/api/v1/address/navigation-channels/{channel_code}/source-audit"
+    ],
+    "future_add": [
+      "POST /api/v1/navigation/routes/generate"
+    ]
+  }
+}
