@@ -10,6 +10,7 @@ from app.modules.approval.router import router as approval_router
 from app.modules.commodity.router import router as commodity_router
 from app.modules.dictionary.router import router as dictionary_router
 from app.modules.freight.router import router as freight_router
+from app.modules.navigation.router import router as navigation_router
 from app.modules.route.router import router as route_router
 from app.modules.storage.router import router as storage_router
 from app.modules.system.router import router as system_router
@@ -51,6 +52,12 @@ api_router.include_router(
     route_router,
     prefix="/route",
     tags=["route"],
+    dependencies=[Depends(require_permission("ROUTE:READ"))],
+)
+api_router.include_router(
+    navigation_router,
+    prefix="/navigation",
+    tags=["navigation"],
     dependencies=[Depends(require_permission("ROUTE:READ"))],
 )
 api_router.include_router(
