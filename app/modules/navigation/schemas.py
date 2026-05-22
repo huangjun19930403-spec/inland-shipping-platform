@@ -141,3 +141,160 @@ class NavigationAnnotationTaskResolveRequest(BaseModel):
     resolution_target_id: int | None = None
     suggestion_json: dict[str, Any] | None = None
     status_code: str = Field(default="RESOLVED", max_length=64)
+
+
+class NavigationWorkbenchChannelResponse(BaseModel):
+    id: int
+    channel_code: str
+    channel_name: str
+    display_name: str | None = None
+    planning_level_code: str | None = None
+    channel_type_code: str | None = None
+    review_required: bool = False
+    boundary_count: int = 0
+    current_boundary_count: int = 0
+    centerline_count: int = 0
+    approved_current_centerline_count: int = 0
+    active_graph_edge_count: int = 0
+    boundary_status_code: str
+    centerline_status_code: str
+    graph_status_code: str
+
+
+class NavigationWorkbenchSummaryResponse(BaseModel):
+    stats: dict[str, int] = Field(default_factory=dict)
+    active_graph_version: dict[str, Any] | None = None
+    channels: list[NavigationWorkbenchChannelResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NavigationWaterAreaListItemResponse(BaseModel):
+    id: int
+    source_code: str
+    source_layer_name: str
+    water_name: str | None = None
+    water_type_code: str
+    geometry_status_code: str
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+    area_km2: float | None = None
+
+
+class NavigationCenterlineListItemResponse(BaseModel):
+    id: int
+    channel_id: int
+    channel_code: str | None = None
+    channel_name: str | None = None
+    centerline_code: str
+    centerline_name: str | None = None
+    source_type_code: str
+    quality_code: str
+    review_status_code: str
+    confidence_score: int
+    is_current: bool
+    geometry_json: dict[str, Any] | None = None
+
+
+class NavigationBoundaryListItemResponse(BaseModel):
+    id: int
+    channel_id: int
+    channel_code: str | None = None
+    channel_name: str | None = None
+    boundary_quality_code: str
+    geometry_status_code: str
+    connectivity_status_code: str
+    repair_status_code: str
+    coverage_policy_code: str
+    is_current: bool
+    geometry_json: dict[str, Any] | None = None
+
+
+class NavigationGraphVersionListItemResponse(BaseModel):
+    id: int
+    version_code: str
+    version_name: str
+    scope_code: str
+    status_code: str
+    is_active: bool
+    node_count: int
+    edge_count: int
+    channel_count: int
+    quality_score: int | None = None
+    built_at: str | None = None
+    validation_report_json: dict[str, Any] | None = None
+
+
+class NavigationGeometryDraftResponse(BaseModel):
+    id: int
+    draft_no: str
+    draft_name: str | None = None
+    draft_type_code: str
+    geometry_type_code: str
+    channel_id: int | None = None
+    channel_code: str | None = None
+    channel_name: str | None = None
+    target_type_code: str | None = None
+    target_id: int | None = None
+    geometry_json: dict[str, Any]
+    source_type_code: str
+    status_code: str
+    quality_code: str
+    review_comment: str | None = None
+    publish_target_type_code: str | None = None
+    publish_target_id: int | None = None
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+
+
+class NavigationGeometryDraftCreateRequest(BaseModel):
+    draft_type_code: str = Field(max_length=64)
+    draft_name: str | None = Field(default=None, max_length=128)
+    channel_id: int | None = None
+    target_type_code: str | None = Field(default=None, max_length=64)
+    target_id: int | None = None
+    geometry_json: dict[str, Any]
+    source_type_code: str = Field(default="GEOJSON_PASTE", max_length=64)
+    source_trace_json: dict[str, Any] | None = None
+
+
+class NavigationGeometryDraftUpdateRequest(BaseModel):
+    draft_name: str | None = Field(default=None, max_length=128)
+    channel_id: int | None = None
+    target_type_code: str | None = Field(default=None, max_length=64)
+    target_id: int | None = None
+    geometry_json: dict[str, Any] | None = None
+    source_type_code: str | None = Field(default=None, max_length=64)
+    source_trace_json: dict[str, Any] | None = None
+    review_comment: str | None = Field(default=None, max_length=512)
+
+
+class NavigationGeometryDraftApproveRequest(BaseModel):
+    review_comment: str | None = Field(default=None, max_length=512)
+
+
+class NavigationGraphBuildRequest(BaseModel):
+    version_code: str | None = Field(default=None, max_length=96)
+    version_name: str | None = Field(default=None, max_length=128)
+    scope_code: str = Field(default="MVP", max_length=64)
+    channel_codes: list[str] | None = None
+    activate: bool = False
+
+
+class NavigationGraphBuildResponse(BaseModel):
+    version_code: str
+    graph_version_id: int
+    status_code: str
+    node_count: int
+    edge_count: int
+    channel_count: int
+    quality_score: int | None = None
+    centerline_count: int = 0
+    connector_edge_count: int = 0
+    constraint_count: int = 0
+    validation_report: dict[str, Any] | None = None
+
+
+class NavigationGraphActivateResponse(BaseModel):
+    graph_version_id: int
+    version_code: str
+    scope_code: str
+    status_code: str
+    is_active: bool

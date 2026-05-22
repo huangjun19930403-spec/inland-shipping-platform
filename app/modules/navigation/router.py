@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_permission
 from app.modules.navigation.annotation_service import NavigationAnnotationTaskService
 from app.modules.navigation.map_layer_service import NavigationMapLayerService
 from app.modules.navigation.routing_service import NavigationRoutingEngineService
@@ -14,12 +14,168 @@ from app.modules.navigation.schemas import (
     NavigationAnnotationTaskListResponse,
     NavigationAnnotationTaskResolveRequest,
     NavigationAnnotationTaskResponse,
+    NavigationBoundaryListItemResponse,
+    NavigationCenterlineListItemResponse,
+    NavigationGeometryDraftApproveRequest,
+    NavigationGeometryDraftCreateRequest,
+    NavigationGeometryDraftResponse,
+    NavigationGeometryDraftUpdateRequest,
+    NavigationGraphActivateResponse,
+    NavigationGraphBuildRequest,
+    NavigationGraphBuildResponse,
+    NavigationGraphVersionListItemResponse,
     NavigationMapLayerResponse,
     NavigationRouteGenerateRequest,
     NavigationRouteGenerateResponse,
+    NavigationWaterAreaListItemResponse,
+    NavigationWorkbenchSummaryResponse,
 )
+from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
 router = APIRouter()
+
+
+@router.get("/workbench/summary", response_model=NavigationWorkbenchSummaryResponse)
+async def get_navigation_workbench_summary(
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).summary()
+
+
+@router.get("/water-areas", response_model=list[NavigationWaterAreaListItemResponse])
+async def list_navigation_water_areas(
+    keyword: str | None = None,
+    limit: int = 50,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_water_areas(keyword=keyword, limit=limit)
+
+
+@router.get("/centerlines", response_model=list[NavigationCenterlineListItemResponse])
+async def list_navigation_centerlines(
+    channel_id: int | None = None,
+    limit: int = 50,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_centerlines(channel_id=channel_id, limit=limit)
+
+
+@router.get("/boundaries", response_model=list[NavigationBoundaryListItemResponse])
+async def list_navigation_boundaries(
+    channel_id: int | None = None,
+    limit: int = 50,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_boundaries(channel_id=channel_id, limit=limit)
+
+
+@router.get("/graph-versions", response_model=list[NavigationGraphVersionListItemResponse])
+async def list_navigation_graph_versions(
+    limit: int = 30,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_graph_versions(limit=limit)
+
+
+@router.get("/geometry-drafts", response_model=list[NavigationGeometryDraftResponse])
+async def list_navigation_geometry_drafts(
+    status_code: str | None = None,
+    channel_id: int | None = None,
+    limit: int = 50,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_geometry_drafts(
+        status_code=status_code,
+        channel_id=channel_id,
+        limit=limit,
+    )
+
+
+@router.post("/geometry-drafts", response_model=NavigationGeometryDraftResponse)
+async def create_navigation_geometry_draft(
+    body: NavigationGeometryDraftCreateRequest,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).create_geometry_draft(
+        body,
+        created_by=getattr(current_user, "id", None),
+    )
+
+
+@router.patch("/geometry-drafts/{draft_id}", response_model=NavigationGeometryDraftResponse)
+async def update_navigation_geometry_draft(
+    draft_id: int,
+    body: NavigationGeometryDraftUpdateRequest,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).update_geometry_draft(draft_id, body)
+
+
+@router.post("/geometry-drafts/{draft_id}/submit", response_model=NavigationGeometryDraftResponse)
+async def submit_navigation_geometry_draft(
+    draft_id: int,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).submit_geometry_draft(
+        draft_id,
+        submitted_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/geometry-drafts/{draft_id}/approve", response_model=NavigationGeometryDraftResponse)
+async def approve_navigation_geometry_draft(
+    draft_id: int,
+    body: NavigationGeometryDraftApproveRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).approve_geometry_draft(
+        draft_id,
+        body or NavigationGeometryDraftApproveRequest(),
+        reviewed_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/geometry-drafts/{draft_id}/publish", response_model=NavigationGeometryDraftResponse)
+async def publish_navigation_geometry_draft(
+    draft_id: int,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).publish_geometry_draft(
+        draft_id,
+        published_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/graph-versions/build", response_model=NavigationGraphBuildResponse)
+async def build_navigation_graph_version(
+    body: NavigationGraphBuildRequest,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).build_graph_version(
+        body,
+        created_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/graph-versions/{graph_version_id}/activate", response_model=NavigationGraphActivateResponse)
+async def activate_navigation_graph_version(
+    graph_version_id: int,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).activate_graph_version(graph_version_id)
 
 
 @router.post("/routes/generate", response_model=NavigationRouteGenerateResponse)

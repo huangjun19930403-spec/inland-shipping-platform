@@ -93,6 +93,41 @@ class NavigationChannelCenterline(Base, TimestampMixin):
     bbox_max_lat: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True, index=True)
 
 
+class NavigationGeometryDraft(Base, TimestampMixin):
+    __tablename__ = "navigation_geometry_draft"
+    __table_args__ = (
+        UniqueConstraint("draft_no", name="uk_navigation_geometry_draft_no"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    draft_no: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    draft_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    draft_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    geometry_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    channel_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("navigation_channel.id"), nullable=True, index=True)
+    target_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    target_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    geometry_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="MANUAL_DRAW", index=True)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="DRAFT", index=True)
+    quality_code: Mapped[str] = mapped_column(String(64), nullable=False, default="NEED_REVIEW", index=True)
+    review_comment: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    publish_target_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    publish_target_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    bbox_min_lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True, index=True)
+    bbox_min_lat: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True, index=True)
+    bbox_max_lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True, index=True)
+    bbox_max_lat: Mapped[float | None] = mapped_column(Numeric(10, 8), nullable=True, index=True)
+    source_trace_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    submitted_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    published_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class NavigationGraphVersion(Base, TimestampMixin):
     __tablename__ = "navigation_graph_version"
     __table_args__ = (
