@@ -6,6 +6,7 @@ import app.models  # noqa: F401
 from app.models import (
     NavigationAnnotationTask,
     NavigationChannelCenterline,
+    NavigationChannelWaterAreaMatch,
     NavigationGraphEdge,
     NavigationGraphEdgeConstraint,
     NavigationGraphNode,
@@ -21,6 +22,7 @@ from app.models.base import Base
 
 NAVIGATION_ENGINE_TABLES = {
     "navigation_water_area",
+    "navigation_channel_water_area_match",
     "navigation_channel_centerline",
     "navigation_graph_version",
     "navigation_graph_node",
@@ -36,6 +38,7 @@ NAVIGATION_ENGINE_TABLES = {
 def test_navigation_engine_models_are_registered_without_moving_legacy_channels() -> None:
     assert NavigationChannel.__tablename__ == "navigation_channel"
     assert NavigationWaterArea.__tablename__ == "navigation_water_area"
+    assert NavigationChannelWaterAreaMatch.__tablename__ == "navigation_channel_water_area_match"
     assert NavigationChannelCenterline.__tablename__ == "navigation_channel_centerline"
     assert NavigationGraphVersion.__tablename__ == "navigation_graph_version"
     assert NavigationGraphNode.__tablename__ == "navigation_graph_node"
@@ -57,6 +60,7 @@ def test_navigation_engine_tables_create_in_sqlite_memory() -> None:
         assert NAVIGATION_ENGINE_TABLES <= tables
 
         water_columns = {column["name"] for column in inspector.get_columns("navigation_water_area")}
+        match_columns = {column["name"] for column in inspector.get_columns("navigation_channel_water_area_match")}
         edge_columns = {column["name"] for column in inspector.get_columns("navigation_graph_edge")}
         result_columns = {column["name"] for column in inspector.get_columns("navigation_route_result")}
 
@@ -68,6 +72,16 @@ def test_navigation_engine_tables_create_in_sqlite_memory() -> None:
             "bbox_min_lng",
             "bbox_max_lat",
         } <= water_columns
+        assert {
+            "channel_id",
+            "water_area_id",
+            "match_batch_code",
+            "match_type_code",
+            "score",
+            "confidence_code",
+            "review_status_code",
+            "is_current",
+        } <= match_columns
         assert {
             "graph_version_id",
             "from_node_id",

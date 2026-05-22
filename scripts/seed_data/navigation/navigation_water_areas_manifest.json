@@ -1,0 +1,28 @@
+{
+  "version": "navigation_water_areas_seed_v1",
+  "generated_at": "2026-05-22T11:25:07+00:00",
+  "source_code": "RIVER_SHAPEFILE_2026",
+  "artifact": "scripts/seed_data/navigation/navigation_water_areas.jsonl.gz",
+  "record_count": 87623,
+  "named_record_count": 25250,
+  "layer_counts": {
+    "rx": 48192,
+    "一级水系": 234,
+    "二级水系": 285,
+    "三级水系": 608,
+    "四级水系": 1407,
+    "五级水系": 4541,
+    "六级水系": 5175,
+    "七级水系": 27181
+  },
+  "bbox": {
+    "min_lng": 73.67559984,
+    "min_lat": 16.05359997,
+    "max_lng": 135.10599984,
+    "max_lat": 53.55919998
+  },
+  "notes": [
+    "This seed artifact is produced from navigation_water_area and replaces runtime revier.zip extraction for local/production seeding.",
+    "It contains raw water-area assets only; it must not overwrite seed channel boundaries or create centerlines/graph edges."
+  ]
+}

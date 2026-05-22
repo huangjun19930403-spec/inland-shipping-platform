@@ -35,6 +35,7 @@ from app.models.route import (
 from app.models.navigation import (
     NavigationAnnotationTask,
     NavigationChannelCenterline,
+    NavigationChannelWaterAreaMatch,
     NavigationGeometryDraft,
     NavigationGraphEdge,
     NavigationGraphEdgeConstraint,
@@ -207,6 +208,7 @@ __all__ = [
     "ShippingRoutePlanTrackVersion",
     "ShippingRoutePlanTrackVersionSegment",
     "NavigationWaterArea",
+    "NavigationChannelWaterAreaMatch",
     "NavigationChannelCenterline",
     "NavigationGeometryDraft",
     "NavigationGraphVersion",

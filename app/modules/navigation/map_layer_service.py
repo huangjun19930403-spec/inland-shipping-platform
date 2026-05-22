@@ -8,6 +8,7 @@ from sqlalchemy.orm import aliased
 
 from app.models import (
     NavigationChannelCenterline,
+    NavigationChannelWaterAreaMatch,
     NavigationGraphEdge,
     NavigationGraphNode,
     NavigationRouteQualityIssue,
@@ -31,6 +32,7 @@ class NavigationMapLayerService:
         min_lat: float | None,
         max_lng: float | None,
         max_lat: float | None,
+        channel_id: int | None,
         route_result_id: int | None,
         include_water_area: bool,
         include_boundary: bool,
@@ -50,6 +52,13 @@ class NavigationMapLayerService:
             if bbox is None and route_results:
                 bbox = self._expanded_geometry_bbox(route_results[0].geometry_json, margin_degree=0.35)
 
+        if channel_id is not None:
+            channel_bbox = await self._channel_layer_bbox(channel_id)
+            if channel_bbox is not None:
+                bbox = channel_bbox if bbox is None else self._merge_bbox(bbox, channel_bbox)
+            else:
+                warnings.append("CHANNEL_HAS_NO_MATCHED_WATER_OR_BOUNDARY")
+
         if bbox is None:
             warnings.append("MAP_LAYER_BBOX_REQUIRED")
             return NavigationMapLayerResponse(
@@ -64,13 +73,13 @@ class NavigationMapLayerService:
         graph_edges: list[NavigationMapLayerFeatureResponse] = []
 
         if include_water_area:
-            water_areas = await self._water_area_layers(bbox, layer_limit, truncated_layers)
+            water_areas = await self._water_area_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
         if include_boundary:
-            channel_boundaries = await self._boundary_layers(bbox, layer_limit, truncated_layers)
+            channel_boundaries = await self._boundary_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
         if include_centerline:
-            centerlines = await self._centerline_layers(bbox, layer_limit, truncated_layers)
+            centerlines = await self._centerline_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
         if include_graph_edge:
-            graph_edges = await self._graph_edge_layers(bbox, layer_limit, truncated_layers)
+            graph_edges = await self._graph_edge_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
 
         return NavigationMapLayerResponse(
             bbox=bbox,
@@ -121,7 +130,56 @@ class NavigationMapLayerService:
         bbox: dict[str, float],
         limit: int,
         truncated_layers: list[str],
+        *,
+        channel_id: int | None,
     ) -> list[NavigationMapLayerFeatureResponse]:
+        if channel_id is not None:
+            rows = list(
+                (
+                    await self.session.execute(
+                        select(NavigationWaterArea, NavigationChannelWaterAreaMatch)
+                        .join(
+                            NavigationChannelWaterAreaMatch,
+                            NavigationChannelWaterAreaMatch.water_area_id == NavigationWaterArea.id,
+                        )
+                        .where(
+                            NavigationWaterArea.is_enabled.is_(True),
+                            NavigationChannelWaterAreaMatch.channel_id == channel_id,
+                            NavigationChannelWaterAreaMatch.is_current.is_(True),
+                        )
+                        .order_by(NavigationChannelWaterAreaMatch.score.desc(), NavigationWaterArea.id)
+                        .limit(limit + 1)
+                    )
+                ).all()
+            )
+            if len(rows) > limit:
+                truncated_layers.append("WATER_AREA")
+                rows = rows[:limit]
+            return [
+                NavigationMapLayerFeatureResponse(
+                    id=row.id,
+                    layer_type_code="MATCHED_WATER_AREA",
+                    name=row.water_name,
+                    geometry_json=row.simplified_geometry_low_json or row.geometry_json,
+                    properties={
+                        "source_code": row.source_code,
+                        "source_layer_name": row.source_layer_name,
+                        "water_type_code": row.water_type_code,
+                        "water_level": row.water_level,
+                        "geometry_status_code": row.geometry_status_code,
+                        "match_id": match.id,
+                        "match_batch_code": match.match_batch_code,
+                        "match_type_code": match.match_type_code,
+                        "matched_term": match.matched_term,
+                        "score": match.score,
+                        "confidence_code": match.confidence_code,
+                        "review_status_code": match.review_status_code,
+                        "issue_codes": match.issue_codes or [],
+                    },
+                )
+                for row, match in rows
+            ]
+
         rows = list(
             (
                 await self.session.execute(
@@ -160,18 +218,31 @@ class NavigationMapLayerService:
         bbox: dict[str, float],
         limit: int,
         truncated_layers: list[str],
+        *,
+        channel_id: int | None,
     ) -> list[NavigationMapLayerFeatureResponse]:
+        clauses = [
+            NavigationChannel.is_enabled.is_(True),
+            NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
+            *self._bbox_intersects(NavigationChannelBoundary, bbox),
+        ]
+        if channel_id is not None:
+            clauses.append(NavigationChannelBoundary.channel_id == channel_id)
+            clauses.append(
+                or_(
+                    NavigationChannelBoundary.is_current.is_(True),
+                    NavigationChannelBoundary.coverage_policy_code == "RIVER_MATCH_CANDIDATE",
+                )
+            )
+        else:
+            clauses.append(NavigationChannelBoundary.is_current.is_(True))
         rows = list(
             (
                 await self.session.execute(
                     select(NavigationChannelBoundary, NavigationChannel)
                     .join(NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id)
-                    .where(
-                        NavigationChannel.is_enabled.is_(True),
-                        NavigationChannelBoundary.is_current.is_(True),
-                        *self._bbox_intersects(NavigationChannelBoundary, bbox),
-                    )
-                    .order_by(NavigationChannel.display_priority.desc(), NavigationChannelBoundary.id)
+                    .where(*clauses)
+                    .order_by(NavigationChannelBoundary.is_current.desc(), NavigationChannel.display_priority.desc(), NavigationChannelBoundary.id)
                     .limit(limit + 1)
                 )
             ).all()
@@ -189,6 +260,9 @@ class NavigationMapLayerService:
                     "channel_id": channel.id,
                     "channel_code": channel.channel_code,
                     "planning_level_code": channel.planning_level_code,
+                    "boundary_role_code": "CURRENT" if boundary.is_current else "CANDIDATE",
+                    "is_current": boundary.is_current,
+                    "coverage_policy_code": boundary.coverage_policy_code,
                     "boundary_quality_code": boundary.boundary_quality_code,
                     "connectivity_status_code": boundary.connectivity_status_code,
                     "repair_status_code": boundary.repair_status_code,
@@ -202,17 +276,22 @@ class NavigationMapLayerService:
         bbox: dict[str, float],
         limit: int,
         truncated_layers: list[str],
+        *,
+        channel_id: int | None,
     ) -> list[NavigationMapLayerFeatureResponse]:
+        clauses = [
+            NavigationChannel.is_enabled.is_(True),
+            NavigationChannelCenterline.is_current.is_(True),
+            *self._bbox_intersects(NavigationChannelCenterline, bbox),
+        ]
+        if channel_id is not None:
+            clauses.append(NavigationChannelCenterline.channel_id == channel_id)
         rows = list(
             (
                 await self.session.execute(
                     select(NavigationChannelCenterline, NavigationChannel)
                     .join(NavigationChannel, NavigationChannel.id == NavigationChannelCenterline.channel_id)
-                    .where(
-                        NavigationChannel.is_enabled.is_(True),
-                        NavigationChannelCenterline.is_current.is_(True),
-                        *self._bbox_intersects(NavigationChannelCenterline, bbox),
-                    )
+                    .where(*clauses)
                     .order_by(NavigationChannelCenterline.id)
                     .limit(limit + 1)
                 )
@@ -245,22 +324,27 @@ class NavigationMapLayerService:
         bbox: dict[str, float],
         limit: int,
         truncated_layers: list[str],
+        *,
+        channel_id: int | None,
     ) -> list[NavigationMapLayerFeatureResponse]:
         from_node = aliased(NavigationGraphNode)
         to_node = aliased(NavigationGraphNode)
+        clauses = [
+            NavigationGraphEdge.routing_enabled.is_(True),
+            or_(
+                self._node_in_bbox(from_node, bbox),
+                self._node_in_bbox(to_node, bbox),
+            ),
+        ]
+        if channel_id is not None:
+            clauses.append(NavigationGraphEdge.channel_id == channel_id)
         rows = list(
             (
                 await self.session.execute(
                     select(NavigationGraphEdge, from_node, to_node)
                     .join(from_node, from_node.id == NavigationGraphEdge.from_node_id)
                     .join(to_node, to_node.id == NavigationGraphEdge.to_node_id)
-                    .where(
-                        NavigationGraphEdge.routing_enabled.is_(True),
-                        or_(
-                            self._node_in_bbox(from_node, bbox),
-                            self._node_in_bbox(to_node, bbox),
-                        ),
-                    )
+                    .where(*clauses)
                     .order_by(NavigationGraphEdge.graph_version_id.desc(), NavigationGraphEdge.id)
                     .limit(limit + 1)
                 )
@@ -348,6 +432,63 @@ class NavigationMapLayerService:
         ]
         return [result_feature], issue_features
 
+    async def _channel_layer_bbox(self, channel_id: int) -> dict[str, float] | None:
+        boxes: list[dict[str, float]] = []
+        water_rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationWaterArea)
+                    .join(NavigationChannelWaterAreaMatch, NavigationChannelWaterAreaMatch.water_area_id == NavigationWaterArea.id)
+                    .where(
+                        NavigationChannelWaterAreaMatch.channel_id == channel_id,
+                        NavigationChannelWaterAreaMatch.is_current.is_(True),
+                        NavigationWaterArea.is_enabled.is_(True),
+                    )
+                )
+            ).scalars()
+        )
+        for row in water_rows:
+            box = self._model_bbox(row)
+            if box:
+                boxes.append(box)
+        boundary_rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationChannelBoundary).where(
+                        NavigationChannelBoundary.channel_id == channel_id,
+                        or_(
+                            NavigationChannelBoundary.is_current.is_(True),
+                            NavigationChannelBoundary.coverage_policy_code == "RIVER_MATCH_CANDIDATE",
+                        ),
+                    )
+                )
+            ).scalars()
+        )
+        for row in boundary_rows:
+            box = self._model_bbox(row)
+            if box:
+                boxes.append(box)
+        centerline_rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationChannelCenterline).where(
+                        NavigationChannelCenterline.channel_id == channel_id,
+                        NavigationChannelCenterline.is_current.is_(True),
+                    )
+                )
+            ).scalars()
+        )
+        for row in centerline_rows:
+            box = self._model_bbox(row)
+            if box:
+                boxes.append(box)
+        if not boxes:
+            return None
+        merged = boxes[0]
+        for box in boxes[1:]:
+            merged = self._merge_bbox(merged, box)
+        return self._expand_bbox(merged, margin_degree=0.08)
+
     def _boundary_geometry(self, boundary: NavigationChannelBoundary) -> dict[str, Any] | None:
         if boundary.boundary_paths_low:
             return {
@@ -355,6 +496,38 @@ class NavigationMapLayerService:
                 "coordinates": [[ring] for ring in boundary.boundary_paths_low if isinstance(ring, list) and len(ring) >= 3],
             }
         return boundary.geometry_json
+
+    def _model_bbox(self, row: Any) -> dict[str, float] | None:
+        values = (
+            getattr(row, "bbox_min_lng", None),
+            getattr(row, "bbox_min_lat", None),
+            getattr(row, "bbox_max_lng", None),
+            getattr(row, "bbox_max_lat", None),
+        )
+        if any(value is None for value in values):
+            return None
+        return {
+            "min_lng": float(values[0]),
+            "min_lat": float(values[1]),
+            "max_lng": float(values[2]),
+            "max_lat": float(values[3]),
+        }
+
+    def _merge_bbox(self, left: dict[str, float], right: dict[str, float]) -> dict[str, float]:
+        return {
+            "min_lng": min(left["min_lng"], right["min_lng"]),
+            "min_lat": min(left["min_lat"], right["min_lat"]),
+            "max_lng": max(left["max_lng"], right["max_lng"]),
+            "max_lat": max(left["max_lat"], right["max_lat"]),
+        }
+
+    def _expand_bbox(self, bbox: dict[str, float], *, margin_degree: float) -> dict[str, float]:
+        return {
+            "min_lng": max(-180.0, bbox["min_lng"] - margin_degree),
+            "min_lat": max(-90.0, bbox["min_lat"] - margin_degree),
+            "max_lng": min(180.0, bbox["max_lng"] + margin_degree),
+            "max_lat": min(90.0, bbox["max_lat"] + margin_degree),
+        }
 
     def _expanded_geometry_bbox(self, geometry: dict[str, Any] | None, *, margin_degree: float) -> dict[str, float] | None:
         points: list[tuple[float, float]] = []

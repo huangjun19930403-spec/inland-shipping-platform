@@ -19,6 +19,16 @@
       "loader": "scripts.seeds.loaders.navigation_channels.seed_navigation_channels"
     },
     {
+      "resource": "navigation_water_areas",
+      "path": "scripts/seed_data/navigation/navigation_water_areas.jsonl.gz",
+      "loader": "scripts.seeds.loaders.navigation_water_areas.seed_navigation_water_areas"
+    },
+    {
+      "resource": "navigation_water_areas_manifest",
+      "path": "scripts/seed_data/navigation/navigation_water_areas_manifest.json",
+      "loader": "scripts.navigation.export_water_area_seed.export_navigation_water_area_seed"
+    },
+    {
       "resource": "navigation_constraints",
       "path": "scripts/seed_data/navigation_constraints/constraint_points.json",
       "loader": "scripts.seeds.loaders.navigation_constraints.seed_navigation_constraints"

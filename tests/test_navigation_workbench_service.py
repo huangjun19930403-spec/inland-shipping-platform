@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
-from app.models import NavigationChannelCenterline, NavigationGeometryDraft, NavigationGraphVersion
+from app.models import NavigationChannelCenterline, NavigationChannelWaterAreaMatch, NavigationGeometryDraft, NavigationGraphVersion, NavigationWaterArea
 from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.models.base import Base
 from app.modules.navigation.schemas import (
@@ -178,3 +178,52 @@ async def test_graph_build_without_approved_centerline_fails_with_real_scope(ses
     assert graph_version is not None
     assert graph_version.scope_code == "REAL-JS-YRD"
     assert graph_version.validation_report_json["issues"][0]["issue_code"] == "NO_APPROVED_CENTERLINE"
+
+
+@pytest.mark.asyncio
+async def test_workbench_lists_channel_water_area_matches(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationWaterArea(
+                id=1,
+                source_code="TEST_RIVER",
+                source_layer_name="rx",
+                source_object_id="1",
+                water_name="测试水域",
+                normalized_water_name="测试水域",
+                water_type_code="RIVER",
+                geometry_json=_polygon(),
+                geometry_status_code="VALID",
+                bbox_min_lng=119.98,
+                bbox_min_lat=30.98,
+                bbox_max_lng=120.24,
+                bbox_max_lat=31.12,
+                is_enabled=True,
+            )
+        )
+        session.add(
+            NavigationChannelWaterAreaMatch(
+                id=1,
+                channel_id=1,
+                water_area_id=1,
+                match_batch_code="TEST-BATCH",
+                match_type_code="EXACT_NAME",
+                matched_term="测试水域",
+                score=95,
+                confidence_code="HIGH_CONFIDENCE",
+                review_status_code="APPROVED",
+                issue_codes=[],
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        service = NavigationWorkbenchService(session)
+        summary = await service.summary()
+        matches = await service.list_water_area_matches(channel_id=1)
+
+    assert summary.channels[0].current_water_area_match_count == 1
+    assert summary.channels[0].water_area_match_status_code == "READY"
+    assert matches.current_match_count == 1
+    assert matches.items[0].water_name == "测试水域"

@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import delete, text
 
 from app.core.database import AsyncSessionLocal, engine
+from app.models import NavigationChannelWaterAreaMatch
 from app.models.address import (
     NavigationChannel,
     NavigationChannelBoundary,
@@ -71,6 +72,7 @@ async def seed_navigation_channels(*, drop_legacy: bool = True) -> dict[str, int
 
     async with AsyncSessionLocal() as session:
         await session.execute(delete(NavigationChannelSourceAudit))
+        await session.execute(delete(NavigationChannelWaterAreaMatch))
         await session.execute(delete(NavigationChannelSegment))
         await session.execute(delete(NavigationChannelBoundary))
         await session.execute(delete(NavigationChannel))

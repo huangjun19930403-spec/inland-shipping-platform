@@ -12,6 +12,7 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models import (
     NavigationAnnotationTask,
     NavigationChannelCenterline,
+    NavigationChannelWaterAreaMatch,
     NavigationGeometryDraft,
     NavigationGraphEdge,
     NavigationGraphVersion,
@@ -21,6 +22,8 @@ from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.modules.navigation.schemas import (
     NavigationBoundaryListItemResponse,
     NavigationCenterlineListItemResponse,
+    NavigationChannelWaterAreaMatchItemResponse,
+    NavigationChannelWaterAreaMatchListResponse,
     NavigationGeometryDraftApproveRequest,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
@@ -90,6 +93,13 @@ class NavigationWorkbenchService:
                 NavigationChannelCenterline.quality_code.in_({"READY", "READY_WITH_WARNING"}),
             ),
         )
+        current_match_counts = await self._counts_by_channel(
+            NavigationChannelWaterAreaMatch.channel_id,
+            select(NavigationChannelWaterAreaMatch.channel_id, func.count()).where(
+                NavigationChannelWaterAreaMatch.channel_id.in_(channel_ids),
+                NavigationChannelWaterAreaMatch.is_current.is_(True),
+            ),
+        )
         active_graph_version = await self._active_graph_version()
         active_edge_counts: dict[int, int] = {}
         if active_graph_version is not None:
@@ -116,9 +126,11 @@ class NavigationWorkbenchService:
                 centerline_count=centerline_counts.get(channel.id, 0),
                 approved_current_centerline_count=approved_centerline_counts.get(channel.id, 0),
                 active_graph_edge_count=active_edge_counts.get(channel.id, 0),
+                current_water_area_match_count=current_match_counts.get(channel.id, 0),
                 boundary_status_code="READY" if current_boundary_counts.get(channel.id, 0) else "MISSING",
                 centerline_status_code="READY" if approved_centerline_counts.get(channel.id, 0) else "MISSING",
                 graph_status_code="READY" if active_edge_counts.get(channel.id, 0) else "MISSING",
+                water_area_match_status_code="READY" if current_match_counts.get(channel.id, 0) else "MISSING",
             )
             for channel in channels
         ]
@@ -135,6 +147,7 @@ class NavigationWorkbenchService:
                 or 0
             ),
             "current_boundary_channel_count": sum(1 for row in channel_rows if row.current_boundary_count > 0),
+            "water_area_matched_channel_count": sum(1 for row in channel_rows if row.current_water_area_match_count > 0),
             "approved_centerline_channel_count": sum(1 for row in channel_rows if row.approved_current_centerline_count > 0),
             "active_graph_channel_count": sum(1 for row in channel_rows if row.active_graph_edge_count > 0),
             "draft_count": int(await self.session.scalar(select(func.count()).select_from(NavigationGeometryDraft)) or 0),
@@ -162,9 +175,21 @@ class NavigationWorkbenchService:
         self,
         *,
         keyword: str | None = None,
+        channel_id: int | None = None,
         limit: int = 50,
     ) -> list[NavigationWaterAreaListItemResponse]:
         stmt = select(NavigationWaterArea).where(NavigationWaterArea.is_enabled.is_(True))
+        if channel_id:
+            stmt = (
+                stmt.join(NavigationChannelWaterAreaMatch, NavigationChannelWaterAreaMatch.water_area_id == NavigationWaterArea.id)
+                .where(
+                    NavigationChannelWaterAreaMatch.channel_id == channel_id,
+                    NavigationChannelWaterAreaMatch.is_current.is_(True),
+                )
+                .order_by(NavigationChannelWaterAreaMatch.score.desc(), NavigationWaterArea.id)
+            )
+        else:
+            stmt = stmt.order_by(NavigationWaterArea.id)
         if keyword:
             like = f"%{keyword.strip()}%"
             stmt = stmt.where(
@@ -173,7 +198,7 @@ class NavigationWorkbenchService:
         rows = list(
             (
                 await self.session.execute(
-                    stmt.order_by(NavigationWaterArea.id).limit(self._limit(limit, default=50, max_value=200))
+                    stmt.limit(self._limit(limit, default=50, max_value=200))
                 )
             ).scalars()
         )
@@ -190,6 +215,88 @@ class NavigationWorkbenchService:
             )
             for row in rows
         ]
+
+    async def list_water_area_matches(
+        self,
+        *,
+        channel_id: int,
+        limit: int = 200,
+    ) -> NavigationChannelWaterAreaMatchListResponse:
+        channel = await self._ensure_channel(channel_id)
+        rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationChannelWaterAreaMatch, NavigationWaterArea)
+                    .join(NavigationWaterArea, NavigationWaterArea.id == NavigationChannelWaterAreaMatch.water_area_id)
+                    .where(
+                        NavigationChannelWaterAreaMatch.channel_id == channel_id,
+                        NavigationChannelWaterAreaMatch.is_current.is_(True),
+                    )
+                    .order_by(NavigationChannelWaterAreaMatch.score.desc(), NavigationChannelWaterAreaMatch.id)
+                    .limit(self._limit(limit, default=200, max_value=500))
+                )
+            ).all()
+        )
+        candidate_boundary_count = int(
+            await self.session.scalar(
+                select(func.count()).select_from(NavigationChannelBoundary).where(
+                    NavigationChannelBoundary.channel_id == channel_id,
+                    NavigationChannelBoundary.coverage_policy_code == "RIVER_MATCH_CANDIDATE",
+                    NavigationChannelBoundary.is_current.is_(False),
+                )
+            )
+            or 0
+        )
+        current_boundary_count = int(
+            await self.session.scalar(
+                select(func.count()).select_from(NavigationChannelBoundary).where(
+                    NavigationChannelBoundary.channel_id == channel_id,
+                    NavigationChannelBoundary.is_current.is_(True),
+                )
+            )
+            or 0
+        )
+        items = [
+            NavigationChannelWaterAreaMatchItemResponse(
+                id=match.id,
+                channel_id=channel.id,
+                channel_code=channel.channel_code,
+                channel_name=channel.channel_name,
+                water_area_id=water_area.id,
+                water_name=water_area.water_name,
+                source_code=water_area.source_code,
+                source_layer_name=water_area.source_layer_name,
+                source_object_id=water_area.source_object_id,
+                water_type_code=water_area.water_type_code,
+                match_batch_code=match.match_batch_code,
+                match_type_code=match.match_type_code,
+                matched_term=match.matched_term,
+                score=match.score,
+                confidence_code=match.confidence_code,
+                review_status_code=match.review_status_code,
+                issue_codes=match.issue_codes or [],
+                is_current=match.is_current,
+                bbox=self._bbox_dict(water_area),
+                source_trace_json=match.source_trace_json,
+            )
+            for match, water_area in rows
+        ]
+        issue_codes = sorted({issue for item in items for issue in item.issue_codes})
+        best = items[0] if items else None
+        return NavigationChannelWaterAreaMatchListResponse(
+            channel_id=channel.id,
+            channel_code=channel.channel_code,
+            channel_name=channel.channel_name,
+            current_match_count=len(items),
+            best_score=best.score if best else None,
+            confidence_code=best.confidence_code if best else "MISSING",
+            review_status_code="NEED_REVIEW" if not items or any(item.review_status_code == "NEED_REVIEW" for item in items) else "APPROVED",
+            issue_codes=issue_codes or (["NO_WATER_AREA_MATCH"] if not items else []),
+            candidate_boundary_count=candidate_boundary_count,
+            current_boundary_count=current_boundary_count,
+            match_batch_code=best.match_batch_code if best else None,
+            items=items,
+        )
 
     async def list_centerlines(
         self,

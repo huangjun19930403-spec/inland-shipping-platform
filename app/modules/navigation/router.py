@@ -16,6 +16,7 @@ from app.modules.navigation.schemas import (
     NavigationAnnotationTaskResponse,
     NavigationBoundaryListItemResponse,
     NavigationCenterlineListItemResponse,
+    NavigationChannelWaterAreaMatchListResponse,
     NavigationGeometryDraftApproveRequest,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
@@ -46,11 +47,22 @@ async def get_navigation_workbench_summary(
 @router.get("/water-areas", response_model=list[NavigationWaterAreaListItemResponse])
 async def list_navigation_water_areas(
     keyword: str | None = None,
+    channel_id: int | None = None,
     limit: int = 50,
     current_user=Depends(require_permission("ROUTE:READ")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await NavigationWorkbenchService(db).list_water_areas(keyword=keyword, limit=limit)
+    return await NavigationWorkbenchService(db).list_water_areas(keyword=keyword, channel_id=channel_id, limit=limit)
+
+
+@router.get("/channels/{channel_id}/water-area-matches", response_model=NavigationChannelWaterAreaMatchListResponse)
+async def list_navigation_channel_water_area_matches(
+    channel_id: int,
+    limit: int = 200,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_water_area_matches(channel_id=channel_id, limit=limit)
 
 
 @router.get("/centerlines", response_model=list[NavigationCenterlineListItemResponse])
@@ -192,6 +204,7 @@ async def generate_navigation_route(
 
 @router.get("/map-layers", response_model=NavigationMapLayerResponse)
 async def get_navigation_map_layers(
+    channel_id: int | None = None,
     min_lng: float | None = None,
     min_lat: float | None = None,
     max_lng: float | None = None,
@@ -209,6 +222,7 @@ async def get_navigation_map_layers(
         min_lat=min_lat,
         max_lng=max_lng,
         max_lat=max_lat,
+        channel_id=channel_id,
         route_result_id=route_result_id,
         include_water_area=include_water_area,
         include_boundary=include_boundary,

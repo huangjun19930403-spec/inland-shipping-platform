@@ -17,6 +17,7 @@ from scripts.seeds.loaders.commodity_standards import seed_commodity_standards
 from scripts.seeds.loaders.commodity_taxonomy import seed_commodity_taxonomy
 from scripts.seeds.loaders.navigation_channels import seed_navigation_channels
 from scripts.seeds.loaders.navigation_constraints import seed_navigation_constraints
+from scripts.seeds.loaders.navigation_water_areas import seed_navigation_water_areas
 from scripts.seeds.loaders.production_freights import seed_production_freights
 from scripts.seeds.loaders.production_vessels import seed_production_vessels
 from scripts.seeds.loaders.system_base import seed_system_base
@@ -38,6 +39,7 @@ PRODUCTION_SEED_STEPS: tuple[tuple[str, SeedStep], ...] = (
     ("code_sequences", seed_code_sequences),
     ("admin_regions", seed_admin_regions),
     ("navigation_channels", seed_navigation_channels),
+    ("navigation_water_areas", seed_navigation_water_areas),
     ("navigation_constraints", seed_navigation_constraints),
     ("commodity_taxonomy", seed_commodity_taxonomy),
     ("commodity_standards", seed_commodity_standards),

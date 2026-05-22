@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     Numeric,
@@ -57,6 +58,33 @@ class NavigationWaterArea(Base, TimestampMixin):
     area_km2: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
     is_low_value: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+
+class NavigationChannelWaterAreaMatch(Base, TimestampMixin):
+    __tablename__ = "navigation_channel_water_area_match"
+    __table_args__ = (
+        UniqueConstraint(
+            "match_batch_code",
+            "channel_id",
+            "water_area_id",
+            name="uk_navigation_channel_water_area_match_batch_channel_area",
+        ),
+        Index("ix_navigation_channel_water_area_match_channel_current", "channel_id", "is_current"),
+        Index("ix_navigation_channel_water_area_match_area_current", "water_area_id", "is_current"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("navigation_channel.id"), nullable=False, index=True)
+    water_area_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("navigation_water_area.id"), nullable=False, index=True)
+    match_batch_code: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    match_type_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    matched_term: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
+    confidence_code: Mapped[str] = mapped_column(String(64), nullable=False, default="LOW_CONFIDENCE", index=True)
+    review_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="NEED_REVIEW", index=True)
+    issue_codes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    source_trace_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class NavigationChannelCenterline(Base, TimestampMixin):

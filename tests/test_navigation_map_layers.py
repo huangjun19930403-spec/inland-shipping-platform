@@ -11,6 +11,7 @@ import app.models  # noqa: F401
 from app.api.v1 import api_router
 from app.models import (
     NavigationChannelCenterline,
+    NavigationChannelWaterAreaMatch,
     NavigationGraphEdge,
     NavigationGraphNode,
     NavigationGraphVersion,
@@ -247,6 +248,7 @@ async def test_map_layers_loads_bbox_limited_features(session_maker) -> None:
             min_lat=30.9,
             max_lng=120.3,
             max_lat=31.3,
+            channel_id=None,
             route_result_id=1,
             include_water_area=True,
             include_boundary=True,
@@ -274,6 +276,7 @@ async def test_map_layers_requires_bbox_for_background_layers(session_maker) -> 
             min_lat=None,
             max_lng=None,
             max_lat=None,
+            channel_id=None,
             route_result_id=None,
             include_water_area=True,
             include_boundary=True,
@@ -285,3 +288,67 @@ async def test_map_layers_requires_bbox_for_background_layers(session_maker) -> 
     assert response.water_areas == []
     assert response.graph_edges == []
     assert response.warnings == ["MAP_LAYER_BBOX_REQUIRED"]
+
+
+@pytest.mark.asyncio
+async def test_map_layers_with_channel_id_uses_persisted_matches_not_fixed_bbox(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_layers(session)
+        session.add(
+            NavigationWaterArea(
+                id=2,
+                source_code="TEST_RIVER",
+                source_layer_name="rx",
+                source_object_id="2",
+                water_name="远处水域",
+                normalized_water_name="远处水域",
+                water_level=1,
+                water_type_code="RIVER",
+                geometry_json={
+                    "type": "Polygon",
+                    "coordinates": [[[122.0, 32.0], [122.1, 32.0], [122.1, 32.1], [122.0, 32.1], [122.0, 32.0]]],
+                },
+                geometry_status_code="VALID",
+                bbox_min_lng=122.0,
+                bbox_min_lat=32.0,
+                bbox_max_lng=122.1,
+                bbox_max_lat=32.1,
+                is_enabled=True,
+            )
+        )
+        session.add(
+            NavigationChannelWaterAreaMatch(
+                id=1,
+                channel_id=1,
+                water_area_id=1,
+                match_batch_code="TEST-BATCH",
+                match_type_code="EXACT_NAME",
+                matched_term="测试水域",
+                score=95,
+                confidence_code="HIGH_CONFIDENCE",
+                review_status_code="APPROVED",
+                issue_codes=[],
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationMapLayerService(session).get_layers(
+            min_lng=None,
+            min_lat=None,
+            max_lng=None,
+            max_lat=None,
+            channel_id=1,
+            route_result_id=None,
+            include_water_area=True,
+            include_boundary=True,
+            include_centerline=True,
+            include_graph_edge=True,
+            limit=20,
+        )
+
+    assert response.warnings == []
+    assert [item.id for item in response.water_areas] == [1]
+    assert response.water_areas[0].layer_type_code == "MATCHED_WATER_AREA"
+    assert response.water_areas[0].properties["match_batch_code"] == "TEST-BATCH"
+    assert [item.properties["channel_id"] for item in response.channel_boundaries] == [1]

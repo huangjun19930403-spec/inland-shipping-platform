@@ -156,9 +156,11 @@ class NavigationWorkbenchChannelResponse(BaseModel):
     centerline_count: int = 0
     approved_current_centerline_count: int = 0
     active_graph_edge_count: int = 0
+    current_water_area_match_count: int = 0
     boundary_status_code: str
     centerline_status_code: str
     graph_status_code: str
+    water_area_match_status_code: str = "MISSING"
 
 
 class NavigationWorkbenchSummaryResponse(BaseModel):
@@ -177,6 +179,44 @@ class NavigationWaterAreaListItemResponse(BaseModel):
     geometry_status_code: str
     bbox: dict[str, float | None] = Field(default_factory=dict)
     area_km2: float | None = None
+
+
+class NavigationChannelWaterAreaMatchItemResponse(BaseModel):
+    id: int
+    channel_id: int
+    channel_code: str | None = None
+    channel_name: str | None = None
+    water_area_id: int
+    water_name: str | None = None
+    source_code: str
+    source_layer_name: str
+    source_object_id: str
+    water_type_code: str
+    match_batch_code: str
+    match_type_code: str
+    matched_term: str | None = None
+    score: int
+    confidence_code: str
+    review_status_code: str
+    issue_codes: list[str] = Field(default_factory=list)
+    is_current: bool
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+    source_trace_json: dict[str, Any] | None = None
+
+
+class NavigationChannelWaterAreaMatchListResponse(BaseModel):
+    channel_id: int
+    channel_code: str
+    channel_name: str
+    current_match_count: int
+    best_score: int | None = None
+    confidence_code: str = "MISSING"
+    review_status_code: str = "NEED_REVIEW"
+    issue_codes: list[str] = Field(default_factory=list)
+    candidate_boundary_count: int = 0
+    current_boundary_count: int = 0
+    match_batch_code: str | None = None
+    items: list[NavigationChannelWaterAreaMatchItemResponse] = Field(default_factory=list)
 
 
 class NavigationCenterlineListItemResponse(BaseModel):
