@@ -2,23 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-import hashlib
-import json
-import math
 from typing import Any
 
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.core.config import settings
-from app.core.exceptions import AppException, NotFoundError, ValidationError
-from app.integrations.hifleet.client import HifleetRouteClient
-from app.integrations.http.route_geometry_types import RouteGeometryQuery
 from app.models.address import AdminRegion, AdminRegionBoundary, Region, TransportNode
 from app.models.analysis import (
     AnalysisJobDefinition,
@@ -53,25 +45,18 @@ from app.modules.address.boundary_utils import (
 from app.modules.analysis.schemas import (
     AnalysisActionBlock,
     AnalysisContextBlock,
-    AnalysisJobRunDetailResponse,
-    AnalysisJobRunResponse,
     AnalysisLineageBlock,
     AnalysisOverviewResponse,
     AnalysisQualityBlock,
-    AnalysisTaskDetailResponse,
-    AnalysisTaskResponse,
-    AnalysisTaskTriggerRequest,
     BoundaryHeatMapItem,
     ChartPoint,
     FlowAnalysisOverviewResponse,
     FlowAnalysisQuery,
     FlowMapItem,
-    FlowRouteCachePrecomputeResponse,
     FreightAnalysisOverviewResponse,
     HeatMapItem,
     MetricCard,
     MetricEvidence,
-    PageResponse,
     PriceAnalysisOverviewResponse,
     RegionSupplyDemandAnalysisResponse,
     RegionAnalysisOverviewResponse,
@@ -82,6 +67,7 @@ from app.modules.analysis.schemas import (
     VesselRiskAnalysisResponse,
     VesselTrajectoryAnalysisResponse,
 )
+from app.modules.analysis.flow_route_geometry import FlowRouteGeometryMixin, _FLOW_ROUTE_GEOMETRY_CACHE, _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT
 from app.modules.analysis.freight_insights import build_freight_insights
 from app.modules.analysis.flow_workbench import (
     enrich_flow_relationships,
@@ -89,22 +75,9 @@ from app.modules.analysis.flow_workbench import (
     freight_structure_links,
     ship_quality_points,
 )
-from app.modules.analysis.map_state import build_map_state_payload, default_retry_action
-from app.modules.analysis.job_catalog import MODULE_NAMES
+from app.modules.analysis.job_views import AnalysisJobViewMixin
 from app.modules.analysis.quote_route_service import QuoteRouteEstimateService
 from app.modules.system.runtime_config import RuntimeConfigService
-
-try:  # Redis is optional locally; memory cache remains the fallback.
-    from redis.asyncio import Redis
-except Exception:  # pragma: no cover - optional dependency guard
-    Redis = None  # type: ignore[assignment]
-
-
-_FLOW_ROUTE_GEOMETRY_CACHE_TTL_SECONDS = settings.ANALYSIS_FLOW_ROUTE_CACHE_TTL_SECONDS
-_FLOW_ROUTE_GEOMETRY_FAILURE_CACHE_TTL_SECONDS = settings.ANALYSIS_FLOW_ROUTE_FAILURE_CACHE_TTL_SECONDS
-_FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX = "analysis:flow_route_geometry:"
-_FLOW_ROUTE_GEOMETRY_CACHE: dict[str, tuple[datetime, dict[str, Any]]] = {}
-_FLOW_ROUTE_GEOMETRY_REDIS_CLIENT: Any | None = None
 
 
 def _num(value: Any) -> float:
@@ -206,460 +179,23 @@ def _evidence(
     )
 
 
-def _job_to_response(entity: AnalysisJobRun) -> AnalysisJobRunResponse:
-    module_name = MODULE_NAMES.get(entity.module_code, entity.module_name)
-    return AnalysisJobRunResponse(
-        id=entity.id,
-        job_code=entity.job_code,
-        job_name=entity.job_name,
-        module_code=entity.module_code,
-        module_name=module_name,
-        stat_date_from=entity.stat_date_from,
-        stat_date_to=entity.stat_date_to,
-        status_code=entity.status_code,
-        status_name=entity.status_name,
-        celery_task_id=entity.celery_task_id,
-        queued_at=entity.queued_at,
-        started_at=entity.started_at,
-        finished_at=entity.finished_at,
-        duration_ms=entity.duration_ms,
-        input_rows=entity.input_rows,
-        output_rows=entity.output_rows,
-        affected_rows=entity.affected_rows,
-        error_message=entity.error_message,
-        triggered_by=entity.triggered_by,
-        created_at=entity.created_at,
-    )
+def _flow_conditions(model: Any, start: date, end: date, query: FlowAnalysisQuery | None, *, include_commodity: bool = False) -> list[Any]:
+    conditions = [model.stat_date >= start, model.stat_date <= end]
+    if not query:
+        return conditions
+    for field in ("origin_node_id", "destination_node_id", "origin_region_id", "destination_region_id"):
+        value = getattr(query, field)
+        if value is not None:
+            conditions.append(getattr(model, field) == value)
+    if include_commodity and query.commodity_standard_id is not None:
+        conditions.append(model.commodity_standard_id == query.commodity_standard_id)
+    return conditions
 
 
-def _task_to_response(entity: AnalysisJobDefinition) -> AnalysisTaskResponse:
-    module_name = MODULE_NAMES.get(entity.module_code, entity.module_name)
-    return AnalysisTaskResponse(
-        id=entity.id,
-        job_code=entity.job_code,
-        job_name=entity.job_name,
-        module_code=entity.module_code,
-        module_name=module_name,
-        description=entity.description,
-        source_tables_json=entity.source_tables_json,
-        target_tables_json=entity.target_tables_json,
-        default_parameters_json=entity.default_parameters_json,
-        schedule_cron=entity.schedule_cron,
-        schedule_enabled=entity.schedule_enabled,
-        enabled=entity.enabled,
-        last_run_id=entity.last_run_id,
-        last_status_code=entity.last_status_code,
-        last_finished_at=entity.last_finished_at,
-        last_result_summary_json=entity.last_result_summary_json,
-        sort_order=entity.sort_order,
-        created_at=entity.created_at,
-        updated_at=entity.updated_at,
-    )
-
-
-def _status_name(status_code: str) -> str:
-    return {
-        "QUEUED": "排队中",
-        "RUNNING": "运行中",
-        "SUCCESS": "成功",
-        "PARTIAL_SUCCESS": "部分成功",
-        "FAILED": "失败",
-    }.get(status_code, status_code)
-
-
-def _to_optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _line_string_points(geometry: dict | None) -> list[tuple[float, float]]:
-    if not isinstance(geometry, dict) or geometry.get("type") != "LineString":
-        return []
-    points: list[tuple[float, float]] = []
-    for item in geometry.get("coordinates") or []:
-        if not isinstance(item, list | tuple) or len(item) < 2:
-            continue
-        lon = _to_optional_float(item[0])
-        lat = _to_optional_float(item[1])
-        if lon is None or lat is None:
-            continue
-        if -180 <= lon <= 180 and -90 <= lat <= 90:
-            point = (lon, lat)
-            if not points or points[-1] != point:
-                points.append(point)
-    return points
-
-
-def _haversine_distance_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    radius_km = 6371.0088
-    lat1_rad = math.radians(lat1)
-    lat2_rad = math.radians(lat2)
-    delta_lat = math.radians(lat2 - lat1)
-    delta_lon = math.radians(lon2 - lon1)
-    a = math.sin(delta_lat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
-    return radius_km * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def _line_length_km(points: list[tuple[float, float]]) -> float | None:
-    if len(points) < 2:
-        return None
-    distance = 0.0
-    for index in range(len(points) - 1):
-        start = points[index]
-        end = points[index + 1]
-        distance += _haversine_distance_km(start[0], start[1], end[0], end[1])
-    return round(distance, 3)
-
-
-def _safe_reason(exc: Exception) -> str:
-    if isinstance(exc, AppException):
-        text = exc.message
-    else:
-        text = str(exc)
-    return (text or "AMMS 航线测算失败").replace("HiFleet", "AMMS").replace("HIFLEET", "AMMS").replace("\r", " ").replace("\n", " ").strip()[:180]
-
-
-def _valid_flow_coordinate(lon: float | None, lat: float | None) -> bool:
-    return lon is not None and lat is not None and -180 <= lon <= 180 and -90 <= lat <= 90
-
-
-def _flow_route_geometry_cache_key(item: FlowMapItem, segment_type: str) -> str:
-    raw = "|".join(
-        [
-            segment_type,
-            str(item.origin_id or ""),
-            str(item.destination_id or ""),
-            f"{float(item.origin_longitude or 0):.6f}",
-            f"{float(item.origin_latitude or 0):.6f}",
-            f"{float(item.destination_longitude or 0):.6f}",
-            f"{float(item.destination_latitude or 0):.6f}",
-        ]
-    )
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
-
-
-def _flow_route_action(status_code: str, item: FlowMapItem, segment_type: str) -> AnalysisActionBlock | None:
-    target_route = "/address/nodes" if status_code == "NOT_COMPUTABLE" else "/analysis/flows"
-    return default_retry_action(
-        status_code,
-        target_route=target_route,
-        query={
-            "segment_type": segment_type,
-            "origin_id": item.origin_id,
-            "destination_id": item.destination_id,
-        },
-    )
-
-
-def _flow_map_state_payload(
-    status_code: str,
-    item: FlowMapItem,
-    segment_type: str,
-    *,
-    cache_status: str | None,
-    generated_at: datetime | None = None,
-    reasons: list[str] | None = None,
-    missing_fields: list[str] | None = None,
-) -> dict[str, Any]:
-    return build_map_state_payload(
-        status_code,
-        provider_code="AMMS",
-        cache_status=cache_status,
-        last_updated_at=generated_at,
-        reasons=reasons or [],
-        missing_fields=missing_fields,
-        retry_action=_flow_route_action(status_code, item, segment_type),
-    )
-
-
-def _flow_route_geometry_cache_backend_setting() -> str:
-    return (settings.ANALYSIS_FLOW_ROUTE_CACHE_BACKEND or "redis").strip().lower()
-
-
-async def _flow_route_geometry_redis() -> Any | None:
-    global _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT
-    if _flow_route_geometry_cache_backend_setting() != "redis" or Redis is None:
-        return None
-    if _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT is None:
-        _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT = Redis.from_url(
-            settings.CELERY_BROKER_URL,
-            encoding="utf-8",
-            decode_responses=True,
-        )
-    return _FLOW_ROUTE_GEOMETRY_REDIS_CLIENT
-
-
-def _restore_flow_route_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    restored = dict(payload)
-    generated_at = restored.get("route_generated_at")
-    if isinstance(generated_at, str):
-        try:
-            restored["route_generated_at"] = datetime.fromisoformat(generated_at)
-        except ValueError:
-            restored["route_generated_at"] = None
-    return restored
-
-
-def _serialize_flow_route_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    serializable = dict(payload)
-    generated_at = serializable.get("route_generated_at")
-    if isinstance(generated_at, datetime):
-        serializable["route_generated_at"] = generated_at.isoformat()
-    return serializable
-
-
-async def _flow_route_geometry_cache_get(cache_key: str) -> dict[str, Any] | None:
-    cached = _FLOW_ROUTE_GEOMETRY_CACHE.get(cache_key)
-    if cached is not None:
-        expires_at, payload = cached
-        if expires_at > datetime.now(UTC):
-            return dict(payload)
-        _FLOW_ROUTE_GEOMETRY_CACHE.pop(cache_key, None)
-    redis_client = await _flow_route_geometry_redis()
-    if redis_client is None:
-        return None
-    try:
-        cached_payload = await redis_client.get(_FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX + cache_key)
-    except Exception:
-        return None
-    if not cached_payload:
-        return None
-    try:
-        payload = _restore_flow_route_payload(json.loads(cached_payload))
-    except Exception:
-        return None
-    ttl = _FLOW_ROUTE_GEOMETRY_CACHE_TTL_SECONDS
-    _FLOW_ROUTE_GEOMETRY_CACHE[cache_key] = (datetime.now(UTC) + timedelta(seconds=min(ttl, 300)), dict(payload))
-    return payload
-
-
-async def _flow_route_geometry_cache_set(cache_key: str, payload: dict[str, Any]) -> None:
-    status = str(payload.get("route_status_code") or "").upper()
-    ttl = _FLOW_ROUTE_GEOMETRY_CACHE_TTL_SECONDS if status == "READY" else _FLOW_ROUTE_GEOMETRY_FAILURE_CACHE_TTL_SECONDS
-    _FLOW_ROUTE_GEOMETRY_CACHE[cache_key] = (datetime.now(UTC) + timedelta(seconds=ttl), dict(payload))
-    redis_client = await _flow_route_geometry_redis()
-    if redis_client is None:
-        return
-    try:
-        await redis_client.setex(
-            _FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX + cache_key,
-            ttl,
-            json.dumps(_serialize_flow_route_payload(payload), ensure_ascii=False, default=str),
-        )
-    except Exception:
-        return
-
-
-async def _flow_route_geometry_cache_delete(cache_key: str) -> None:
-    _FLOW_ROUTE_GEOMETRY_CACHE.pop(cache_key, None)
-    redis_client = await _flow_route_geometry_redis()
-    if redis_client is None:
-        return
-    try:
-        await redis_client.delete(_FLOW_ROUTE_GEOMETRY_CACHE_KEY_PREFIX + cache_key)
-    except Exception:
-        return
-
-
-class AnalysisDashboardService:
+class AnalysisDashboardService(FlowRouteGeometryMixin, AnalysisJobViewMixin):
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.runtime_config = RuntimeConfigService(db)
-
-    def _route_client(self) -> HifleetRouteClient:
-        return HifleetRouteClient(runtime_config=self.runtime_config)
-
-    async def _flow_route_geometry_payload(
-        self,
-        item: FlowMapItem,
-        *,
-        segment_type: str,
-        client: HifleetRouteClient,
-        generate_missing: bool,
-        force_refresh: bool = False,
-    ) -> dict[str, Any]:
-        origin_lon = _to_optional_float(item.origin_longitude)
-        origin_lat = _to_optional_float(item.origin_latitude)
-        destination_lon = _to_optional_float(item.destination_longitude)
-        destination_lat = _to_optional_float(item.destination_latitude)
-        if not (
-            _valid_flow_coordinate(origin_lon, origin_lat)
-            and _valid_flow_coordinate(destination_lon, destination_lat)
-        ):
-            reasons = ["起终点经纬度不完整，无法生成 AMMS 轨迹"]
-            return {
-                "route_status_code": "NOT_COMPUTABLE",
-                "route_cache_status": "SKIPPED",
-                "geometry_source": "AMMS",
-                "route_not_computable_reasons": reasons,
-                "map_state": _flow_map_state_payload(
-                    "NOT_COMPUTABLE",
-                    item,
-                    segment_type,
-                    cache_status="SKIPPED",
-                    reasons=reasons,
-                    missing_fields=["origin_longitude", "origin_latitude", "destination_longitude", "destination_latitude"],
-                ),
-            }
-        if origin_lon == destination_lon and origin_lat == destination_lat:
-            reasons = ["起终点坐标相同，无法生成 AMMS 轨迹"]
-            return {
-                "route_status_code": "NOT_COMPUTABLE",
-                "route_cache_status": "SKIPPED",
-                "geometry_source": "AMMS",
-                "route_not_computable_reasons": reasons,
-                "map_state": _flow_map_state_payload(
-                    "NOT_COMPUTABLE",
-                    item,
-                    segment_type,
-                    cache_status="SKIPPED",
-                    reasons=reasons,
-                    missing_fields=["origin_longitude", "origin_latitude", "destination_longitude", "destination_latitude"],
-                ),
-            }
-
-        cache_key = _flow_route_geometry_cache_key(item, segment_type)
-        if force_refresh:
-            await _flow_route_geometry_cache_delete(cache_key)
-        cached = await _flow_route_geometry_cache_get(cache_key)
-        if cached is not None:
-            cached["route_cache_status"] = "HIT"
-            status = str(cached.get("route_status_code") or "PENDING").upper()
-            cached["map_state"] = _flow_map_state_payload(
-                status,
-                item,
-                segment_type,
-                cache_status="HIT",
-                generated_at=cached.get("route_generated_at"),
-                reasons=_reasons(cached.get("route_not_computable_reasons")),
-            )
-            return cached
-
-        if not generate_missing:
-            reasons = ["AMMS 轨迹缓存尚未生成"]
-            return {
-                "route_status_code": "PENDING",
-                "route_cache_status": "MISS",
-                "geometry_source": "AMMS",
-                "route_not_computable_reasons": reasons,
-                "map_state": _flow_map_state_payload(
-                    "PENDING",
-                    item,
-                    segment_type,
-                    cache_status="MISS",
-                    reasons=reasons,
-                ),
-            }
-
-        assert origin_lon is not None and origin_lat is not None and destination_lon is not None and destination_lat is not None
-        try:
-            result = await client.generate(
-                RouteGeometryQuery(
-                    origin_lon=origin_lon,
-                    origin_lat=origin_lat,
-                    dest_lon=destination_lon,
-                    dest_lat=destination_lat,
-                    transport_mode="WATER",
-                    segment_type=segment_type,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            reason = _safe_reason(exc)
-            status = "NOT_COMPUTABLE" if "未配置" in reason else "FAILED"
-            generated_at = datetime.now(UTC)
-            payload = {
-                "route_status_code": status,
-                "route_cache_status": "FAILED",
-                "geometry_source": "AMMS",
-                "route_generated_at": generated_at,
-                "route_not_computable_reasons": [reason],
-                "map_state": _flow_map_state_payload(
-                    status,
-                    item,
-                    segment_type,
-                    cache_status="FAILED",
-                    generated_at=generated_at,
-                    reasons=[reason],
-                ),
-            }
-            await _flow_route_geometry_cache_set(cache_key, payload)
-            return payload
-
-        points = _line_string_points(result.geometry)
-        distance_km = result.distance_km if result.distance_km is not None else _line_length_km(points)
-        if len(points) < 2:
-            reasons = ["AMMS 返回轨迹为空"]
-            generated_at = datetime.now(UTC)
-            payload = {
-                "route_status_code": "FAILED",
-                "route_cache_status": "FAILED",
-                "geometry_source": "AMMS",
-                "route_generated_at": generated_at,
-                "route_not_computable_reasons": reasons,
-                "map_state": _flow_map_state_payload(
-                    "FAILED",
-                    item,
-                    segment_type,
-                    cache_status="FAILED",
-                    generated_at=generated_at,
-                    reasons=reasons,
-                ),
-            }
-            await _flow_route_geometry_cache_set(cache_key, payload)
-            return payload
-
-        generated_at = datetime.now(UTC)
-        payload = {
-            "geometry_json": result.geometry,
-            "geometry_source": "AMMS",
-            "route_status_code": "READY",
-            "route_cache_status": "GENERATED",
-            "route_generated_at": generated_at,
-            "route_distance_km": round(distance_km, 3) if distance_km is not None else None,
-            "route_point_count": len(points),
-            "route_not_computable_reasons": [],
-            "map_state": _flow_map_state_payload(
-                "READY",
-                item,
-                segment_type,
-                cache_status="GENERATED",
-                generated_at=generated_at,
-            ),
-        }
-        await _flow_route_geometry_cache_set(cache_key, payload)
-        return payload
-
-    async def _attach_flow_route_geometries(
-        self,
-        items: list[FlowMapItem],
-        *,
-        segment_type: str,
-        generate_missing: bool = False,
-        force_refresh: bool = False,
-    ) -> list[FlowMapItem]:
-        if not items:
-            return items
-        client = self._route_client()
-        payloads = await asyncio.gather(
-            *(
-                self._flow_route_geometry_payload(
-                    item,
-                    segment_type=segment_type,
-                    client=client,
-                    generate_missing=generate_missing,
-                    force_refresh=force_refresh,
-                )
-                for item in items
-            )
-        )
-        return [
-            FlowMapItem.model_validate({**item.model_dump(), **payload}) if payload else item
-            for item, payload in zip(items, payloads, strict=False)
-        ]
 
     async def _date_range(self, date_from: date | None, date_to: date | None) -> tuple[date, date]:
         latest = await self.db.scalar(select(func.max(FactFreightDaily.stat_date)))
@@ -1035,18 +571,7 @@ class AnalysisDashboardService:
         origin_city = aliased(AdminRegion)
         destination_city = aliased(AdminRegion)
         city_capacity = await self._ship_city_capacity_metrics()
-        conditions = [FactFreightFlowDaily.stat_date >= start, FactFreightFlowDaily.stat_date <= end]
-        if query:
-            if query.origin_node_id is not None:
-                conditions.append(FactFreightFlowDaily.origin_node_id == query.origin_node_id)
-            if query.destination_node_id is not None:
-                conditions.append(FactFreightFlowDaily.destination_node_id == query.destination_node_id)
-            if query.origin_region_id is not None:
-                conditions.append(FactFreightFlowDaily.origin_region_id == query.origin_region_id)
-            if query.destination_region_id is not None:
-                conditions.append(FactFreightFlowDaily.destination_region_id == query.destination_region_id)
-            if query.commodity_standard_id is not None:
-                conditions.append(FactFreightFlowDaily.commodity_standard_id == query.commodity_standard_id)
+        conditions = _flow_conditions(FactFreightFlowDaily, start, end, query, include_commodity=True)
         rows = (
             await self.db.execute(
                 select(
@@ -1232,16 +757,7 @@ class AnalysisDashboardService:
     ) -> list[FlowMapItem]:
         origin = aliased(TransportNode)
         destination = aliased(TransportNode)
-        conditions = [FactShipFlowDaily.stat_date >= start, FactShipFlowDaily.stat_date <= end]
-        if query:
-            if query.origin_node_id is not None:
-                conditions.append(FactShipFlowDaily.origin_node_id == query.origin_node_id)
-            if query.destination_node_id is not None:
-                conditions.append(FactShipFlowDaily.destination_node_id == query.destination_node_id)
-            if query.origin_region_id is not None:
-                conditions.append(FactShipFlowDaily.origin_region_id == query.origin_region_id)
-            if query.destination_region_id is not None:
-                conditions.append(FactShipFlowDaily.destination_region_id == query.destination_region_id)
+        conditions = _flow_conditions(FactShipFlowDaily, start, end, query)
         city_ais_metrics = await self._ship_city_ais_metrics()
         rows = (
             await self.db.execute(
@@ -1554,73 +1070,6 @@ class AnalysisDashboardService:
             ship_flow_details=flow_corridor_items(ship_flows, subject="ship", limit=20),
         )
 
-    @staticmethod
-    def _flow_route_cache_counts(items: list[FlowMapItem]) -> dict[str, int]:
-        counts = {
-            "total_count": len(items),
-            "cached_count": 0,
-            "generated_count": 0,
-            "pending_count": 0,
-            "failed_count": 0,
-            "skipped_count": 0,
-        }
-        for item in items:
-            cache_status = str(item.route_cache_status or "").upper()
-            status = str(item.route_status_code or "").upper()
-            if cache_status == "HIT":
-                counts["cached_count"] += 1
-            elif cache_status == "GENERATED":
-                counts["generated_count"] += 1
-            elif cache_status == "SKIPPED":
-                counts["skipped_count"] += 1
-            elif status == "PENDING" or cache_status == "MISS":
-                counts["pending_count"] += 1
-            elif status in {"FAILED", "NOT_COMPUTABLE"} or cache_status == "FAILED":
-                counts["failed_count"] += 1
-        return counts
-
-    async def precompute_flow_route_cache(
-        self,
-        date_from: date | None,
-        date_to: date | None,
-        *,
-        flow_types: list[str] | None = None,
-        limit: int = 20,
-        force_refresh: bool = False,
-    ) -> FlowRouteCachePrecomputeResponse:
-        start, end = await self._date_range(date_from, date_to)
-        normalized_types = {str(item).strip().lower() for item in (flow_types or ["freight", "ship"]) if item}
-        limit = max(1, min(80, int(limit or 20)))
-        all_items: list[FlowMapItem] = []
-        if "freight" in normalized_types:
-            all_items.extend(
-                await self.freight_hot_routes(
-                    start,
-                    end,
-                    limit,
-                    route_geometry_mode="generate",
-                    force_refresh_routes=force_refresh,
-                )
-            )
-        if "ship" in normalized_types:
-            all_items.extend(
-                await self.ship_flow_map(
-                    start,
-                    end,
-                    limit,
-                    route_geometry_mode="generate",
-                    force_refresh_routes=force_refresh,
-                )
-            )
-        counts = self._flow_route_cache_counts(all_items)
-        return FlowRouteCachePrecomputeResponse(
-            status_code="SUCCESS",
-            message="AMMS 流向轨迹缓存已生成",
-            date_from=start,
-            date_to=end,
-            **counts,
-        )
-
     async def price_overview(self, date_from: date | None, date_to: date | None) -> PriceAnalysisOverviewResponse:
         start, end = await self._date_range(date_from, date_to)
         price_rows = (
@@ -1925,172 +1374,3 @@ class AnalysisDashboardService:
             not_computable_distribution=[ChartPoint(name=key, value=value) for key, value in sorted(not_computable_distribution.items())],
             source_status=self._source_status(rows, start, end, last),
         )
-
-    async def list_jobs(
-        self,
-        module_code: str | None,
-        status_code: str | None,
-        date_from: date | None,
-        date_to: date | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[AnalysisJobRunResponse]:
-        stmt = select(AnalysisJobRun)
-        if module_code:
-            stmt = stmt.where(AnalysisJobRun.module_code == module_code)
-        if status_code:
-            stmt = stmt.where(AnalysisJobRun.status_code == status_code)
-        if date_from:
-            stmt = stmt.where(AnalysisJobRun.stat_date_to >= date_from)
-        if date_to:
-            stmt = stmt.where(AnalysisJobRun.stat_date_from <= date_to)
-
-        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
-        rows = (
-            await self.db.execute(
-                stmt.order_by(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-            )
-        ).scalars().all()
-        return PageResponse[AnalysisJobRunResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_job_to_response(row) for row in rows],
-        )
-
-    async def get_job_detail(self, job_run_id: int) -> AnalysisJobRunDetailResponse:
-        row = await self.db.scalar(select(AnalysisJobRun).where(AnalysisJobRun.id == job_run_id))
-        if row is None:
-            raise NotFoundError("AnalysisJobRun", job_run_id)
-        base = _job_to_response(row).model_dump()
-        return AnalysisJobRunDetailResponse(
-            **base,
-            parameters_json=row.parameters_json,
-            result_summary_json=row.result_summary_json,
-        )
-
-    async def list_tasks(
-        self,
-        module_code: str | None,
-        enabled: bool | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[AnalysisTaskResponse]:
-        stmt = select(AnalysisJobDefinition)
-        if module_code:
-            stmt = stmt.where(AnalysisJobDefinition.module_code == module_code)
-        if enabled is not None:
-            stmt = stmt.where(AnalysisJobDefinition.enabled == enabled)
-        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
-        rows = (
-            await self.db.execute(
-                stmt.order_by(AnalysisJobDefinition.sort_order.asc(), AnalysisJobDefinition.id.asc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-            )
-        ).scalars().all()
-        return PageResponse[AnalysisTaskResponse](
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[_task_to_response(row) for row in rows],
-        )
-
-    async def get_task_detail(self, job_code: str) -> AnalysisTaskDetailResponse:
-        row = await self.db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == job_code))
-        if row is None:
-            raise NotFoundError("AnalysisJobDefinition", job_code)
-        runs = (
-            await self.db.execute(
-                select(AnalysisJobRun)
-                .where(AnalysisJobRun.job_code == job_code)
-                .order_by(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc())
-                .limit(20)
-            )
-        ).scalars().all()
-        base = _task_to_response(row).model_dump()
-        return AnalysisTaskDetailResponse(**base, recent_runs=[_job_to_response(item) for item in runs])
-
-    async def list_task_runs(
-        self,
-        job_code: str,
-        status_code: str | None,
-        date_from: date | None,
-        date_to: date | None,
-        page: int,
-        page_size: int,
-    ) -> PageResponse[AnalysisJobRunResponse]:
-        stmt = select(AnalysisJobRun).where(AnalysisJobRun.job_code == job_code)
-        if status_code:
-            stmt = stmt.where(AnalysisJobRun.status_code == status_code)
-        if date_from:
-            stmt = stmt.where(AnalysisJobRun.stat_date_to >= date_from)
-        if date_to:
-            stmt = stmt.where(AnalysisJobRun.stat_date_from <= date_to)
-        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
-        rows = (
-            await self.db.execute(
-                stmt.order_by(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-            )
-        ).scalars().all()
-        return PageResponse[AnalysisJobRunResponse](total=total, page=page, page_size=page_size, items=[_job_to_response(row) for row in rows])
-
-    async def trigger_task(self, job_code: str, payload: AnalysisTaskTriggerRequest, triggered_by: str | None) -> AnalysisJobRunResponse:
-        definition = await self.db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == job_code))
-        if definition is None:
-            raise NotFoundError("AnalysisJobDefinition", job_code)
-        if not definition.enabled:
-            raise ValidationError("分析任务已停用，不能手动触发", {"job_code": job_code})
-        now = datetime.utcnow()
-        parameters = {
-            **(definition.default_parameters_json or {}),
-            **(payload.parameters_json or {}),
-            "force_rebuild": payload.force_rebuild,
-        }
-        run = AnalysisJobRun(
-            job_code=definition.job_code,
-            job_name=definition.job_name,
-            module_code=definition.module_code,
-            module_name=definition.module_name,
-            stat_date_from=payload.date_from,
-            stat_date_to=payload.date_to,
-            status_code="QUEUED",
-            status_name=_status_name("QUEUED"),
-            queued_at=now,
-            parameters_json=parameters,
-            triggered_by=triggered_by,
-            created_at=now,
-        )
-        self.db.add(run)
-        await self.db.flush()
-        await self.db.commit()
-        await self.db.refresh(run)
-
-        try:
-            from app.tasks.analysis_tasks import run_analysis_job
-
-            async_result = run_analysis_job.apply_async(
-                args=[
-                    definition.job_code,
-                    payload.date_from.isoformat(),
-                    payload.date_to.isoformat(),
-                    payload.force_rebuild,
-                    {"job_run_id": run.id, "triggered_by": triggered_by, **(payload.parameters_json or {})},
-                ],
-                queue="analysis",
-            )
-            run.celery_task_id = async_result.id
-        except Exception as exc:
-            run.status_code = "FAILED"
-            run.status_name = _status_name("FAILED")
-            run.finished_at = datetime.utcnow()
-            run.error_message = f"Celery 任务投递失败：{exc}"
-            await self.db.commit()
-            raise ValidationError("Celery 任务投递失败，请确认 Redis 和 analysis-worker 已启动", {"error": str(exc)}) from exc
-        await self.db.commit()
-        await self.db.refresh(run)
-        return _job_to_response(run)

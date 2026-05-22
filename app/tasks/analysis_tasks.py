@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.analysis import AnalysisJobDefinition, AnalysisJobRun
 from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
-from app.modules.analysis.dashboard_service import AnalysisDashboardService
+from app.modules.analysis.service import AnalysisDashboardService
 from app.modules.analysis.statistics import AnalysisStatisticsService
 from app.tasks.celery_app import celery_app
 

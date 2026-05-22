@@ -100,9 +100,36 @@ Seed 必须显式指定 profile：
 后台任务本地运行：
 
 ```bash
-.venv/bin/celery -A app.tasks.celery_app:celery_app worker -Q analysis --loglevel=info
-.venv/bin/celery -A app.tasks.celery_app:celery_app beat --loglevel=info
+cd /Users/hj/Documents/paltform_data_V2/inland-shipping-platform
+.venv/bin/celery -A app.tasks.celery_app:celery_app worker \
+  -n inland_worker@%h \
+  -Q analysis,freight_ai,vessel_ai \
+  -B \
+  -s /private/tmp/inland_celerybeat_schedule.db \
+  --loglevel=info
 ```
+
+更稳妥的方式是 worker 与 beat 分开运行：
+
+```bash
+cd /Users/hj/Documents/paltform_data_V2/inland-shipping-platform
+.venv/bin/celery -A app.tasks.celery_app:celery_app worker \
+  -n inland_worker@%h \
+  -Q analysis,freight_ai,vessel_ai \
+  --loglevel=info
+
+.venv/bin/celery -A app.tasks.celery_app:celery_app beat \
+  -s /private/tmp/inland_celerybeat_schedule.db \
+  --loglevel=info
+```
+
+启动后用只读健康检查确认在线 worker 注册了最新任务：
+
+```bash
+.venv/bin/python scripts/check_celery_registered_tasks.py --inspect-workers
+```
+
+如果缺少 `route.generate_track_version` 或 `vessel.precompute_production_candidate_analyses`，说明旧 worker 没有加载当前代码；先停止旧 worker，再从后端仓库根目录按上面的命令重启，不要通过重复点击业务按钮恢复。
 
 ## 接口调试
 

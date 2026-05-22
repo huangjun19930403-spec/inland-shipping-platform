@@ -8,6 +8,7 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -113,7 +114,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={
             "code": "422000",
             "message": "request validation failed",
-            "data": exc.errors(),
+            "data": jsonable_encoder(exc.errors()),
             "request_id": request_id,
         },
     )

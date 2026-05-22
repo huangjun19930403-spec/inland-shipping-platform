@@ -9,6 +9,7 @@ from typing import Any
 from app.core.database import AsyncSessionLocal
 from app.modules.analysis.statistics import seed_analysis_job_definitions
 from scripts.seeds.loaders.admin_regions import seed_admin_regions
+from scripts.seeds.loaders.approval_base import seed_approval_base
 from scripts.seeds.loaders.business_regions import seed_business_regions
 from scripts.seeds.loaders.builtin_dicts import seed_builtin_dicts
 from scripts.seeds.loaders.code_sequences import seed_code_sequences
@@ -53,6 +54,7 @@ async def seed_production_preset() -> None:
     for _, step in PRODUCTION_SEED_STEPS:
         await step()
     await seed_system_base(preserve_existing_config_values=True)
+    await seed_approval_base()
 
 
 if __name__ == "__main__":

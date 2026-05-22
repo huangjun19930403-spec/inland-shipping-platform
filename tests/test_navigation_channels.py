@@ -3,9 +3,9 @@ from __future__ import annotations
 from decimal import Decimal
 
 from main import app
-from app.modules.vessel.service import (
+from app.modules.vessel.shared.aggregate import VesselDomainService as VesselService
+from app.modules.vessel.shared.base import (
     CURRENT_CHANNEL_SOURCE_NEAR_BOUNDARY,
-    VesselService,
     _NavigationChannelBoundary,
     _build_channel_boundary_grid,
 )

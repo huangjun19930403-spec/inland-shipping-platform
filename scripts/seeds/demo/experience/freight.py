@@ -325,8 +325,6 @@ async def _seed_freight_scenarios(
                 hall_status_code="LISTED",
                 hall_published_at=now,
                 hall_visible_until=now + timedelta(days=20),
-                audit_status="APPROVED",
-                audited_at=now,
                 created_at=now,
                 updated_at=now,
             )
@@ -434,8 +432,6 @@ async def _seed_price_history_samples(session, freight_rows: list[Freight], now:
                     hall_status_code="LISTED",
                     hall_published_at=loading_from - timedelta(days=1),
                     hall_visible_until=loading_from + timedelta(days=20),
-                    audit_status="APPROVED",
-                    audited_at=loading_from,
                     created_at=loading_from,
                     updated_at=now,
                 )

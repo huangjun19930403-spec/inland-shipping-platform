@@ -2,20 +2,13 @@
 
 Revision ID: 001_initial_schema
 Revises: 
-Create Date: 2026-05-10 14:34:05.623491
+Create Date: 2026-05-22 11:18:14.751726
 
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.types import BigInteger
-
-
-@compiles(BigInteger, "sqlite")
-def _compile_bigint_sqlite(_type, _compiler, **_kw):
-    return "INTEGER"
 
 
 # revision identifiers, used by Alembic.
@@ -51,166 +44,6 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('admin_region', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_admin_region_parent_code'), ['parent_code'], unique=False)
-
-    op.create_table(
-    'navigation_channel',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('channel_code', sa.String(length=64), nullable=False),
-    sa.Column('channel_name', sa.String(length=128), nullable=False),
-    sa.Column('official_name', sa.String(length=128), nullable=True),
-    sa.Column('display_name', sa.String(length=128), nullable=True),
-    sa.Column('alias_names', sa.JSON(), nullable=True),
-    sa.Column('parent_channel_code', sa.String(length=64), nullable=True),
-    sa.Column('channel_type_code', sa.String(length=32), nullable=False),
-    sa.Column('planning_level_code', sa.String(length=32), nullable=False),
-    sa.Column('planning_basis_code', sa.String(length=128), nullable=True),
-    sa.Column('start_place', sa.String(length=128), nullable=True),
-    sa.Column('end_place', sa.String(length=128), nullable=True),
-    sa.Column('via_city_names', sa.JSON(), nullable=True),
-    sa.Column('via_port_names', sa.JSON(), nullable=True),
-    sa.Column('technical_grade_current_code', sa.String(length=32), nullable=True),
-    sa.Column('technical_grade_planned_code', sa.String(length=32), nullable=True),
-    sa.Column('ais_scope_code', sa.String(length=32), nullable=False),
-    sa.Column('display_priority', sa.Integer(), nullable=False),
-    sa.Column('review_required', sa.Boolean(), nullable=False),
-    sa.Column('segment_count', sa.Integer(), nullable=False),
-    sa.Column('source_summary', sa.String(length=1024), nullable=True),
-    sa.Column('source_audit_summary', sa.JSON(), nullable=True),
-    sa.Column('source_version', sa.String(length=64), nullable=False),
-    sa.Column('is_enabled', sa.Boolean(), nullable=False),
-    sa.Column('sort_order', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('channel_code')
-    )
-    with op.batch_alter_table('navigation_channel', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_navigation_channel_ais_scope_code'), ['ais_scope_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_code'), ['channel_code'], unique=True)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_name'), ['channel_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_type_code'), ['channel_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_is_enabled'), ['is_enabled'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_official_name'), ['official_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_parent_channel_code'), ['parent_channel_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_planning_basis_code'), ['planning_basis_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_planning_level_code'), ['planning_level_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_review_required'), ['review_required'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_version'), ['source_version'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_technical_grade_current_code'), ['technical_grade_current_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_technical_grade_planned_code'), ['technical_grade_planned_code'], unique=False)
-
-    op.create_table(
-    'navigation_channel_boundary',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('channel_id', sa.BigInteger(), nullable=False),
-    sa.Column('geometry_json', sa.JSON(), nullable=False),
-    sa.Column('boundary_paths_low', sa.JSON(), nullable=True),
-    sa.Column('boundary_paths_medium', sa.JSON(), nullable=True),
-    sa.Column('boundary_paths_high', sa.JSON(), nullable=True),
-    sa.Column('center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
-    sa.Column('center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
-    sa.Column('display_center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
-    sa.Column('display_center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
-    sa.Column('bbox_min_lng', sa.Numeric(precision=11, scale=8), nullable=True),
-    sa.Column('bbox_min_lat', sa.Numeric(precision=10, scale=8), nullable=True),
-    sa.Column('bbox_max_lng', sa.Numeric(precision=11, scale=8), nullable=True),
-    sa.Column('bbox_max_lat', sa.Numeric(precision=10, scale=8), nullable=True),
-    sa.Column('source_shape_length_degree', sa.Numeric(precision=24, scale=15), nullable=True),
-    sa.Column('source_shape_area_degree', sa.Numeric(precision=24, scale=15), nullable=True),
-    sa.Column('ring_count', sa.Integer(), nullable=False),
-    sa.Column('point_count', sa.Integer(), nullable=False),
-    sa.Column('geometry_status_code', sa.String(length=32), nullable=False),
-    sa.Column('boundary_quality_code', sa.String(length=32), nullable=False),
-    sa.Column('connectivity_status_code', sa.String(length=32), nullable=False),
-    sa.Column('repair_status_code', sa.String(length=32), nullable=False),
-    sa.Column('coverage_policy_code', sa.String(length=64), nullable=False),
-    sa.Column('geometry_coordinate_system_code', sa.String(length=16), nullable=False),
-    sa.Column('boundary_coordinate_system_code', sa.String(length=16), nullable=False),
-    sa.Column('is_current', sa.Boolean(), nullable=False),
-    sa.Column('imported_at', sa.DateTime(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    with op.batch_alter_table('navigation_channel_boundary', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_boundary_quality_code'), ['boundary_quality_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_channel_id'), ['channel_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_connectivity_status_code'), ['connectivity_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_geometry_status_code'), ['geometry_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_is_current'), ['is_current'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_repair_status_code'), ['repair_status_code'], unique=False)
-
-    op.create_table(
-    'navigation_channel_segment',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('channel_id', sa.BigInteger(), nullable=False),
-    sa.Column('segment_code', sa.String(length=96), nullable=False),
-    sa.Column('segment_name', sa.String(length=128), nullable=False),
-    sa.Column('segment_kind_code', sa.String(length=32), nullable=False),
-    sa.Column('sequence_no', sa.Integer(), nullable=False),
-    sa.Column('start_place', sa.String(length=128), nullable=True),
-    sa.Column('end_place', sa.String(length=128), nullable=True),
-    sa.Column('via_city_names', sa.JSON(), nullable=True),
-    sa.Column('source_water_names', sa.JSON(), nullable=True),
-    sa.Column('source_summary', sa.String(length=512), nullable=True),
-    sa.Column('geometry_status_code', sa.String(length=32), nullable=False),
-    sa.Column('boundary_quality_code', sa.String(length=32), nullable=False),
-    sa.Column('connectivity_status_code', sa.String(length=32), nullable=False),
-    sa.Column('repair_status_code', sa.String(length=32), nullable=False),
-    sa.Column('review_required', sa.Boolean(), nullable=False),
-    sa.Column('sort_order', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('channel_id', 'segment_code', name='uk_navigation_channel_segment_code')
-    )
-    with op.batch_alter_table('navigation_channel_segment', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_boundary_quality_code'), ['boundary_quality_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_channel_id'), ['channel_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_connectivity_status_code'), ['connectivity_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_geometry_status_code'), ['geometry_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_repair_status_code'), ['repair_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_review_required'), ['review_required'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_code'), ['segment_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_kind_code'), ['segment_kind_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_name'), ['segment_name'], unique=False)
-
-    op.create_table(
-    'navigation_channel_source_audit',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('channel_id', sa.BigInteger(), nullable=True),
-    sa.Column('segment_id', sa.BigInteger(), nullable=True),
-    sa.Column('channel_code', sa.String(length=64), nullable=True),
-    sa.Column('segment_code', sa.String(length=96), nullable=True),
-    sa.Column('source_name', sa.String(length=128), nullable=True),
-    sa.Column('source_layer_name', sa.String(length=256), nullable=True),
-    sa.Column('source_object_id', sa.String(length=64), nullable=True),
-    sa.Column('source_level', sa.SmallInteger(), nullable=True),
-    sa.Column('decision_code', sa.String(length=64), nullable=False),
-    sa.Column('role_code', sa.String(length=64), nullable=False),
-    sa.Column('reason_code', sa.String(length=128), nullable=True),
-    sa.Column('source_remark', sa.String(length=512), nullable=True),
-    sa.Column('review_required', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
-    sa.ForeignKeyConstraint(['segment_id'], ['navigation_channel_segment.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    with op.batch_alter_table('navigation_channel_source_audit', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_channel_code'), ['channel_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_channel_id'), ['channel_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_decision_code'), ['decision_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_reason_code'), ['reason_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_review_required'), ['review_required'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_role_code'), ['role_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_segment_code'), ['segment_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_segment_id'), ['segment_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_layer_name'), ['source_layer_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_level'), ['source_level'], unique=False)
-        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_name'), ['source_name'], unique=False)
 
     op.create_table('analysis_bucket_definition',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -309,36 +142,91 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_analysis_job_run_stat_date_to'), ['stat_date_to'], unique=False)
         batch_op.create_index(batch_op.f('ix_analysis_job_run_status_code'), ['status_code'], unique=False)
 
-    op.create_table('audit_task',
+    op.create_table('approval_flow_definition',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('task_no', sa.String(length=32), nullable=False),
-    sa.Column('biz_type_code', sa.String(length=64), nullable=False),
-    sa.Column('biz_id', sa.BigInteger(), nullable=False),
-    sa.Column('biz_code', sa.String(length=64), nullable=True),
-    sa.Column('object_type_code', sa.String(length=64), nullable=True),
-    sa.Column('object_code', sa.String(length=128), nullable=True),
-    sa.Column('object_name', sa.String(length=256), nullable=True),
-    sa.Column('change_type_code', sa.String(length=64), nullable=True),
-    sa.Column('source_module_code', sa.String(length=64), nullable=True),
-    sa.Column('submitter_id', sa.BigInteger(), nullable=True),
-    sa.Column('submitter_name', sa.String(length=64), nullable=True),
-    sa.Column('current_handler_id', sa.BigInteger(), nullable=True),
-    sa.Column('current_handler_name', sa.String(length=64), nullable=True),
-    sa.Column('audit_status', sa.String(length=32), nullable=False),
-    sa.Column('audit_remark', sa.String(length=512), nullable=True),
-    sa.Column('submitted_at', sa.DateTime(), nullable=True),
-    sa.Column('completed_at', sa.DateTime(), nullable=True),
+    sa.Column('flow_code', sa.String(length=96), nullable=False),
+    sa.Column('flow_name', sa.String(length=128), nullable=False),
+    sa.Column('subject_type', sa.String(length=96), nullable=False),
+    sa.Column('trigger_action_code', sa.String(length=64), nullable=False),
+    sa.Column('engine_type', sa.String(length=32), nullable=False),
+    sa.Column('approval_mode', sa.String(length=32), nullable=False),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('spiff_spec_id', sa.String(length=128), nullable=True),
+    sa.Column('config_json', sa.JSON(), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('task_no')
+    sa.UniqueConstraint('flow_code', name='uk_approval_flow_definition_code')
     )
-    with op.batch_alter_table('audit_task', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_audit_task_biz_id'), ['biz_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_audit_task_change_type_code'), ['change_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_audit_task_object_code'), ['object_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_audit_task_object_type_code'), ['object_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_audit_task_source_module_code'), ['source_module_code'], unique=False)
+    with op.batch_alter_table('approval_flow_definition', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_flow_definition_engine_type'), ['engine_type'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_flow_definition_flow_code'), ['flow_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_flow_definition_status_code'), ['status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_flow_definition_subject_type'), ['subject_type'], unique=False)
+        batch_op.create_index('ix_approval_flow_definition_trigger', ['subject_type', 'trigger_action_code', 'status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_flow_definition_trigger_action_code'), ['trigger_action_code'], unique=False)
+
+    op.create_table('approval_subject_definition',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('subject_type', sa.String(length=96), nullable=False),
+    sa.Column('subject_name', sa.String(length=128), nullable=False),
+    sa.Column('module_code', sa.String(length=64), nullable=False),
+    sa.Column('detail_path_template', sa.String(length=256), nullable=True),
+    sa.Column('read_permission_code', sa.String(length=96), nullable=True),
+    sa.Column('submit_permission_code', sa.String(length=96), nullable=True),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('summary_schema_json', sa.JSON(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('subject_type', name='uk_approval_subject_definition_type')
+    )
+    with op.batch_alter_table('approval_subject_definition', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_subject_definition_module_code'), ['module_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_subject_definition_status_code'), ['status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_subject_definition_subject_type'), ['subject_type'], unique=False)
+
+    op.create_table('async_task_run',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('task_name', sa.String(length=128), nullable=False),
+    sa.Column('task_title', sa.String(length=128), nullable=False),
+    sa.Column('celery_task_id', sa.String(length=128), nullable=True),
+    sa.Column('queue_name', sa.String(length=64), nullable=False),
+    sa.Column('business_type', sa.String(length=64), nullable=False),
+    sa.Column('business_id', sa.BigInteger(), nullable=True),
+    sa.Column('business_no', sa.String(length=128), nullable=True),
+    sa.Column('idempotency_key', sa.String(length=256), nullable=True),
+    sa.Column('status_code', sa.String(length=64), nullable=False),
+    sa.Column('stage_code', sa.String(length=64), nullable=True),
+    sa.Column('stage_name', sa.String(length=128), nullable=True),
+    sa.Column('stage_message', sa.Text(), nullable=True),
+    sa.Column('progress_percent', sa.Integer(), nullable=False),
+    sa.Column('attempt', sa.Integer(), nullable=False),
+    sa.Column('max_retries', sa.Integer(), nullable=False),
+    sa.Column('requested_by', sa.BigInteger(), nullable=True),
+    sa.Column('triggered_by', sa.String(length=64), nullable=True),
+    sa.Column('queued_at', sa.DateTime(), nullable=True),
+    sa.Column('started_at', sa.DateTime(), nullable=True),
+    sa.Column('finished_at', sa.DateTime(), nullable=True),
+    sa.Column('heartbeat_at', sa.DateTime(), nullable=True),
+    sa.Column('error_message', sa.Text(), nullable=True),
+    sa.Column('result_json', sa.JSON(), nullable=True),
+    sa.Column('extra_json', sa.JSON(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('async_task_run', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_async_task_run_business_id'), ['business_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_business_no'), ['business_no'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_business_type'), ['business_type'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_celery_task_id'), ['celery_task_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_heartbeat_at'), ['heartbeat_at'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_idempotency_key'), ['idempotency_key'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_queue_name'), ['queue_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_requested_by'), ['requested_by'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_status_code'), ['status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_async_task_run_task_name'), ['task_name'], unique=False)
 
     op.create_table('code_sequence',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -386,10 +274,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code')
     )
@@ -528,6 +412,51 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_freight_tms_inbound_source_trace_id'), ['source_trace_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_freight_tms_inbound_status_code'), ['status_code'], unique=False)
 
+    op.create_table('navigation_channel',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('channel_code', sa.String(length=64), nullable=False),
+    sa.Column('channel_name', sa.String(length=128), nullable=False),
+    sa.Column('official_name', sa.String(length=128), nullable=True),
+    sa.Column('display_name', sa.String(length=128), nullable=True),
+    sa.Column('alias_names', sa.JSON(), nullable=True),
+    sa.Column('parent_channel_code', sa.String(length=64), nullable=True),
+    sa.Column('channel_type_code', sa.String(length=32), nullable=False),
+    sa.Column('planning_level_code', sa.String(length=32), nullable=False),
+    sa.Column('planning_basis_code', sa.String(length=128), nullable=True),
+    sa.Column('start_place', sa.String(length=128), nullable=True),
+    sa.Column('end_place', sa.String(length=128), nullable=True),
+    sa.Column('via_city_names', sa.JSON(), nullable=True),
+    sa.Column('via_port_names', sa.JSON(), nullable=True),
+    sa.Column('technical_grade_current_code', sa.String(length=32), nullable=True),
+    sa.Column('technical_grade_planned_code', sa.String(length=32), nullable=True),
+    sa.Column('ais_scope_code', sa.String(length=32), nullable=False),
+    sa.Column('display_priority', sa.Integer(), nullable=False),
+    sa.Column('review_required', sa.Boolean(), nullable=False),
+    sa.Column('segment_count', sa.Integer(), nullable=False),
+    sa.Column('source_summary', sa.String(length=1024), nullable=True),
+    sa.Column('source_audit_summary', sa.JSON(), nullable=True),
+    sa.Column('source_version', sa.String(length=64), nullable=False),
+    sa.Column('is_enabled', sa.Boolean(), nullable=False),
+    sa.Column('sort_order', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('navigation_channel', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_ais_scope_code'), ['ais_scope_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_code'), ['channel_code'], unique=True)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_name'), ['channel_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_channel_type_code'), ['channel_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_is_enabled'), ['is_enabled'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_official_name'), ['official_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_parent_channel_code'), ['parent_channel_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_planning_basis_code'), ['planning_basis_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_planning_level_code'), ['planning_level_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_review_required'), ['review_required'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_version'), ['source_version'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_technical_grade_current_code'), ['technical_grade_current_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_technical_grade_planned_code'), ['technical_grade_planned_code'], unique=False)
+
     op.create_table('navigation_constraint_point',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('code', sa.String(length=32), nullable=False),
@@ -547,6 +476,31 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code')
     )
+    op.create_table('operation_log',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('module_code', sa.String(length=64), nullable=False),
+    sa.Column('operation_code', sa.String(length=96), nullable=False),
+    sa.Column('subject_type', sa.String(length=96), nullable=True),
+    sa.Column('subject_id', sa.BigInteger(), nullable=True),
+    sa.Column('subject_ref', sa.String(length=128), nullable=True),
+    sa.Column('operator_id', sa.BigInteger(), nullable=True),
+    sa.Column('request_id', sa.String(length=128), nullable=True),
+    sa.Column('before_json', sa.JSON(), nullable=True),
+    sa.Column('after_json', sa.JSON(), nullable=True),
+    sa.Column('detail_json', sa.JSON(), nullable=True),
+    sa.Column('remark', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('operation_log', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_operation_log_module_code'), ['module_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_operation_log_operation_code'), ['operation_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_operation_log_operator_id'), ['operator_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_operation_log_request_id'), ['request_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_operation_log_subject_id'), ['subject_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_operation_log_subject_ref'), ['subject_ref'], unique=False)
+        batch_op.create_index(batch_op.f('ix_operation_log_subject_type'), ['subject_type'], unique=False)
+
     op.create_table('region',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('code', sa.String(length=32), nullable=False),
@@ -560,10 +514,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code')
     )
@@ -605,8 +555,8 @@ def upgrade() -> None:
     sa.Column('menu_type_code', sa.String(length=64), nullable=False),
     sa.Column('route_path', sa.String(length=256), nullable=True),
     sa.Column('component_path', sa.String(length=256), nullable=True),
-    sa.Column('icon', sa.String(length=64), nullable=True),
     sa.Column('permission_code', sa.String(length=128), nullable=True),
+    sa.Column('icon', sa.String(length=64), nullable=True),
     sa.Column('sort_order', sa.Integer(), nullable=False),
     sa.Column('visible_flag', sa.Integer(), nullable=False),
     sa.Column('status_code', sa.String(length=64), nullable=False),
@@ -829,35 +779,70 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_analysis_snapshot_generated_by_job_id'), ['generated_by_job_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_analysis_snapshot_module_code'), ['module_code'], unique=False)
 
-    op.create_table('audit_record',
+    op.create_table('approval_instance',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('task_id', sa.BigInteger(), nullable=False),
-    sa.Column('action_code', sa.String(length=64), nullable=False),
-    sa.Column('operator_id', sa.BigInteger(), nullable=True),
-    sa.Column('from_status_code', sa.String(length=64), nullable=True),
-    sa.Column('to_status_code', sa.String(length=64), nullable=True),
-    sa.Column('remark', sa.String(length=512), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['task_id'], ['audit_task.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.Column('instance_no', sa.String(length=64), nullable=False),
+    sa.Column('flow_id', sa.BigInteger(), nullable=False),
+    sa.Column('flow_code', sa.String(length=96), nullable=False),
+    sa.Column('subject_type', sa.String(length=96), nullable=False),
+    sa.Column('subject_id', sa.BigInteger(), nullable=True),
+    sa.Column('subject_ref', sa.String(length=128), nullable=True),
+    sa.Column('subject_code', sa.String(length=128), nullable=True),
+    sa.Column('subject_name', sa.String(length=256), nullable=False),
+    sa.Column('subject_path', sa.String(length=256), nullable=True),
+    sa.Column('trigger_action_code', sa.String(length=64), nullable=False),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('current_step_instance_id', sa.BigInteger(), nullable=True),
+    sa.Column('submitter_id', sa.BigInteger(), nullable=True),
+    sa.Column('submitted_at', sa.DateTime(), nullable=False),
+    sa.Column('completed_at', sa.DateTime(), nullable=True),
+    sa.Column('engine_type', sa.String(length=32), nullable=False),
+    sa.Column('engine_state_json', sa.JSON(), nullable=True),
+    sa.Column('idempotency_key', sa.String(length=256), nullable=False),
+    sa.Column('lock_version', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['flow_id'], ['approval_flow_definition.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('idempotency_key', name='uk_approval_instance_idempotency'),
+    sa.UniqueConstraint('instance_no', name='uk_approval_instance_no')
     )
-    with op.batch_alter_table('audit_record', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_audit_record_task_id'), ['task_id'], unique=False)
+    with op.batch_alter_table('approval_instance', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_instance_current_step_instance_id'), ['current_step_instance_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_flow_code'), ['flow_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_idempotency_key'), ['idempotency_key'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_instance_no'), ['instance_no'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_status_code'), ['status_code'], unique=False)
+        batch_op.create_index('ix_approval_instance_subject', ['subject_type', 'subject_id', 'subject_ref'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_subject_id'), ['subject_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_subject_ref'), ['subject_ref'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_subject_type'), ['subject_type'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_submitter_id'), ['submitter_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_instance_trigger_action_code'), ['trigger_action_code'], unique=False)
 
-    op.create_table('audit_task_snapshot',
+    op.create_table('approval_step_definition',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('task_id', sa.BigInteger(), nullable=False),
-    sa.Column('before_snapshot_json', sa.JSON(), nullable=True),
-    sa.Column('after_snapshot_json', sa.JSON(), nullable=True),
-    sa.Column('diff_json', sa.JSON(), nullable=True),
-    sa.Column('summary_json', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['task_id'], ['audit_task.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.Column('flow_id', sa.BigInteger(), nullable=False),
+    sa.Column('step_key', sa.String(length=96), nullable=False),
+    sa.Column('step_order', sa.Integer(), nullable=False),
+    sa.Column('step_name', sa.String(length=128), nullable=False),
+    sa.Column('step_type', sa.String(length=32), nullable=False),
+    sa.Column('assignment_type', sa.String(length=64), nullable=False),
+    sa.Column('assignee_user_id', sa.BigInteger(), nullable=True),
+    sa.Column('assignee_role_code', sa.String(length=96), nullable=True),
+    sa.Column('assignee_permission_code', sa.String(length=96), nullable=True),
+    sa.Column('action_policy', sa.String(length=32), nullable=False),
+    sa.Column('condition_json', sa.JSON(), nullable=True),
+    sa.Column('sla_hours', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['flow_id'], ['approval_flow_definition.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('flow_id', 'step_key', name='uk_approval_step_definition_key'),
+    sa.UniqueConstraint('flow_id', 'step_order', name='uk_approval_step_definition_order')
     )
-    with op.batch_alter_table('audit_task_snapshot', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_audit_task_snapshot_task_id'), ['task_id'], unique=True)
+    with op.batch_alter_table('approval_step_definition', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_step_definition_flow_id'), ['flow_id'], unique=False)
 
     op.create_table('commodity_type',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -869,10 +854,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['category_id'], ['commodity_category.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code')
@@ -1214,6 +1195,82 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_freight_clue_source_type_code'), ['source_type_code'], unique=False)
         batch_op.create_index(batch_op.f('ix_freight_clue_status_code'), ['status_code'], unique=False)
 
+    op.create_table('navigation_channel_boundary',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('channel_id', sa.BigInteger(), nullable=False),
+    sa.Column('geometry_json', sa.JSON(), nullable=False),
+    sa.Column('boundary_paths_low', sa.JSON(), nullable=True),
+    sa.Column('boundary_paths_medium', sa.JSON(), nullable=True),
+    sa.Column('boundary_paths_high', sa.JSON(), nullable=True),
+    sa.Column('center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('display_center_longitude', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('display_center_latitude', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('bbox_min_lng', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('bbox_min_lat', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('bbox_max_lng', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('bbox_max_lat', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('source_shape_length_degree', sa.Numeric(precision=24, scale=15), nullable=True),
+    sa.Column('source_shape_area_degree', sa.Numeric(precision=24, scale=15), nullable=True),
+    sa.Column('ring_count', sa.Integer(), nullable=False),
+    sa.Column('point_count', sa.Integer(), nullable=False),
+    sa.Column('geometry_status_code', sa.String(length=32), nullable=False),
+    sa.Column('boundary_quality_code', sa.String(length=32), nullable=False),
+    sa.Column('connectivity_status_code', sa.String(length=32), nullable=False),
+    sa.Column('repair_status_code', sa.String(length=32), nullable=False),
+    sa.Column('coverage_policy_code', sa.String(length=64), nullable=False),
+    sa.Column('geometry_coordinate_system_code', sa.String(length=16), nullable=False),
+    sa.Column('boundary_coordinate_system_code', sa.String(length=16), nullable=False),
+    sa.Column('is_current', sa.Boolean(), nullable=False),
+    sa.Column('imported_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('navigation_channel_boundary', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_boundary_quality_code'), ['boundary_quality_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_channel_id'), ['channel_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_connectivity_status_code'), ['connectivity_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_geometry_status_code'), ['geometry_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_is_current'), ['is_current'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_boundary_repair_status_code'), ['repair_status_code'], unique=False)
+
+    op.create_table('navigation_channel_segment',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('channel_id', sa.BigInteger(), nullable=False),
+    sa.Column('segment_code', sa.String(length=96), nullable=False),
+    sa.Column('segment_name', sa.String(length=128), nullable=False),
+    sa.Column('segment_kind_code', sa.String(length=32), nullable=False),
+    sa.Column('sequence_no', sa.Integer(), nullable=False),
+    sa.Column('start_place', sa.String(length=128), nullable=True),
+    sa.Column('end_place', sa.String(length=128), nullable=True),
+    sa.Column('via_city_names', sa.JSON(), nullable=True),
+    sa.Column('source_water_names', sa.JSON(), nullable=True),
+    sa.Column('source_summary', sa.String(length=512), nullable=True),
+    sa.Column('geometry_status_code', sa.String(length=32), nullable=False),
+    sa.Column('boundary_quality_code', sa.String(length=32), nullable=False),
+    sa.Column('connectivity_status_code', sa.String(length=32), nullable=False),
+    sa.Column('repair_status_code', sa.String(length=32), nullable=False),
+    sa.Column('review_required', sa.Boolean(), nullable=False),
+    sa.Column('sort_order', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('channel_id', 'segment_code', name='uk_navigation_channel_segment_code')
+    )
+    with op.batch_alter_table('navigation_channel_segment', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_boundary_quality_code'), ['boundary_quality_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_channel_id'), ['channel_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_connectivity_status_code'), ['connectivity_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_geometry_status_code'), ['geometry_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_repair_status_code'), ['repair_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_review_required'), ['review_required'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_code'), ['segment_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_kind_code'), ['segment_kind_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_segment_segment_name'), ['segment_name'], unique=False)
+
     op.create_table('navigation_constraint_profile',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('constraint_point_id', sa.BigInteger(), nullable=False),
@@ -1276,45 +1333,6 @@ def upgrade() -> None:
     with op.batch_alter_table('region_city_relation', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_region_city_relation_city_region_id'), ['city_region_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_region_city_relation_region_id'), ['region_id'], unique=False)
-
-    op.create_table('shipping_route',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('code', sa.String(length=32), nullable=False),
-    sa.Column('name', sa.String(length=128), nullable=False),
-    sa.Column('origin_endpoint_type_code', sa.String(length=32), nullable=False),
-    sa.Column('origin_region_id', sa.BigInteger(), nullable=True),
-    sa.Column('origin_city_code', sa.String(length=12), nullable=True),
-    sa.Column('origin_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('destination_endpoint_type_code', sa.String(length=32), nullable=False),
-    sa.Column('destination_region_id', sa.BigInteger(), nullable=True),
-    sa.Column('destination_city_code', sa.String(length=12), nullable=True),
-    sa.Column('destination_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('transport_org_type_code', sa.String(length=64), nullable=False),
-    sa.Column('multimodal_combination_code', sa.String(length=64), nullable=True),
-    sa.Column('status_code', sa.String(length=32), nullable=False),
-    sa.Column('description', sa.String(length=512), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
-    sa.ForeignKeyConstraint(['destination_node_id'], ['transport_node.id'], ),
-    sa.ForeignKeyConstraint(['destination_region_id'], ['region.id'], ),
-    sa.ForeignKeyConstraint(['origin_node_id'], ['transport_node.id'], ),
-    sa.ForeignKeyConstraint(['origin_region_id'], ['region.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('code')
-    )
-    with op.batch_alter_table('shipping_route', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_destination_city_code'), ['destination_city_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_destination_node_id'), ['destination_node_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_destination_region_id'), ['destination_region_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_origin_city_code'), ['origin_city_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_origin_node_id'), ['origin_node_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_origin_region_id'), ['origin_region_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_status_code'), ['status_code'], unique=False)
 
     op.create_table('std_dict_item',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -1448,10 +1466,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['city_region_id'], ['admin_region.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code')
@@ -1502,10 +1516,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['vessel_identity_id'], ['vessel_identity.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('vessel_profile_code')
@@ -1562,6 +1572,77 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_vessel_spatial_observation_snapshot_stat_time'), ['stat_time'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_spatial_observation_snapshot_status_code'), ['status_code'], unique=False)
 
+    op.create_table('approval_outbox',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('event_type', sa.String(length=96), nullable=False),
+    sa.Column('instance_id', sa.BigInteger(), nullable=False),
+    sa.Column('subject_type', sa.String(length=96), nullable=False),
+    sa.Column('subject_id', sa.BigInteger(), nullable=True),
+    sa.Column('decision_code', sa.String(length=32), nullable=False),
+    sa.Column('payload_json', sa.JSON(), nullable=True),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('retry_count', sa.Integer(), nullable=False),
+    sa.Column('next_retry_at', sa.DateTime(), nullable=True),
+    sa.Column('last_error', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['instance_id'], ['approval_instance.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('approval_outbox', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_outbox_decision_code'), ['decision_code'], unique=False)
+        batch_op.create_index('ix_approval_outbox_dispatch', ['status_code', 'next_retry_at'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_outbox_event_type'), ['event_type'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_outbox_instance_id'), ['instance_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_outbox_status_code'), ['status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_outbox_subject_id'), ['subject_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_outbox_subject_type'), ['subject_type'], unique=False)
+
+    op.create_table('approval_snapshot',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('instance_id', sa.BigInteger(), nullable=False),
+    sa.Column('before_snapshot_json', sa.JSON(), nullable=True),
+    sa.Column('after_snapshot_json', sa.JSON(), nullable=True),
+    sa.Column('diff_json', sa.JSON(), nullable=True),
+    sa.Column('summary_json', sa.JSON(), nullable=True),
+    sa.Column('submit_payload_json', sa.JSON(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['instance_id'], ['approval_instance.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('approval_snapshot', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_snapshot_instance_id'), ['instance_id'], unique=True)
+
+    op.create_table('approval_step_instance',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('instance_id', sa.BigInteger(), nullable=False),
+    sa.Column('step_key', sa.String(length=96), nullable=False),
+    sa.Column('step_order', sa.Integer(), nullable=False),
+    sa.Column('step_name', sa.String(length=128), nullable=False),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('candidate_user_id', sa.BigInteger(), nullable=True),
+    sa.Column('candidate_role_code', sa.String(length=96), nullable=True),
+    sa.Column('candidate_permission_code', sa.String(length=96), nullable=True),
+    sa.Column('actor_id', sa.BigInteger(), nullable=True),
+    sa.Column('comment', sa.Text(), nullable=True),
+    sa.Column('started_at', sa.DateTime(), nullable=True),
+    sa.Column('acted_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['instance_id'], ['approval_instance.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('instance_id', 'step_key', name='uk_approval_step_instance_key'),
+    sa.UniqueConstraint('instance_id', 'step_order', name='uk_approval_step_instance_order')
+    )
+    with op.batch_alter_table('approval_step_instance', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_step_instance_actor_id'), ['actor_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_step_instance_candidate_permission_code'), ['candidate_permission_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_step_instance_candidate_role_code'), ['candidate_role_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_step_instance_candidate_user_id'), ['candidate_user_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_step_instance_instance_id'), ['instance_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_step_instance_status_code'), ['status_code'], unique=False)
+
     op.create_table('commodity_standard',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('category_id', sa.BigInteger(), nullable=True),
@@ -1589,10 +1670,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['category_id'], ['commodity_category.id'], ),
     sa.ForeignKeyConstraint(['type_id'], ['commodity_type.id'], ),
     sa.PrimaryKeyConstraint('id'),
@@ -1774,6 +1851,40 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_fact_vessel_trajectory_daily_stat_date'), ['stat_date'], unique=False)
         batch_op.create_index(batch_op.f('ix_fact_vessel_trajectory_daily_vessel_profile_id'), ['vessel_profile_id'], unique=False)
 
+    op.create_table('navigation_channel_source_audit',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('channel_id', sa.BigInteger(), nullable=True),
+    sa.Column('segment_id', sa.BigInteger(), nullable=True),
+    sa.Column('channel_code', sa.String(length=64), nullable=True),
+    sa.Column('segment_code', sa.String(length=96), nullable=True),
+    sa.Column('source_name', sa.String(length=128), nullable=True),
+    sa.Column('source_layer_name', sa.String(length=256), nullable=True),
+    sa.Column('source_object_id', sa.String(length=64), nullable=True),
+    sa.Column('source_level', sa.SmallInteger(), nullable=True),
+    sa.Column('decision_code', sa.String(length=64), nullable=False),
+    sa.Column('role_code', sa.String(length=64), nullable=False),
+    sa.Column('reason_code', sa.String(length=128), nullable=True),
+    sa.Column('source_remark', sa.String(length=512), nullable=True),
+    sa.Column('review_required', sa.Boolean(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['channel_id'], ['navigation_channel.id'], ),
+    sa.ForeignKeyConstraint(['segment_id'], ['navigation_channel_segment.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('navigation_channel_source_audit', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_channel_code'), ['channel_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_channel_id'), ['channel_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_decision_code'), ['decision_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_reason_code'), ['reason_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_review_required'), ['review_required'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_role_code'), ['role_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_segment_code'), ['segment_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_segment_id'), ['segment_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_layer_name'), ['source_layer_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_level'), ['source_level'], unique=False)
+        batch_op.create_index(batch_op.f('ix_navigation_channel_source_audit_source_name'), ['source_name'], unique=False)
+
     op.create_table('node_alias',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('node_id', sa.BigInteger(), nullable=False),
@@ -1789,30 +1900,40 @@ def upgrade() -> None:
     with op.batch_alter_table('node_alias', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_node_alias_node_id'), ['node_id'], unique=False)
 
-    op.create_table('shipping_route_plan',
+    op.create_table('shipping_route',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('route_id', sa.BigInteger(), nullable=False),
-    sa.Column('plan_code', sa.String(length=32), nullable=False),
-    sa.Column('plan_name', sa.String(length=128), nullable=False),
-    sa.Column('plan_type_code', sa.String(length=64), nullable=False),
-    sa.Column('is_default', sa.Boolean(), nullable=False),
+    sa.Column('code', sa.String(length=32), nullable=False),
+    sa.Column('name', sa.String(length=128), nullable=False),
+    sa.Column('origin_endpoint_type_code', sa.String(length=32), nullable=False),
+    sa.Column('origin_region_id', sa.BigInteger(), nullable=True),
+    sa.Column('origin_city_code', sa.String(length=12), nullable=True),
+    sa.Column('origin_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('destination_endpoint_type_code', sa.String(length=32), nullable=False),
+    sa.Column('destination_region_id', sa.BigInteger(), nullable=True),
+    sa.Column('destination_city_code', sa.String(length=12), nullable=True),
+    sa.Column('destination_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('transport_org_type_code', sa.String(length=64), nullable=False),
+    sa.Column('multimodal_combination_code', sa.String(length=64), nullable=True),
     sa.Column('status_code', sa.String(length=32), nullable=False),
-    sa.Column('display_order', sa.Integer(), nullable=False),
-    sa.Column('current_track_version_id', sa.BigInteger(), nullable=True),
-    sa.Column('applicable_condition', sa.String(length=512), nullable=True),
-    sa.Column('remark', sa.String(length=512), nullable=True),
+    sa.Column('description', sa.String(length=512), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['route_id'], ['shipping_route.id'], ),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['destination_node_id'], ['transport_node.id'], ),
+    sa.ForeignKeyConstraint(['destination_region_id'], ['region.id'], ),
+    sa.ForeignKeyConstraint(['origin_node_id'], ['transport_node.id'], ),
+    sa.ForeignKeyConstraint(['origin_region_id'], ['region.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plan_code'),
-    sa.UniqueConstraint('route_id', 'display_order', name='uk_route_plan_display_order')
+    sa.UniqueConstraint('code')
     )
-    with op.batch_alter_table('shipping_route_plan', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_current_track_version_id'), ['current_track_version_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_is_default'), ['is_default'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_route_id'), ['route_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_status_code'), ['status_code'], unique=False)
+    with op.batch_alter_table('shipping_route', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_destination_city_code'), ['destination_city_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_destination_node_id'), ['destination_node_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_destination_region_id'), ['destination_region_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_origin_city_code'), ['origin_city_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_origin_node_id'), ['origin_node_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_origin_region_id'), ['origin_region_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_status_code'), ['status_code'], unique=False)
 
     op.create_table('sys_role_data_scope',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -2098,7 +2219,6 @@ def upgrade() -> None:
     sa.Column('effective_to', sa.Date(), nullable=True),
     sa.Column('status_code', sa.String(length=32), nullable=False),
     sa.Column('verified_status_code', sa.String(length=32), nullable=False),
-    sa.Column('audit_task_id', sa.BigInteger(), nullable=True),
     sa.Column('verified_at', sa.DateTime(), nullable=True),
     sa.Column('verified_by', sa.BigInteger(), nullable=True),
     sa.Column('revision', sa.Integer(), nullable=False),
@@ -2107,12 +2227,10 @@ def upgrade() -> None:
     sa.Column('void_reason', sa.String(length=500), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['audit_task_id'], ['audit_task.id'], ),
     sa.ForeignKeyConstraint(['vessel_profile_id'], ['vessel_profile.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('vessel_controller_evidence', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_vessel_controller_evidence_audit_task_id'), ['audit_task_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_controller_evidence_status_code'), ['status_code'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_controller_evidence_verified_status_code'), ['verified_status_code'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_controller_evidence_vessel_profile_id'), ['vessel_profile_id'], unique=False)
@@ -2624,6 +2742,28 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_vessel_risk_signal_vessel_profile_id'), ['vessel_profile_id'], unique=False)
         batch_op.create_index('uq_vessel_risk_signal_active_fingerprint', ['fingerprint'], unique=True, sqlite_where=sa.text("status_code IN ('OPEN', 'IN_REVIEW', 'EVIDENCE_ADDED')"), postgresql_where=sa.text("status_code IN ('OPEN', 'IN_REVIEW', 'EVIDENCE_ADDED')"))
 
+    op.create_table('approval_action_log',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('instance_id', sa.BigInteger(), nullable=False),
+    sa.Column('step_instance_id', sa.BigInteger(), nullable=True),
+    sa.Column('action_code', sa.String(length=64), nullable=False),
+    sa.Column('operator_id', sa.BigInteger(), nullable=True),
+    sa.Column('from_status_code', sa.String(length=32), nullable=True),
+    sa.Column('to_status_code', sa.String(length=32), nullable=True),
+    sa.Column('comment', sa.Text(), nullable=True),
+    sa.Column('request_id', sa.String(length=128), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['instance_id'], ['approval_instance.id'], ),
+    sa.ForeignKeyConstraint(['step_instance_id'], ['approval_step_instance.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('approval_action_log', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_approval_action_log_action_code'), ['action_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_action_log_instance_id'), ['instance_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_action_log_operator_id'), ['operator_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_action_log_request_id'), ['request_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_approval_action_log_step_instance_id'), ['step_instance_id'], unique=False)
+
     op.create_table('commodity_alias',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('commodity_standard_id', sa.BigInteger(), nullable=False),
@@ -2642,45 +2782,6 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('commodity_alias', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_commodity_alias_commodity_standard_id'), ['commodity_standard_id'], unique=False)
-
-    op.create_table('commodity_recognition_record',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('raw_name', sa.String(length=128), nullable=False),
-    sa.Column('normalized_name', sa.String(length=128), nullable=False),
-    sa.Column('context_note', sa.Text(), nullable=True),
-    sa.Column('category_hint_id', sa.BigInteger(), nullable=True),
-    sa.Column('type_hint_id', sa.BigInteger(), nullable=True),
-    sa.Column('request_payload_json', sa.JSON(), nullable=True),
-    sa.Column('deterministic_result_json', sa.JSON(), nullable=True),
-    sa.Column('ai_result_json', sa.JSON(), nullable=True),
-    sa.Column('suggestion_json', sa.JSON(), nullable=True),
-    sa.Column('status_code', sa.String(length=32), nullable=False),
-    sa.Column('ai_status_code', sa.String(length=32), nullable=False),
-    sa.Column('ai_error_message', sa.String(length=512), nullable=True),
-    sa.Column('adopted_action_code', sa.String(length=32), nullable=True),
-    sa.Column('adopted_standard_id', sa.BigInteger(), nullable=True),
-    sa.Column('adopted_alias_id', sa.BigInteger(), nullable=True),
-    sa.Column('adopted_by_id', sa.BigInteger(), nullable=True),
-    sa.Column('adopted_at', sa.DateTime(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['adopted_alias_id'], ['commodity_alias.id'], ),
-    sa.ForeignKeyConstraint(['adopted_by_id'], ['sys_user.id'], ),
-    sa.ForeignKeyConstraint(['adopted_standard_id'], ['commodity_standard.id'], ),
-    sa.ForeignKeyConstraint(['category_hint_id'], ['commodity_category.id'], ),
-    sa.ForeignKeyConstraint(['type_hint_id'], ['commodity_type.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    with op.batch_alter_table('commodity_recognition_record', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_action_code'), ['adopted_action_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_alias_id'), ['adopted_alias_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_by_id'), ['adopted_by_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_standard_id'), ['adopted_standard_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_category_hint_id'), ['category_hint_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_normalized_name'), ['normalized_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_raw_name'), ['raw_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_status_code'), ['status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_type_hint_id'), ['type_hint_id'], unique=False)
 
     op.create_table('commodity_handling_mode_rule',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -2918,10 +3019,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('audit_status', sa.String(), nullable=False),
-    sa.Column('submitter_id', sa.Integer(), nullable=True),
-    sa.Column('auditor_id', sa.Integer(), nullable=True),
-    sa.Column('audited_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['commodity_standard_id'], ['commodity_standard.id'], ),
     sa.ForeignKeyConstraint(['destination_node_id'], ['transport_node.id'], ),
     sa.ForeignKeyConstraint(['destination_region_id_cache'], ['region.id'], ),
@@ -2946,87 +3043,32 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_freight_source_ref_no'), ['source_ref_no'], unique=False)
         batch_op.create_index(batch_op.f('ix_freight_source_tms_inbound_id'), ['source_tms_inbound_id'], unique=False)
 
-    op.create_table('pricing_decision_record',
-    sa.Column('id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'), autoincrement=True, nullable=False),
-    sa.Column('record_no', sa.String(length=64), nullable=False),
-    sa.Column('record_type_code', sa.String(length=32), nullable=False),
-    sa.Column('status_code', sa.String(length=32), nullable=False),
-    sa.Column('freight_id', sa.BigInteger(), nullable=True),
-    sa.Column('origin_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('destination_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('commodity_standard_id', sa.BigInteger(), nullable=True),
-    sa.Column('expected_loading_time', sa.DateTime(), nullable=True),
-    sa.Column('tonnage', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('current_quote', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('owner_quote_min', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('owner_quote_max', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('recommended_quote', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('estimated_low_quote', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('estimated_high_quote', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('cost_floor', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('gross_profit', sa.Numeric(precision=18, scale=2), nullable=True),
-    sa.Column('gross_margin_rate', sa.Numeric(precision=8, scale=4), nullable=True),
-    sa.Column('sample_size', sa.Integer(), nullable=False),
-    sa.Column('coverage_rate', sa.Numeric(precision=5, scale=2), nullable=True),
-    sa.Column('confidence_level', sa.String(length=32), nullable=False),
-    sa.Column('fallback_level_code', sa.String(length=64), nullable=True),
-    sa.Column('context_json', sa.JSON(), nullable=True),
-    sa.Column('input_json', sa.JSON(), nullable=True),
-    sa.Column('advanced_config_json', sa.JSON(), nullable=True),
-    sa.Column('route_evidence_json', sa.JSON(), nullable=True),
-    sa.Column('sample_evidence_json', sa.JSON(), nullable=True),
-    sa.Column('result_json', sa.JSON(), nullable=True),
-    sa.Column('lineage_json', sa.JSON(), nullable=True),
-    sa.Column('not_computable_reasons_json', sa.JSON(), nullable=True),
-    sa.Column('recommended_actions_json', sa.JSON(), nullable=True),
-    sa.Column('created_by', sa.BigInteger(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['commodity_standard_id'], ['commodity_standard.id'], ),
-    sa.ForeignKeyConstraint(['destination_node_id'], ['transport_node.id'], ),
-    sa.ForeignKeyConstraint(['freight_id'], ['freight.id'], ),
-    sa.ForeignKeyConstraint(['origin_node_id'], ['transport_node.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('record_no')
-    )
-    with op.batch_alter_table('pricing_decision_record', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_commodity_standard_id'), ['commodity_standard_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_confidence_level'), ['confidence_level'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_created_by'), ['created_by'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_destination_node_id'), ['destination_node_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_expected_loading_time'), ['expected_loading_time'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_fallback_level_code'), ['fallback_level_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_freight_id'), ['freight_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_origin_node_id'), ['origin_node_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_record_no'), ['record_no'], unique=True)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_record_type_code'), ['record_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_pricing_decision_record_status_code'), ['status_code'], unique=False)
-
-    op.create_table('shipping_route_plan_point',
+    op.create_table('shipping_route_plan',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('plan_id', sa.BigInteger(), nullable=False),
-    sa.Column('point_order', sa.Integer(), nullable=False),
-    sa.Column('point_type_code', sa.String(length=64), nullable=False),
-    sa.Column('transport_node_id', sa.BigInteger(), nullable=True),
-    sa.Column('constraint_point_id', sa.BigInteger(), nullable=True),
-    sa.Column('manual_name', sa.String(length=128), nullable=True),
-    sa.Column('longitude', sa.Numeric(precision=11, scale=8), nullable=True),
-    sa.Column('latitude', sa.Numeric(precision=10, scale=8), nullable=True),
-    sa.Column('display_name', sa.String(length=128), nullable=False),
-    sa.Column('transport_mode_after_code', sa.String(length=64), nullable=True),
+    sa.Column('route_id', sa.BigInteger(), nullable=False),
+    sa.Column('plan_code', sa.String(length=32), nullable=False),
+    sa.Column('plan_name', sa.String(length=128), nullable=False),
+    sa.Column('plan_type_code', sa.String(length=64), nullable=False),
+    sa.Column('is_default', sa.Boolean(), nullable=False),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('display_order', sa.Integer(), nullable=False),
+    sa.Column('structure_revision', sa.Integer(), nullable=False),
+    sa.Column('current_track_version_id', sa.BigInteger(), nullable=True),
+    sa.Column('applicable_condition', sa.String(length=512), nullable=True),
     sa.Column('remark', sa.String(length=512), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['constraint_point_id'], ['navigation_constraint_point.id'], ),
-    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
-    sa.ForeignKeyConstraint(['transport_node_id'], ['transport_node.id'], ),
+    sa.ForeignKeyConstraint(['route_id'], ['shipping_route.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plan_id', 'point_order', name='uk_route_plan_point_order')
+    sa.UniqueConstraint('plan_code'),
+    sa.UniqueConstraint('route_id', 'display_order', name='uk_route_plan_display_order')
     )
-    with op.batch_alter_table('shipping_route_plan_point', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_point_constraint_point_id'), ['constraint_point_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_point_plan_id'), ['plan_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_point_transport_node_id'), ['transport_node_id'], unique=False)
+    with op.batch_alter_table('shipping_route_plan', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_current_track_version_id'), ['current_track_version_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_is_default'), ['is_default'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_route_id'), ['route_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_status_code'), ['status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_structure_revision'), ['structure_revision'], unique=False)
 
     op.create_table('vessel_affiliation_evidence',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -3045,7 +3087,6 @@ def upgrade() -> None:
     sa.Column('effective_to', sa.Date(), nullable=True),
     sa.Column('status_code', sa.String(length=32), nullable=False),
     sa.Column('verified_status_code', sa.String(length=32), nullable=False),
-    sa.Column('audit_task_id', sa.BigInteger(), nullable=True),
     sa.Column('verified_at', sa.DateTime(), nullable=True),
     sa.Column('verified_by', sa.BigInteger(), nullable=True),
     sa.Column('revision', sa.Integer(), nullable=False),
@@ -3054,14 +3095,12 @@ def upgrade() -> None:
     sa.Column('void_reason', sa.String(length=500), nullable=True),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['audit_task_id'], ['audit_task.id'], ),
     sa.ForeignKeyConstraint(['operator_period_id'], ['vessel_operator_period.id'], ),
     sa.ForeignKeyConstraint(['owner_period_id'], ['vessel_owner_period.id'], ),
     sa.ForeignKeyConstraint(['vessel_profile_id'], ['vessel_profile.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('vessel_affiliation_evidence', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_vessel_affiliation_evidence_audit_task_id'), ['audit_task_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_affiliation_evidence_operator_period_id'), ['operator_period_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_affiliation_evidence_owner_period_id'), ['owner_period_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_affiliation_evidence_status_code'), ['status_code'], unique=False)
@@ -3234,6 +3273,45 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_vessel_risk_review_reviewed_by'), ['reviewed_by'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_risk_review_risk_signal_id'), ['risk_signal_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_risk_review_vessel_profile_id'), ['vessel_profile_id'], unique=False)
+
+    op.create_table('commodity_recognition_record',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('raw_name', sa.String(length=128), nullable=False),
+    sa.Column('normalized_name', sa.String(length=128), nullable=False),
+    sa.Column('context_note', sa.Text(), nullable=True),
+    sa.Column('category_hint_id', sa.BigInteger(), nullable=True),
+    sa.Column('type_hint_id', sa.BigInteger(), nullable=True),
+    sa.Column('request_payload_json', sa.JSON(), nullable=True),
+    sa.Column('deterministic_result_json', sa.JSON(), nullable=True),
+    sa.Column('ai_result_json', sa.JSON(), nullable=True),
+    sa.Column('suggestion_json', sa.JSON(), nullable=True),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('ai_status_code', sa.String(length=32), nullable=False),
+    sa.Column('ai_error_message', sa.String(length=512), nullable=True),
+    sa.Column('adopted_action_code', sa.String(length=32), nullable=True),
+    sa.Column('adopted_standard_id', sa.BigInteger(), nullable=True),
+    sa.Column('adopted_alias_id', sa.BigInteger(), nullable=True),
+    sa.Column('adopted_by_id', sa.BigInteger(), nullable=True),
+    sa.Column('adopted_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['adopted_alias_id'], ['commodity_alias.id'], ),
+    sa.ForeignKeyConstraint(['adopted_by_id'], ['sys_user.id'], ),
+    sa.ForeignKeyConstraint(['adopted_standard_id'], ['commodity_standard.id'], ),
+    sa.ForeignKeyConstraint(['category_hint_id'], ['commodity_category.id'], ),
+    sa.ForeignKeyConstraint(['type_hint_id'], ['commodity_type.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('commodity_recognition_record', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_action_code'), ['adopted_action_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_alias_id'), ['adopted_alias_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_by_id'), ['adopted_by_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_adopted_standard_id'), ['adopted_standard_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_category_hint_id'), ['category_hint_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_normalized_name'), ['normalized_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_raw_name'), ['raw_name'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_status_code'), ['status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_commodity_recognition_record_type_hint_id'), ['type_hint_id'], unique=False)
 
     op.create_table('freight_candidate',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -3424,6 +3502,121 @@ def upgrade() -> None:
     with op.batch_alter_table('freight_tag_relation', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_freight_tag_relation_freight_id'), ['freight_id'], unique=False)
 
+    op.create_table('pricing_decision_record',
+    sa.Column('id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'), autoincrement=True, nullable=False),
+    sa.Column('record_no', sa.String(length=64), nullable=False),
+    sa.Column('record_type_code', sa.String(length=32), nullable=False),
+    sa.Column('status_code', sa.String(length=32), nullable=False),
+    sa.Column('freight_id', sa.BigInteger(), nullable=True),
+    sa.Column('origin_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('destination_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('commodity_standard_id', sa.BigInteger(), nullable=True),
+    sa.Column('expected_loading_time', sa.DateTime(), nullable=True),
+    sa.Column('tonnage', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('current_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('owner_quote_min', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('owner_quote_max', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('recommended_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('estimated_low_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('estimated_high_quote', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('cost_floor', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('gross_profit', sa.Numeric(precision=18, scale=2), nullable=True),
+    sa.Column('gross_margin_rate', sa.Numeric(precision=8, scale=4), nullable=True),
+    sa.Column('sample_size', sa.Integer(), nullable=False),
+    sa.Column('coverage_rate', sa.Numeric(precision=5, scale=2), nullable=True),
+    sa.Column('confidence_level', sa.String(length=32), nullable=False),
+    sa.Column('fallback_level_code', sa.String(length=64), nullable=True),
+    sa.Column('context_json', sa.JSON(), nullable=True),
+    sa.Column('input_json', sa.JSON(), nullable=True),
+    sa.Column('advanced_config_json', sa.JSON(), nullable=True),
+    sa.Column('route_evidence_json', sa.JSON(), nullable=True),
+    sa.Column('sample_evidence_json', sa.JSON(), nullable=True),
+    sa.Column('result_json', sa.JSON(), nullable=True),
+    sa.Column('lineage_json', sa.JSON(), nullable=True),
+    sa.Column('not_computable_reasons_json', sa.JSON(), nullable=True),
+    sa.Column('recommended_actions_json', sa.JSON(), nullable=True),
+    sa.Column('created_by', sa.BigInteger(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['commodity_standard_id'], ['commodity_standard.id'], ),
+    sa.ForeignKeyConstraint(['destination_node_id'], ['transport_node.id'], ),
+    sa.ForeignKeyConstraint(['freight_id'], ['freight.id'], ),
+    sa.ForeignKeyConstraint(['origin_node_id'], ['transport_node.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('pricing_decision_record', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_commodity_standard_id'), ['commodity_standard_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_confidence_level'), ['confidence_level'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_created_by'), ['created_by'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_destination_node_id'), ['destination_node_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_expected_loading_time'), ['expected_loading_time'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_fallback_level_code'), ['fallback_level_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_freight_id'), ['freight_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_origin_node_id'), ['origin_node_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_record_no'), ['record_no'], unique=True)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_record_type_code'), ['record_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_pricing_decision_record_status_code'), ['status_code'], unique=False)
+
+    op.create_table('shipping_route_plan_point',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('plan_id', sa.BigInteger(), nullable=False),
+    sa.Column('structure_revision', sa.Integer(), nullable=False),
+    sa.Column('point_order', sa.Integer(), nullable=False),
+    sa.Column('point_type_code', sa.String(length=64), nullable=False),
+    sa.Column('transport_node_id', sa.BigInteger(), nullable=True),
+    sa.Column('constraint_point_id', sa.BigInteger(), nullable=True),
+    sa.Column('manual_name', sa.String(length=128), nullable=True),
+    sa.Column('longitude', sa.Numeric(precision=11, scale=8), nullable=True),
+    sa.Column('latitude', sa.Numeric(precision=10, scale=8), nullable=True),
+    sa.Column('display_name', sa.String(length=128), nullable=False),
+    sa.Column('transport_mode_after_code', sa.String(length=64), nullable=True),
+    sa.Column('remark', sa.String(length=512), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['constraint_point_id'], ['navigation_constraint_point.id'], ),
+    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
+    sa.ForeignKeyConstraint(['transport_node_id'], ['transport_node.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('plan_id', 'structure_revision', 'point_order', name='uk_route_plan_point_order')
+    )
+    with op.batch_alter_table('shipping_route_plan_point', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_point_constraint_point_id'), ['constraint_point_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_point_plan_id'), ['plan_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_point_structure_revision'), ['structure_revision'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_point_transport_node_id'), ['transport_node_id'], unique=False)
+
+    op.create_table('shipping_route_plan_track_version',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('plan_id', sa.BigInteger(), nullable=False),
+    sa.Column('structure_revision', sa.Integer(), nullable=False),
+    sa.Column('version_no', sa.Integer(), nullable=False),
+    sa.Column('version_name', sa.String(length=128), nullable=True),
+    sa.Column('source_type_code', sa.String(length=64), nullable=False),
+    sa.Column('provider_type_code', sa.String(length=64), nullable=True),
+    sa.Column('parent_version_id', sa.BigInteger(), nullable=True),
+    sa.Column('is_current', sa.Boolean(), nullable=False),
+    sa.Column('version_status_code', sa.String(length=64), nullable=False),
+    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('point_count', sa.Integer(), nullable=False),
+    sa.Column('segment_count', sa.Integer(), nullable=False),
+    sa.Column('summary_json', sa.JSON(), nullable=True),
+    sa.Column('error_message', sa.String(length=512), nullable=True),
+    sa.Column('generated_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('plan_id', 'version_no', name='uk_route_plan_track_version_no')
+    )
+    with op.batch_alter_table('shipping_route_plan_track_version', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_is_current'), ['is_current'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_parent_version_id'), ['parent_version_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_plan_id'), ['plan_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_source_type_code'), ['source_type_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_structure_revision'), ['structure_revision'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_version_status_code'), ['version_status_code'], unique=False)
+
     op.create_table('vessel_certificate_image_recognition',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('vessel_profile_id', sa.BigInteger(), nullable=False),
@@ -3529,6 +3722,7 @@ def upgrade() -> None:
     op.create_table('shipping_route_plan_segment',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('plan_id', sa.BigInteger(), nullable=False),
+    sa.Column('structure_revision', sa.Integer(), nullable=False),
     sa.Column('segment_no', sa.Integer(), nullable=False),
     sa.Column('start_plan_point_id', sa.BigInteger(), nullable=False),
     sa.Column('end_plan_point_id', sa.BigInteger(), nullable=False),
@@ -3544,7 +3738,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
     sa.ForeignKeyConstraint(['start_plan_point_id'], ['shipping_route_plan_point.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plan_id', 'segment_no', name='uk_route_plan_segment_no')
+    sa.UniqueConstraint('plan_id', 'structure_revision', 'segment_no', name='uk_route_plan_segment_no')
     )
     with op.batch_alter_table('shipping_route_plan_segment', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_end_plan_point_id'), ['end_plan_point_id'], unique=False)
@@ -3552,83 +3746,7 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_plan_id'), ['plan_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_selected_result_id'), ['selected_result_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_start_plan_point_id'), ['start_plan_point_id'], unique=False)
-
-    op.create_table('shipping_route_plan_segment_result',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('segment_id', sa.BigInteger(), nullable=False),
-    sa.Column('result_no', sa.Integer(), nullable=False),
-    sa.Column('provider_type_code', sa.String(length=64), nullable=False),
-    sa.Column('provider_route_id', sa.String(length=128), nullable=True),
-    sa.Column('result_status_code', sa.String(length=64), nullable=False),
-    sa.Column('is_selected', sa.Boolean(), nullable=False),
-    sa.Column('geometry_json', sa.JSON(), nullable=True),
-    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('raw_summary_json', sa.JSON(), nullable=True),
-    sa.Column('error_message', sa.String(length=512), nullable=True),
-    sa.Column('generated_at', sa.DateTime(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['segment_id'], ['shipping_route_plan_segment.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('segment_id', 'result_no', name='uk_route_segment_result_no')
-    )
-    with op.batch_alter_table('shipping_route_plan_segment_result', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_result_is_selected'), ['is_selected'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_result_result_status_code'), ['result_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_result_segment_id'), ['segment_id'], unique=False)
-
-    op.create_table('shipping_route_plan_track_version',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('plan_id', sa.BigInteger(), nullable=False),
-    sa.Column('version_no', sa.Integer(), nullable=False),
-    sa.Column('version_name', sa.String(length=128), nullable=True),
-    sa.Column('source_type_code', sa.String(length=64), nullable=False),
-    sa.Column('provider_type_code', sa.String(length=64), nullable=True),
-    sa.Column('parent_version_id', sa.BigInteger(), nullable=True),
-    sa.Column('is_current', sa.Boolean(), nullable=False),
-    sa.Column('version_status_code', sa.String(length=64), nullable=False),
-    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('point_count', sa.Integer(), nullable=False),
-    sa.Column('segment_count', sa.Integer(), nullable=False),
-    sa.Column('summary_json', sa.JSON(), nullable=True),
-    sa.Column('error_message', sa.String(length=512), nullable=True),
-    sa.Column('generated_at', sa.DateTime(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['plan_id'], ['shipping_route_plan.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plan_id', 'version_no', name='uk_route_plan_track_version_no')
-    )
-    with op.batch_alter_table('shipping_route_plan_track_version', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_is_current'), ['is_current'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_parent_version_id'), ['parent_version_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_plan_id'), ['plan_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_source_type_code'), ['source_type_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_version_status_code'), ['version_status_code'], unique=False)
-
-    op.create_table('shipping_route_plan_track_version_segment',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('version_id', sa.BigInteger(), nullable=False),
-    sa.Column('segment_id', sa.BigInteger(), nullable=False),
-    sa.Column('segment_no', sa.Integer(), nullable=False),
-    sa.Column('geometry_json', sa.JSON(), nullable=False),
-    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('point_count', sa.Integer(), nullable=False),
-    sa.Column('edit_status_code', sa.String(length=64), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.ForeignKeyConstraint(['segment_id'], ['shipping_route_plan_segment.id'], ),
-    sa.ForeignKeyConstraint(['version_id'], ['shipping_route_plan_track_version.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('version_id', 'segment_id', name='uk_route_track_version_segment')
-    )
-    with op.batch_alter_table('shipping_route_plan_track_version_segment', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_segment_edit_status_code'), ['edit_status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_segment_segment_id'), ['segment_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_segment_version_id'), ['version_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_structure_revision'), ['structure_revision'], unique=False)
 
     op.create_table('vessel_candidate_analysis',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
@@ -3770,6 +3888,53 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_fact_vessel_route_segment_daily_source_spatial_snapshot_id'), ['source_spatial_snapshot_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_fact_vessel_route_segment_daily_stat_date'), ['stat_date'], unique=False)
 
+    op.create_table('shipping_route_plan_segment_result',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('segment_id', sa.BigInteger(), nullable=False),
+    sa.Column('result_no', sa.Integer(), nullable=False),
+    sa.Column('provider_type_code', sa.String(length=64), nullable=False),
+    sa.Column('provider_route_id', sa.String(length=128), nullable=True),
+    sa.Column('result_status_code', sa.String(length=64), nullable=False),
+    sa.Column('is_selected', sa.Boolean(), nullable=False),
+    sa.Column('geometry_json', sa.JSON(), nullable=True),
+    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('raw_summary_json', sa.JSON(), nullable=True),
+    sa.Column('error_message', sa.String(length=512), nullable=True),
+    sa.Column('generated_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['segment_id'], ['shipping_route_plan_segment.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('segment_id', 'result_no', name='uk_route_segment_result_no')
+    )
+    with op.batch_alter_table('shipping_route_plan_segment_result', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_result_is_selected'), ['is_selected'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_result_result_status_code'), ['result_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_segment_result_segment_id'), ['segment_id'], unique=False)
+
+    op.create_table('shipping_route_plan_track_version_segment',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('version_id', sa.BigInteger(), nullable=False),
+    sa.Column('segment_id', sa.BigInteger(), nullable=False),
+    sa.Column('segment_no', sa.Integer(), nullable=False),
+    sa.Column('geometry_json', sa.JSON(), nullable=False),
+    sa.Column('distance_km', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('estimated_duration_hour', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('point_count', sa.Integer(), nullable=False),
+    sa.Column('edit_status_code', sa.String(length=64), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['segment_id'], ['shipping_route_plan_segment.id'], ),
+    sa.ForeignKeyConstraint(['version_id'], ['shipping_route_plan_track_version.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('version_id', 'segment_id', name='uk_route_track_version_segment')
+    )
+    with op.batch_alter_table('shipping_route_plan_track_version_segment', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_segment_edit_status_code'), ['edit_status_code'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_segment_segment_id'), ['segment_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_shipping_route_plan_track_version_segment_version_id'), ['version_id'], unique=False)
+
     op.create_table('vessel_candidate_analysis_item',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('analysis_id', sa.BigInteger(), nullable=False),
@@ -3897,66 +4062,11 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_vessel_candidate_analysis_annotation_created_by'), ['created_by'], unique=False)
         batch_op.create_index(batch_op.f('ix_vessel_candidate_analysis_annotation_item_id'), ['item_id'], unique=False)
 
-    op.create_table('async_task_run',
-    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
-    sa.Column('task_name', sa.String(length=128), nullable=False),
-    sa.Column('task_title', sa.String(length=128), nullable=False),
-    sa.Column('celery_task_id', sa.String(length=128), nullable=True),
-    sa.Column('queue_name', sa.String(length=64), nullable=False),
-    sa.Column('business_type', sa.String(length=64), nullable=False),
-    sa.Column('business_id', sa.BigInteger(), nullable=True),
-    sa.Column('business_no', sa.String(length=128), nullable=True),
-    sa.Column('idempotency_key', sa.String(length=256), nullable=True),
-    sa.Column('status_code', sa.String(length=64), nullable=False),
-    sa.Column('stage_code', sa.String(length=64), nullable=True),
-    sa.Column('stage_name', sa.String(length=128), nullable=True),
-    sa.Column('stage_message', sa.Text(), nullable=True),
-    sa.Column('progress_percent', sa.Integer(), nullable=False),
-    sa.Column('attempt', sa.Integer(), nullable=False),
-    sa.Column('max_retries', sa.Integer(), nullable=False),
-    sa.Column('requested_by', sa.BigInteger(), nullable=True),
-    sa.Column('triggered_by', sa.String(length=64), nullable=True),
-    sa.Column('queued_at', sa.DateTime(), nullable=True),
-    sa.Column('started_at', sa.DateTime(), nullable=True),
-    sa.Column('finished_at', sa.DateTime(), nullable=True),
-    sa.Column('heartbeat_at', sa.DateTime(), nullable=True),
-    sa.Column('error_message', sa.Text(), nullable=True),
-    sa.Column('result_json', sa.JSON(), nullable=True),
-    sa.Column('extra_json', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.PrimaryKeyConstraint('id')
-    )
-    with op.batch_alter_table('async_task_run', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_async_task_run_business_id'), ['business_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_business_no'), ['business_no'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_business_type'), ['business_type'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_celery_task_id'), ['celery_task_id'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_heartbeat_at'), ['heartbeat_at'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_idempotency_key'), ['idempotency_key'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_queue_name'), ['queue_name'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_requested_by'), ['requested_by'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_status_code'), ['status_code'], unique=False)
-        batch_op.create_index(batch_op.f('ix_async_task_run_task_name'), ['task_name'], unique=False)
-
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
-    with op.batch_alter_table('async_task_run', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_async_task_run_task_name'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_status_code'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_requested_by'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_queue_name'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_idempotency_key'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_heartbeat_at'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_celery_task_id'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_business_type'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_business_no'))
-        batch_op.drop_index(batch_op.f('ix_async_task_run_business_id'))
-
-    op.drop_table('async_task_run')
     with op.batch_alter_table('vessel_candidate_analysis_annotation', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_vessel_candidate_analysis_annotation_item_id'))
         batch_op.drop_index(batch_op.f('ix_vessel_candidate_analysis_annotation_created_by'))
@@ -3993,6 +4103,18 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_vessel_candidate_analysis_item_ais_freshness_level'))
 
     op.drop_table('vessel_candidate_analysis_item')
+    with op.batch_alter_table('shipping_route_plan_track_version_segment', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_segment_version_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_segment_segment_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_segment_edit_status_code'))
+
+    op.drop_table('shipping_route_plan_track_version_segment')
+    with op.batch_alter_table('shipping_route_plan_segment_result', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_result_segment_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_result_result_status_code'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_result_is_selected'))
+
+    op.drop_table('shipping_route_plan_segment_result')
     with op.batch_alter_table('fact_vessel_route_segment_daily', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_fact_vessel_route_segment_daily_stat_date'))
         batch_op.drop_index(batch_op.f('ix_fact_vessel_route_segment_daily_source_spatial_snapshot_id'))
@@ -4035,27 +4157,8 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_vessel_candidate_analysis_confidence_level'))
 
     op.drop_table('vessel_candidate_analysis')
-    with op.batch_alter_table('shipping_route_plan_track_version_segment', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_segment_version_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_segment_segment_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_segment_edit_status_code'))
-
-    op.drop_table('shipping_route_plan_track_version_segment')
-    with op.batch_alter_table('shipping_route_plan_track_version', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_version_status_code'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_source_type_code'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_plan_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_parent_version_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_is_current'))
-
-    op.drop_table('shipping_route_plan_track_version')
-    with op.batch_alter_table('shipping_route_plan_segment_result', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_result_segment_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_result_result_status_code'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_result_is_selected'))
-
-    op.drop_table('shipping_route_plan_segment_result')
     with op.batch_alter_table('shipping_route_plan_segment', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_structure_revision'))
         batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_start_plan_point_id'))
         batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_selected_result_id'))
         batch_op.drop_index(batch_op.f('ix_shipping_route_plan_segment_plan_id'))
@@ -4087,6 +4190,36 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_vessel_certificate_image_recognition_certificate_file_id'))
 
     op.drop_table('vessel_certificate_image_recognition')
+    with op.batch_alter_table('shipping_route_plan_track_version', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_version_status_code'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_structure_revision'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_source_type_code'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_plan_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_parent_version_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_track_version_is_current'))
+
+    op.drop_table('shipping_route_plan_track_version')
+    with op.batch_alter_table('shipping_route_plan_point', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_point_transport_node_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_point_structure_revision'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_point_plan_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_point_constraint_point_id'))
+
+    op.drop_table('shipping_route_plan_point')
+    with op.batch_alter_table('pricing_decision_record', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_status_code'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_record_type_code'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_record_no'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_origin_node_id'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_freight_id'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_fallback_level_code'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_expected_loading_time'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_destination_node_id'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_created_by'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_confidence_level'))
+        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_commodity_standard_id'))
+
+    op.drop_table('pricing_decision_record')
     with op.batch_alter_table('freight_tag_relation', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_tag_relation_freight_id'))
 
@@ -4129,6 +4262,18 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_freight_candidate_ai_review_status_code'))
 
     op.drop_table('freight_candidate')
+    with op.batch_alter_table('commodity_recognition_record', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_type_hint_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_status_code'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_raw_name'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_normalized_name'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_category_hint_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_standard_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_by_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_alias_id'))
+        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_action_code'))
+
+    op.drop_table('commodity_recognition_record')
     with op.batch_alter_table('vessel_risk_review', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_vessel_risk_review_vessel_profile_id'))
         batch_op.drop_index(batch_op.f('ix_vessel_risk_review_risk_signal_id'))
@@ -4172,29 +4317,16 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_vessel_affiliation_evidence_status_code'))
         batch_op.drop_index(batch_op.f('ix_vessel_affiliation_evidence_owner_period_id'))
         batch_op.drop_index(batch_op.f('ix_vessel_affiliation_evidence_operator_period_id'))
-        batch_op.drop_index(batch_op.f('ix_vessel_affiliation_evidence_audit_task_id'))
 
     op.drop_table('vessel_affiliation_evidence')
-    with op.batch_alter_table('shipping_route_plan_point', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_point_transport_node_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_point_plan_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_point_constraint_point_id'))
+    with op.batch_alter_table('shipping_route_plan', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_structure_revision'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_status_code'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_route_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_is_default'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_current_track_version_id'))
 
-    op.drop_table('shipping_route_plan_point')
-    with op.batch_alter_table('pricing_decision_record', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_status_code'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_record_type_code'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_record_no'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_origin_node_id'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_freight_id'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_fallback_level_code'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_expected_loading_time'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_destination_node_id'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_created_by'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_confidence_level'))
-        batch_op.drop_index(batch_op.f('ix_pricing_decision_record_commodity_standard_id'))
-
-    op.drop_table('pricing_decision_record')
+    op.drop_table('shipping_route_plan')
     with op.batch_alter_table('freight', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_source_tms_inbound_id'))
         batch_op.drop_index(batch_op.f('ix_freight_source_ref_no'))
@@ -4263,19 +4395,15 @@ def downgrade() -> None:
     with op.batch_alter_table('commodity_alias', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_commodity_alias_commodity_standard_id'))
 
-    with op.batch_alter_table('commodity_recognition_record', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_type_hint_id'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_status_code'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_raw_name'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_normalized_name'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_category_hint_id'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_standard_id'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_by_id'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_alias_id'))
-        batch_op.drop_index(batch_op.f('ix_commodity_recognition_record_adopted_action_code'))
-
-    op.drop_table('commodity_recognition_record')
     op.drop_table('commodity_alias')
+    with op.batch_alter_table('approval_action_log', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_action_log_step_instance_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_action_log_request_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_action_log_operator_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_action_log_instance_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_action_log_action_code'))
+
+    op.drop_table('approval_action_log')
     with op.batch_alter_table('vessel_risk_signal', schema=None) as batch_op:
         batch_op.drop_index('uq_vessel_risk_signal_active_fingerprint', sqlite_where=sa.text("status_code IN ('OPEN', 'IN_REVIEW', 'EVIDENCE_ADDED')"), postgresql_where=sa.text("status_code IN ('OPEN', 'IN_REVIEW', 'EVIDENCE_ADDED')"))
         batch_op.drop_index(batch_op.f('ix_vessel_risk_signal_vessel_profile_id'))
@@ -4406,7 +4534,6 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_vessel_controller_evidence_vessel_profile_id'))
         batch_op.drop_index(batch_op.f('ix_vessel_controller_evidence_verified_status_code'))
         batch_op.drop_index(batch_op.f('ix_vessel_controller_evidence_status_code'))
-        batch_op.drop_index(batch_op.f('ix_vessel_controller_evidence_audit_task_id'))
 
     op.drop_table('vessel_controller_evidence')
     with op.batch_alter_table('vessel_controller_conclusion', schema=None) as batch_op:
@@ -4469,17 +4596,34 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_sys_role_data_scope_data_scope_id'))
 
     op.drop_table('sys_role_data_scope')
-    with op.batch_alter_table('shipping_route_plan', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_status_code'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_route_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_is_default'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_plan_current_track_version_id'))
+    with op.batch_alter_table('shipping_route', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_shipping_route_status_code'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_origin_region_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_origin_node_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_origin_city_code'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_destination_region_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_destination_node_id'))
+        batch_op.drop_index(batch_op.f('ix_shipping_route_destination_city_code'))
 
-    op.drop_table('shipping_route_plan')
+    op.drop_table('shipping_route')
     with op.batch_alter_table('node_alias', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_node_alias_node_id'))
 
     op.drop_table('node_alias')
+    with op.batch_alter_table('navigation_channel_source_audit', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_level'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_layer_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_segment_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_segment_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_role_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_review_required'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_reason_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_decision_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_channel_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_channel_code'))
+
+    op.drop_table('navigation_channel_source_audit')
     with op.batch_alter_table('fact_vessel_trajectory_daily', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_fact_vessel_trajectory_daily_vessel_profile_id'))
         batch_op.drop_index(batch_op.f('ix_fact_vessel_trajectory_daily_stat_date'))
@@ -4534,6 +4678,29 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_commodity_standard_category_id'))
 
     op.drop_table('commodity_standard')
+    with op.batch_alter_table('approval_step_instance', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_step_instance_status_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_step_instance_instance_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_step_instance_candidate_user_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_step_instance_candidate_role_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_step_instance_candidate_permission_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_step_instance_actor_id'))
+
+    op.drop_table('approval_step_instance')
+    with op.batch_alter_table('approval_snapshot', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_snapshot_instance_id'))
+
+    op.drop_table('approval_snapshot')
+    with op.batch_alter_table('approval_outbox', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_outbox_subject_type'))
+        batch_op.drop_index(batch_op.f('ix_approval_outbox_subject_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_outbox_status_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_outbox_instance_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_outbox_event_type'))
+        batch_op.drop_index('ix_approval_outbox_dispatch')
+        batch_op.drop_index(batch_op.f('ix_approval_outbox_decision_code'))
+
+    op.drop_table('approval_outbox')
     with op.batch_alter_table('vessel_spatial_observation_snapshot', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_vessel_spatial_observation_snapshot_status_code'))
         batch_op.drop_index(batch_op.f('ix_vessel_spatial_observation_snapshot_stat_time'))
@@ -4591,16 +4758,6 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_std_dict_item_dict_id'))
 
     op.drop_table('std_dict_item')
-    with op.batch_alter_table('shipping_route', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_shipping_route_status_code'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_origin_region_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_origin_node_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_origin_city_code'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_destination_region_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_destination_node_id'))
-        batch_op.drop_index(batch_op.f('ix_shipping_route_destination_city_code'))
-
-    op.drop_table('shipping_route')
     with op.batch_alter_table('region_city_relation', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_region_city_relation_region_id'))
         batch_op.drop_index(batch_op.f('ix_region_city_relation_city_region_id'))
@@ -4614,6 +4771,27 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_navigation_constraint_profile_constraint_point_id'))
 
     op.drop_table('navigation_constraint_profile')
+    with op.batch_alter_table('navigation_channel_segment', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_kind_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_review_required'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_repair_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_geometry_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_connectivity_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_channel_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_boundary_quality_code'))
+
+    op.drop_table('navigation_channel_segment')
+    with op.batch_alter_table('navigation_channel_boundary', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_repair_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_is_current'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_geometry_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_connectivity_status_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_channel_id'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_boundary_quality_code'))
+
+    op.drop_table('navigation_channel_boundary')
     with op.batch_alter_table('freight_clue', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_clue_status_code'))
         batch_op.drop_index(batch_op.f('ix_freight_clue_source_type_code'))
@@ -4716,14 +4894,24 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_commodity_type_category_id'))
 
     op.drop_table('commodity_type')
-    with op.batch_alter_table('audit_task_snapshot', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_audit_task_snapshot_task_id'))
+    with op.batch_alter_table('approval_step_definition', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_step_definition_flow_id'))
 
-    op.drop_table('audit_task_snapshot')
-    with op.batch_alter_table('audit_record', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_audit_record_task_id'))
+    op.drop_table('approval_step_definition')
+    with op.batch_alter_table('approval_instance', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_instance_trigger_action_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_submitter_id'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_subject_type'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_subject_ref'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_subject_id'))
+        batch_op.drop_index('ix_approval_instance_subject')
+        batch_op.drop_index(batch_op.f('ix_approval_instance_status_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_instance_no'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_idempotency_key'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_flow_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_instance_current_step_instance_id'))
 
-    op.drop_table('audit_record')
+    op.drop_table('approval_instance')
     with op.batch_alter_table('analysis_snapshot', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_analysis_snapshot_module_code'))
         batch_op.drop_index(batch_op.f('ix_analysis_snapshot_generated_by_job_id'))
@@ -4769,7 +4957,33 @@ def downgrade() -> None:
     op.drop_table('storage_file')
     op.drop_table('std_dict')
     op.drop_table('region')
+    with op.batch_alter_table('operation_log', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_operation_log_subject_type'))
+        batch_op.drop_index(batch_op.f('ix_operation_log_subject_ref'))
+        batch_op.drop_index(batch_op.f('ix_operation_log_subject_id'))
+        batch_op.drop_index(batch_op.f('ix_operation_log_request_id'))
+        batch_op.drop_index(batch_op.f('ix_operation_log_operator_id'))
+        batch_op.drop_index(batch_op.f('ix_operation_log_operation_code'))
+        batch_op.drop_index(batch_op.f('ix_operation_log_module_code'))
+
+    op.drop_table('operation_log')
     op.drop_table('navigation_constraint_point')
+    with op.batch_alter_table('navigation_channel', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_technical_grade_planned_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_technical_grade_current_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_version'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_review_required'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_planning_level_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_planning_basis_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_parent_channel_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_official_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_is_enabled'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_type_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_name'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_code'))
+        batch_op.drop_index(batch_op.f('ix_navigation_channel_ais_scope_code'))
+
+    op.drop_table('navigation_channel')
     with op.batch_alter_table('freight_tms_inbound', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_freight_tms_inbound_status_code'))
         batch_op.drop_index(batch_op.f('ix_freight_tms_inbound_source_trace_id'))
@@ -4803,14 +5017,34 @@ def downgrade() -> None:
     op.drop_table('commodity_category')
     op.drop_table('commodity_attribute_definition')
     op.drop_table('code_sequence')
-    with op.batch_alter_table('audit_task', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_audit_task_source_module_code'))
-        batch_op.drop_index(batch_op.f('ix_audit_task_object_type_code'))
-        batch_op.drop_index(batch_op.f('ix_audit_task_object_code'))
-        batch_op.drop_index(batch_op.f('ix_audit_task_change_type_code'))
-        batch_op.drop_index(batch_op.f('ix_audit_task_biz_id'))
+    with op.batch_alter_table('async_task_run', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_async_task_run_task_name'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_status_code'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_requested_by'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_queue_name'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_idempotency_key'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_heartbeat_at'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_celery_task_id'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_business_type'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_business_no'))
+        batch_op.drop_index(batch_op.f('ix_async_task_run_business_id'))
 
-    op.drop_table('audit_task')
+    op.drop_table('async_task_run')
+    with op.batch_alter_table('approval_subject_definition', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_subject_definition_subject_type'))
+        batch_op.drop_index(batch_op.f('ix_approval_subject_definition_status_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_subject_definition_module_code'))
+
+    op.drop_table('approval_subject_definition')
+    with op.batch_alter_table('approval_flow_definition', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_approval_flow_definition_trigger_action_code'))
+        batch_op.drop_index('ix_approval_flow_definition_trigger')
+        batch_op.drop_index(batch_op.f('ix_approval_flow_definition_subject_type'))
+        batch_op.drop_index(batch_op.f('ix_approval_flow_definition_status_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_flow_definition_flow_code'))
+        batch_op.drop_index(batch_op.f('ix_approval_flow_definition_engine_type'))
+
+    op.drop_table('approval_flow_definition')
     with op.batch_alter_table('analysis_job_run', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_analysis_job_run_status_code'))
         batch_op.drop_index(batch_op.f('ix_analysis_job_run_stat_date_to'))
@@ -4836,53 +5070,6 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_analysis_bucket_definition_bucket_code'))
 
     op.drop_table('analysis_bucket_definition')
-    with op.batch_alter_table('navigation_channel_source_audit', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_name'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_level'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_source_layer_name'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_segment_id'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_segment_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_role_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_review_required'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_reason_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_decision_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_channel_id'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_audit_channel_code'))
-    op.drop_table('navigation_channel_source_audit')
-    with op.batch_alter_table('navigation_channel_segment', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_name'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_kind_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_segment_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_review_required'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_repair_status_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_geometry_status_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_connectivity_status_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_channel_id'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_segment_boundary_quality_code'))
-    op.drop_table('navigation_channel_segment')
-    with op.batch_alter_table('navigation_channel_boundary', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_repair_status_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_is_current'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_geometry_status_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_connectivity_status_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_channel_id'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_boundary_boundary_quality_code'))
-    op.drop_table('navigation_channel_boundary')
-    with op.batch_alter_table('navigation_channel', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_technical_grade_planned_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_technical_grade_current_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_source_version'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_review_required'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_planning_level_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_planning_basis_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_parent_channel_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_official_name'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_is_enabled'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_type_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_name'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_channel_code'))
-        batch_op.drop_index(batch_op.f('ix_navigation_channel_ais_scope_code'))
-    op.drop_table('navigation_channel')
     with op.batch_alter_table('admin_region', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_admin_region_parent_code'))
 

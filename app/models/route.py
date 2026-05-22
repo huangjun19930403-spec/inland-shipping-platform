@@ -5,10 +5,10 @@ from datetime import datetime
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import AuditFlowMixin, Base, SoftDeleteMixin, TimestampMixin
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 
 
-class ShippingRoute(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
+class ShippingRoute(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "shipping_route"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

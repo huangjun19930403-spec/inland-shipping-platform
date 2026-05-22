@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.freight.service import _is_packaging_only_commodity_text
+from app.modules.freight.master_data_matcher import _is_packaging_only_commodity_text
 from scripts.seeds.curation.commodity_seed import (
     EXCLUDED_TMS_COMMODITY_NAMES,
     build_commodity_term_index,

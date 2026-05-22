@@ -357,7 +357,7 @@ class VesselControllerEvidenceResponse(BaseModel):
     status_code: str
     verified_status_code: str = "DRAFT"
     verified_status_name: str | None = None
-    audit_task_id: int | None = None
+    approval_instance_id: int | None = None
     verified_at: datetime | None = None
     verified_by: int | None = None
     revision: int
@@ -417,7 +417,7 @@ class VesselAffiliationEvidenceResponse(BaseModel):
     status_code: str
     verified_status_code: str = "DRAFT"
     verified_status_name: str | None = None
-    audit_task_id: int | None = None
+    approval_instance_id: int | None = None
     verified_at: datetime | None = None
     verified_by: int | None = None
     revision: int

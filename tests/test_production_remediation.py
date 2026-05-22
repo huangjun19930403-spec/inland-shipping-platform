@@ -26,7 +26,7 @@ from app.models.route import (
 )
 from app.modules.address.schemas import TransportNodeCreateRequest
 from app.modules.address.service import TransportNodeService
-from app.modules.freight.service import FreightService
+from app.modules.freight.freight_profile_service import FreightService
 from app.modules.route.schemas import RouteCreateRequest, RouteListQuery
 from app.modules.route.service import ShippingRouteService
 

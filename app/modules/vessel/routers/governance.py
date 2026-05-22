@@ -143,7 +143,7 @@ from app.modules.vessel.schemas import (
     VesselRiskReviewResponse,
     VesselSpatialSnapshotResponse,
 )
-from app.modules.vessel.services.governance_task_service import VesselGovernanceTaskService
+from app.modules.vessel.governance_service import VesselGovernanceService
 
 router = APIRouter()
 
@@ -161,7 +161,7 @@ async def list_vessel_blacklist_signal_queue(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselGovernanceTaskService(db).list_blacklist_signal_queue(query)
+    return await VesselGovernanceService(db).list_blacklist_signal_queue(query)
 
 
 @router.get("/governance/dashboard", response_model=VesselGovernanceDashboardResponse)
@@ -170,7 +170,7 @@ async def get_vessel_governance_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselGovernanceTaskService(db).dashboard()
+    return await VesselGovernanceService(db).dashboard()
 
 
 @router.get("/governance/tasks", response_model=PageResponse[VesselGovernanceTaskResponse])
@@ -180,7 +180,7 @@ async def list_vessel_governance_tasks(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselGovernanceTaskService(db).list_tasks(query)
+    return await VesselGovernanceService(db).list_tasks(query)
 
 
 @router.post("/governance/tasks/sync", response_model=VesselGovernanceTaskSyncResponse)
@@ -188,7 +188,7 @@ async def sync_vessel_governance_tasks(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselGovernanceTaskService(db).sync_tasks_command(operator_id=_operator_id(current_user))
+    return await VesselGovernanceService(db).sync_tasks_command(operator_id=_operator_id(current_user))
 
 
 @router.get("/governance/sync-batches/{batch_id}", response_model=VesselGovernanceSyncBatchResponse)
@@ -198,7 +198,7 @@ async def get_vessel_governance_sync_batch(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselGovernanceTaskService(db).get_sync_batch(batch_id)
+    return await VesselGovernanceService(db).get_sync_batch(batch_id)
 
 
 @router.get("/governance/rules", response_model=list[VesselGovernanceRuleResponse])
@@ -207,7 +207,7 @@ async def list_vessel_governance_rules(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselGovernanceTaskService(db).list_rule_catalog()
+    return await VesselGovernanceService(db).list_rule_catalog()
 
 
 @router.patch("/governance/tasks/{task_id}", response_model=VesselGovernanceTaskResponse)
@@ -217,7 +217,7 @@ async def update_vessel_governance_task(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselGovernanceTaskService(db).update_task(
+    return await VesselGovernanceService(db).update_task(
         task_id,
         body,
         operator_id=_operator_id(current_user),
@@ -231,7 +231,7 @@ async def list_vessel_blacklist_signals(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return await VesselGovernanceTaskService(db).list_blacklist_signals(vessel_id)
+    return await VesselGovernanceService(db).list_blacklist_signals(vessel_id)
 
 
 @router.post("/{vessel_id}/blacklist-signals", response_model=VesselBlacklistSignalResponse)
@@ -241,7 +241,7 @@ async def create_vessel_blacklist_signal(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselGovernanceTaskService(db).create_blacklist_signal(
+    return await VesselGovernanceService(db).create_blacklist_signal(
         vessel_id,
         body,
         operator_id=_operator_id(current_user),
@@ -256,7 +256,7 @@ async def update_vessel_blacklist_signal(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselGovernanceTaskService(db).update_blacklist_signal(
+    return await VesselGovernanceService(db).update_blacklist_signal(
         vessel_id,
         signal_id,
         body,
@@ -272,7 +272,7 @@ async def void_vessel_blacklist_signal(
     current_user: SysUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await VesselGovernanceTaskService(db).void_blacklist_signal(
+    return await VesselGovernanceService(db).void_blacklist_signal(
         vessel_id,
         signal_id,
         body,

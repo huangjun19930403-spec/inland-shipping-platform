@@ -15,10 +15,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import AuditFlowMixin, Base, SoftDeleteMixin, TimestampMixin
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 
 
-class CommodityCategory(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
+class CommodityCategory(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "commodity_category"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -28,7 +28,7 @@ class CommodityCategory(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-class CommodityType(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
+class CommodityType(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "commodity_type"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -41,7 +41,7 @@ class CommodityType(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-class CommodityStandard(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
+class CommodityStandard(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "commodity_standard"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

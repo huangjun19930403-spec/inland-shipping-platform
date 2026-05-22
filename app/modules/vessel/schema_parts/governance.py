@@ -162,11 +162,11 @@ class VesselGovernanceTaskResponse(VesselGovernanceContextMixin):
     recommended_actions: list[VesselRecommendedAction] = Field(default_factory=list)
     verification_status_code: str = "NOT_VERIFIED"
     verification_message: str | None = None
-    audit_task_id: int | None = None
-    audit_task_no: str | None = None
-    audit_status_code: str | None = None
-    audit_status_name: str | None = None
-    audit_action_path: str | None = None
+    approval_instance_id: int | None = None
+    approval_instance_no: str | None = None
+    approval_status_code: str | None = None
+    approval_status_name: str | None = None
+    approval_action_path: str | None = None
     business_sync_status_code: str | None = None
     business_sync_message: str | None = None
     sla_due_at: datetime | None = None

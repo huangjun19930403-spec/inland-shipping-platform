@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from app.modules.tasks.schemas import AsyncTaskRunResponse, PageResponse, TaskRe
 
 TERMINAL_STATUSES = {"SUCCESS", "PARTIAL_SUCCESS", "FAILED", "STALE", "CANCELED"}
 RETRYABLE_STATUSES = {"FAILED", "STALE"}
+DEFAULT_TASK_STALE_SECONDS = 1800
 
 
 def _status_name(status_code: str | None) -> str:
@@ -31,6 +32,10 @@ def _status_name(status_code: str | None) -> str:
         "STALE": "心跳过期",
         "CANCELED": "已取消",
     }.get(status_code or "", status_code or "")
+
+
+def _task_heartbeat_at(row: AsyncTaskRun) -> datetime | None:
+    return row.heartbeat_at or row.updated_at or row.queued_at or row.created_at
 
 
 class AsyncTaskRunService:
@@ -53,12 +58,16 @@ class AsyncTaskRunService:
         triggered_by: str | None = "manual",
         max_retries: int = 1,
         extra_json: dict | None = None,
+        stale_seconds: int = DEFAULT_TASK_STALE_SECONDS,
     ) -> AsyncTaskRun:
         now = datetime.utcnow()
         if idempotency_key:
             active = await self.repo.get_active_by_idempotency_key(idempotency_key)
             if active is not None:
-                return active
+                if await self.mark_stale_if_expired(active, stale_seconds=stale_seconds):
+                    active = None
+                else:
+                    return active
         return await self.repo.create(
             {
                 "task_name": task_name,
@@ -82,6 +91,65 @@ class AsyncTaskRunService:
                 "extra_json": extra_json,
             }
         )
+
+    async def mark_stale_if_expired(self, row: AsyncTaskRun, *, stale_seconds: int = DEFAULT_TASK_STALE_SECONDS) -> bool:
+        if row.status_code not in ACTIVE_STATUSES:
+            return False
+        heartbeat_at = _task_heartbeat_at(row)
+        if heartbeat_at is None:
+            return False
+        stale_seconds = max(30, stale_seconds)
+        cutoff = datetime.utcnow() - timedelta(seconds=stale_seconds)
+        if heartbeat_at >= cutoff:
+            return False
+        await self.repo.update(
+            row.id,
+            {
+                "status_code": "STALE",
+                "stage_code": "STALE",
+                "stage_name": "心跳过期",
+                "stage_message": f"任务超过 {stale_seconds} 秒未更新心跳，已标记为可重新提交",
+                "finished_at": datetime.utcnow(),
+                "error_message": f"任务超过 {stale_seconds} 秒未更新心跳",
+                "progress_percent": 100,
+            },
+        )
+        await self.db.commit()
+        return True
+
+    async def get_latest_by_idempotency_key(
+        self,
+        idempotency_key: str,
+        *,
+        stale_seconds: int = DEFAULT_TASK_STALE_SECONDS,
+        recover_stale: bool = True,
+    ) -> AsyncTaskRunResponse | None:
+        row = await self.repo.get_latest_by_idempotency_key(idempotency_key)
+        if row is None:
+            return None
+        if recover_stale and await self.mark_stale_if_expired(row, stale_seconds=stale_seconds):
+            fresh = await self.repo.get_by_id(row.id)
+            row = fresh or row
+        return self._from_async_task(row)
+
+    async def get_latest_by_idempotency_key_prefix(
+        self,
+        idempotency_key_prefix: str,
+        *,
+        status_codes: set[str] | None = None,
+        stale_seconds: int = DEFAULT_TASK_STALE_SECONDS,
+        recover_stale: bool = True,
+    ) -> AsyncTaskRunResponse | None:
+        row = await self.repo.get_latest_by_idempotency_key_prefix(
+            idempotency_key_prefix,
+            status_codes=status_codes,
+        )
+        if row is None:
+            return None
+        if recover_stale and await self.mark_stale_if_expired(row, stale_seconds=stale_seconds):
+            fresh = await self.repo.get_by_id(row.id)
+            row = fresh or row
+        return self._from_async_task(row)
 
     async def bind_celery_task_id(self, task_run_id: int | None, celery_task_id: str | None) -> None:
         if task_run_id is None or not celery_task_id:

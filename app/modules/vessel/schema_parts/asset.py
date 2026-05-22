@@ -166,8 +166,6 @@ class VesselProfileResponse(BaseModel):
     business_region_name: str | None = None
     source_type_code: str
     source_type_name: str | None = None
-    audit_status: str
-    audit_status_name: str | None = None
     remark: str | None
     created_at: datetime
     updated_at: datetime

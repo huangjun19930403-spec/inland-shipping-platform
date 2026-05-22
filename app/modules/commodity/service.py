@@ -71,7 +71,6 @@ def _category_response(row: CommodityCategory) -> CommodityCategoryResponse:
         name=row.name,
         description=row.description,
         sort_order=row.sort_order,
-        audit_status=row.audit_status,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -85,7 +84,6 @@ def _type_response(row: CommodityType) -> CommodityTypeResponse:
         name=row.name,
         description=row.description,
         sort_order=row.sort_order,
-        audit_status=row.audit_status,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -198,8 +196,6 @@ def _standard_response(
         recognition_priority=standard.recognition_priority,
         remark=standard.remark,
         is_active=standard.is_active,
-        audit_status=standard.audit_status,
-        audit_status_name=dict_label(labels, "AUDIT_STATUS", standard.audit_status),
         alias_count=alias_count,
         attribute_count=attribute_count,
         image_count=image_count,

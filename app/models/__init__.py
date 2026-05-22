@@ -136,7 +136,17 @@ from app.models.analysis import (
     FactVesselRouteSegmentDaily,
     FactVesselTrajectoryDaily,
 )
-from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
+from app.models.approval import (
+    ApprovalActionLog,
+    ApprovalFlowDefinition,
+    ApprovalInstance,
+    ApprovalOutbox,
+    ApprovalSnapshot,
+    ApprovalStepDefinition,
+    ApprovalStepInstance,
+    ApprovalSubjectDefinition,
+)
+from app.models.operation import OperationLog
 from app.models.system import (
     SysUser,
     SysRole,
@@ -276,9 +286,15 @@ __all__ = [
     "FactVesselRiskDaily",
     "FactCandidateFitDaily",
     "FactRegionSupplyDemandDaily",
-    "AuditTask",
-    "AuditRecord",
-    "AuditTaskSnapshot",
+    "ApprovalSubjectDefinition",
+    "ApprovalFlowDefinition",
+    "ApprovalStepDefinition",
+    "ApprovalInstance",
+    "ApprovalStepInstance",
+    "ApprovalSnapshot",
+    "ApprovalActionLog",
+    "ApprovalOutbox",
+    "OperationLog",
     "SysUser",
     "SysRole",
     "SysUserRole",

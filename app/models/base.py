@@ -27,10 +27,3 @@ class TimestampMixin:
 
 class SoftDeleteMixin:
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-class AuditFlowMixin:
-    audit_status: Mapped[str] = mapped_column(nullable=False, default="PENDING")
-    submitter_id: Mapped[int | None] = mapped_column(nullable=True)
-    auditor_id: Mapped[int | None] = mapped_column(nullable=True)
-    audited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

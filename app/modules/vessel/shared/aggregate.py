@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.modules.vessel.shared.methods import VesselCoreMixin
-from app.modules.vessel.asset.methods import VesselAssetMixin
+from app.modules.vessel.asset.profile_methods import VesselAssetMixin
 from app.modules.vessel.certificate.methods import VesselCertificateMixin
 from app.modules.vessel.relation.methods import VesselRelationMixin
 from app.modules.vessel.recognition.methods import VesselRecognitionMixin

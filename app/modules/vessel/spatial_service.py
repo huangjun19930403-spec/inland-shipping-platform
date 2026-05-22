@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import math
 import uuid
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -53,6 +50,28 @@ from app.models.vessel import (
     VesselSpatialObservationSnapshot,
 )
 from app.modules.system.runtime_config import RuntimeConfigService
+from app.modules.vessel.spatial_math import (
+    ais_freshness_level,
+    avg as avg_value,
+    code_distribution,
+    confidence_level as resolve_confidence_level,
+    coverage_rate as calc_coverage_rate,
+    distance_km,
+    first_value,
+    freshness_distribution as build_freshness_distribution,
+    jsonable,
+    line_length_km,
+    parse_datetime,
+    parse_linestring,
+    point_line_distance_km,
+    query_hash,
+    route_direction_consistency,
+    source_status_name,
+    to_decimal,
+    to_float,
+    valid_lon_lat,
+    within_distance_km,
+)
 from app.modules.vessel.schemas import (
     PageResponse,
     VesselAisNodeSituationQuery,
@@ -100,213 +119,6 @@ def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {key: _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _query_hash(payload: dict[str, Any]) -> str:
-    raw = json.dumps(_jsonable(payload), ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def _to_decimal(value: Any) -> Decimal | None:
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _to_float(value: Any) -> float | None:
-    decimal_value = _to_decimal(value)
-    return float(decimal_value) if decimal_value is not None else None
-
-
-def _source_status_name(code: str) -> str:
-    return {
-        "AVAILABLE": "可用",
-        "EMPTY": "无数据",
-        "UNCONFIGURED": "未配置",
-        "PARTIAL": "部分可用",
-        "ERROR": "异常",
-    }.get(code, code)
-
-
-def _ais_freshness_level(age_minutes: int | None) -> str:
-    if age_minutes is None:
-        return "UNKNOWN"
-    if age_minutes <= 120:
-        return "FRESH"
-    if age_minutes <= 720:
-        return "RECENT"
-    if age_minutes <= 4320:
-        return "STALE"
-    return "EXPIRED"
-
-
-def _valid_lon_lat(longitude: Any, latitude: Any) -> bool:
-    lon = _to_float(longitude)
-    lat = _to_float(latitude)
-    return lon is not None and lat is not None and -180 <= lon <= 180 and -90 <= lat <= 90
-
-
-def _parse_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        raw = float(value)
-        if raw > 10_000_000_000:
-            raw = raw / 1000
-        return datetime.utcfromtimestamp(raw)
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
-    except ValueError:
-        return None
-
-
-def _first_value(source: dict[str, Any], keys: list[str]) -> Any:
-    for key in keys:
-        value = source.get(key)
-        if value is not None:
-            return value
-    return None
-
-
-def _distance_km(lon1: Any, lat1: Any, lon2: Any, lat2: Any) -> float | None:
-    a_lon = _to_float(lon1)
-    a_lat = _to_float(lat1)
-    b_lon = _to_float(lon2)
-    b_lat = _to_float(lat2)
-    if a_lon is None or a_lat is None or b_lon is None or b_lat is None:
-        return None
-    radius = 6371.0088
-    phi1 = math.radians(a_lat)
-    phi2 = math.radians(b_lat)
-    delta_phi = math.radians(b_lat - a_lat)
-    delta_lambda = math.radians(b_lon - a_lon)
-    hav = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-    return 2 * radius * math.atan2(math.sqrt(hav), math.sqrt(1 - hav))
-
-
-def _within_distance_km(lon1: Any, lat1: Any, lon2: Any, lat2: Any, radius_km: float) -> bool:
-    distance = _distance_km(lon1, lat1, lon2, lat2)
-    return distance is not None and distance <= radius_km
-
-
-def _point_segment_distance_km(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> float:
-    lon0, lat0 = point
-    lon1, lat1 = start
-    lon2, lat2 = end
-    ref_lat = math.radians((lat0 + lat1 + lat2) / 3)
-    km_per_deg_lat = 111.32
-    km_per_deg_lon = 111.32 * max(math.cos(ref_lat), 0.0001)
-
-    px, py = lon0 * km_per_deg_lon, lat0 * km_per_deg_lat
-    ax, ay = lon1 * km_per_deg_lon, lat1 * km_per_deg_lat
-    bx, by = lon2 * km_per_deg_lon, lat2 * km_per_deg_lat
-    dx, dy = bx - ax, by - ay
-    if dx == 0 and dy == 0:
-        return math.hypot(px - ax, py - ay)
-    ratio = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
-    cx, cy = ax + ratio * dx, ay + ratio * dy
-    return math.hypot(px - cx, py - cy)
-
-
-def _point_line_distance_km(point: tuple[float, float], line: list[tuple[float, float]]) -> float | None:
-    if len(line) < 2:
-        return None
-    return min(_point_segment_distance_km(point, line[index], line[index + 1]) for index in range(len(line) - 1))
-
-
-def _line_length_km(line: list[tuple[float, float]]) -> float:
-    return sum((_distance_km(*line[index], *line[index + 1]) or 0.0) for index in range(len(line) - 1))
-
-
-def _bearing_deg(start: tuple[float, float], end: tuple[float, float]) -> float | None:
-    lon1, lat1 = map(math.radians, start)
-    lon2, lat2 = map(math.radians, end)
-    delta_lon = lon2 - lon1
-    x = math.sin(delta_lon) * math.cos(lat2)
-    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(delta_lon)
-    if x == 0 and y == 0:
-        return None
-    return (math.degrees(math.atan2(x, y)) + 360) % 360
-
-
-def _angle_difference_deg(a: float, b: float) -> float:
-    return abs((a - b + 180) % 360 - 180)
-
-
-def _route_direction_consistency(line: list[tuple[float, float]], points: list[dict[str, Any]]) -> float | None:
-    segment_bearing = _bearing_deg(line[0], line[-1]) if len(line) >= 2 else None
-    if segment_bearing is None:
-        return None
-    point_bearings: list[float] = []
-    for point in points:
-        heading = _to_float(point.get("course_deg"))
-        if heading is None:
-            heading = _to_float(point.get("heading_deg"))
-        if heading is not None:
-            point_bearings.append(heading % 360)
-    ordered = [point for point in points if point.get("position_time")]
-    ordered.sort(key=lambda item: item["position_time"])
-    for index in range(len(ordered) - 1):
-        start = (_to_float(ordered[index].get("longitude")), _to_float(ordered[index].get("latitude")))
-        end = (_to_float(ordered[index + 1].get("longitude")), _to_float(ordered[index + 1].get("latitude")))
-        if None in start or None in end:
-            continue
-        bearing = _bearing_deg((start[0], start[1]), (end[0], end[1]))  # type: ignore[arg-type]
-        if bearing is not None:
-            point_bearings.append(bearing)
-    if not point_bearings:
-        return None
-    avg_deviation = sum(_angle_difference_deg(segment_bearing, bearing) for bearing in point_bearings) / len(point_bearings)
-    return round(max(0.0, 100.0 - avg_deviation / 180.0 * 100.0), 2)
-
-
-def _parse_linestring(geometry: dict[str, Any] | None) -> list[tuple[float, float]]:
-    if not isinstance(geometry, dict):
-        return []
-    coordinates = geometry.get("coordinates")
-    if geometry.get("type") == "Feature" and isinstance(geometry.get("geometry"), dict):
-        coordinates = geometry["geometry"].get("coordinates")
-    if geometry.get("type") == "LineString" and isinstance(coordinates, list):
-        raw_points = coordinates
-    elif isinstance(geometry.get("path"), list):
-        raw_points = geometry["path"]
-    elif isinstance(geometry.get("paths"), list) and geometry["paths"]:
-        raw_points = geometry["paths"][0]
-    else:
-        raw_points = []
-    result: list[tuple[float, float]] = []
-    for item in raw_points:
-        if isinstance(item, dict):
-            lon = _to_float(item.get("longitude") or item.get("lng") or item.get("lon"))
-            lat = _to_float(item.get("latitude") or item.get("lat"))
-        elif isinstance(item, (list, tuple)) and len(item) >= 2:
-            lon = _to_float(item[0])
-            lat = _to_float(item[1])
-        else:
-            continue
-        if lon is not None and lat is not None and _valid_lon_lat(lon, lat):
-            result.append((lon, lat))
-    return result
-
-
 class VesselSpatialAnalysisService:
     """Spatial observation layer for Round 7."""
 
@@ -324,7 +136,7 @@ class VesselSpatialAnalysisService:
         query_payload = query.model_dump(mode="json")
         query_payload["radius_km"] = radius_km
 
-        if not _valid_lon_lat(node.longitude, node.latitude):
+        if not valid_lon_lat(node.longitude, node.latitude):
             snapshot = await self._persist_spatial_snapshot(
                 observation_type_code="NODE",
                 query_payload=query_payload,
@@ -343,7 +155,7 @@ class VesselSpatialAnalysisService:
             await self.db.commit()
             return VesselAisNodeSituationResponse(
                 source_status=snapshot.source_status_code,
-                source_status_name=_source_status_name(snapshot.source_status_code),
+                source_status_name=source_status_name(snapshot.source_status_code),
                 generated_at=now,
                 message="节点缺少经纬度，空间观测不可计算",
                 snapshot=self._snapshot_meta(snapshot),
@@ -372,7 +184,7 @@ class VesselSpatialAnalysisService:
             await self.db.commit()
             return VesselAisNodeSituationResponse(
                 source_status=snapshot.source_status_code,
-                source_status_name=_source_status_name(snapshot.source_status_code),
+                source_status_name=source_status_name(snapshot.source_status_code),
                 generated_at=now,
                 message="缺少可用 AIS 快照",
                 snapshot=self._snapshot_meta(snapshot),
@@ -382,14 +194,14 @@ class VesselSpatialAnalysisService:
             )
 
         latest_rows = await self._latest_position_rows(source_snapshot.snapshot_id, query)
-        freshness_distribution = self._freshness_distribution([row.position for row in latest_rows])
+        freshness_distribution = build_freshness_distribution([row.position for row in latest_rows])
         active_rows: list[tuple[_LatestPositionRow, float]] = []
         stale_position_count = 0
         reported_limit = now - timedelta(minutes=query.reported_within_minutes or 1440)
         for row in latest_rows:
-            if not _valid_lon_lat(row.position.longitude, row.position.latitude):
+            if not valid_lon_lat(row.position.longitude, row.position.latitude):
                 continue
-            distance = _distance_km(node.longitude, node.latitude, row.position.longitude, row.position.latitude)
+            distance = distance_km(node.longitude, node.latitude, row.position.longitude, row.position.latitude)
             if distance is None or distance > radius_km:
                 continue
             if row.position.position_time and row.position.position_time < reported_limit:
@@ -416,7 +228,7 @@ class VesselSpatialAnalysisService:
         inflow_count = sum(1 for item in vessel_items if item.direction_status_code == "INFLOW")
         outflow_count = sum(1 for item in vessel_items if item.direction_status_code == "OUTFLOW")
         matched_position_count = len(active_rows)
-        coverage_rate = self._coverage_rate(matched_position_count, source_snapshot.queried_mmsi_count or len(latest_rows))
+        coverage_rate = calc_coverage_rate(matched_position_count, source_snapshot.queried_mmsi_count or len(latest_rows))
         not_computable: list[str] = []
         uncertainty_notes: list[str] = []
         status_code = "READY"
@@ -434,7 +246,7 @@ class VesselSpatialAnalysisService:
             status_code = "PARTIAL" if matched_position_count else "NOT_COMPUTABLE"
             not_computable.append("LOW_COVERAGE")
             uncertainty_notes.append("AIS 覆盖率低，节点观测置信度降低")
-        confidence_level = self._confidence_level(coverage_rate, bool(active_rows), history.partial or history.source_status_code == "UNCONFIGURED")
+        confidence_level = resolve_confidence_level(coverage_rate, bool(active_rows), history.partial or history.source_status_code == "UNCONFIGURED")
         snapshot = await self._persist_spatial_snapshot(
             observation_type_code="NODE",
             query_payload=query_payload,
@@ -475,8 +287,8 @@ class VesselSpatialAnalysisService:
             coverage_rate=coverage_rate,
             confidence_level=confidence_level,
             freshness_distribution=freshness_distribution,
-            ship_type_distribution=self._ship_type_distribution(vessel_items),
-            risk_distribution=self._risk_distribution(vessel_items),
+            ship_type_distribution=code_distribution(vessel_items, "ship_type_code", code_key="ship_type_code", name_key="ship_type_name"),
+            risk_distribution=code_distribution(vessel_items, "risk_level"),
             latest_position_time=max((item.position_time for item in vessel_items if item.position_time), default=None),
         )
         await self._store_node_vessel_rows(snapshot.snapshot_id, node.id, vessel_items)
@@ -484,7 +296,7 @@ class VesselSpatialAnalysisService:
         await self.db.commit()
         return VesselAisNodeSituationResponse(
             source_status=snapshot.source_status_code,
-            source_status_name=_source_status_name(snapshot.source_status_code),
+            source_status_name=source_status_name(snapshot.source_status_code),
             generated_at=now,
             snapshot=self._snapshot_meta(snapshot),
             summary=self._node_summary(node_item),
@@ -553,7 +365,7 @@ class VesselSpatialAnalysisService:
             await self.db.commit()
             return VesselAisRouteSituationResponse(
                 source_status=snapshot.source_status_code,
-                source_status_name=_source_status_name(snapshot.source_status_code),
+                source_status_name=source_status_name(snapshot.source_status_code),
                 generated_at=now,
                 message=route_reason,
                 snapshot=self._snapshot_meta(snapshot),
@@ -579,7 +391,7 @@ class VesselSpatialAnalysisService:
             await self.db.commit()
             return VesselAisRouteSituationResponse(
                 source_status=snapshot.source_status_code,
-                source_status_name=_source_status_name(snapshot.source_status_code),
+                source_status_name=source_status_name(snapshot.source_status_code),
                 generated_at=now,
                 message="缺少可用 AIS 快照",
                 snapshot=self._snapshot_meta(snapshot),
@@ -630,7 +442,7 @@ class VesselSpatialAnalysisService:
         not_computable: set[str] = set()
         for segment in segments:
             version_segment = version_segment_by_segment_id.get(segment.id)
-            geometry = _parse_linestring(version_segment.geometry_json if version_segment else None)
+            geometry = parse_linestring(version_segment.geometry_json if version_segment else None)
             if version_segment is None or len(geometry) < 2:
                 not_computable.add("ROUTE_GEOMETRY_MISSING")
                 observation_rows.append(self._route_segment_item(
@@ -658,14 +470,14 @@ class VesselSpatialAnalysisService:
                 matched_vessel_count=len({item.mmsi for item in reliable_matches}),
                 point_count=sum(item.point_count for item in reliable_matches),
                 gap_count=sum(item.gap_count for item in reliable_matches),
-                covered_ratio=self._avg([_to_float(item.covered_ratio) for item in reliable_matches]),
-                average_match_score=self._avg([_to_float(item.match_score) for item in reliable_matches]),
-                coverage_rate=self._coverage_rate(len({item.mmsi for item in reliable_matches}), active_vessel_count),
-                confidence_level=self._confidence_level(self._coverage_rate(len({item.mmsi for item in reliable_matches}), active_vessel_count), bool(reliable_matches), history.partial),
+                covered_ratio=avg_value([to_float(item.covered_ratio) for item in reliable_matches]),
+                average_match_score=avg_value([to_float(item.match_score) for item in reliable_matches]),
+                coverage_rate=calc_coverage_rate(len({item.mmsi for item in reliable_matches}), active_vessel_count),
+                confidence_level=resolve_confidence_level(calc_coverage_rate(len({item.mmsi for item in reliable_matches}), active_vessel_count), bool(reliable_matches), history.partial),
             ))
         reliable_sample_rows = [item for item in sample_rows if item.match_status_code != "LOW_CONFIDENCE"]
         matched_vessels = len({item.mmsi for item in reliable_sample_rows})
-        coverage_rate = self._coverage_rate(matched_vessels, active_vessel_count)
+        coverage_rate = calc_coverage_rate(matched_vessels, active_vessel_count)
         status_code = "READY"
         source_status_code = "AVAILABLE"
         uncertainty_notes: list[str] = []
@@ -695,7 +507,7 @@ class VesselSpatialAnalysisService:
             status_code = "PARTIAL"
             not_computable.add("TRACK_SAMPLE_INSUFFICIENT")
             uncertainty_notes.append("航线段样本方向一致性不足，仅保留低可信解释")
-        confidence_level = self._confidence_level(coverage_rate, bool(sample_rows), history.partial or history.source_status_code == "UNCONFIGURED")
+        confidence_level = resolve_confidence_level(coverage_rate, bool(sample_rows), history.partial or history.source_status_code == "UNCONFIGURED")
         snapshot = await self._persist_spatial_snapshot(
             observation_type_code="ROUTE",
             query_payload=query_payload,
@@ -708,7 +520,7 @@ class VesselSpatialAnalysisService:
             window_end=now,
             coverage_rate=coverage_rate,
             confidence_level=confidence_level,
-            freshness_distribution=self._freshness_distribution([row.position for row in latest_rows_all]),
+            freshness_distribution=build_freshness_distribution([row.position for row in latest_rows_all]),
             source_indices=sorted(set((source_snapshot.source_indices_json or []) + history.source_indices)),
             failed_batches=history.failed_batches,
             unmatched_mmsi_count=source_snapshot.unmatched_mmsi_count,
@@ -731,7 +543,7 @@ class VesselSpatialAnalysisService:
         await self.db.commit()
         return VesselAisRouteSituationResponse(
             source_status=snapshot.source_status_code,
-            source_status_name=_source_status_name(snapshot.source_status_code),
+            source_status_name=source_status_name(snapshot.source_status_code),
             generated_at=now,
             snapshot=self._snapshot_meta(snapshot),
             summary=VesselRouteSituationSummary(
@@ -742,7 +554,7 @@ class VesselSpatialAnalysisService:
                 matched_segment_count=sum(1 for item in observation_rows if item.matched_vessel_count > 0),
                 matched_vessel_count=matched_vessels,
                 active_vessel_count=active_vessel_count,
-                coverage_rate=_to_decimal(coverage_rate),
+                coverage_rate=to_decimal(coverage_rate),
                 confidence_level=confidence_level,
                 not_computable_reasons=sorted(not_computable),
             ),
@@ -815,7 +627,7 @@ class VesselSpatialAnalysisService:
                 matched_segment_count=sum(1 for item in route_items if item.matched_vessel_count > 0),
                 matched_vessel_count=snapshot.matched_position_count,
                 active_vessel_count=snapshot.active_vessel_count,
-                coverage_rate=_to_decimal(snapshot.coverage_rate),
+                coverage_rate=to_decimal(snapshot.coverage_rate),
                 confidence_level=snapshot.confidence_level,
                 not_computable_reasons=snapshot.not_computable_reasons_json or [],
             )
@@ -901,11 +713,11 @@ class VesselSpatialAnalysisService:
         source_indices: set[str] = set()
         for hit in hits:
             source = hit.get("_source") or {}
-            mmsi = str(_first_value(source, ["mmsi", "MMSI"]) or "").strip()
-            lon = _to_float(_first_value(source, ["longitude", "lon", "lng"]))
-            lat = _to_float(_first_value(source, ["latitude", "lat"]))
-            point_time = _parse_datetime(_first_value(source, ["position_time", "time", "@timestamp"]))
-            if not mmsi or lon is None or lat is None or not _valid_lon_lat(lon, lat):
+            mmsi = str(first_value(source, ["mmsi", "MMSI"]) or "").strip()
+            lon = to_float(first_value(source, ["longitude", "lon", "lng"]))
+            lat = to_float(first_value(source, ["latitude", "lat"]))
+            point_time = parse_datetime(first_value(source, ["position_time", "time", "@timestamp"]))
+            if not mmsi or lon is None or lat is None or not valid_lon_lat(lon, lat):
                 continue
             source_index = hit.get("_index") or source.get("source_index")
             if source_index:
@@ -916,9 +728,9 @@ class VesselSpatialAnalysisService:
                 "latitude": lat,
                 "position_time": point_time,
                 "source_index": source_index,
-                "speed_kn": _to_float(_first_value(source, ["speed_kn", "speed"])),
-                "course_deg": _to_float(_first_value(source, ["course", "cog"])),
-                "heading_deg": _to_float(_first_value(source, ["heading"])),
+                "speed_kn": to_float(first_value(source, ["speed_kn", "speed"])),
+                "course_deg": to_float(first_value(source, ["course", "cog"])),
+                "heading_deg": to_float(first_value(source, ["heading"])),
             })
         return _HistorySearchResult(dict(points_by_mmsi), False, None, [], "AVAILABLE", sorted(source_indices))
 
@@ -955,8 +767,8 @@ class VesselSpatialAnalysisService:
             snapshot_id=snapshot_id,
             source_snapshot_id=source_snapshot.snapshot_id if source_snapshot else None,
             observation_type_code=observation_type_code,
-            query_hash=_query_hash(query_payload),
-            query_params_json=_jsonable(query_payload),
+            query_hash=query_hash(query_payload),
+            query_params_json=jsonable(query_payload),
             status_code=status_code,
             source_status_code=source_status_code,
             stat_time=stat_time,
@@ -1054,7 +866,7 @@ class VesselSpatialAnalysisService:
             inside_times = [
                 point["position_time"]
                 for point in history_points
-                if point.get("position_time") and _within_distance_km(node.longitude, node.latitude, point.get("longitude"), point.get("latitude"), radius_km)
+                if point.get("position_time") and within_distance_km(node.longitude, node.latitude, point.get("longitude"), point.get("latitude"), radius_km)
             ]
             stay_duration = None
             if inside_times:
@@ -1066,10 +878,10 @@ class VesselSpatialAnalysisService:
                 mmsi=row.position.mmsi,
                 ship_name=(row.summary.ship_name if row.summary else None) or (row.profile.ship_name if row.profile else None),
                 ship_type_code=(row.summary.ship_type_code if row.summary else None) or (row.profile.ship_type_code if row.profile else None),
-                deadweight_ton=_to_decimal((row.summary.deadweight_ton if row.summary else None) or (row.capacity.deadweight_ton if row.capacity else None)),
-                longitude=_to_decimal(row.position.longitude),
-                latitude=_to_decimal(row.position.latitude),
-                distance_km=_to_decimal(round(distance, 3)),
+                deadweight_ton=to_decimal((row.summary.deadweight_ton if row.summary else None) or (row.capacity.deadweight_ton if row.capacity else None)),
+                longitude=to_decimal(row.position.longitude),
+                latitude=to_decimal(row.position.latitude),
+                distance_km=to_decimal(round(distance, 3)),
                 position_time=row.position.position_time,
                 source_index=row.position.source_index,
                 freshness_level=row.position.freshness_level,
@@ -1121,8 +933,8 @@ class VesselSpatialAnalysisService:
         ordered.sort(key=lambda item: item["position_time"])
         if stay_duration_minutes is None or stay_duration_minutes < min_stay_minutes:
             return "PASSBY"
-        first_inside = _within_distance_km(node.longitude, node.latitude, ordered[0].get("longitude"), ordered[0].get("latitude"), radius_km)
-        last_inside = _within_distance_km(node.longitude, node.latitude, ordered[-1].get("longitude"), ordered[-1].get("latitude"), radius_km)
+        first_inside = within_distance_km(node.longitude, node.latitude, ordered[0].get("longitude"), ordered[0].get("latitude"), radius_km)
+        last_inside = within_distance_km(node.longitude, node.latitude, ordered[-1].get("longitude"), ordered[-1].get("latitude"), radius_km)
         if not first_inside and last_inside:
             return "INFLOW"
         if first_inside and not last_inside:
@@ -1159,11 +971,11 @@ class VesselSpatialAnalysisService:
     ) -> list[VesselRouteSegmentMatchSample]:
         rows_by_mmsi = {row.position.mmsi: row for row in latest_rows}
         result: list[VesselRouteSegmentMatchSample] = []
-        line_length = max(_line_length_km(geometry), 0.1)
+        line_length = max(line_length_km(geometry), 0.1)
         for mmsi, points in history_points.items():
             matched_points: list[dict[str, Any]] = []
             for point in points:
-                distance = _point_line_distance_km((float(point["longitude"]), float(point["latitude"])), geometry)
+                distance = point_line_distance_km((float(point["longitude"]), float(point["latitude"])), geometry)
                 if distance is not None and distance <= buffer_km:
                     matched_points.append(point)
             if not matched_points:
@@ -1178,7 +990,7 @@ class VesselSpatialAnalysisService:
             )
             row = rows_by_mmsi.get(mmsi)
             covered_ratio = min(100.0, len(matched_points) * max(buffer_km, 0.1) / line_length * 100)
-            direction_consistency = _route_direction_consistency(geometry, matched_points)
+            direction_consistency = route_direction_consistency(geometry, matched_points)
             if direction_consistency is None:
                 direction_consistency = 0.0
             direction_deviation = (100.0 - direction_consistency) / 100.0 * 180.0
@@ -1186,7 +998,7 @@ class VesselSpatialAnalysisService:
             match_score = max(0.0, min(100.0, covered_ratio - gap_count * 5 - (100.0 - direction_consistency) * 0.4))
             latest_time = max((item.get("position_time") for item in matched_points if item.get("position_time")), default=None)
             age = int((_utcnow() - latest_time).total_seconds() // 60) if latest_time else None
-            confidence_level = "LOW" if low_direction_confidence else self._confidence_level(covered_ratio, True, False)
+            confidence_level = "LOW" if low_direction_confidence else resolve_confidence_level(covered_ratio, True, False)
             match_status_code = "LOW_CONFIDENCE" if low_direction_confidence else "MATCHED" if gap_count == 0 else "PARTIAL"
             result.append(VesselRouteSegmentMatchSample(
                 snapshot_id="",
@@ -1203,7 +1015,7 @@ class VesselSpatialAnalysisService:
                 gap_count=gap_count,
                 latest_position_time=latest_time,
                 source_index=matched_points[-1].get("source_index"),
-                freshness_level=_ais_freshness_level(age),
+                freshness_level=ais_freshness_level(age),
                 confidence_level=confidence_level,
                 match_status_code=match_status_code,
                 created_at=_utcnow(),
@@ -1269,8 +1081,8 @@ class VesselSpatialAnalysisService:
             node = await self.db.get(TransportNode, node_id)
             if node:
                 candidates = (await self.db.scalars(select(NavigationConstraintPoint).where(NavigationConstraintPoint.status == 1, NavigationConstraintPoint.city_code == node.city_code))).all()
-                if _valid_lon_lat(node.longitude, node.latitude) and radius_km is not None:
-                    points = [point for point in candidates if _within_distance_km(node.longitude, node.latitude, point.longitude, point.latitude, radius_km)]
+                if valid_lon_lat(node.longitude, node.latitude) and radius_km is not None:
+                    points = [point for point in candidates if within_distance_km(node.longitude, node.latitude, point.longitude, point.latitude, radius_km)]
                 else:
                     points = list(candidates)
         elif context_type == "ROUTE_PLAN":
@@ -1368,14 +1180,14 @@ class VesselSpatialAnalysisService:
                 confidence_level = "UNKNOWN"
                 unavailable_reason = "PROFILE_INCOMPLETE"
             value = {
-                "longitude": _jsonable(point.longitude),
-                "latitude": _jsonable(point.latitude),
+                "longitude": jsonable(point.longitude),
+                "latitude": jsonable(point.latitude),
                 "severity_level": point.severity_level,
                 "description": point.description,
                 "profile": {
-                    "max_tonnage": _jsonable(profile.max_tonnage),
-                    "max_allowed_draft_m": _jsonable(profile.max_allowed_draft_m),
-                    "min_water_depth_m": _jsonable(profile.min_water_depth_m),
+                    "max_tonnage": jsonable(profile.max_tonnage),
+                    "max_allowed_draft_m": jsonable(profile.max_allowed_draft_m),
+                    "min_water_depth_m": jsonable(profile.min_water_depth_m),
                     "warning_message": profile.warning_message,
                 } if profile else {},
             }
@@ -1416,7 +1228,7 @@ class VesselSpatialAnalysisService:
             generated_at=snapshot.generated_at,
             expires_at=snapshot.expires_at,
             refresh_required=refresh_required or expired,
-            coverage_rate=_to_decimal(snapshot.coverage_rate),
+            coverage_rate=to_decimal(snapshot.coverage_rate),
             confidence_level=snapshot.confidence_level,
             freshness_distribution=snapshot.freshness_distribution_json or {},
             source_indices=snapshot.source_indices_json or [],
@@ -1439,9 +1251,9 @@ class VesselSpatialAnalysisService:
             node_name=item.node_name,
             node_type_code=item.node_type_code,
             city_code=item.city_code,
-            radius_km=_to_decimal(item.radius_km) or Decimal("0"),
-            longitude=_to_decimal(item.longitude),
-            latitude=_to_decimal(item.latitude),
+            radius_km=to_decimal(item.radius_km) or Decimal("0"),
+            longitude=to_decimal(item.longitude),
+            latitude=to_decimal(item.latitude),
             active_vessel_count=item.active_vessel_count,
             stay_vessel_count=item.stay_vessel_count,
             passby_vessel_count=item.passby_vessel_count,
@@ -1450,7 +1262,7 @@ class VesselSpatialAnalysisService:
             unmatched_mmsi_count=item.unmatched_mmsi_count,
             invalid_position_count=item.invalid_position_count,
             stale_position_count=item.stale_position_count,
-            coverage_rate=_to_decimal(item.coverage_rate),
+            coverage_rate=to_decimal(item.coverage_rate),
             confidence_level=item.confidence_level,
             freshness_distribution=item.freshness_distribution_json or {},
             ship_type_distribution=[
@@ -1480,10 +1292,10 @@ class VesselSpatialAnalysisService:
             mmsi=row.mmsi,
             ship_name=row.ship_name,
             ship_type_code=row.ship_type_code,
-            deadweight_ton=_to_decimal(row.deadweight_ton),
-            longitude=_to_decimal(row.longitude),
-            latitude=_to_decimal(row.latitude),
-            distance_km=_to_decimal(row.distance_km),
+            deadweight_ton=to_decimal(row.deadweight_ton),
+            longitude=to_decimal(row.longitude),
+            latitude=to_decimal(row.latitude),
+            distance_km=to_decimal(row.distance_km),
             position_time=row.position_time,
             source_index=row.source_index,
             freshness_level=row.freshness_level,
@@ -1509,9 +1321,9 @@ class VesselSpatialAnalysisService:
             active_vessel_count=row.active_vessel_count,
             point_count=row.point_count,
             gap_count=row.gap_count,
-            covered_ratio=_to_decimal(row.covered_ratio),
-            average_match_score=_to_decimal(row.average_match_score),
-            coverage_rate=_to_decimal(row.coverage_rate),
+            covered_ratio=to_decimal(row.covered_ratio),
+            average_match_score=to_decimal(row.average_match_score),
+            coverage_rate=to_decimal(row.coverage_rate),
             confidence_level=row.confidence_level,
             not_computable_reasons=row.not_computable_reasons_json or [],
         )
@@ -1524,10 +1336,10 @@ class VesselSpatialAnalysisService:
             mmsi=row.mmsi,
             ship_name=row.ship_name,
             ship_type_code=row.ship_type_code,
-            deadweight_ton=_to_decimal(row.deadweight_ton),
-            match_score=_to_decimal(row.match_score),
-            covered_ratio=_to_decimal(row.covered_ratio),
-            direction_consistency=_to_decimal(row.direction_consistency),
+            deadweight_ton=to_decimal(row.deadweight_ton),
+            match_score=to_decimal(row.match_score),
+            covered_ratio=to_decimal(row.covered_ratio),
+            direction_consistency=to_decimal(row.direction_consistency),
             point_count=row.point_count,
             gap_count=row.gap_count,
             latest_position_time=row.latest_position_time,
@@ -1555,46 +1367,6 @@ class VesselSpatialAnalysisService:
             confidence_level=row.confidence_level,
             unavailable_reason=row.unavailable_reason,
         )
-
-    def _freshness_distribution(self, positions: list[VesselLatestPositionSnapshot]) -> dict[str, int]:
-        result = {"FRESH": 0, "RECENT": 0, "STALE": 0, "EXPIRED": 0, "UNKNOWN": 0}
-        for position in positions:
-            result[position.freshness_level or "UNKNOWN"] = result.get(position.freshness_level or "UNKNOWN", 0) + 1
-        return result
-
-    def _ship_type_distribution(self, items: list[VesselNodeObservationVesselResponse]) -> list[dict[str, Any]]:
-        total = max(len(items), 1)
-        counts = Counter(item.ship_type_code or "UNKNOWN" for item in items)
-        return [{"ship_type_code": code, "ship_type_name": code, "count": count, "rate": round(count / total * 100, 2)} for code, count in counts.items()]
-
-    def _risk_distribution(self, items: list[VesselNodeObservationVesselResponse]) -> list[dict[str, Any]]:
-        total = max(len(items), 1)
-        counts = Counter(item.risk_level or "UNKNOWN" for item in items)
-        return [{"code": code, "name": code, "count": count, "rate": round(count / total * 100, 2)} for code, count in counts.items()]
-
-    def _coverage_rate(self, numerator: int, denominator: int | None) -> float | None:
-        if not denominator:
-            return None
-        return round(numerator / denominator * 100, 2)
-
-    def _confidence_level(self, coverage_rate: float | None, has_sample: bool, partial: bool) -> str:
-        if not has_sample:
-            return "UNKNOWN"
-        if partial:
-            return "LOW"
-        if coverage_rate is None:
-            return "MEDIUM"
-        if coverage_rate >= 80:
-            return "HIGH"
-        if coverage_rate >= 40:
-            return "MEDIUM"
-        return "LOW"
-
-    def _avg(self, values: list[float | None]) -> float | None:
-        clean = [value for value in values if value is not None]
-        if not clean:
-            return None
-        return round(sum(clean) / len(clean), 2)
 
     async def _node_default_radius_km(self) -> float:
         return float(await self.runtime_config.get_float(VESSEL_SPATIAL_NODE_DEFAULT_RADIUS_KM, settings.VESSEL_SPATIAL_NODE_DEFAULT_RADIUS_KM, profile_code=ES_HISTORY_CONFIG_PROFILE))

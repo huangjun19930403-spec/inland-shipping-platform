@@ -14,7 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import AuditFlowMixin, Base, SoftDeleteMixin, TimestampMixin
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 
 
 class AdminRegion(Base, TimestampMixin):
@@ -173,7 +173,7 @@ class NavigationChannelSourceAudit(Base, TimestampMixin):
     review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
 
-class Region(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
+class Region(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "region"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -228,7 +228,7 @@ class RegionCityRelation(Base, TimestampMixin):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-class TransportNode(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
+class TransportNode(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "transport_node"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

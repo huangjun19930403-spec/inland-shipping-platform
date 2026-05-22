@@ -60,8 +60,8 @@ from app.modules.address.service import (
     BusinessRegionService,
     NavigationConstraintPointService,
     TransportNodeService,
-    NavigationChannelService,
 )
+from app.modules.address.navigation_channel_service import NavigationChannelService
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 

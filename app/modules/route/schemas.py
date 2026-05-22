@@ -8,6 +8,8 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
+from app.modules.tasks.schemas import AsyncTaskRunResponse
+
 T = TypeVar("T")
 
 
@@ -89,10 +91,6 @@ class RouteResponse(BaseModel):
     multimodal_combination_code: str | None
     status_code: str
     description: str | None
-    audit_status: str
-    submitter_id: int | None
-    auditor_id: int | None
-    audited_at: datetime | None
     created_at: datetime
     updated_at: datetime
     plan_count: int = 0
@@ -108,6 +106,7 @@ class RouteResponse(BaseModel):
     track_status: str = "NOT_GENERATED"
     track_error_message: str | None = None
     track_generated_at: datetime | None = None
+    active_track_generation_task: AsyncTaskRunResponse | None = None
 
 
 class RoutePlanResponse(BaseModel):
@@ -132,6 +131,7 @@ class RoutePlanResponse(BaseModel):
     current_track_source_type_code: str | None = None
     track_version_count: int = 0
     track_status: str = "NOT_GENERATED"
+    active_track_generation_task: AsyncTaskRunResponse | None = None
 
 
 class RouteDetailResponse(BaseModel):

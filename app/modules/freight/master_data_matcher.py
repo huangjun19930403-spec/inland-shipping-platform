@@ -20,6 +20,13 @@ def _first(segment: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+PACKAGING_ONLY_COMMODITY_TEXTS = {"吨包", "吨袋"}
+
+
+def _is_packaging_only_commodity_text(value: str) -> bool:
+    return "".join(value.strip().lower().split()) in PACKAGING_ONLY_COMMODITY_TEXTS
+
+
 class FreightMasterDataBatchMatcher:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -118,6 +125,14 @@ class FreightMasterDataBatchMatcher:
         text = raw_name.strip()
         if not text:
             return None, None, None, [], {"status": "NO_TEXT"}
+        if _is_packaging_only_commodity_text(text):
+            return (
+                None,
+                Decimal("0.0"),
+                "RAW",
+                [{"level": "RAW", "name": text, "score": "0.0"}],
+                {"status": "PACKAGING_ONLY", "text": text},
+            )
         options: list[dict[str, Any]] = []
         for standard in self.standards:
             score = None

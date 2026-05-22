@@ -175,11 +175,6 @@ class FreightResponse(BaseModel):
     hall_published_at: datetime | None = None
     hall_unpublished_at: datetime | None = None
     hall_visible_until: datetime | None = None
-    audit_status: str
-    audit_status_name: str | None = None
-    submitter_id: int | None
-    auditor_id: int | None
-    audited_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

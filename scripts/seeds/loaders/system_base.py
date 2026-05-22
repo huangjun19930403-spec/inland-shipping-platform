@@ -146,7 +146,7 @@ ROLE_PERMISSION_CODES = {
         "VESSEL:ALL",
         "ROUTE:ALL",
         "ANALYSIS:READ",
-        "AUDIT:ALL",
+        "APPROVAL:ALL",
         "FREIGHT:ALL",
         "STORAGE:ALL",
     ],
@@ -212,12 +212,16 @@ ROLE_MENU_CODES = {
         "ADDRESS_REGIONS",
         "ADDRESS_NAVIGATION_CHANNELS",
         "ADDRESS_CONSTRAINT_POINTS",
-        "AUDIT_ROOT",
+        "APPROVAL_ROOT",
         "FREIGHT_NORMALIZATION",
         "QUALITY_VESSEL_ISSUES",
         "QUALITY_VESSEL_TASKS",
-        "AUDIT_PENDING",
-        "AUDIT_DONE",
+        "APPROVAL_PENDING",
+        "APPROVAL_SUBMITTED",
+        "APPROVAL_RECORDS",
+        "APPROVAL_CONFIG_ROOT",
+        "APPROVAL_SUBJECTS",
+        "APPROVAL_FLOWS",
         "TASK_RUNS_CENTER",
         "ANALYSIS_TASK_LIST",
         "SYSTEM_ROOT",
@@ -265,7 +269,7 @@ ROLE_MENU_CODES = {
         "ANALYSIS_PRICES",
         "ANALYSIS_QUOTE_SIMULATOR",
         "ANALYSIS_RATE_ESTIMATOR",
-        "AUDIT_ROOT",
+        "APPROVAL_ROOT",
         "ANALYSIS_TASK_LIST",
         "TASK_RUNS_CENTER",
     ],
@@ -279,7 +283,7 @@ ROLE_MENU_CODES = {
         "FREIGHT_CANDIDATES",
         "FREIGHT_LIST",
         "FREIGHT_NORMALIZATION_ENTRY",
-        "AUDIT_ROOT",
+        "APPROVAL_ROOT",
         "ROUTE_ROOT",
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NODES",
@@ -476,28 +480,44 @@ PERMISSIONS = [
         "description": "维护航线、航线方案、航线段和几何数据",
     },
     {
-        "permission_code": "AUDIT:ALL",
-        "permission_name": "审核中心全量权限",
+        "permission_code": "APPROVAL:ALL",
+        "permission_name": "审批中心全量权限",
         "permission_type_code": "API",
-        "resource_path": "/api/v1/audit/*",
+        "resource_path": "/api/v1/approvals/*",
         "action_code": "ALL",
-        "description": "审核队列、差异查看、通过、驳回和指派权限",
+        "description": "审批队列、实例详情、动作处理和流程配置权限",
     },
     {
-        "permission_code": "AUDIT:READ",
-        "permission_name": "审核中心查看权限",
+        "permission_code": "APPROVAL:READ",
+        "permission_name": "审批中心查看权限",
         "permission_type_code": "API",
-        "resource_path": "/api/v1/audit/*",
+        "resource_path": "/api/v1/approvals/*",
         "action_code": "READ",
-        "description": "查看审核任务、审核记录和元数据",
+        "description": "查看审批队列、实例详情和元数据",
     },
     {
-        "permission_code": "AUDIT:WRITE",
-        "permission_name": "审核中心处理权限",
+        "permission_code": "APPROVAL:SUBMIT",
+        "permission_name": "审批提交权限",
         "permission_type_code": "API",
-        "resource_path": "/api/v1/audit/*",
+        "resource_path": "/api/v1/approvals/instances",
+        "action_code": "SUBMIT",
+        "description": "业务模块提交审批实例",
+    },
+    {
+        "permission_code": "APPROVAL:WRITE",
+        "permission_name": "审批处理权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/approvals/*",
         "action_code": "WRITE",
-        "description": "指派、通过、驳回和撤销审核任务",
+        "description": "通过、驳回、退回、撤销和指派审批实例",
+    },
+    {
+        "permission_code": "APPROVAL:CONFIG",
+        "permission_name": "审批配置权限",
+        "permission_type_code": "API",
+        "resource_path": "/api/v1/approvals/*",
+        "action_code": "CONFIG",
+        "description": "维护审批对象和流程定义",
     },
     {
         "permission_code": "ANALYSIS:READ",
@@ -1226,8 +1246,8 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "AUDIT_ROOT",
-        "menu_name": "审核中心",
+        "menu_code": "APPROVAL_ROOT",
+        "menu_name": "审批中心",
         "menu_type_code": "DIRECTORY",
         "route_path": None,
         "component_path": None,
@@ -1237,39 +1257,74 @@ MENUS = [
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "AUDIT_PENDING",
-        "menu_name": "待审核",
+        "menu_code": "APPROVAL_PENDING",
+        "menu_name": "待办审批",
         "menu_type_code": "MENU",
-        "parent_code": "AUDIT_ROOT",
-        "route_path": "/audit/pending",
-        "component_path": "modules/audit/pages/AuditTaskListPage",
+        "parent_code": "APPROVAL_ROOT",
+        "route_path": "/approvals/pending",
+        "component_path": "modules/approval/pages/ApprovalQueuePage",
         "icon": "Clock",
         "sort_order": 1,
         "visible_flag": 1,
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "AUDIT_DONE",
-        "menu_name": "已审核",
+        "menu_code": "APPROVAL_SUBMITTED",
+        "menu_name": "我提交的",
         "menu_type_code": "MENU",
-        "parent_code": "AUDIT_ROOT",
-        "route_path": "/audit/done",
-        "component_path": "modules/audit/pages/AuditTaskListPage",
+        "parent_code": "APPROVAL_ROOT",
+        "route_path": "/approvals/submitted",
+        "component_path": "modules/approval/pages/ApprovalQueuePage",
         "icon": "Finished",
         "sort_order": 2,
         "visible_flag": 1,
         "status_code": "ACTIVE",
     },
     {
-        "menu_code": "AUDIT_TASKS",
-        "menu_name": "审核任务兼容入口",
+        "menu_code": "APPROVAL_RECORDS",
+        "menu_name": "审批记录",
         "menu_type_code": "MENU",
-        "parent_code": "AUDIT_ROOT",
-        "route_path": "/audit/tasks",
-        "component_path": "modules/audit/pages/AuditTaskListPage",
+        "parent_code": "APPROVAL_ROOT",
+        "route_path": "/approvals/done",
+        "component_path": "modules/approval/pages/ApprovalQueuePage",
         "icon": "Select",
-        "sort_order": 99,
-        "visible_flag": 0,
+        "sort_order": 3,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
+        "menu_code": "APPROVAL_CONFIG_ROOT",
+        "menu_name": "审批配置",
+        "menu_type_code": "DIRECTORY",
+        "route_path": None,
+        "component_path": None,
+        "icon": "Setting",
+        "sort_order": 81,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
+        "menu_code": "APPROVAL_SUBJECTS",
+        "menu_name": "审批对象",
+        "menu_type_code": "MENU",
+        "parent_code": "APPROVAL_CONFIG_ROOT",
+        "route_path": "/approvals/config/subjects",
+        "component_path": "modules/approval/pages/ApprovalSubjectDefinitionPage",
+        "icon": "Tickets",
+        "sort_order": 1,
+        "visible_flag": 1,
+        "status_code": "ACTIVE",
+    },
+    {
+        "menu_code": "APPROVAL_FLOWS",
+        "menu_name": "流程定义",
+        "menu_type_code": "MENU",
+        "parent_code": "APPROVAL_CONFIG_ROOT",
+        "route_path": "/approvals/config/flows",
+        "component_path": "modules/approval/pages/ApprovalFlowDefinitionListPage",
+        "icon": "Connection",
+        "sort_order": 2,
+        "visible_flag": 1,
         "status_code": "ACTIVE",
     },
 ]
@@ -1415,20 +1470,20 @@ def _apply_production_menu_information_architecture() -> None:
     update("ANALYSIS_TASK_LIST", menu_name="分析刷新任务", parent_code="ANALYSIS_OPERATION_GROUP", sort_order=2)
     update("TASK_RUNS_CENTER", menu_name="后台任务中心", parent_code="ANALYSIS_OPERATION_GROUP", sort_order=3)
 
-    update("AUDIT_ROOT", menu_name="数据质量与治理", icon="Select", sort_order=60)
-    update("FREIGHT_NORMALIZATION", menu_name="货源清洗", parent_code="AUDIT_ROOT", sort_order=1)
+    update("APPROVAL_ROOT", menu_name="审批中心", icon="Select", sort_order=60)
+    update("FREIGHT_NORMALIZATION", menu_name="货源清洗", parent_code="FREIGHT_ROOT", sort_order=8)
     by_code["QUALITY_VESSEL_ISSUES"] = _route_menu(
         "VESSEL_QUALITY",
         "QUALITY_VESSEL_ISSUES",
         "船舶资料问题",
-        parent_code="AUDIT_ROOT",
+        parent_code="VESSEL_WORKBENCH_GROUP",
         sort_order=2,
     )
     by_code["QUALITY_VESSEL_TASKS"] = _route_menu(
         "VESSEL_GOVERNANCE_TASKS",
         "QUALITY_VESSEL_TASKS",
         "船舶治理任务",
-        parent_code="AUDIT_ROOT",
+        parent_code="VESSEL_WORKBENCH_GROUP",
         sort_order=3,
     )
     update("VESSEL_GOVERNANCE_DASHBOARD", menu_name="船舶问题看板", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=1)
@@ -1438,10 +1493,13 @@ def _apply_production_menu_information_architecture() -> None:
     update("VESSEL_COMPLIANCE_RISKS", menu_name="合规风险", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=5)
     update("VESSEL_BLACKLIST_SIGNALS", menu_name="名单预警", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=6)
     update("VESSEL_RECOGNITIONS", menu_name="证照识别审核", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=7)
-    update("AUDIT_PENDING", parent_code="AUDIT_ROOT", sort_order=9)
-    update("AUDIT_DONE", parent_code="AUDIT_ROOT", sort_order=10)
+    update("APPROVAL_PENDING", parent_code="APPROVAL_ROOT", sort_order=1)
+    update("APPROVAL_SUBMITTED", parent_code="APPROVAL_ROOT", sort_order=2)
+    update("APPROVAL_RECORDS", parent_code="APPROVAL_ROOT", visible_flag=1, sort_order=3)
+    update("APPROVAL_CONFIG_ROOT", menu_name="审批配置", icon="Setting", sort_order=61)
+    update("APPROVAL_SUBJECTS", parent_code="APPROVAL_CONFIG_ROOT", sort_order=1)
+    update("APPROVAL_FLOWS", parent_code="APPROVAL_CONFIG_ROOT", sort_order=2)
     update("ANALYSIS_TASK_ROOT", visible_flag=0, sort_order=98)
-    update("AUDIT_TASKS", visible_flag=0, sort_order=99)
 
     update("SYSTEM_ROOT", menu_name="系统管理", sort_order=70)
     by_code["SYSTEM_SECURITY_GROUP"] = _directory_menu(
@@ -1542,12 +1600,16 @@ def _apply_production_menu_information_architecture() -> None:
         "ROUTE_LIST",
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NAVIGATION_CHANNELS",
-        "AUDIT_ROOT",
+        "APPROVAL_ROOT",
         "FREIGHT_NORMALIZATION",
         "QUALITY_VESSEL_ISSUES",
         "QUALITY_VESSEL_TASKS",
-        "AUDIT_PENDING",
-        "AUDIT_DONE",
+        "APPROVAL_PENDING",
+        "APPROVAL_SUBMITTED",
+        "APPROVAL_RECORDS",
+        "APPROVAL_CONFIG_ROOT",
+        "APPROVAL_SUBJECTS",
+        "APPROVAL_FLOWS",
         "SYSTEM_ROOT",
         "SYSTEM_SECURITY_GROUP",
         "SYSTEM_USER",
@@ -1608,7 +1670,8 @@ def infer_menu_permission_code(item: dict) -> str | None:
         ("/route", "ROUTE:READ"),
         ("/analysis", "ANALYSIS:READ"),
         ("/tasks", "ANALYSIS:READ"),
-        ("/audit", "AUDIT:READ"),
+        ("/approvals/config", "APPROVAL:CONFIG"),
+        ("/approvals", "APPROVAL:READ"),
     )
     for prefix, permission_code in route_rules:
         if route_path == prefix or route_path.startswith(f"{prefix}/"):

@@ -39,7 +39,7 @@ from app.modules.vessel.schemas import (
     VesselVoidRequest,
     VesselRiskReviewRequest,
 )
-from app.modules.vessel.service import VesselService
+from app.modules.vessel.shared.aggregate import VesselDomainService as VesselService
 from scripts.seeds.loaders.builtin_dicts import BUILTIN_DICTS
 
 

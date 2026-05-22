@@ -92,8 +92,6 @@ async def _seed_test_freight(session, now: datetime) -> None:
             hall_status_code="LISTED",
             hall_published_at=now,
             hall_visible_until=now + timedelta(days=10),
-            audit_status="APPROVED",
-            audited_at=now,
             created_at=now,
             updated_at=now,
         )

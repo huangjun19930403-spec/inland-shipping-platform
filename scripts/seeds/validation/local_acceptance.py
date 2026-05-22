@@ -76,7 +76,7 @@ from app.models.analysis import (
     FactShipFlowDaily,
     PricingDecisionRecord,
 )
-from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
+from app.models.approval import ApprovalActionLog, ApprovalInstance, ApprovalSnapshot
 from app.models.commodity import CommodityAlias, CommodityStandard
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightNormalizationSuggestion, FreightNormalizationTask, FreightTmsInbound
 from app.models.route import ShippingRoute, ShippingRoutePlanSegment, ShippingRoutePlanSegmentResult
@@ -551,9 +551,9 @@ async def verify() -> list[CheckResult]:
             ("ship flow facts", await _count(session, FactShipFlowDaily), 2),
             ("analysis task definitions", await _count(session, AnalysisJobDefinition), 10),
             ("analysis jobs", await _count(session, AnalysisJobRun), 1),
-            ("audit tasks empty-ok", await _count(session, AuditTask), 0),
-            ("audit snapshots empty-ok", await _count(session, AuditTaskSnapshot), 0),
-            ("audit records empty-ok", await _count(session, AuditRecord), 0),
+            ("approval instances empty-ok", await _count(session, ApprovalInstance), 0),
+            ("approval snapshots empty-ok", await _count(session, ApprovalSnapshot), 0),
+            ("approval logs empty-ok", await _count(session, ApprovalActionLog), 0),
             ("navigation constraints", await _count(session, NavigationConstraintPoint), 3),
             ("shipping routes", await _count(session, ShippingRoute), 3),
             ("pricing decision records empty-ok", await _count(session, PricingDecisionRecord), 0),

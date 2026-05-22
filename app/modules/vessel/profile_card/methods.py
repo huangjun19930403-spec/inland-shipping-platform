@@ -654,7 +654,6 @@ class VesselProfileCardMixin:
                 "verified_status_code": getattr(row, "verified_status_code", None),
                 "verified_at": getattr(row, "verified_at", None),
                 "verified_by": getattr(row, "verified_by", None),
-                "audit_task_id": getattr(row, "audit_task_id", None),
                 "evidence_summary": getattr(row, "evidence_summary", None),
                 "evidence_json": evidence_payload,
                 "voided_at": getattr(row, "voided_at", None),
@@ -663,25 +662,22 @@ class VesselProfileCardMixin:
             evidence_completeness=self._evidence_completeness(missing_fields) if missing_fields or object_type in {"VESSEL_CONTROLLER_EVIDENCE", "VESSEL_AFFILIATION_EVIDENCE"} else None,
             missing_required_fields=missing_fields,
             attachment_refs=attachment_refs,
-            audit_history=self._profile_evidence_audit_history(row),
+            approval_history=self._profile_evidence_approval_history(row),
             conclusion_refs=[ref.model_dump(mode="json") if hasattr(ref, "model_dump") else _jsonable(ref) for ref in (conclusion_refs or [])],
         )
 
     @staticmethod
-    def _profile_evidence_audit_history(row: Any) -> list[dict[str, Any]]:
+    def _profile_evidence_approval_history(row: Any) -> list[dict[str, Any]]:
         history: list[dict[str, Any]] = []
-        audit_task_id = getattr(row, "audit_task_id", None)
         verified_status_code = getattr(row, "verified_status_code", None)
-        if audit_task_id:
-            history.append({"label": "审核任务", "value": audit_task_id})
         if verified_status_code:
-            history.append({"label": "审核状态", "value": verified_status_code})
+            history.append({"label": "审批状态", "value": verified_status_code})
         verified_at = getattr(row, "verified_at", None)
         if verified_at:
-            history.append({"label": "审核时间", "value": _jsonable(verified_at)})
+            history.append({"label": "审批时间", "value": _jsonable(verified_at)})
         verified_by = getattr(row, "verified_by", None)
         if verified_by:
-            history.append({"label": "审核人", "value": verified_by})
+            history.append({"label": "审批人", "value": verified_by})
         revision = getattr(row, "revision", None)
         if revision is not None:
             history.append({"label": "版本", "value": revision})

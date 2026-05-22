@@ -12,19 +12,19 @@ from app.core.exceptions import AppException, ConflictError, ValidationError
 from app.models.vessel import VesselProfileSummary, VesselRecognitionFieldDiff
 from app.models.vessel import VesselAisSnapshot, VesselAisCitySnapshotItem, VesselLatestPositionSnapshot
 from app.tasks import vessel_position_tasks
-from app.modules.vessel import service as vessel_service_module
 from app.modules.vessel.ais.methods import _public_ais_error_message
 from app.modules.vessel.ais.service import VesselAisService
 from app.modules.vessel.compliance import methods as vessel_compliance_methods
 from app.modules.vessel.profile_card import methods as vessel_profile_card_methods
-from app.modules.vessel.service import (
+from app.modules.vessel.shared.aggregate import VesselDomainService as VesselService
+from app.modules.vessel.shared import base as vessel_base
+from app.modules.vessel.shared.base import (
     CURRENT_CITY_SOURCE_ADMIN_BOUNDARY,
     CURRENT_CITY_SOURCE_INVALID_POSITION,
     CURRENT_CITY_SOURCE_UNKNOWN,
     LOW_CONFIDENCE_SCORE_THRESHOLD,
     REQUIRED_VESSEL_CERTIFICATE_TYPES,
     UNKNOWN_CITY_NAME,
-    VesselService,
     _CityBoundary,
     _boundary_paths_for_precision,
     _build_city_boundary_grid,
@@ -218,12 +218,12 @@ def test_vessel_domain_split_keeps_key_openapi_paths() -> None:
 
 
 def test_vessel_domain_services_are_router_boundaries() -> None:
-    from app.modules.vessel.services.asset_service import VesselAssetService
-    from app.modules.vessel.services.compliance_service import VesselComplianceService
-    from app.modules.vessel.services.governance_task_service import VesselGovernanceTaskService
-    from app.modules.vessel.services.quality_service import VesselQualityService
-    from app.modules.vessel.services.recognition_service import VesselRecognitionService
-    from app.modules.vessel.services.relation_service import VesselRelationService
+    from app.modules.vessel.asset.service import VesselAssetService
+    from app.modules.vessel.compliance.service import VesselComplianceService
+    from app.modules.vessel.governance_service import VesselGovernanceService
+    from app.modules.vessel.quality.service import VesselQualityService
+    from app.modules.vessel.recognition.service import VesselRecognitionService
+    from app.modules.vessel.relation.service import VesselRelationService
 
     services = {
         VesselAssetService: ("asset_summary", "list_assets"),
@@ -231,7 +231,7 @@ def test_vessel_domain_services_are_router_boundaries() -> None:
         VesselComplianceService: ("list_compliance_risks", "create_risk_review"),
         VesselRelationService: ("list_controller_evidence", "list_relation_conclusions"),
         VesselRecognitionService: ("list_recognition_queue", "unified_recognition_field_diff"),
-        VesselGovernanceTaskService: ("dashboard", "sync_tasks_command"),
+        VesselGovernanceService: ("dashboard", "sync_tasks_command"),
     }
 
     for service_cls, method_names in services.items():
@@ -1598,9 +1598,9 @@ async def test_vessel_city_situation_ignores_seed_cache_when_realtime_es_is_conf
 @pytest.mark.asyncio
 async def test_vessel_round6_memory_cache_forbidden_in_production(monkeypatch) -> None:
     service = VesselService.__new__(VesselService)
-    monkeypatch.setattr(vessel_service_module.settings, "APP_ENV", "production")
-    monkeypatch.setattr(vessel_service_module.settings, "DEBUG", False)
-    monkeypatch.setattr(vessel_service_module.settings, "VESSEL_CITY_SITUATION_CACHE_BACKEND", "memory")
+    monkeypatch.setattr(vessel_base.settings, "APP_ENV", "production")
+    monkeypatch.setattr(vessel_base.settings, "DEBUG", False)
+    monkeypatch.setattr(vessel_base.settings, "VESSEL_CITY_SITUATION_CACHE_BACKEND", "memory")
 
     with pytest.raises(AppException) as exc_info:
         await service._city_cache_backend()
@@ -1613,10 +1613,10 @@ async def test_vessel_round6_memory_cache_forbidden_in_production(monkeypatch) -
 async def test_vessel_round6_production_redis_failure_does_not_store_memory_cache(monkeypatch) -> None:
     service = VesselService.__new__(VesselService)
     cache_key = "production-redis-failed"
-    vessel_service_module._CITY_SITUATION_RESPONSE_CACHE.pop(cache_key, None)
-    monkeypatch.setattr(vessel_service_module.settings, "APP_ENV", "production")
-    monkeypatch.setattr(vessel_service_module.settings, "DEBUG", False)
-    monkeypatch.setattr(vessel_service_module.settings, "VESSEL_CITY_SITUATION_CACHE_BACKEND", "redis")
+    vessel_base._CITY_SITUATION_RESPONSE_CACHE.pop(cache_key, None)
+    monkeypatch.setattr(vessel_base.settings, "APP_ENV", "production")
+    monkeypatch.setattr(vessel_base.settings, "DEBUG", False)
+    monkeypatch.setattr(vessel_base.settings, "VESSEL_CITY_SITUATION_CACHE_BACKEND", "redis")
 
     class BrokenRedis:
         async def setex(self, *args, **kwargs) -> None:
@@ -1651,7 +1651,7 @@ async def test_vessel_round6_production_redis_failure_does_not_store_memory_cach
 
     await service._store_city_situation_response_cache(cache_key, response)
 
-    assert cache_key not in vessel_service_module._CITY_SITUATION_RESPONSE_CACHE
+    assert cache_key not in vessel_base._CITY_SITUATION_RESPONSE_CACHE
 
 
 def test_vessel_round3_certificate_risk_requires_complete_verified_evidence() -> None:

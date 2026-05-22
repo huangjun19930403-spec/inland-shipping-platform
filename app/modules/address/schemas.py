@@ -256,11 +256,6 @@ class BusinessRegionResponse(BaseModel):
     status: int
     status_name: str | None
     current_boundary_version_id: int | None
-    audit_status: str
-    audit_status_name: str | None
-    submitter_id: int | None
-    auditor_id: int | None
-    audited_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -480,8 +475,6 @@ class TransportNodeResponse(BaseModel):
     lifecycle_status_name: str | None
     sort_order: int
     is_hot_node: bool
-    audit_status: str
-    audit_status_name: str | None
     created_at: datetime
     updated_at: datetime
 

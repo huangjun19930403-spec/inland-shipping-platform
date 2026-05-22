@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -221,9 +221,48 @@ def _dwt_bucket(deadweight: Decimal | None) -> tuple[str, str]:
     return "DWT_GT_10000", "10000吨以上"
 
 
+def _freight_stat_date(row: Freight) -> date | None:
+    return _date_of(row.published_at, row.confirmed_at, row.created_at)
+
+
+def _freight_tonnage(row: Freight) -> Decimal:
+    return _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
+
+
+def _avg_unit_price(amount: Decimal, tonnage: Decimal) -> Decimal | None:
+    return (amount / tonnage).quantize(Decimal("0.01")) if tonnage else None
+
+
+def _freight_amount(row: Freight, tonnage: Decimal | None = None) -> Decimal:
+    return (tonnage if tonnage is not None else _freight_tonnage(row)) * _money(row.unit_price)
+
+
+def _add_freight_totals(item: dict[str, Any], row: Freight, tonnage: Decimal | None = None) -> Decimal:
+    tonnage = tonnage if tonnage is not None else _freight_tonnage(row)
+    item["count"] = int(item["count"]) + 1
+    item["tonnage"] = item["tonnage"] + tonnage
+    item["amount"] = item["amount"] + _freight_amount(row, tonnage)
+    return tonnage
+
+
+def _heat_value(count: int, tonnage: Decimal, weight: str) -> Decimal:
+    return Decimal(count) * Decimal(weight) + (tonnage / Decimal("1000") if tonnage else Decimal("0"))
+
+
 class AnalysisStatisticsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self._freights_cache: dict[tuple[date, date], list[Freight]] = {}
+        self._city_context_cache: tuple[dict[str, AdminRegion], dict[str, int | None]] | None = None
+        self._node_map_cache: dict[int, TransportNode] | None = None
+        self._ship_context_cache: tuple[
+            list[VesselProfile],
+            dict[int, VesselCapacityDimension],
+            dict[int, VesselBuildInfo],
+            dict[int, VesselOperatorPeriod],
+            dict[str, AdminRegion],
+            dict[str, int | None],
+        ] | None = None
 
     async def run(
         self,
@@ -326,26 +365,50 @@ class AnalysisStatisticsService:
         return int(existing or 0) == 0
 
     def _skipped_round9_result(self, job_code: str, table_name: str) -> AggregationResult:
-        return AggregationResult(
-            job_code,
-            0,
-            0,
-            0,
-            [table_name],
-            {"skipped": True, "reason": "EXISTING_SOURCE_VERSION_PRESERVED"},
-        )
+        return AggregationResult(job_code, 0, 0, 0, [table_name], {"skipped": True, "reason": "EXISTING_SOURCE_VERSION_PRESERVED"})
+
+    def _add_empty_round9_facts(
+        self, model: Any, dates: list[date], *, base: dict[str, Any], reason: str, uncertainty: str, source_versions: dict[str, Any], now: datetime, job_run_id: int | None
+    ) -> int:
+        meta = {
+            "source_layer_code": "NOT_AVAILABLE",
+            "sample_count": 0,
+            "coverage_rate": Decimal("0.00"),
+            "confidence_level": "UNKNOWN",
+            "not_computable_reasons_json": [reason],
+            "uncertainty_reasons_json": [uncertainty],
+            "source_versions_json": source_versions,
+            "source_updated_at": None,
+            "generated_at": now,
+            "job_run_id": job_run_id,
+        }
+        for stat_date in dates:
+            self.db.add(model(stat_date=stat_date, **base, **meta))
+        return len(dates)
 
     async def _freights(self, start: date, end: date) -> list[Freight]:
+        key = (start, end)
+        if key in self._freights_cache:
+            return self._freights_cache[key]
+        stat_time = func.coalesce(Freight.published_at, Freight.confirmed_at, Freight.created_at)
         rows = (
             await self.db.execute(
                 select(Freight)
-                .where(Freight.deleted_at.is_(None), Freight.status_code.in_(VALID_FREIGHT_STATUSES))
+                .where(
+                    Freight.deleted_at.is_(None),
+                    Freight.status_code.in_(VALID_FREIGHT_STATUSES),
+                    stat_time >= datetime.combine(start, time.min),
+                    stat_time < datetime.combine(end + timedelta(days=1), time.min),
+                )
                 .order_by(Freight.id.asc())
             )
         ).scalars().all()
-        return [row for row in rows if (stat_date := _date_of(row.published_at, row.confirmed_at, row.created_at)) and start <= stat_date <= end]
+        self._freights_cache[key] = [row for row in rows if (stat_date := _freight_stat_date(row)) and start <= stat_date <= end]
+        return self._freights_cache[key]
 
     async def _city_context(self) -> tuple[dict[str, AdminRegion], dict[str, int | None]]:
+        if self._city_context_cache is not None:
+            return self._city_context_cache
         cities = (
             await self.db.execute(select(AdminRegion).where(AdminRegion.level == 2, AdminRegion.status == 1))
         ).scalars().all()
@@ -365,11 +428,15 @@ class AnalysisStatisticsService:
             code = id_to_code.get(rel.city_region_id)
             if code and code not in primary_region_by_city:
                 primary_region_by_city[code] = rel.region_id
-        return city_by_code, primary_region_by_city
+        self._city_context_cache = (city_by_code, primary_region_by_city)
+        return self._city_context_cache
 
     async def _node_map(self) -> dict[int, TransportNode]:
+        if self._node_map_cache is not None:
+            return self._node_map_cache
         rows = (await self.db.execute(select(TransportNode).where(TransportNode.deleted_at.is_(None)))).scalars().all()
-        return {row.id: row for row in rows}
+        self._node_map_cache = {row.id: row for row in rows}
+        return self._node_map_cache
 
     async def run_freight_daily(self, start: date, end: date, *, force_rebuild: bool = True) -> AggregationResult:
         if force_rebuild:
@@ -392,16 +459,12 @@ class AnalysisStatisticsService:
 
         acc: dict[date, dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "confirmed": 0, "tonnage": Decimal("0"), "amount": Decimal("0")})
         for row in freights:
-            dt = _date_of(row.published_at, row.confirmed_at, row.created_at)
+            dt = _freight_stat_date(row)
             if dt is None:
                 continue
             item = acc[dt]
-            tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
-            price = _money(row.unit_price)
-            item["count"] = int(item["count"]) + 1
+            _add_freight_totals(item, row)
             item["confirmed"] = int(item["confirmed"]) + (1 if row.confirmed_at else 0)
-            item["tonnage"] = item["tonnage"] + tonnage
-            item["amount"] = item["amount"] + (tonnage * price)
 
         now = datetime.utcnow()
         output = 0
@@ -418,7 +481,7 @@ class AnalysisStatisticsService:
                     source_inbound_count=inbound_counts[stat_date],
                     total_tonnage=tonnage,
                     total_estimated_amount=amount.quantize(Decimal("0.01")) if amount else None,
-                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
+                    avg_unit_price=_avg_unit_price(amount, tonnage),
                     data_version=DATA_VERSION,
                     generated_at=now,
                 )
@@ -433,7 +496,7 @@ class AnalysisStatisticsService:
         freights = await self._freights(start, end)
         acc: dict[tuple, dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "tonnage": Decimal("0"), "amount": Decimal("0"), "min": None, "max": None})
         for row in freights:
-            stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
+            stat_date = _freight_stat_date(row)
             if stat_date is None or not row.origin_city_code or not row.destination_city_code:
                 continue
             key = (
@@ -447,11 +510,8 @@ class AnalysisStatisticsService:
                 row.commodity_standard_id,
             )
             item = acc[key]
-            tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
             price = _money(row.unit_price)
-            item["count"] = int(item["count"]) + 1
-            item["tonnage"] = item["tonnage"] + tonnage
-            item["amount"] = item["amount"] + (tonnage * price)
+            _add_freight_totals(item, row)
             item["min"] = price if item["min"] is None or price < item["min"] else item["min"]
             item["max"] = price if item["max"] is None or price > item["max"] else item["max"]
         now = datetime.utcnow()
@@ -470,7 +530,7 @@ class AnalysisStatisticsService:
                     commodity_standard_id=key[7],
                     freight_count=int(item["count"]),
                     total_tonnage=tonnage,
-                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
+                    avg_unit_price=_avg_unit_price(amount, tonnage),
                     min_unit_price=item["min"],
                     max_unit_price=item["max"],
                     data_version=DATA_VERSION,
@@ -491,18 +551,13 @@ class AnalysisStatisticsService:
         commodity_category = {row.id: row.category_id or type_category.get(row.type_id) for row in commodities}
         acc: dict[tuple, dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "tonnage": Decimal("0"), "amount": Decimal("0")})
         for row in freights:
-            stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
+            stat_date = _freight_stat_date(row)
             if stat_date is None:
                 continue
             if row.commodity_standard_id is None:
                 continue
             key = (stat_date, row.commodity_standard_id)
-            item = acc[key]
-            tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
-            price = _money(row.unit_price)
-            item["count"] = int(item["count"]) + 1
-            item["tonnage"] = item["tonnage"] + tonnage
-            item["amount"] = item["amount"] + (tonnage * price)
+            _add_freight_totals(acc[key], row)
         now = datetime.utcnow()
         for (stat_date, commodity_id), item in acc.items():
             tonnage = item["tonnage"]
@@ -515,7 +570,7 @@ class AnalysisStatisticsService:
                     commodity_type_id=commodity_type.get(commodity_id),
                     freight_count=int(item["count"]),
                     total_tonnage=tonnage,
-                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
+                    avg_unit_price=_avg_unit_price(amount, tonnage),
                     data_version=DATA_VERSION,
                     generated_at=now,
                 )
@@ -548,20 +603,18 @@ class AnalysisStatisticsService:
         buckets = await self._price_buckets()
         acc: dict[tuple, dict[str, Decimal | int | str | None]] = defaultdict(lambda: {"count": 0, "tonnage": Decimal("0"), "amount": Decimal("0"), "name": "", "min": None, "max": None})
         for row in freights:
-            stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
+            stat_date = _freight_stat_date(row)
             price = _money(row.unit_price)
             if stat_date is None or price <= 0:
                 continue
             bucket = next((b for b in buckets if (b[2] is None or price >= b[2]) and (b[3] is None or price < b[3])), buckets[-1])
             key = (stat_date, bucket[0])
             item = acc[key]
-            tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
+            tonnage = _freight_tonnage(row)
             item["name"] = bucket[1]
             item["min"] = bucket[2]
             item["max"] = bucket[3]
-            item["count"] = int(item["count"]) + 1
-            item["tonnage"] = item["tonnage"] + tonnage
-            item["amount"] = item["amount"] + (tonnage * price)
+            _add_freight_totals(item, row, tonnage)
         now = datetime.utcnow()
         for (stat_date, bucket_code), item in acc.items():
             tonnage = item["tonnage"]
@@ -575,7 +628,7 @@ class AnalysisStatisticsService:
                     max_unit_price=item["max"],
                     freight_count=int(item["count"]),
                     total_tonnage=tonnage,
-                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
+                    avg_unit_price=_avg_unit_price(amount, tonnage),
                     data_version=DATA_VERSION,
                     generated_at=now,
                 )
@@ -590,20 +643,17 @@ class AnalysisStatisticsService:
         city_by_code, primary_region = await self._city_context()
         acc: dict[tuple[date, str], dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "in": 0, "out": 0, "tonnage": Decimal("0"), "amount": Decimal("0")})
         for row in freights:
-            stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
+            stat_date = _freight_stat_date(row)
             if stat_date is None:
                 continue
-            tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
-            price = _money(row.unit_price)
+            tonnage = _freight_tonnage(row)
             for city_code, inbound, outbound in ((row.origin_city_code, 0, 1), (row.destination_city_code, 1, 0)):
                 if not city_code:
                     continue
                 item = acc[(stat_date, city_code)]
-                item["count"] = int(item["count"]) + 1
+                _add_freight_totals(item, row, tonnage)
                 item["in"] = int(item["in"]) + inbound
                 item["out"] = int(item["out"]) + outbound
-                item["tonnage"] = item["tonnage"] + tonnage
-                item["amount"] = item["amount"] + (tonnage * price)
         now = datetime.utcnow()
         for (stat_date, city_code), item in acc.items():
             tonnage = item["tonnage"]
@@ -618,8 +668,8 @@ class AnalysisStatisticsService:
                     inbound_count=int(item["in"]),
                     outbound_count=int(item["out"]),
                     total_tonnage=tonnage,
-                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
-                    heat_value=Decimal(int(item["count"])) * Decimal("1.35") + (tonnage / Decimal("1000") if tonnage else Decimal("0")),
+                    avg_unit_price=_avg_unit_price(amount, tonnage),
+                    heat_value=_heat_value(int(item["count"]), tonnage, "1.35"),
                     data_version=DATA_VERSION,
                     generated_at=now,
                 )
@@ -635,20 +685,17 @@ class AnalysisStatisticsService:
         _, primary_region = await self._city_context()
         acc: dict[tuple[date, int], dict[str, Decimal | int]] = defaultdict(lambda: {"count": 0, "in": 0, "out": 0, "tonnage": Decimal("0"), "amount": Decimal("0")})
         for row in freights:
-            stat_date = _date_of(row.published_at, row.confirmed_at, row.created_at)
+            stat_date = _freight_stat_date(row)
             if stat_date is None:
                 continue
-            tonnage = _money(row.estimated_tonnage or row.max_tonnage or row.min_tonnage)
-            price = _money(row.unit_price)
+            tonnage = _freight_tonnage(row)
             for node_id, inbound, outbound in ((row.origin_node_id, 0, 1), (row.destination_node_id, 1, 0)):
                 if node_id is None:
                     continue
                 item = acc[(stat_date, int(node_id))]
-                item["count"] = int(item["count"]) + 1
+                _add_freight_totals(item, row, tonnage)
                 item["in"] = int(item["in"]) + inbound
                 item["out"] = int(item["out"]) + outbound
-                item["tonnage"] = item["tonnage"] + tonnage
-                item["amount"] = item["amount"] + (tonnage * price)
         now = datetime.utcnow()
         for (stat_date, node_id), item in acc.items():
             node = nodes.get(node_id)
@@ -666,8 +713,8 @@ class AnalysisStatisticsService:
                     inbound_count=int(item["in"]),
                     outbound_count=int(item["out"]),
                     total_tonnage=tonnage,
-                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
-                    heat_value=Decimal(int(item["count"])) * Decimal("1.5") + (tonnage / Decimal("1000") if tonnage else Decimal("0")),
+                    avg_unit_price=_avg_unit_price(amount, tonnage),
+                    heat_value=_heat_value(int(item["count"]), tonnage, "1.5"),
                     data_version=DATA_VERSION,
                     generated_at=now,
                 )
@@ -685,6 +732,8 @@ class AnalysisStatisticsService:
         dict[str, AdminRegion],
         dict[str, int | None],
     ]:
+        if self._ship_context_cache is not None:
+            return self._ship_context_cache
         ships = (
             await self.db.execute(select(VesselProfile).where(VesselProfile.deleted_at.is_(None)).order_by(VesselProfile.id.asc()))
         ).scalars().all()
@@ -694,7 +743,7 @@ class AnalysisStatisticsService:
             await self.db.execute(select(VesselOperatorPeriod).where(VesselOperatorPeriod.is_current.is_(True)))
         ).scalars().all()
         city_by_code, primary_region = await self._city_context()
-        return (
+        self._ship_context_cache = (
             list(ships),
             {row.vessel_profile_id: row for row in capacities},
             {row.vessel_profile_id: row for row in builds},
@@ -702,6 +751,7 @@ class AnalysisStatisticsService:
             city_by_code,
             primary_region,
         )
+        return self._ship_context_cache
 
     async def run_ship_daily(self, start: date, end: date, *, force_rebuild: bool = True) -> AggregationResult:
         if force_rebuild:
@@ -962,7 +1012,7 @@ class AnalysisStatisticsService:
                     outbound_count=int(item["out"]),
                     total_tonnage=tonnage,
                     ship_count=int(item["ship"]),
-                    avg_unit_price=(amount / tonnage).quantize(Decimal("0.01")) if tonnage else None,
+                    avg_unit_price=_avg_unit_price(amount, tonnage),
                     heat_value=item["heat"],
                     data_version=DATA_VERSION,
                     generated_at=now,
@@ -1087,32 +1137,27 @@ class AnalysisStatisticsService:
         for stat_date in _dates(start, end):
             snapshot = snapshot_by_day.get(stat_date)
             if snapshot is None:
-                self.db.add(
-                    FactVesselAisFreshnessDaily(
-                        stat_date=stat_date,
-                        city_code=None,
-                        city_name=None,
-                        ship_type_code=None,
-                        freshness_level="UNKNOWN",
-                        match_status_code="UNKNOWN",
-                        vessel_count=0,
-                        matched_profile_count=0,
-                        unmatched_mmsi_count=0,
-                        invalid_position_count=0,
-                        source_snapshot_id=None,
-                        source_layer_code="NOT_AVAILABLE",
-                        sample_count=0,
-                        coverage_rate=Decimal("0.00"),
-                        confidence_level="UNKNOWN",
-                        not_computable_reasons_json=["SOURCE_MISSING"],
-                        uncertainty_reasons_json=["AIS 快照缺失，不能计算新鲜度分布"],
-                        source_versions_json={"source": "vessel_ais_snapshot"},
-                        source_updated_at=None,
-                        generated_at=now,
-                        job_run_id=job_run_id,
-                    )
+                output += self._add_empty_round9_facts(
+                    FactVesselAisFreshnessDaily,
+                    [stat_date],
+                    base={
+                        "city_code": None,
+                        "city_name": None,
+                        "ship_type_code": None,
+                        "freshness_level": "UNKNOWN",
+                        "match_status_code": "UNKNOWN",
+                        "vessel_count": 0,
+                        "matched_profile_count": 0,
+                        "unmatched_mmsi_count": 0,
+                        "invalid_position_count": 0,
+                        "source_snapshot_id": None,
+                    },
+                    reason="SOURCE_MISSING",
+                    uncertainty="AIS 快照缺失，不能计算新鲜度分布",
+                    source_versions={"source": "vessel_ais_snapshot"},
+                    now=now,
+                    job_run_id=job_run_id,
                 )
-                output += 1
                 continue
             rows = positions_by_snapshot.get(snapshot.snapshot_id) or []
             if rows:
@@ -1214,32 +1259,26 @@ class AnalysisStatisticsService:
         output = 0
         now = _utcnow()
         if not samples:
-            for stat_date in _dates(start, end):
-                self.db.add(
-                    FactVesselTrajectoryDaily(
-                        stat_date=stat_date,
-                        vessel_profile_id=None,
-                        mmsi=None,
-                        ship_type_code=None,
-                        track_coverage_rate=None,
-                        gap_count=0,
-                        anomaly_point_count=0,
-                        stay_count=0,
-                        route_match_count=0,
-                        latest_position_time=None,
-                        source_layer_code="NOT_AVAILABLE",
-                        sample_count=0,
-                        coverage_rate=Decimal("0.00"),
-                        confidence_level="UNKNOWN",
-                        not_computable_reasons_json=["HISTORICAL_AIS_UNCONFIGURED"],
-                        uncertainty_reasons_json=["历史 AIS 或航段匹配样本缺失"],
-                        source_versions_json={"source": "vessel_route_segment_match_sample"},
-                        source_updated_at=None,
-                        generated_at=now,
-                        job_run_id=job_run_id,
-                    )
-                )
-                output += 1
+            output = self._add_empty_round9_facts(
+                FactVesselTrajectoryDaily,
+                _dates(start, end),
+                base={
+                    "vessel_profile_id": None,
+                    "mmsi": None,
+                    "ship_type_code": None,
+                    "track_coverage_rate": None,
+                    "gap_count": 0,
+                    "anomaly_point_count": 0,
+                    "stay_count": 0,
+                    "route_match_count": 0,
+                    "latest_position_time": None,
+                },
+                reason="HISTORICAL_AIS_UNCONFIGURED",
+                uncertainty="历史 AIS 或航段匹配样本缺失",
+                source_versions={"source": "vessel_route_segment_match_sample"},
+                now=now,
+                job_run_id=job_run_id,
+            )
             await self.db.flush()
             return AggregationResult(
                 "ANALYSIS_VESSEL_TRAJECTORY_DAILY",
@@ -1327,34 +1366,28 @@ class AnalysisStatisticsService:
         output = 0
         now = _utcnow()
         if not items:
-            for stat_date in _dates(start, end):
-                self.db.add(
-                    FactVesselNodeDaily(
-                        stat_date=stat_date,
-                        node_id=None,
-                        node_name=None,
-                        city_code=None,
-                        radius_km=None,
-                        ship_type_code=None,
-                        deadweight_bucket_code=None,
-                        active_count=0,
-                        stay_count=0,
-                        passby_count=0,
-                        low_confidence_count=0,
-                        source_spatial_snapshot_id=None,
-                        source_layer_code="NOT_AVAILABLE",
-                        sample_count=0,
-                        coverage_rate=Decimal("0.00"),
-                        confidence_level="UNKNOWN",
-                        not_computable_reasons_json=["SOURCE_MISSING"],
-                        uncertainty_reasons_json=["节点空间观测快照缺失"],
-                        source_versions_json={"source": "vessel_node_observation_item"},
-                        source_updated_at=None,
-                        generated_at=now,
-                        job_run_id=job_run_id,
-                    )
-                )
-                output += 1
+            output = self._add_empty_round9_facts(
+                FactVesselNodeDaily,
+                _dates(start, end),
+                base={
+                    "node_id": None,
+                    "node_name": None,
+                    "city_code": None,
+                    "radius_km": None,
+                    "ship_type_code": None,
+                    "deadweight_bucket_code": None,
+                    "active_count": 0,
+                    "stay_count": 0,
+                    "passby_count": 0,
+                    "low_confidence_count": 0,
+                    "source_spatial_snapshot_id": None,
+                },
+                reason="SOURCE_MISSING",
+                uncertainty="节点空间观测快照缺失",
+                source_versions={"source": "vessel_node_observation_item"},
+                now=now,
+                job_run_id=job_run_id,
+            )
             await self.db.flush()
             return AggregationResult("ANALYSIS_VESSEL_NODE_DAILY", 0, output, output, ["fact_vessel_node_daily"])
 
@@ -1454,36 +1487,30 @@ class AnalysisStatisticsService:
         output = 0
         now = _utcnow()
         if not items:
-            for stat_date in _dates(start, end):
-                self.db.add(
-                    FactVesselRouteSegmentDaily(
-                        stat_date=stat_date,
-                        route_id=None,
-                        plan_id=None,
-                        segment_id=None,
-                        segment_name=None,
-                        direction_code="UNKNOWN",
-                        ship_type_code=None,
-                        matched_count=0,
-                        reliable_match_count=0,
-                        covered_ratio=None,
-                        avg_direction_consistency=None,
-                        gap_count=0,
-                        low_confidence_count=0,
-                        source_spatial_snapshot_id=None,
-                        source_layer_code="NOT_AVAILABLE",
-                        sample_count=0,
-                        coverage_rate=Decimal("0.00"),
-                        confidence_level="UNKNOWN",
-                        not_computable_reasons_json=["SOURCE_MISSING"],
-                        uncertainty_reasons_json=["航段空间观测快照缺失"],
-                        source_versions_json={"source": "vessel_route_segment_observation_item"},
-                        source_updated_at=None,
-                        generated_at=now,
-                        job_run_id=job_run_id,
-                    )
-                )
-                output += 1
+            output = self._add_empty_round9_facts(
+                FactVesselRouteSegmentDaily,
+                _dates(start, end),
+                base={
+                    "route_id": None,
+                    "plan_id": None,
+                    "segment_id": None,
+                    "segment_name": None,
+                    "direction_code": "UNKNOWN",
+                    "ship_type_code": None,
+                    "matched_count": 0,
+                    "reliable_match_count": 0,
+                    "covered_ratio": None,
+                    "avg_direction_consistency": None,
+                    "gap_count": 0,
+                    "low_confidence_count": 0,
+                    "source_spatial_snapshot_id": None,
+                },
+                reason="SOURCE_MISSING",
+                uncertainty="航段空间观测快照缺失",
+                source_versions={"source": "vessel_route_segment_observation_item"},
+                now=now,
+                job_run_id=job_run_id,
+            )
             await self.db.flush()
             return AggregationResult("ANALYSIS_VESSEL_ROUTE_SEGMENT_DAILY", 0, output, output, ["fact_vessel_route_segment_daily"])
 
@@ -1696,12 +1723,10 @@ class AnalysisStatisticsService:
             await self.db.execute(select(VesselCandidateAnalysisAnnotation).where(VesselCandidateAnalysisAnnotation.analysis_id.in_(analysis_ids)))
         ).scalars().all() if analysis_ids else []
         analysis_map = {row.id: row for row in analyses}
-        ann_by_analysis: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        for ann in annotations:
-            ann_by_analysis[ann.analysis_id][ann.annotation_type_code] += 1
         acc: dict[tuple[date, str, str], dict[str, Any]] = defaultdict(
             lambda: {"analysis": set(), "item": 0, "not": 0, "low": 0, "ann": 0, "ann_dist": defaultdict(int), "risk_dist": defaultdict(int), "scores": [], "coverages": []}
         )
+        annotation_bucket_by_analysis: dict[int, tuple[date, str, str]] = {}
         for item in items:
             analysis = analysis_map.get(item.analysis_id)
             if analysis is None:
@@ -1713,6 +1738,7 @@ class AnalysisStatisticsService:
             if item.confidence_level in {"LOW", "UNKNOWN"} or item.risk_level in {"HIGH", "UNKNOWN"} or item.not_computable_reasons_json:
                 value_level = "LOW" if value_level == "HIGH" else value_level
             bucket = acc[(stat_date, analysis.context_type_code, value_level)]
+            annotation_bucket_by_analysis.setdefault(analysis.id, (stat_date, analysis.context_type_code, value_level))
             bucket["analysis"].add(analysis.id)
             bucket["item"] += 1
             bucket["not"] += 1 if item.not_computable_reasons_json else 0
@@ -1722,14 +1748,10 @@ class AnalysisStatisticsService:
             for reason in item.risk_reasons_json or []:
                 bucket["risk_dist"][str(reason)] += 1
         for ann in annotations:
-            analysis = analysis_map.get(ann.analysis_id)
-            if analysis is None:
-                continue
-            stat_date = _date_of(analysis.generated_at) or start
-            for key in [key for key in acc if key[0] == stat_date and key[1] == analysis.context_type_code]:
+            key = annotation_bucket_by_analysis.get(ann.analysis_id)
+            if key is not None:
                 acc[key]["ann"] += 1
                 acc[key]["ann_dist"][ann.annotation_type_code] += 1
-                break
         output = 0
         now = _utcnow()
         if not acc:

@@ -156,10 +156,10 @@ class VesselRiskReviewResponse(BaseModel):
     reviewed_at: datetime
     created_at: datetime
     updated_at: datetime
-    audit_task_id: int | None = None
-    audit_task_no: str | None = None
-    audit_status_code: str | None = None
-    audit_action_path: str | None = None
+    approval_instance_id: int | None = None
+    approval_instance_no: str | None = None
+    approval_status_code: str | None = None
+    approval_action_path: str | None = None
 
 class VesselComplianceRiskResponse(BaseModel):
     vessel_id: int

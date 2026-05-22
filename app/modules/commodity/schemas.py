@@ -23,7 +23,6 @@ class CommodityCategoryResponse(BaseModel):
     name: str
     description: str | None
     sort_order: int
-    audit_status: str
     created_at: datetime
     updated_at: datetime
 
@@ -35,7 +34,6 @@ class CommodityTypeResponse(BaseModel):
     name: str
     description: str | None
     sort_order: int
-    audit_status: str
     created_at: datetime
     updated_at: datetime
 
@@ -127,7 +125,6 @@ class CommodityStandardUpdateRequest(BaseModel):
     recognition_priority: int | None = Field(default=None, ge=0, le=999)
     remark: str | None = None
     is_active: bool | None = None
-    audit_status: str | None = None
 
 
 class CommodityAliasItem(BaseModel):
@@ -304,8 +301,6 @@ class CommodityStandardResponse(BaseModel):
     recognition_priority: int
     remark: str | None
     is_active: bool
-    audit_status: str
-    audit_status_name: str | None
     alias_count: int = 0
     attribute_count: int = 0
     image_count: int = 0

@@ -6,7 +6,7 @@ from app.core.security import require_permission
 
 from app.modules.address.router import router as address_router
 from app.modules.analysis.router import router as analysis_router
-from app.modules.audit.router import router as audit_router
+from app.modules.approval.router import router as approval_router
 from app.modules.commodity.router import router as commodity_router
 from app.modules.dictionary.router import router as dictionary_router
 from app.modules.freight.router import router as freight_router
@@ -66,10 +66,9 @@ api_router.include_router(
     dependencies=[Depends(require_permission("ANALYSIS:READ"))],
 )
 api_router.include_router(
-    audit_router,
-    prefix="/audit",
-    tags=["audit"],
-    dependencies=[Depends(require_permission("AUDIT:READ"))],
+    approval_router,
+    prefix="/approvals",
+    tags=["approvals"],
 )
 api_router.include_router(
     storage_router,

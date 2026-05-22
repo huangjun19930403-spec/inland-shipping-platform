@@ -142,7 +142,7 @@ class VesselProfileCardEvidenceItem(BaseModel):
     evidence_completeness: str | None = None
     missing_required_fields: list[str] = Field(default_factory=list)
     attachment_refs: list[Any] = Field(default_factory=list)
-    audit_history: list[dict[str, Any]] = Field(default_factory=list)
+    approval_history: list[dict[str, Any]] = Field(default_factory=list)
     conclusion_refs: list[dict[str, Any]] = Field(default_factory=list)
 
 class VesselProfileCardEvidenceResponse(PageResponse[VesselProfileCardEvidenceItem]):

@@ -303,8 +303,6 @@ async def seed_production_vessels() -> None:
                     for key, value in profile_payload.items():
                         setattr(profile, key, value)
                     profile.deleted_at = None
-                profile.audit_status = "APPROVED"
-                profile.audited_at = now
                 prepared.append((row, identity, profile))
 
             await session.flush()

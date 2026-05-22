@@ -31,7 +31,9 @@ from app.models.base import Base
 from app.models.commodity import CommodityCategory, CommodityStandard, CommodityType
 from app.models.common import CodeSequence
 from app.models.freight import Freight, FreightBatchTask, FreightCandidate, FreightClue, FreightNormalizationSuggestion, FreightNormalizationTask
-from app.modules.freight import service as freight_service_module
+from app.modules.freight import batch_service as freight_batch_service_module
+from app.modules.freight import support as freight_support_module
+from app.modules.freight import tms_service as freight_tms_service_module
 from app.modules.dictionary.service import CodeSequenceService
 from app.modules.freight.ai_evidence_gate import (
     COMMODITY_SCOPE_UNSAFE,
@@ -66,12 +68,10 @@ from app.modules.freight.schemas import (
     FreightCandidateConfirmRequest,
     FreightTmsInboundCreateRequest,
 )
-from app.modules.freight.service import (
-    FreightBatchTaskService,
-    FreightCandidateService,
-    FreightNormalizationSuggestionService,
-    FreightTmsInboundService,
-)
+from app.modules.freight.batch_service import FreightBatchTaskService
+from app.modules.freight.candidate_service import FreightCandidateService
+from app.modules.freight.normalization_service import FreightNormalizationSuggestionService
+from app.modules.freight.tms_service import FreightTmsInboundService
 
 
 @compiles(BigInteger, "sqlite")
@@ -122,7 +122,8 @@ def fake_parser(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeFreightParser.segments = []
     FakeFreightParser.prompt_version = "test_prompt_v2"
     FakeFreightParser.last_source_type = None
-    monkeypatch.setattr(freight_service_module, "DashScopeQwenFreightParserClient", FakeFreightParser)
+    monkeypatch.setattr(freight_batch_service_module, "DashScopeQwenFreightParserClient", FakeFreightParser)
+    monkeypatch.setattr(freight_tms_service_module, "DashScopeQwenFreightParserClient", FakeFreightParser)
 
 
 async def _seed_foundation(session: AsyncSession) -> None:
@@ -1431,7 +1432,7 @@ async def test_staged_wechat_parse_records_evidence_metrics_in_timings(session: 
         def merge_review_results(self, segments, review_results):  # noqa: ANN001
             return segments
 
-    monkeypatch.setattr(freight_service_module, "DashScopeQwenFreightParserClient", StagedParser)
+    monkeypatch.setattr(freight_batch_service_module, "DashScopeQwenFreightParserClient", StagedParser)
 
     service = FreightBatchTaskService(session)
     batch = await service.create_wechat_batch(FreightBatchCreateRequest(raw_text="南京港装动力煤到芜湖港，联系13800000000"), creator_id=7)
@@ -1493,13 +1494,13 @@ async def test_wechat_reparse_saving_failure_keeps_existing_unconfirmed_data(
     async def fail_bulk_create(self, rows):  # noqa: ANN001
         raise RuntimeError("模拟保存失败")
 
-    monkeypatch.setattr(freight_service_module.FreightCandidateRepository, "bulk_create", fail_bulk_create)
+    monkeypatch.setattr(freight_support_module.FreightCandidateRepository, "bulk_create", fail_bulk_create)
 
     with pytest.raises(RuntimeError, match="模拟保存失败"):
         await FreightBatchTaskService(session).run_parse_now(batch.id, requested_by=7)
 
-    candidates = await freight_service_module.FreightCandidateRepository(session).list_by_batch(batch.id)
-    clues = await freight_service_module.FreightClueRepository(session).list_by_batch(batch.id)
+    candidates = await freight_support_module.FreightCandidateRepository(session).list_by_batch(batch.id)
+    clues = await freight_support_module.FreightClueRepository(session).list_by_batch(batch.id)
     refreshed = await session.scalar(select(FreightBatchTask).where(FreightBatchTask.id == batch.id))
     assert [item.candidate_no for item in candidates] == ["FCA-OLD"]
     assert [item.clue_no for item in clues] == ["FCU-OLD"]

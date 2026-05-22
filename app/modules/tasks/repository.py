@@ -32,6 +32,24 @@ class AsyncTaskRunRepository:
             .order_by(AsyncTaskRun.id.desc())
         )
 
+    async def get_latest_by_idempotency_key(self, idempotency_key: str) -> AsyncTaskRun | None:
+        return await self.db.scalar(
+            select(AsyncTaskRun)
+            .where(AsyncTaskRun.idempotency_key == idempotency_key)
+            .order_by(AsyncTaskRun.created_at.desc(), AsyncTaskRun.id.desc())
+        )
+
+    async def get_latest_by_idempotency_key_prefix(
+        self,
+        idempotency_key_prefix: str,
+        *,
+        status_codes: set[str] | None = None,
+    ) -> AsyncTaskRun | None:
+        stmt = select(AsyncTaskRun).where(AsyncTaskRun.idempotency_key.like(f"{idempotency_key_prefix}%"))
+        if status_codes is not None:
+            stmt = stmt.where(AsyncTaskRun.status_code.in_(status_codes))
+        return await self.db.scalar(stmt.order_by(AsyncTaskRun.created_at.desc(), AsyncTaskRun.id.desc()))
+
     async def create(self, data: dict[str, Any]) -> AsyncTaskRun:
         row = AsyncTaskRun(**data)
         self.db.add(row)

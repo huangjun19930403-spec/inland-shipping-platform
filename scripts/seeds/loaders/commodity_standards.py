@@ -245,7 +245,6 @@ async def seed_commodity_standards() -> None:
                 entity.is_active = bool(row.get("is_active", True))
                 entity.deleted_at = None
                 await session.flush()
-            entity.audit_status = "APPROVED"
 
             await session.execute(
                 delete(CommodityAlias).where(

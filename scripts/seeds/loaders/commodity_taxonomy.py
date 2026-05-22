@@ -60,7 +60,6 @@ async def seed_commodity_taxonomy() -> None:
                 entity.description = row.get("description")
                 entity.sort_order = int(row.get("sort_order") or 0)
                 entity.deleted_at = None
-            entity.audit_status = "APPROVED"
             category_id_by_code[code] = int(entity.id)
 
         for row in types:
@@ -88,7 +87,6 @@ async def seed_commodity_taxonomy() -> None:
                 entity.description = row.get("description")
                 entity.sort_order = int(row.get("sort_order") or 0)
                 entity.deleted_at = None
-            entity.audit_status = "APPROVED"
 
         await session.commit()
 

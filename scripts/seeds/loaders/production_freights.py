@@ -160,8 +160,6 @@ async def seed_production_freights() -> None:
                 for key, value in payload.items():
                     setattr(entity, key, value)
                 entity.deleted_at = None
-            entity.audit_status = "APPROVED"
-            entity.audited_at = datetime.utcnow()
         await session.commit()
 
 

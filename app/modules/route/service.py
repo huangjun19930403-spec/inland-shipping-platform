@@ -41,6 +41,7 @@ from app.modules.route.schemas import (
     RouteTrackVersionGenerateResponse,
 )
 from app.modules.system.runtime_config import RuntimeConfigService
+from app.modules.tasks.repository import ACTIVE_STATUSES
 from app.modules.tasks.schemas import AsyncTaskRunResponse
 from app.modules.tasks.service import AsyncTaskRunService
 
@@ -54,6 +55,9 @@ GEOMETRY_SOURCES = {"AMAP", "HIFLEET", "MANUAL", "FALLBACK"}
 TRACK_VERSION_SOURCES = {"AMAP", "HIFLEET", "MANUAL", "FALLBACK"}
 TRACK_VERSION_STATUSES = {"READY", "PARTIAL", "FAILED"}
 TRACK_EDIT_STATUSES = {"ORIGINAL", "EDITED", "REDRAWN"}
+ROUTE_TRACK_GENERATION_TASK_NAME = "route.generate_track_version"
+ROUTE_TRACK_GENERATION_BUSINESS_TYPE = "ROUTE_PLAN_TRACK_VERSION"
+ROUTE_TRACK_GENERATION_STALE_SECONDS = 900
 PLAN_POINT_COMPARE_FIELDS = (
     "point_order",
     "point_type_code",
@@ -281,6 +285,7 @@ def _to_route_response(
     track_status: str = "NOT_GENERATED",
     track_error_message: str | None = None,
     track_generated_at: datetime | None = None,
+    active_track_generation_task: AsyncTaskRunResponse | None = None,
 ) -> RouteResponse:
     return RouteResponse(
         id=entity.id,
@@ -298,10 +303,6 @@ def _to_route_response(
         multimodal_combination_code=entity.multimodal_combination_code,
         status_code=entity.status_code,
         description=entity.description,
-        audit_status=entity.audit_status,
-        submitter_id=entity.submitter_id,
-        auditor_id=entity.auditor_id,
-        audited_at=entity.audited_at,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
         plan_count=plan_count,
@@ -317,6 +318,7 @@ def _to_route_response(
         track_status=track_status,
         track_error_message=track_error_message,
         track_generated_at=track_generated_at,
+        active_track_generation_task=active_track_generation_task,
     )
 
 
@@ -329,6 +331,7 @@ def _to_plan_response(
     failed_count: int = 0,
     current_track_version: ShippingRoutePlanTrackVersion | None = None,
     track_version_count: int = 0,
+    active_track_generation_task: AsyncTaskRunResponse | None = None,
 ) -> RoutePlanResponse:
     return RoutePlanResponse(
         id=entity.id,
@@ -352,7 +355,53 @@ def _to_plan_response(
         current_track_source_type_code=current_track_version.source_type_code if current_track_version else None,
         track_version_count=track_version_count,
         track_status=_track_status_from_current_version(segment_count, selected_result_count, failed_count),
+        active_track_generation_task=active_track_generation_task,
     )
+
+
+def _normalize_provider_code(provider_code: str | None) -> str:
+    return str(provider_code or "AUTO").strip().upper() or "AUTO"
+
+
+def _track_generation_idempotency_key(plan, provider_code: str | None = None) -> str:
+    return f"{ROUTE_TRACK_GENERATION_TASK_NAME}:{plan.id}:{int(plan.structure_revision or 1)}:{_normalize_provider_code(provider_code)}"
+
+
+def _track_generation_idempotency_key_prefix(plan) -> str:
+    return f"{ROUTE_TRACK_GENERATION_TASK_NAME}:{plan.id}:{int(plan.structure_revision or 1)}:"
+
+
+async def _latest_track_generation_task(
+    db: AsyncSession,
+    plan,
+    *,
+    provider_code: str | None = None,
+) -> AsyncTaskRunResponse | None:
+    return await AsyncTaskRunService(db).get_latest_by_idempotency_key(
+        _track_generation_idempotency_key(plan, provider_code),
+        stale_seconds=ROUTE_TRACK_GENERATION_STALE_SECONDS,
+        recover_stale=True,
+    )
+
+
+async def _active_track_generation_task(
+    db: AsyncSession,
+    plan,
+    *,
+    provider_code: str | None = None,
+) -> AsyncTaskRunResponse | None:
+    if provider_code is None:
+        task = await AsyncTaskRunService(db).get_latest_by_idempotency_key_prefix(
+            _track_generation_idempotency_key_prefix(plan),
+            status_codes=ACTIVE_STATUSES,
+            stale_seconds=ROUTE_TRACK_GENERATION_STALE_SECONDS,
+            recover_stale=True,
+        )
+    else:
+        task = await _latest_track_generation_task(db, plan, provider_code=provider_code)
+    if task is None or task.status_code not in ACTIVE_STATUSES:
+        return None
+    return task
 
 
 def _to_point_response(
@@ -508,11 +557,15 @@ class ShippingRouteService:
         default_plan_name = None
         track_generated_at = None
         track_error_message = None
+        active_track_generation_task = None
         for plan in plans:
             if plan.is_default and default_plan_id is None:
                 default_plan_id = plan.id
                 default_plan_name = plan.plan_name
                 current_track_version_id = plan.current_track_version_id
+            active_task = await _active_track_generation_task(self.db, plan)
+            if active_task is not None and (active_track_generation_task is None or plan.is_default):
+                active_track_generation_task = active_task
             points = await self.structure_repo.list_points(plan.id, plan.structure_revision)
             segments = await self.structure_repo.list_segments(plan.id, plan.structure_revision)
             versions = await self.structure_repo.list_track_versions(plan.id)
@@ -545,6 +598,7 @@ class ShippingRouteService:
             "track_status": _track_status_from_current_version(segment_count, selected_result_count, failed_count),
             "track_error_message": track_error_message,
             "track_generated_at": track_generated_at,
+            "active_track_generation_task": active_track_generation_task,
         }
 
     async def _plan_response(self, plan) -> RoutePlanResponse:
@@ -555,6 +609,7 @@ class ShippingRouteService:
         current_version_segments = await self.structure_repo.list_track_version_segments([current_version.id]) if current_version else []
         selected_count = len(current_version_segments)
         failed_count = 1 if current_version and current_version.version_status_code == "FAILED" else 0
+        active_track_generation_task = await _active_track_generation_task(self.db, plan)
         return _to_plan_response(
             plan,
             point_count=len(points),
@@ -563,6 +618,7 @@ class ShippingRouteService:
             failed_count=failed_count,
             current_track_version=current_version,
             track_version_count=len(versions),
+            active_track_generation_task=active_track_generation_task,
         )
 
     async def list_routes(self, query) -> PageResponse[RouteResponse]:
@@ -601,6 +657,12 @@ class ShippingRouteService:
             error,
             generated_at,
         ) in rows:
+            active_track_generation_task = None
+            plans = await self.plan_repo.list_all_plans(row.id)
+            for plan in sorted(plans, key=lambda item: (not item.is_default, item.display_order, item.id)):
+                active_track_generation_task = await _active_track_generation_task(self.db, plan)
+                if active_track_generation_task is not None:
+                    break
             responses.append(
                 _to_route_response(
                     row,
@@ -617,6 +679,7 @@ class ShippingRouteService:
                     track_status=status,
                     track_error_message=error,
                     track_generated_at=generated_at,
+                    active_track_generation_task=active_track_generation_task,
                 )
             )
         return PageResponse[RouteResponse](total=total, page=query.page, page_size=query.page_size, items=responses)
@@ -625,7 +688,6 @@ class ShippingRouteService:
         data = payload.model_dump(exclude_none=True)
         code = (payload.code or "").strip() or await self.sequence_service.next_code("ROUTE_CODE")
         data["code"] = code
-        data["audit_status"] = "APPROVED"
         data["name"] = payload.name.strip()
         data = await self._normalize_route_endpoint_data(data)
         if await self.route_repo.exists_route_code(code):
@@ -727,6 +789,7 @@ class ShippingRoutePlanService:
         current_version_segments = await self.structure_repo.list_track_version_segments([current_version.id]) if current_version else []
         selected_count = len(current_version_segments)
         failed_count = 1 if current_version and current_version.version_status_code == "FAILED" else 0
+        active_track_generation_task = await _active_track_generation_task(self.db, plan)
         return _to_plan_response(
             plan,
             point_count=len(points),
@@ -735,6 +798,7 @@ class ShippingRoutePlanService:
             failed_count=failed_count,
             current_track_version=current_version,
             track_version_count=len(versions),
+            active_track_generation_task=active_track_generation_task,
         )
 
     async def list_plans(self, route_id: int, query) -> PageResponse[RoutePlanResponse]:
@@ -856,16 +920,16 @@ class ShippingRoutePlanStructureService:
         plan = await self.plan_repo.get_plan_by_id(plan_id)
         if plan is None:
             raise NotFoundError("ShippingRoutePlan", plan_id)
-        provider_code = str(payload.provider_code or "AUTO").strip().upper() or "AUTO"
+        provider_code = _normalize_provider_code(payload.provider_code)
         task_run_service = AsyncTaskRunService(self.db)
         task_run = await task_run_service.create_queued(
-            task_name="route.generate_track_version",
+            task_name=ROUTE_TRACK_GENERATION_TASK_NAME,
             task_title=f"航线轨迹生成：{plan.plan_name}",
             queue_name="analysis",
-            business_type="ROUTE_PLAN_TRACK_VERSION",
+            business_type=ROUTE_TRACK_GENERATION_BUSINESS_TYPE,
             business_id=plan.id,
             business_no=plan.plan_code,
-            idempotency_key=f"route.generate_track_version:{plan.id}:{int(plan.structure_revision or 1)}:{provider_code}",
+            idempotency_key=_track_generation_idempotency_key(plan, provider_code),
             requested_by=requested_by,
             triggered_by="manual",
             max_retries=0,
@@ -875,6 +939,7 @@ class ShippingRoutePlanStructureService:
                 "structure_revision": int(plan.structure_revision or 1),
                 "provider_code": provider_code,
             },
+            stale_seconds=ROUTE_TRACK_GENERATION_STALE_SECONDS,
         )
         should_dispatch = not (
             task_run.celery_task_id
@@ -896,6 +961,17 @@ class ShippingRoutePlanStructureService:
                 await task_run_service.mark_failed(task_run.id, f"轨迹生成任务投递失败：{exc}")
                 raise ValidationError(f"轨迹生成任务投递失败：{exc}") from exc
         return await task_run_service.get_run(task_run.id)
+
+    async def get_latest_track_generation_task(
+        self,
+        plan_id: int,
+        *,
+        provider_code: str | None = None,
+    ) -> AsyncTaskRunResponse | None:
+        plan = await self.plan_repo.get_plan_by_id(plan_id)
+        if plan is None:
+            raise NotFoundError("ShippingRoutePlan", plan_id)
+        return await _latest_track_generation_task(self.db, plan, provider_code=provider_code)
 
     async def generate_track_version(self, plan_id: int, payload) -> RouteTrackVersionGenerateResponse:
         plan = await self.plan_repo.get_plan_by_id(plan_id)
@@ -1137,6 +1213,7 @@ class ShippingRoutePlanStructureService:
         current_version_segments = await self.structure_repo.list_track_version_segments([current_version.id]) if current_version else []
         selected_count = len(current_version_segments)
         failed_count = 1 if current_version and current_version.version_status_code == "FAILED" else 0
+        active_track_generation_task = await _active_track_generation_task(self.db, plan)
         return RoutePlanStructureResponse(
             plan=_to_plan_response(
                 plan,
@@ -1146,6 +1223,7 @@ class ShippingRoutePlanStructureService:
                 failed_count=failed_count,
                 current_track_version=current_version,
                 track_version_count=len(versions),
+                active_track_generation_task=active_track_generation_task,
             ),
             points=point_responses,
             segments=[

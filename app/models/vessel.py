@@ -5,7 +5,7 @@ from datetime import date, datetime
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import AuditFlowMixin, Base, SoftDeleteMixin, TimestampMixin
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin
 
 
 class VesselIdentity(Base, TimestampMixin, SoftDeleteMixin):
@@ -21,7 +21,7 @@ class VesselIdentity(Base, TimestampMixin, SoftDeleteMixin):
     remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
-class VesselProfile(Base, TimestampMixin, SoftDeleteMixin, AuditFlowMixin):
+class VesselProfile(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "vessel_profile"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -1111,7 +1111,6 @@ class VesselControllerEvidence(Base, TimestampMixin):
     effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
     verified_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT", index=True)
-    audit_task_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("audit_task.id"), nullable=True, index=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     verified_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -1163,7 +1162,6 @@ class VesselAffiliationEvidence(Base, TimestampMixin):
     effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE", index=True)
     verified_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT", index=True)
-    audit_task_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("audit_task.id"), nullable=True, index=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     verified_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

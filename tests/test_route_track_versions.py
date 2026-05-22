@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -25,6 +25,7 @@ from app.models.route import (
     ShippingRoutePlanTrackVersion,
     ShippingRoutePlanTrackVersionSegment,
 )
+from app.models.task import AsyncTaskRun
 from app.models.vessel import (
     VesselCandidateAnalysis,
     VesselCandidateAnalysisAnnotation,
@@ -694,6 +695,46 @@ async def test_enqueue_generate_track_version_creates_idempotent_async_task(sess
     assert first.business_type == "ROUTE_PLAN_TRACK_VERSION"
     assert first.extra_json["structure_revision"] == 1
     assert calls == [(plan_id, {"provider_code": "HIFLEET"}, 99, first.id)]
+    latest = await service.get_latest_track_generation_task(plan_id, provider_code="HIFLEET")
+    structure = await service.get_structure(plan_id)
+    assert latest is not None
+    assert latest.id == first.id
+    assert structure.plan.active_track_generation_task is not None
+    assert structure.plan.active_track_generation_task.id == first.id
+
+
+@pytest.mark.asyncio
+async def test_enqueue_generate_track_version_marks_stale_task_and_creates_new_run(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    plan_id = await _seed_plan(session)
+    service = ShippingRoutePlanStructureService(session)
+    calls: list[tuple[int, dict, int | None, int | None]] = []
+
+    class FakeAsyncResult:
+        def __init__(self, task_id: str) -> None:
+            self.id = task_id
+
+    def fake_delay(plan_id_arg: int, payload: dict, requested_by: int | None, task_run_id: int | None) -> FakeAsyncResult:
+        calls.append((plan_id_arg, payload, requested_by, task_run_id))
+        return FakeAsyncResult(f"celery-route-test-{len(calls)}")
+
+    from app.tasks import route_tasks
+
+    monkeypatch.setattr(route_tasks.generate_route_track_version_task, "delay", fake_delay)
+
+    first = await service.enqueue_generate_track_version(plan_id, RouteTrackGenerateRequest(provider_code="AUTO"))
+    row = await session.get(AsyncTaskRun, first.id)
+    assert row is not None
+    row.heartbeat_at = datetime.utcnow() - timedelta(seconds=1900)
+    await session.commit()
+
+    second = await service.enqueue_generate_track_version(plan_id, RouteTrackGenerateRequest(provider_code="AUTO"))
+    stale_first = await session.get(AsyncTaskRun, first.id)
+
+    assert second.id != first.id
+    assert stale_first is not None
+    assert stale_first.status_code == "STALE"
+    assert second.status_code == "QUEUED"
+    assert [call[3] for call in calls] == [first.id, second.id]
 
 
 @pytest.mark.asyncio

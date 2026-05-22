@@ -19,11 +19,12 @@ from app.core.database import Base
 from app.models import (  # noqa: F401
     address,
     analysis,
-    audit,
     commodity,
     common,
     dictionary,
     freight,
+    operation,
+    approval,
     route,
     vessel,
     system,

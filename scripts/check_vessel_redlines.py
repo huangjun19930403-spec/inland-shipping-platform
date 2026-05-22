@@ -104,10 +104,15 @@ def main() -> int:
         "ais",
         "profile_card",
     }
+    required_domain_files = {
+        name: ["service.py", "methods.py"] for name in required_domain_dirs
+    }
+    required_domain_files["asset"] = ["service.py", "profile_methods.py", "list_methods.py", "summary_methods.py"]
     missing_domain_services = sorted(
-        name
-        for name in required_domain_dirs
-        if not (vessel_root / name / "service.py").exists() or not (vessel_root / name / "methods.py").exists()
+        f"{name}/{file_name}"
+        for name, file_names in required_domain_files.items()
+        for file_name in file_names
+        if not (vessel_root / name / file_name).exists()
     )
     if missing_domain_services:
         failures.append("vessel domain service/method modules missing: " + ", ".join(missing_domain_services))
@@ -148,11 +153,7 @@ def main() -> int:
 
     aggregate_service = vessel_root / "service.py"
     if aggregate_service.exists():
-        text = aggregate_service.read_text(encoding="utf-8")
-        if "class VesselService(VesselDomainService)" not in text:
-            failures.append("app/modules/vessel/service.py must remain a compatibility aggregate over split domain services")
-        if "async def " in text or "def __init__" in text:
-            failures.append("app/modules/vessel/service.py must not grow implementation methods again")
+        failures.append("app/modules/vessel/service.py is a deleted compatibility aggregate; use explicit vessel domain services")
 
     governance_service = BACKEND / "app" / "modules" / "vessel" / "governance_service.py"
     if governance_service.exists():

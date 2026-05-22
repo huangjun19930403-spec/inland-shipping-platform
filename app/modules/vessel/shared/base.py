@@ -30,7 +30,6 @@ from app.integrations.config_keys import (
 )
 from app.integrations.es import RealtimeEsClient
 from app.models.address import AdminRegion, AdminRegionBoundary, Region, NavigationChannel, NavigationChannelBoundary
-from app.models.audit import AuditRecord, AuditTask, AuditTaskSnapshot
 from app.models.dictionary import StdDict, StdDictItem
 from app.models.vessel import (
     VesselAffiliationEvidence,
@@ -190,7 +189,6 @@ LABEL_DICTS = [
     "VESSEL_IDENTITY_STATUS",
     "SHIP_OPERATION_STATUS",
     "SOURCE_TYPE",
-    "AUDIT_STATUS",
     "CONTACT_ROLE",
     "CONTACT_SCOPE",
     "VESSEL_CREW_ROLE",
@@ -983,7 +981,6 @@ def _profile_response(
         identity_status_name=label_map.get("VESSEL_IDENTITY_STATUS", {}).get(row.identity_status_code),
         operation_status_name=label_map.get("SHIP_OPERATION_STATUS", {}).get(row.operation_status_code or ""),
         source_type_name=label_map.get("SOURCE_TYPE", {}).get(row.source_type_code),
-        audit_status_name=label_map.get("AUDIT_STATUS", {}).get(row.audit_status),
         registry_city_name=city_map.get(row.registry_city_code or ""),
         business_region_name=region_map.get(row.business_region_id or 0),
     )

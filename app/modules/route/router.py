@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -170,6 +170,20 @@ async def generate_route_plan_track_version(
         plan_id,
         body or RouteTrackGenerateRequest(),
         requested_by=requested_by,
+    )
+
+
+@router.get("/plans/{plan_id}/track-generation-tasks/latest", response_model=AsyncTaskRunResponse | None)
+async def get_latest_route_plan_track_generation_task(
+    plan_id: int,
+    provider_code: str | None = Query(default="AUTO"),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    return await ShippingRoutePlanStructureService(db).get_latest_track_generation_task(
+        plan_id,
+        provider_code=provider_code,
     )
 
 
