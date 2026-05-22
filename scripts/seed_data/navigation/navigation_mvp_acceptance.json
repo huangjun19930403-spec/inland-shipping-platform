@@ -1,0 +1,229 @@
+{
+  "source_code": "MVP_JS_YRD_2026",
+  "scope_code": "YANGTZE_DELTA_MVP",
+  "version_name": "江苏/长三角 MVP 航道图 V1",
+  "disclaimer": "MVP graph is for business route generation and acceptance calibration only; it is not an official navigation safety chart.",
+  "nodes": [
+    {
+      "node_code": "MVP-NODE-TN-1",
+      "transport_node_id": 1,
+      "node_type_code": "TERMINAL",
+      "channel_code": "NC-YANGTZE",
+      "role": "靖江主验收端点"
+    },
+    {
+      "node_code": "MVP-NODE-TN-11",
+      "transport_node_id": 11,
+      "node_type_code": "TERMINAL",
+      "channel_code": "NC-YANGTZE",
+      "role": "长江江苏段入口端点"
+    },
+    {
+      "node_code": "MVP-NODE-TN-25",
+      "transport_node_id": 25,
+      "node_type_code": "TERMINAL",
+      "channel_code": "NC-YANGTZE",
+      "role": "扬州主验收端点"
+    },
+    {
+      "node_code": "MVP-NODE-TN-37",
+      "transport_node_id": 37,
+      "node_type_code": "TERMINAL",
+      "channel_code": "NC-SUNAN-CANAL",
+      "role": "常州主验收端点"
+    },
+    {
+      "node_code": "MVP-NODE-TN-103",
+      "transport_node_id": 103,
+      "node_type_code": "TERMINAL",
+      "channel_code": "NC-GRAND-CANAL",
+      "role": "苏州主验收端点"
+    },
+    {
+      "node_code": "MVP-NODE-TN-295",
+      "transport_node_id": 295,
+      "node_type_code": "ANCHORAGE",
+      "channel_code": "NC-SUNAN-CANAL",
+      "role": "无锡主验收端点"
+    },
+    {
+      "node_code": "MVP-NODE-YANGTZE-SUNAN-GATE",
+      "node_name": "长江-苏南内河 MVP 接入点",
+      "longitude": 120.175,
+      "latitude": 31.925,
+      "node_type_code": "CHANNEL_JUNCTION",
+      "channel_code": "NC-YANGTZE",
+      "role": "长江到苏南内河 graph 连接点"
+    }
+  ],
+  "centerline_edges": [
+    {
+      "edge_code": "MVP-EDGE-YANGTZE-YZ-JJ",
+      "centerline_code": "MVP-CL-YANGTZE-YZ-JJ",
+      "centerline_name": "MVP 长江江苏段 扬州-靖江",
+      "water_area_object_id": "MVP-WA-YANGTZE-YZ-JJ",
+      "water_name": "长江江苏段 MVP 走廊",
+      "channel_code": "NC-YANGTZE",
+      "from_node_code": "MVP-NODE-TN-25",
+      "to_node_code": "MVP-NODE-TN-1",
+      "technical_grade_code": "III",
+      "confidence_score": 82,
+      "unknown_constraint_flag": true,
+      "coordinates": [
+        [119.81034, 32.32482],
+        [119.92, 32.22],
+        [120.04, 32.10],
+        [120.14, 32.00],
+        [120.2193, 31.94489]
+      ]
+    },
+    {
+      "edge_code": "MVP-EDGE-YANGTZE-STG-JJ",
+      "centerline_code": "MVP-CL-YANGTZE-STG-JJ",
+      "centerline_name": "MVP 长江江苏段 苏通港务-靖江",
+      "water_area_object_id": "MVP-WA-YANGTZE-STG-JJ",
+      "water_name": "长江江苏段 MVP 走廊",
+      "channel_code": "NC-YANGTZE",
+      "from_node_code": "MVP-NODE-TN-11",
+      "to_node_code": "MVP-NODE-TN-1",
+      "technical_grade_code": "III",
+      "confidence_score": 82,
+      "unknown_constraint_flag": true,
+      "coordinates": [
+        [120.34265, 32.00218],
+        [120.29, 31.985],
+        [120.2193, 31.94489]
+      ]
+    },
+    {
+      "edge_code": "MVP-EDGE-YANGTZE-JJ-GATE",
+      "centerline_code": "MVP-CL-YANGTZE-JJ-GATE",
+      "centerline_name": "MVP 长江江苏段 靖江接入",
+      "water_area_object_id": "MVP-WA-YANGTZE-JJ-GATE",
+      "water_name": "长江江苏段 MVP 接入走廊",
+      "channel_code": "NC-YANGTZE",
+      "from_node_code": "MVP-NODE-TN-1",
+      "to_node_code": "MVP-NODE-YANGTZE-SUNAN-GATE",
+      "technical_grade_code": "III",
+      "confidence_score": 80,
+      "unknown_constraint_flag": true,
+      "coordinates": [
+        [120.2193, 31.94489],
+        [120.195, 31.935],
+        [120.175, 31.925]
+      ]
+    },
+    {
+      "edge_code": "MVP-EDGE-SUNAN-GATE-CZ",
+      "centerline_code": "MVP-CL-SUNAN-GATE-CZ",
+      "centerline_name": "MVP 苏南运河 接入点-常州",
+      "water_area_object_id": "MVP-WA-SUNAN-GATE-CZ",
+      "water_name": "苏南运河 MVP 走廊",
+      "channel_code": "NC-SUNAN-CANAL",
+      "from_node_code": "MVP-NODE-YANGTZE-SUNAN-GATE",
+      "to_node_code": "MVP-NODE-TN-37",
+      "technical_grade_code": "IV",
+      "confidence_score": 78,
+      "unknown_constraint_flag": true,
+      "coordinates": [
+        [120.175, 31.925],
+        [120.14, 31.84],
+        [120.105, 31.77],
+        [120.07399, 31.71087]
+      ]
+    },
+    {
+      "edge_code": "MVP-EDGE-SUNAN-CZ-WX",
+      "centerline_code": "MVP-CL-SUNAN-CZ-WX",
+      "centerline_name": "MVP 苏南运河 常州-无锡",
+      "water_area_object_id": "MVP-WA-SUNAN-CZ-WX",
+      "water_name": "苏南运河 MVP 走廊",
+      "channel_code": "NC-SUNAN-CANAL",
+      "from_node_code": "MVP-NODE-TN-37",
+      "to_node_code": "MVP-NODE-TN-295",
+      "technical_grade_code": "IV",
+      "confidence_score": 80,
+      "unknown_constraint_flag": true,
+      "coordinates": [
+        [120.07399, 31.71087],
+        [120.12, 31.66],
+        [120.206125, 31.606669]
+      ]
+    },
+    {
+      "edge_code": "MVP-EDGE-GRAND-CANAL-WX-SZ",
+      "centerline_code": "MVP-CL-GRAND-CANAL-WX-SZ",
+      "centerline_name": "MVP 京杭运河江南段 无锡-苏州",
+      "water_area_object_id": "MVP-WA-GRAND-CANAL-WX-SZ",
+      "water_name": "京杭运河江南段 MVP 走廊",
+      "channel_code": "NC-GRAND-CANAL",
+      "from_node_code": "MVP-NODE-TN-295",
+      "to_node_code": "MVP-NODE-TN-103",
+      "technical_grade_code": "IV",
+      "confidence_score": 80,
+      "unknown_constraint_flag": true,
+      "coordinates": [
+        [120.206125, 31.606669],
+        [120.34, 31.56],
+        [120.49, 31.50],
+        [120.63105, 31.4515]
+      ]
+    }
+  ],
+  "acceptance_routes": [
+    {
+      "route_code": "MVP-R01",
+      "route_name": "靖江永益码头 -> 苏州渭塘华东材料",
+      "origin_transport_node_id": 1,
+      "destination_transport_node_id": 103,
+      "expected_channel_codes": ["NC-YANGTZE", "NC-SUNAN-CANAL", "NC-GRAND-CANAL"],
+      "expected_issue_types": ["UNKNOWN_CONSTRAINT_DATA"],
+      "unacceptable_results": ["DIRECT_LINE_FALLBACK", "MISSING_EDGE_IDS", "MISSING_GRAPH_VERSION", "FAILED"]
+    },
+    {
+      "route_code": "MVP-R02",
+      "route_name": "靖江永益码头 -> 无锡惠山锚地",
+      "origin_transport_node_id": 1,
+      "destination_transport_node_id": 295,
+      "expected_channel_codes": ["NC-YANGTZE", "NC-SUNAN-CANAL"],
+      "expected_issue_types": ["UNKNOWN_CONSTRAINT_DATA"],
+      "unacceptable_results": ["DIRECT_LINE_FALLBACK", "MISSING_EDGE_IDS", "MISSING_GRAPH_VERSION", "FAILED"]
+    },
+    {
+      "route_code": "MVP-R03",
+      "route_name": "苏州渭塘华东材料 -> 扬州海昌港务",
+      "origin_transport_node_id": 103,
+      "destination_transport_node_id": 25,
+      "expected_channel_codes": ["NC-GRAND-CANAL", "NC-SUNAN-CANAL", "NC-YANGTZE"],
+      "expected_issue_types": ["UNKNOWN_CONSTRAINT_DATA"],
+      "unacceptable_results": ["DIRECT_LINE_FALLBACK", "MISSING_EDGE_IDS", "MISSING_GRAPH_VERSION", "FAILED"]
+    },
+    {
+      "route_code": "MVP-R04",
+      "route_name": "无锡惠山锚地 -> 常州中天特钢",
+      "origin_transport_node_id": 295,
+      "destination_transport_node_id": 37,
+      "expected_channel_codes": ["NC-SUNAN-CANAL"],
+      "expected_issue_types": ["UNKNOWN_CONSTRAINT_DATA"],
+      "unacceptable_results": ["DIRECT_LINE_FALLBACK", "MISSING_EDGE_IDS", "MISSING_GRAPH_VERSION", "FAILED"]
+    },
+    {
+      "route_code": "MVP-R05",
+      "route_name": "京杭运河江苏段局部：苏州渭塘华东材料 -> 无锡惠山锚地",
+      "origin_transport_node_id": 103,
+      "destination_transport_node_id": 295,
+      "expected_channel_codes": ["NC-GRAND-CANAL"],
+      "expected_issue_types": ["UNKNOWN_CONSTRAINT_DATA"],
+      "unacceptable_results": ["DIRECT_LINE_FALLBACK", "MISSING_EDGE_IDS", "MISSING_GRAPH_VERSION", "FAILED"]
+    },
+    {
+      "route_code": "MVP-R06",
+      "route_name": "长江江苏段 -> 苏南内河码头：靖江苏通港务 -> 常州中天特钢",
+      "origin_transport_node_id": 11,
+      "destination_transport_node_id": 37,
+      "expected_channel_codes": ["NC-YANGTZE", "NC-SUNAN-CANAL"],
+      "expected_issue_types": ["UNKNOWN_CONSTRAINT_DATA"],
+      "unacceptable_results": ["DIRECT_LINE_FALLBACK", "MISSING_EDGE_IDS", "MISSING_GRAPH_VERSION", "FAILED"]
+    }
+  ]
+}

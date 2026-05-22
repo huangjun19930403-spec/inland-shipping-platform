@@ -22,7 +22,7 @@
 
 ## 2. MVP 验收端点候选
 
-端点优先使用当前 `transport_node` seed 中可查到的码头、锚地或港口节点。后续 Round 12 若业务指定更精确码头，应在本文件补充 fixture 节点。
+端点优先使用当前 `transport_node` seed 中可查到的码头、锚地或港口节点。Round 12 已用 `scripts/seed_data/navigation/navigation_mvp_acceptance.json` 固定首批自动验收端点；后续若业务指定更精确码头，应在本文件补充 fixture 节点并重新标定。
 
 | 城市/区域 | node_id | node_code | node_name | lng | lat | 用途 |
 | --- | ---: | --- | --- | ---: | ---: | --- |
@@ -42,16 +42,33 @@
 
 ## 3. MVP 路线验收集
 
-里程范围先以 `TBD_AFTER_GRAPH_FIXTURE_CALIBRATION` 表示。Round 12 发布 MVP graph 前必须用 fixture 和人工地图核验把范围补成具体数值。未标定前不能把“接口返回路线”作为通过。
+Round 12 发布的首个 MVP graph version：
 
-| 编号 | 起点 | 终点 | 预期经过航道候选 | 里程范围 | 验收重点 |
-| --- | --- | --- | --- | --- | --- |
-| MVP-R01 | 靖江永益码头 `1` | 苏州渭塘华东材料 `103` | 长江江苏段、苏南内河、京杭运河/苏申相关航道候选 | TBD_AFTER_GRAPH_FIXTURE_CALIBRATION | 沿江到内河接入是否合理 |
-| MVP-R02 | 靖江永益码头 `1` | 无锡惠山锚地 `295` | 长江江苏段、锡澄运河/苏南运河、京杭运河候选 | TBD_AFTER_GRAPH_FIXTURE_CALIBRATION | 靖江到无锡内河连通性 |
-| MVP-R03 | 苏州渭塘华东材料 `103` | 扬州海昌港务 `25` | 京杭运河江苏段、苏南运河、长江/内河组合候选 | TBD_AFTER_GRAPH_FIXTURE_CALIBRATION | 苏州到扬州不应画直线跨陆 |
-| MVP-R04 | 无锡惠山锚地 `295` | 常州中天特钢 `37` | 京杭运河江苏段、苏南运河、锡溧/丹金溧漕河候选 | TBD_AFTER_GRAPH_FIXTURE_CALIBRATION | 短途内河路径是否沿 graph |
-| MVP-R05 | 苏州渭塘华东材料 `103` | 无锡惠山锚地 `295` | 京杭运河江苏段、苏南运河候选 | TBD_AFTER_GRAPH_FIXTURE_CALIBRATION | 京杭运河江苏段局部路径 |
-| MVP-R06 | 靖江苏通港务 `11` | 常州中天特钢 `37` | 长江江苏段、苏南内河接入航道候选 | TBD_AFTER_GRAPH_FIXTURE_CALIBRATION | 长江干线到苏南内河码头接入 |
+```text
+version_code: MVP-JS-YRD-20260522-V1
+scope_code: YANGTZE_DELTA_MVP
+seed_summary: data_audit/navigation_mvp_seed_summary.json
+acceptance_report: data_audit/navigation_mvp_acceptance_report.json
+```
+
+自动验收已标定每条路线的 graph 距离范围。该范围来自受控 MVP graph fixture，仍需人工地图复核后才能作为业务长期验收阈值。
+
+| 编号 | 起点 | 终点 | 实际经过航道 | channel_ids | 标定距离 km | 验收重点 |
+| --- | --- | --- | --- | --- | --- | --- |
+| MVP-R01 | 靖江永益码头 `1` | 苏州渭塘华东材料 `103` | 长江干线、苏南运河、京杭运河 | `1,46,3` | 91.4545，范围 77.7~105.2 | 沿江到内河接入是否合理 |
+| MVP-R02 | 靖江永益码头 `1` | 无锡惠山锚地 `295` | 长江干线、苏南运河 | `1,46` | 47.5695，范围 40.4~54.7 | 靖江到无锡内河连通性 |
+| MVP-R03 | 苏州渭塘华东材料 `103` | 扬州海昌港务 `25` | 京杭运河、苏南运河、长江干线 | `3,46,1` | 148.7123，范围 126.4~171.0 | 苏州到扬州不应画直线跨陆 |
+| MVP-R04 | 无锡惠山锚地 `295` | 常州中天特钢 `37` | 苏南运河 | `46` | 17.2165，范围 14.6~19.8 | 短途内河路径是否沿 graph |
+| MVP-R05 | 苏州渭塘华东材料 `103` | 无锡惠山锚地 `295` | 京杭运河 | `3` | 43.8851，范围 37.3~50.5 | 京杭运河江苏段局部路径 |
+| MVP-R06 | 靖江苏通港务 `11` | 常州中天特钢 `37` | 长江干线、苏南运河 | `1,46` | 43.7085，范围 37.2~50.3 | 长江干线到苏南内河码头接入 |
+
+自动验收状态：
+
+- 6 条路线全部返回 `SUCCESS`。
+- 6 条路线全部使用 `provider_code=NAVIGATION_ENGINE`。
+- 每条路线都有 `graph_version_id`、`edge_ids`、`channel_ids`。
+- 每条路线都产生 `UNKNOWN_CONSTRAINT_DATA`，质量为 `READY_WITH_WARNING`。
+- 没有使用 HiFleet 主链，也没有生成水路 fallback 假路线。
 
 ## 4. 不可接受结果
 
@@ -78,18 +95,23 @@
 - 对未知桥梁净空、船闸计划、水深限制等，前端必须显示风险提示。
 - 失败路线要定位失败区域，例如起点无 graph、终点无 graph、graph 断裂、约束阻断。
 
-## 6. Round 12 前必须补齐
+## 6. Round 12 标定字段
 
-Round 12 业务验收前必须把以下字段补成具体值：
+Round 12 已补齐自动验收字段：
 
 ```text
 expected_distance_km_min
 expected_distance_km_max
 expected_primary_channel_ids
 expected_optional_channel_ids
-known_lock_or_bridge_points
-manual_map_reviewer
-manual_map_reviewed_at
+```
+
+本轮仍保留为人工待复核字段：
+
+```text
+known_lock_or_bridge_points = PENDING_CONSTRAINT_DATA
+manual_map_reviewer = PENDING_HUMAN_REVIEW
+manual_map_reviewed_at = PENDING_HUMAN_REVIEW
 ```
 
 如果某条路线数据缺口过大，应保留在验收集中但状态为 `BLOCKED_BY_DATA_GAP`，不能从验收集中静默删除。

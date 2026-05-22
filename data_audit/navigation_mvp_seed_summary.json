@@ -1,0 +1,89 @@
+{
+  "version_code": "MVP-JS-YRD-20260522-V1",
+  "graph_version_id": 1,
+  "status_code": "READY",
+  "is_active": true,
+  "water_area_count": 6,
+  "centerline_count": 6,
+  "node_count": 7,
+  "edge_count": 6,
+  "channel_codes": [
+    "NC-GRAND-CANAL",
+    "NC-SUNAN-CANAL",
+    "NC-YANGTZE"
+  ],
+  "transport_node_ids": [
+    1,
+    11,
+    25,
+    37,
+    103,
+    295
+  ],
+  "validation_report": {
+    "graph_version_id": 1,
+    "version_code": "MVP-JS-YRD-20260522-V1",
+    "status_code": "READY",
+    "quality_score": 82,
+    "node_count": 7,
+    "edge_count": 6,
+    "routing_edge_count": 6,
+    "component_count": 1,
+    "blocking_issue_count": 0,
+    "warning_issue_count": 6,
+    "issues": [
+      {
+        "issue_code": "UNKNOWN_CONSTRAINT_DATA",
+        "severity_code": "WARNING",
+        "message": "Edge MVP-EDGE-YANGTZE-YZ-JJ has incomplete navigation constraint data",
+        "node_id": null,
+        "edge_id": 1,
+        "annotation_candidate": null
+      },
+      {
+        "issue_code": "UNKNOWN_CONSTRAINT_DATA",
+        "severity_code": "WARNING",
+        "message": "Edge MVP-EDGE-YANGTZE-STG-JJ has incomplete navigation constraint data",
+        "node_id": null,
+        "edge_id": 2,
+        "annotation_candidate": null
+      },
+      {
+        "issue_code": "UNKNOWN_CONSTRAINT_DATA",
+        "severity_code": "WARNING",
+        "message": "Edge MVP-EDGE-YANGTZE-JJ-GATE has incomplete navigation constraint data",
+        "node_id": null,
+        "edge_id": 3,
+        "annotation_candidate": null
+      },
+      {
+        "issue_code": "UNKNOWN_CONSTRAINT_DATA",
+        "severity_code": "WARNING",
+        "message": "Edge MVP-EDGE-SUNAN-GATE-CZ has incomplete navigation constraint data",
+        "node_id": null,
+        "edge_id": 4,
+        "annotation_candidate": null
+      },
+      {
+        "issue_code": "UNKNOWN_CONSTRAINT_DATA",
+        "severity_code": "WARNING",
+        "message": "Edge MVP-EDGE-SUNAN-CZ-WX has incomplete navigation constraint data",
+        "node_id": null,
+        "edge_id": 5,
+        "annotation_candidate": null
+      },
+      {
+        "issue_code": "UNKNOWN_CONSTRAINT_DATA",
+        "severity_code": "WARNING",
+        "message": "Edge MVP-EDGE-GRAND-CANAL-WX-SZ has incomplete navigation constraint data",
+        "node_id": null,
+        "edge_id": 6,
+        "annotation_candidate": null
+      }
+    ],
+    "annotation_task_candidates": []
+  },
+  "warnings": [
+    "MVP graph contains UNKNOWN_CONSTRAINT_DATA warnings; route quality must be READY_WITH_WARNING at most."
+  ]
+}
