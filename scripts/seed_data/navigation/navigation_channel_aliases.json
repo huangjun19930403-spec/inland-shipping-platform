@@ -1,0 +1,70 @@
+{
+  "version": "navigation_channel_aliases_v1",
+  "description": "Alias and water-name hints for Round 5 navigation water-area matching. These rules do not overwrite seed boundaries.",
+  "channels": {
+    "NC-YANGTZE": {
+      "aliases": ["长江", "长江干线", "扬子江"],
+      "water_names": ["长江"]
+    },
+    "NC-GRAND-CANAL": {
+      "aliases": ["京杭运河", "京杭大运河", "苏北运河", "江南运河"],
+      "water_names": ["京杭运河", "京杭大运河"]
+    },
+    "NC-HUANGPU-RIVER": {
+      "aliases": ["黄浦江"],
+      "water_names": ["黄浦江"]
+    },
+    "NC-QIANTANG-RIVER": {
+      "aliases": ["钱塘江"],
+      "water_names": ["钱塘江"]
+    },
+    "NC-HANJIANG-RIVER": {
+      "aliases": ["汉江", "汉水"],
+      "water_names": ["汉水", "汉江"]
+    },
+    "NC-SHAYING-RIVER": {
+      "aliases": ["沙颍河", "沙颍河航道", "颖河", "颍河"],
+      "water_names": ["颖河", "颍河"]
+    },
+    "NC-HUAIHE-SEA-CHANNEL": {
+      "aliases": ["淮河出海航道", "盐河", "淮河出海航道—盐河"],
+      "water_names": ["淮河", "盐河"]
+    },
+    "NC-TONGYANG-LINE": {
+      "aliases": ["通扬线", "通扬运河"],
+      "water_names": ["通扬运河"]
+    },
+    "NC-LIANSHEN-LINE": {
+      "aliases": ["连申线", "连申运河"],
+      "water_names": ["连申线", "连申运河"]
+    },
+    "NC-WUSHEN-LINE": {
+      "aliases": ["芜申线", "苏申外港线", "芜申线—苏申外港线"],
+      "water_names": ["芜申运河", "苏申外港线"]
+    },
+    "NC-SUSHEN-INNER-PORT-LINE": {
+      "aliases": ["苏申内港线"],
+      "water_names": ["苏申内港线"]
+    },
+    "NC-CHANGHUSHEN-LINE": {
+      "aliases": ["长湖申线", "黄浦江", "大浦线", "长湖申线—黄浦江—大浦线"],
+      "water_names": ["长湖申线", "黄浦江", "大浦线"]
+    },
+    "NC-ZHAJIAGOU": {
+      "aliases": ["赵家沟"],
+      "water_names": ["赵家沟"]
+    },
+    "NC-DALU-LINE": {
+      "aliases": ["大芦线"],
+      "water_names": ["大芦线"]
+    },
+    "NC-DAPU-LINE": {
+      "aliases": ["大浦线"],
+      "water_names": ["大浦线"]
+    },
+    "NC-HANGYONG-CANAL": {
+      "aliases": ["杭甬运河"],
+      "water_names": ["杭甬运河"]
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "version": "navigation_mvp_scope_v1",
+  "scope_code": "YANGTZE_DELTA_MVP",
+  "description": "Round 5 MVP scope hints. Bbox is only used to reduce ambiguous water-area matches, not to generate routes.",
+  "bbox": {
+    "min_lng": 118.0,
+    "min_lat": 29.5,
+    "max_lng": 122.8,
+    "max_lat": 33.8
+  },
+  "priority_channel_codes": [
+    "NC-YANGTZE",
+    "NC-GRAND-CANAL",
+    "NC-HUAIHE-SEA-CHANNEL",
+    "NC-TONGYANG-LINE",
+    "NC-LIANSHEN-LINE",
+    "NC-WUSHEN-LINE",
+    "NC-CHANGHUSHEN-LINE",
+    "NC-SUSHEN-OUTER-PORT-LINE",
+    "NC-SUSHEN-INNER-PORT-LINE",
+    "NC-XICHENG-CANAL",
+    "NC-DANJINLI-CAOHE",
+    "NC-HANGYONG-CANAL",
+    "NC-HUANGPU-RIVER",
+    "NC-QIANTANG-RIVER",
+    "NC-ZHAJIAGOU",
+    "NC-DALU-LINE",
+    "NC-DAPU-LINE"
+  ]
+}
