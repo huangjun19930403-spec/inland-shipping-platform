@@ -420,25 +420,27 @@ class NavigationMapLayerService:
         *,
         channel_id: int | None,
     ) -> list[NavigationMapLayerFeatureResponse]:
-        active_graph_version_id = await self.session.scalar(
-            select(NavigationGraphVersion.id)
-            .where(
-                NavigationGraphVersion.is_active.is_(True),
-                NavigationGraphVersion.status_code == "READY",
-                NavigationGraphVersion.edge_count > 0,
-                NavigationGraphVersion.scope_code.not_like("MVP%"),
+        active_graph_exists = bool(
+            await self.session.scalar(
+                select(NavigationGraphVersion.id)
+                .where(
+                    NavigationGraphVersion.is_active.is_(True),
+                    NavigationGraphVersion.status_code == "READY",
+                    NavigationGraphVersion.edge_count > 0,
+                    NavigationGraphVersion.scope_code.not_like("MVP%"),
+                )
+                .limit(1)
             )
-            .order_by(NavigationGraphVersion.id.desc())
         )
-        if active_graph_version_id is None:
+        if not active_graph_exists:
             warnings.append("NO_ACTIVE_READY_GRAPH_VERSION")
             return []
         from_node = aliased(NavigationGraphNode)
         to_node = aliased(NavigationGraphNode)
         clauses = [
-            NavigationGraphEdge.graph_version_id == active_graph_version_id,
             NavigationGraphVersion.is_active.is_(True),
             NavigationGraphVersion.status_code == "READY",
+            NavigationGraphVersion.edge_count > 0,
             NavigationGraphVersion.scope_code.not_like("MVP%"),
             NavigationGraphEdge.routing_enabled.is_(True),
             or_(
@@ -447,6 +449,24 @@ class NavigationMapLayerService:
             ),
         ]
         if channel_id is not None:
+            active_graph_version_id = await self.session.scalar(
+                select(NavigationGraphEdge.graph_version_id)
+                .join(NavigationGraphVersion, NavigationGraphVersion.id == NavigationGraphEdge.graph_version_id)
+                .where(
+                    NavigationGraphVersion.is_active.is_(True),
+                    NavigationGraphVersion.status_code == "READY",
+                    NavigationGraphVersion.edge_count > 0,
+                    NavigationGraphVersion.scope_code.not_like("MVP%"),
+                    NavigationGraphEdge.channel_id == channel_id,
+                    NavigationGraphEdge.routing_enabled.is_(True),
+                )
+                .order_by(NavigationGraphEdge.graph_version_id.desc())
+                .limit(1)
+            )
+            if active_graph_version_id is None:
+                warnings.append("NO_ACTIVE_READY_GRAPH_FOR_CHANNEL")
+                return []
+            clauses.append(NavigationGraphEdge.graph_version_id == active_graph_version_id)
             clauses.append(NavigationGraphEdge.channel_id == channel_id)
         rows = list(
             (

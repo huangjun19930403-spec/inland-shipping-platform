@@ -403,6 +403,141 @@ async def test_map_layers_warns_without_active_ready_graph_version(session_maker
 
 
 @pytest.mark.asyncio
+async def test_map_layers_selects_active_graph_per_channel_scope(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_layers(session)
+        session.add(
+            NavigationChannel(
+                id=2,
+                channel_code="TEST-CHANNEL-2",
+                channel_name="测试航道 2",
+                channel_type_code="CANAL",
+                planning_level_code="REGIONAL_IMPORTANT",
+                source_version="TEST",
+                is_enabled=True,
+                display_priority=9,
+            )
+        )
+        session.add(
+            NavigationGraphVersion(
+                id=2,
+                version_code="GV-2",
+                version_name="Graph fixture 2",
+                scope_code="OTHER",
+                node_count=2,
+                edge_count=1,
+                channel_count=1,
+                status_code="READY",
+                is_active=True,
+            )
+        )
+        session.add_all(
+            [
+                NavigationGraphNode(
+                    id=3,
+                    graph_version_id=2,
+                    node_code="N3",
+                    node_type_code="CENTERLINE_VERTEX",
+                    longitude=120.0,
+                    latitude=31.15,
+                    geometry_json={"type": "Point", "coordinates": [120.0, 31.15]},
+                    is_enabled=True,
+                    quality_code="READY",
+                    source_type_code="CENTERLINE_VERTEX",
+                ),
+                NavigationGraphNode(
+                    id=4,
+                    graph_version_id=2,
+                    node_code="N4",
+                    node_type_code="CENTERLINE_VERTEX",
+                    longitude=120.2,
+                    latitude=31.15,
+                    geometry_json={"type": "Point", "coordinates": [120.2, 31.15]},
+                    is_enabled=True,
+                    quality_code="READY",
+                    source_type_code="CENTERLINE_VERTEX",
+                ),
+                NavigationGraphEdge(
+                    id=2,
+                    graph_version_id=2,
+                    edge_code="E2",
+                    from_node_id=3,
+                    to_node_id=4,
+                    channel_id=2,
+                    geometry_json=_line((120.0, 31.15), (120.2, 31.15)),
+                    length_km=22.2,
+                    direction_code="BIDIRECTIONAL",
+                    routing_enabled=True,
+                    quality_code="READY",
+                    source_type_code="MANUAL",
+                    confidence_score=95,
+                ),
+            ]
+        )
+        await session.commit()
+
+        service = NavigationMapLayerService(session)
+        all_response = await service.get_layers(
+            min_lng=119.9,
+            min_lat=30.9,
+            max_lng=120.3,
+            max_lat=31.3,
+            channel_id=None,
+            route_result_id=None,
+            include_water_area=False,
+            include_boundary=False,
+            include_centerline=False,
+            include_graph_edge=True,
+            limit=20,
+        )
+        channel_one_response = await service.get_layers(
+            min_lng=119.9,
+            min_lat=30.9,
+            max_lng=120.3,
+            max_lat=31.3,
+            channel_id=1,
+            route_result_id=None,
+            include_water_area=False,
+            include_boundary=False,
+            include_centerline=False,
+            include_graph_edge=True,
+            limit=20,
+        )
+        channel_two_response = await service.get_layers(
+            min_lng=119.9,
+            min_lat=30.9,
+            max_lng=120.3,
+            max_lat=31.3,
+            channel_id=2,
+            route_result_id=None,
+            include_water_area=False,
+            include_boundary=False,
+            include_centerline=False,
+            include_graph_edge=True,
+            limit=20,
+        )
+        missing_channel_response = await service.get_layers(
+            min_lng=119.9,
+            min_lat=30.9,
+            max_lng=120.3,
+            max_lat=31.3,
+            channel_id=999,
+            route_result_id=None,
+            include_water_area=False,
+            include_boundary=False,
+            include_centerline=False,
+            include_graph_edge=True,
+            limit=20,
+        )
+
+    assert {item.id for item in all_response.graph_edges} == {1, 2}
+    assert [item.id for item in channel_one_response.graph_edges] == [1]
+    assert [item.id for item in channel_two_response.graph_edges] == [2]
+    assert missing_channel_response.graph_edges == []
+    assert "NO_ACTIVE_READY_GRAPH_FOR_CHANNEL" in missing_channel_response.warnings
+
+
+@pytest.mark.asyncio
 async def test_map_layers_requires_bbox_for_background_layers(session_maker) -> None:
     async with session_maker() as session:
         await _seed_layers(session)

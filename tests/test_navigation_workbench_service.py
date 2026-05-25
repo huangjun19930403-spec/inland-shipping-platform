@@ -11,6 +11,7 @@ from app.models import (
     NavigationChannelCenterline,
     NavigationChannelWaterBodyMatch,
     NavigationGeometryDraft,
+    NavigationGraphEdge,
     NavigationGraphVersion,
     NavigationWaterArea,
     NavigationWaterBody,
@@ -379,6 +380,73 @@ async def test_workbench_lists_channel_water_body_matches(session_maker) -> None
     assert water_bodies.items[0].is_matched is True
     assert water_bodies.items[0].match_count == 1
     assert water_bodies.items[0].matched_channels[0]["channel_code"] == "TEST-CHANNEL"
+
+
+@pytest.mark.asyncio
+async def test_workbench_active_graph_counts_include_all_active_ready_scopes(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add_all(
+            [
+                NavigationGraphVersion(
+                    id=1,
+                    version_code="GV-ONE",
+                    version_name="Graph one",
+                    scope_code="REAL-ONE",
+                    status_code="READY",
+                    is_active=True,
+                    node_count=2,
+                    edge_count=1,
+                    channel_count=1,
+                    quality_score=90,
+                ),
+                NavigationGraphVersion(
+                    id=2,
+                    version_code="GV-TWO",
+                    version_name="Graph two",
+                    scope_code="REAL-TWO",
+                    status_code="READY",
+                    is_active=True,
+                    node_count=2,
+                    edge_count=1,
+                    channel_count=1,
+                    quality_score=90,
+                ),
+                NavigationGraphEdge(
+                    id=1,
+                    graph_version_id=1,
+                    edge_code="E1",
+                    from_node_id=1,
+                    to_node_id=2,
+                    channel_id=1,
+                    geometry_json=_line(),
+                    length_km=1,
+                    direction_code="BIDIRECTIONAL",
+                    routing_enabled=True,
+                    quality_code="READY",
+                    source_type_code="MANUAL",
+                ),
+                NavigationGraphEdge(
+                    id=2,
+                    graph_version_id=2,
+                    edge_code="E2",
+                    from_node_id=3,
+                    to_node_id=4,
+                    channel_id=999,
+                    geometry_json=_line(),
+                    length_km=1,
+                    direction_code="BIDIRECTIONAL",
+                    routing_enabled=True,
+                    quality_code="READY",
+                    source_type_code="MANUAL",
+                ),
+            ]
+        )
+        await session.commit()
+
+        summary = await NavigationWorkbenchService(session).summary()
+
+    assert summary.channels[0].active_graph_edge_count == 1
 
 
 @pytest.mark.asyncio

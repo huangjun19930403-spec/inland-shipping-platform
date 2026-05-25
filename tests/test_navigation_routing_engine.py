@@ -199,12 +199,47 @@ def _request(
     origin: tuple[float, float] = (120.0, 31.0),
     destination: tuple[float, float] = (120.2, 31.0),
     vessel_profile: VesselProfileRequest | None = None,
+    graph_version_id: int | None = None,
 ) -> NavigationRouteGenerateRequest:
     return NavigationRouteGenerateRequest(
         origin=NavigationEndpointRequest(endpoint_type_code="LNG_LAT", longitude=origin[0], latitude=origin[1]),
         destination=NavigationEndpointRequest(endpoint_type_code="LNG_LAT", longitude=destination[0], latitude=destination[1]),
         vessel_profile=vessel_profile,
+        graph_version_id=graph_version_id,
     )
+
+
+async def _seed_far_active_graph(session: AsyncSession) -> None:
+    session.add(
+        NavigationGraphVersion(
+            id=2,
+            version_code="TEST-FAR-GRAPH",
+            version_name="Far graph",
+            scope_code="OTHER",
+            node_count=2,
+            edge_count=1,
+            channel_count=1,
+            quality_score=95,
+            status_code="READY",
+            is_active=True,
+        )
+    )
+    session.add_all(
+        [
+            _node(id=20, graph_version_id=2, lng=132.0, lat=43.0, code="FAR-N1"),
+            _node(id=21, graph_version_id=2, lng=132.2, lat=43.0, code="FAR-N2"),
+            _edge(
+                id=20,
+                graph_version_id=2,
+                from_node_id=20,
+                to_node_id=21,
+                code="FAR-E1",
+                geometry=_line((132.0, 43.0), (132.2, 43.0)),
+                channel_id=20,
+            ),
+        ]
+    )
+    await session.commit()
 
 
 def test_navigation_route_generate_api_is_registered() -> None:
@@ -294,6 +329,35 @@ async def test_generate_route_expands_bbox_until_edges_are_loaded(session_maker)
     assert response.status_code == "SUCCESS"
     assert result.quality_summary_json["graph_load_margin_degree"] >= 2.0
     assert result.quality_summary_json["loaded_edge_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_route_falls_back_across_active_graph_versions(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_ready_graph(session)
+        await _seed_far_active_graph(session)
+
+        response = await NavigationRoutingEngineService(session).generate_route(_request())
+        result = (await session.execute(select(NavigationRouteResult))).scalar_one()
+
+    assert response.status_code == "SUCCESS"
+    assert response.graph_version_id == 1
+    assert result.quality_summary_json["attempted_graph_version_ids"] == [2, 1]
+
+
+@pytest.mark.asyncio
+async def test_generate_route_respects_explicit_graph_version_without_fallback(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_ready_graph(session)
+        await _seed_far_active_graph(session)
+
+        response = await NavigationRoutingEngineService(session).generate_route(_request(graph_version_id=2))
+        result = (await session.execute(select(NavigationRouteResult))).scalar_one()
+
+    assert response.status_code == "FAILED"
+    assert response.graph_version_id == 2
+    assert response.error_code == "NO_ROUTING_EDGE_IN_EXPANDED_BBOX"
+    assert result.quality_summary_json["attempted_graph_version_ids"] == [2]
 
 
 @pytest.mark.asyncio

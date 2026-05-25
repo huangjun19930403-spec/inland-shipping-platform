@@ -289,19 +289,22 @@ class NavigationDiagnosticService:
         return channel
 
     async def _counts(self, channel: NavigationChannel) -> dict[str, int]:
-        active_graph_version = await self._active_graph_version()
-        edge_count = 0
-        if active_graph_version is not None:
-            edge_count = int(
-                await self.session.scalar(
-                    select(func.count()).select_from(NavigationGraphEdge).where(
-                        NavigationGraphEdge.graph_version_id == active_graph_version.id,
-                        NavigationGraphEdge.channel_id == channel.id,
-                        NavigationGraphEdge.routing_enabled.is_(True),
-                    )
+        edge_count = int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(NavigationGraphEdge)
+                .join(NavigationGraphVersion, NavigationGraphVersion.id == NavigationGraphEdge.graph_version_id)
+                .where(
+                    NavigationGraphVersion.is_active.is_(True),
+                    NavigationGraphVersion.status_code == "READY",
+                    NavigationGraphVersion.scope_code.not_like("MVP%"),
+                    NavigationGraphVersion.edge_count > 0,
+                    NavigationGraphEdge.channel_id == channel.id,
+                    NavigationGraphEdge.routing_enabled.is_(True),
                 )
-                or 0
             )
+            or 0
+        )
         return {
             "match": int(
                 await self.session.scalar(

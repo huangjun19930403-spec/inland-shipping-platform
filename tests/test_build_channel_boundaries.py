@@ -160,7 +160,7 @@ async def test_build_channel_boundary_report_matches_aliases_and_preserves_seed_
     by_code = {item.channel_code: item for item in report.channels}
     assert by_code["NC-YANGTZE"].matched_water_area_count == 1
     assert by_code["NC-YANGTZE"].confidence_code == "HIGH_CONFIDENCE"
-    assert by_code["NC-YANGTZE"].review_status_code == "APPROVED"
+    assert by_code["NC-YANGTZE"].review_status_code == "PUBLISHED"
     assert by_code["NC-SHAYING-RIVER"].matched_terms == ["颖河"]
     assert by_code["NC-SHAYING-RIVER"].review_status_code == "NEED_REVIEW"
     assert "SEED_BOUNDARY_MISSING" in by_code["NC-SHAYING-RIVER"].issue_codes

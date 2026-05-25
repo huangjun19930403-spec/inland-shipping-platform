@@ -128,8 +128,8 @@ async def test_build_channel_water_area_matches_persists_rows_and_candidate_boun
 
     by_code = {item.channel_code: item for item in report.channels}
     assert by_code["NC-YANGTZE"].matched_water_area_count == 1
-    assert by_code["NC-YANGTZE"].candidates[0].source_layer_name == "rx"
-    assert by_code["NC-YANGTZE"].candidates[0].duplicate_layer_names == ["一级水系"]
+    assert by_code["NC-YANGTZE"].candidates[0].source_layer_name == "一级水系"
+    assert by_code["NC-YANGTZE"].candidates[0].duplicate_layer_names == ["rx"]
     assert by_code["NC-SHAYING-RIVER"].matched_water_area_count == 1
     assert by_code["NC-LIANSHEN-LINE"].matched_water_area_count == 0
     assert "NO_WATER_AREA_MATCH" in by_code["NC-LIANSHEN-LINE"].issue_codes

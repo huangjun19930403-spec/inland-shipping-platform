@@ -539,16 +539,7 @@ class NavigationProductionService:
             ),
         )
         active_graph_version = await self._active_graph_version()
-        active_edge_counts: dict[int, int] = {}
-        if active_graph_version is not None:
-            active_edge_counts = await self.workbench._counts_by_channel(
-                NavigationGraphEdge.channel_id,
-                select(NavigationGraphEdge.channel_id, func.count()).where(
-                    NavigationGraphEdge.graph_version_id == active_graph_version.id,
-                    NavigationGraphEdge.channel_id.in_(channel_ids),
-                    NavigationGraphEdge.routing_enabled.is_(True),
-                ),
-            )
+        active_edge_counts = await self.workbench._active_graph_edge_counts(channel_ids)
         route_verified_by_channel = await self._route_verified_by_channel(channel_ids)
 
         rows: list[NavigationProductionChannelResponse] = []

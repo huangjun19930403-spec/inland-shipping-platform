@@ -24,33 +24,40 @@ class NavigationGraphLoader:
         self.max_node_count = max_node_count
         self.max_edge_count = max_edge_count
 
-    async def select_graph_version(self, graph_version_id: int | None) -> NavigationGraphVersion:
+    async def list_candidate_graph_versions(self, graph_version_id: int | None) -> list[NavigationGraphVersion]:
         if graph_version_id is not None:
             version = await self.session.scalar(
                 select(NavigationGraphVersion).where(
-                NavigationGraphVersion.id == graph_version_id,
-                NavigationGraphVersion.status_code == "READY",
-                NavigationGraphVersion.edge_count > 0,
-                NavigationGraphVersion.scope_code.not_like("MVP%"),
-            )
+                    NavigationGraphVersion.id == graph_version_id,
+                    NavigationGraphVersion.status_code == "READY",
+                    NavigationGraphVersion.edge_count > 0,
+                    NavigationGraphVersion.scope_code.not_like("MVP%"),
+                )
             )
             if version is None:
                 raise RoutingEngineError("GRAPH_VERSION_NOT_READY", "Requested graph version is not READY")
-            return version
+            return [version]
 
-        version = await self.session.scalar(
-            select(NavigationGraphVersion)
-            .where(
-                NavigationGraphVersion.status_code == "READY",
-                NavigationGraphVersion.is_active.is_(True),
-                NavigationGraphVersion.edge_count > 0,
-                NavigationGraphVersion.scope_code.not_like("MVP%"),
-            )
-            .order_by(NavigationGraphVersion.id.desc())
+        versions = list(
+            (
+                await self.session.execute(
+                    select(NavigationGraphVersion)
+                    .where(
+                        NavigationGraphVersion.status_code == "READY",
+                        NavigationGraphVersion.is_active.is_(True),
+                        NavigationGraphVersion.edge_count > 0,
+                        NavigationGraphVersion.scope_code.not_like("MVP%"),
+                    )
+                    .order_by(NavigationGraphVersion.id.desc())
+                )
+            ).scalars()
         )
-        if version is None:
+        if not versions:
             raise RoutingEngineError("NO_ACTIVE_GRAPH_VERSION", "No active READY navigation graph version is available")
-        return version
+        return versions
+
+    async def select_graph_version(self, graph_version_id: int | None) -> NavigationGraphVersion:
+        return (await self.list_candidate_graph_versions(graph_version_id))[0]
 
     async def load_graph(
         self,

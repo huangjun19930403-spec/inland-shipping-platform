@@ -36,6 +36,14 @@ from app.modules.navigation.schemas import (
 class NavigationRoutingEngineService:
     DEFAULT_SPEED_KMH = 10.0
     DEFAULT_LOCK_WAIT_HOUR = 1.0
+    RETRYABLE_GRAPH_ERROR_CODES = {
+        "NO_ROUTING_EDGE_IN_EXPANDED_BBOX",
+        "NO_GRAPH_NEAR_ORIGIN",
+        "NO_GRAPH_NEAR_DESTINATION",
+        "ORIGIN_TOO_FAR_FROM_GRAPH",
+        "DESTINATION_TOO_FAR_FROM_GRAPH",
+        "GRAPH_DISCONNECTED",
+    }
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -78,73 +86,132 @@ class NavigationRoutingEngineService:
 
         origin_snap: SnapResult | None = None
         destination_snap: SnapResult | None = None
+        attempted_graph_version_ids: list[int] = []
         try:
-            graph_version = await self.loader.select_graph_version(body.graph_version_id)
-            request_row.graph_version_id = graph_version.id
-            loaded_graph = await self.loader.load_graph(
-                graph_version=graph_version,
-                origin=(origin.longitude, origin.latitude),
-                destination=(destination.longitude, destination.latitude),
-            )
-            origin_snap = self.snapper.snap(role="ORIGIN", point=origin, graph=loaded_graph)
-            destination_snap = self.snapper.snap(role="DESTINATION", point=destination, graph=loaded_graph)
-            search_result = self.searcher.search(
-                graph=loaded_graph,
-                origin_snap=origin_snap,
-                destination_snap=destination_snap,
-                vessel_profile=vessel_profile,
-                routing_preference_code=request_row.routing_preference_code,
-            )
-            assembled = self.assembler.assemble(search_result)
-            validation_issues = [
-                *self.validator.validate_geometry(assembled.geometry_json),
-                *(await self._validate_spatial_context(assembled.geometry_json, assembled.channel_ids)),
-            ]
-            quality = self.scorer.score(
-                origin_snap=origin_snap,
-                destination_snap=destination_snap,
-                search_result=search_result,
-                validation_issues=validation_issues,
-            )
-            duration_detail = self._duration_detail(assembled.distance_km, assembled.passed_lock_count)
-            request_row.status_code = "SUCCESS" if quality.quality_code != "FAILED" else "FAILED"
-            result_row = NavigationRouteResult(
-                request_id=request_row.id,
-                result_no=1,
-                result_type_code="RECOMMENDED",
-                status_code=quality.quality_code,
-                geometry_json=assembled.geometry_json,
-                distance_km=assembled.distance_km,
-                estimated_duration_hour=duration_detail["estimated_duration_hour"],
-                edge_ids=assembled.edge_ids,
-                channel_ids=assembled.channel_ids,
-                passed_node_ids=assembled.passed_node_ids,
-                passed_lock_count=assembled.passed_lock_count,
-                passed_bridge_count=assembled.passed_bridge_count,
-                quality_score=quality.quality_score,
-                quality_code=quality.quality_code,
-                quality_summary_json={
-                    "engine": "NAVIGATION_ROUTING_ENGINE",
-                    "origin_snap": origin_snap.as_dict(),
-                    "destination_snap": destination_snap.as_dict(),
-                    "issue_count": len(quality.issues),
-                    "search_cost": search_result.total_cost,
-                    "graph_load_bbox": loaded_graph.load_bbox,
-                    "graph_load_margin_degree": loaded_graph.load_margin_degree,
-                    "loaded_node_count": loaded_graph.loaded_node_count,
-                    "loaded_edge_count": loaded_graph.loaded_edge_count,
-                    "duration_detail": duration_detail,
-                },
-                provider_code="NAVIGATION_ENGINE",
-                engine_code="NAVIGATION_ROUTING_ENGINE_V1",
-            )
-            self.session.add(result_row)
-            await self.session.flush()
-            await self._insert_issues(result_row.id, quality.issues)
-            await self.session.commit()
-            return self._success_response(request_row, result_row, origin_snap, destination_snap, quality.issues)
+            graph_versions = await self.loader.list_candidate_graph_versions(body.graph_version_id)
+            last_error: RoutingEngineError | None = None
+            for graph_version in graph_versions:
+                request_row.graph_version_id = graph_version.id
+                attempted_graph_version_ids.append(int(graph_version.id))
+                origin_snap = None
+                destination_snap = None
+                try:
+                    response = await self._generate_with_graph_version(
+                        request_row=request_row,
+                        graph_version=graph_version,
+                        origin=origin,
+                        destination=destination,
+                        vessel_profile=vessel_profile,
+                        attempted_graph_version_ids=attempted_graph_version_ids,
+                    )
+                    return response
+                except RoutingEngineError as exc:
+                    last_error = exc
+                    if body.graph_version_id is not None or exc.error_code not in self.RETRYABLE_GRAPH_ERROR_CODES:
+                        return await self._persist_failure(
+                            request_row,
+                            exc,
+                            origin_snap,
+                            destination_snap,
+                            attempted_graph_version_ids=attempted_graph_version_ids,
+                        )
+                    continue
+            if last_error is not None:
+                message = (
+                    f"{last_error.message}; attempted graph versions: {attempted_graph_version_ids}"
+                    if attempted_graph_version_ids
+                    else last_error.message
+                )
+                return await self._persist_failure(
+                    request_row,
+                    RoutingEngineError(last_error.error_code, message, issues=last_error.issues),
+                    origin_snap,
+                    destination_snap,
+                    attempted_graph_version_ids=attempted_graph_version_ids,
+                )
+            raise RoutingEngineError("NO_ACTIVE_GRAPH_VERSION", "No active READY navigation graph version is available")
         except RoutingEngineError as exc:
-            return await self._persist_failure(request_row, exc, origin_snap, destination_snap)
+            return await self._persist_failure(
+                request_row,
+                exc,
+                origin_snap,
+                destination_snap,
+                attempted_graph_version_ids=attempted_graph_version_ids,
+            )
+
+    async def _generate_with_graph_version(
+        self,
+        *,
+        request_row: NavigationRouteRequest,
+        graph_version,
+        origin: RoutePoint,
+        destination: RoutePoint,
+        vessel_profile: dict[str, Any] | None,
+        attempted_graph_version_ids: list[int],
+    ) -> NavigationRouteGenerateResponse:
+        loaded_graph = await self.loader.load_graph(
+            graph_version=graph_version,
+            origin=(origin.longitude, origin.latitude),
+            destination=(destination.longitude, destination.latitude),
+        )
+        origin_snap = self.snapper.snap(role="ORIGIN", point=origin, graph=loaded_graph)
+        destination_snap = self.snapper.snap(role="DESTINATION", point=destination, graph=loaded_graph)
+        search_result = self.searcher.search(
+            graph=loaded_graph,
+            origin_snap=origin_snap,
+            destination_snap=destination_snap,
+            vessel_profile=vessel_profile,
+            routing_preference_code=request_row.routing_preference_code,
+        )
+        assembled = self.assembler.assemble(search_result)
+        validation_issues = [
+            *self.validator.validate_geometry(assembled.geometry_json),
+            *(await self._validate_spatial_context(assembled.geometry_json, assembled.channel_ids)),
+        ]
+        quality = self.scorer.score(
+            origin_snap=origin_snap,
+            destination_snap=destination_snap,
+            search_result=search_result,
+            validation_issues=validation_issues,
+        )
+        duration_detail = self._duration_detail(assembled.distance_km, assembled.passed_lock_count)
+        request_row.status_code = "SUCCESS" if quality.quality_code != "FAILED" else "FAILED"
+        result_row = NavigationRouteResult(
+            request_id=request_row.id,
+            result_no=1,
+            result_type_code="RECOMMENDED",
+            status_code=quality.quality_code,
+            geometry_json=assembled.geometry_json,
+            distance_km=assembled.distance_km,
+            estimated_duration_hour=duration_detail["estimated_duration_hour"],
+            edge_ids=assembled.edge_ids,
+            channel_ids=assembled.channel_ids,
+            passed_node_ids=assembled.passed_node_ids,
+            passed_lock_count=assembled.passed_lock_count,
+            passed_bridge_count=assembled.passed_bridge_count,
+            quality_score=quality.quality_score,
+            quality_code=quality.quality_code,
+            quality_summary_json={
+                "engine": "NAVIGATION_ROUTING_ENGINE",
+                "origin_snap": origin_snap.as_dict(),
+                "destination_snap": destination_snap.as_dict(),
+                "issue_count": len(quality.issues),
+                "search_cost": search_result.total_cost,
+                "graph_load_bbox": loaded_graph.load_bbox,
+                "graph_load_margin_degree": loaded_graph.load_margin_degree,
+                "loaded_node_count": loaded_graph.loaded_node_count,
+                "loaded_edge_count": loaded_graph.loaded_edge_count,
+                "attempted_graph_version_ids": list(attempted_graph_version_ids),
+                "duration_detail": duration_detail,
+            },
+            provider_code="NAVIGATION_ENGINE",
+            engine_code="NAVIGATION_ROUTING_ENGINE_V1",
+        )
+        self.session.add(result_row)
+        await self.session.flush()
+        await self._insert_issues(result_row.id, quality.issues)
+        await self.session.commit()
+        return self._success_response(request_row, result_row, origin_snap, destination_snap, quality.issues)
 
     async def _resolve_endpoint(self, endpoint: NavigationEndpointRequest, *, role: str) -> RoutePoint:
         endpoint_type = endpoint.endpoint_type_code.upper()
@@ -212,6 +279,8 @@ class NavigationRoutingEngineService:
         exc: RoutingEngineError,
         origin_snap: SnapResult | None,
         destination_snap: SnapResult | None,
+        *,
+        attempted_graph_version_ids: list[int] | None = None,
     ) -> NavigationRouteGenerateResponse:
         request_row.status_code = "FAILED"
         request_row.error_code = exc.error_code
@@ -228,6 +297,7 @@ class NavigationRoutingEngineService:
                 "origin_snap": origin_snap.as_dict() if origin_snap else None,
                 "destination_snap": destination_snap.as_dict() if destination_snap else None,
                 "error_code": exc.error_code,
+                "attempted_graph_version_ids": list(attempted_graph_version_ids or []),
             },
             provider_code="NAVIGATION_ENGINE",
             engine_code="NAVIGATION_ROUTING_ENGINE_V1",

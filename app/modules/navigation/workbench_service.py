@@ -120,16 +120,7 @@ class NavigationWorkbenchService:
             ),
         )
         active_graph_version = await self._active_graph_version()
-        active_edge_counts: dict[int, int] = {}
-        if active_graph_version is not None:
-            active_edge_counts = await self._counts_by_channel(
-                NavigationGraphEdge.channel_id,
-                select(NavigationGraphEdge.channel_id, func.count()).where(
-                    NavigationGraphEdge.graph_version_id == active_graph_version.id,
-                    NavigationGraphEdge.channel_id.in_(channel_ids),
-                    NavigationGraphEdge.routing_enabled.is_(True),
-                ),
-            )
+        active_edge_counts = await self._active_graph_edge_counts(channel_ids)
 
         channel_rows = [
             NavigationWorkbenchChannelResponse(
@@ -1197,6 +1188,23 @@ class NavigationWorkbenchService:
                 .limit(1)
             )
         ).scalar_one_or_none()
+
+    async def _active_graph_edge_counts(self, channel_ids: list[int]) -> dict[int, int]:
+        if not channel_ids:
+            return {}
+        return await self._counts_by_channel(
+            NavigationGraphEdge.channel_id,
+            select(NavigationGraphEdge.channel_id, func.count())
+            .join(NavigationGraphVersion, NavigationGraphVersion.id == NavigationGraphEdge.graph_version_id)
+            .where(
+                NavigationGraphVersion.is_active.is_(True),
+                NavigationGraphVersion.status_code == "READY",
+                NavigationGraphVersion.scope_code.not_like("MVP%"),
+                NavigationGraphVersion.edge_count > 0,
+                NavigationGraphEdge.channel_id.in_(channel_ids),
+                NavigationGraphEdge.routing_enabled.is_(True),
+            ),
+        )
 
     async def _ensure_channel(self, channel_id: int) -> NavigationChannel:
         channel = await self.session.get(NavigationChannel, channel_id)
