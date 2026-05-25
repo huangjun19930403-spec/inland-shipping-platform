@@ -1,6 +1,6 @@
-"""Import candidate navigation centerlines from GeoJSON.
+"""Import navigation centerlines from GeoJSON.
 
-Round 6 only creates centerline assets and review state. It never creates graph
+This importer creates centerline assets and publish state. It never creates graph
 nodes, graph edges, route requests, or route results.
 """
 
@@ -25,10 +25,10 @@ from app.models import NavigationChannelCenterline
 from app.models.address import NavigationChannel, NavigationChannelBoundary, NavigationChannelSegment
 from app.models.base import Base
 
-DIRECT_APPROVABLE_SOURCES = {"MANUAL", "SEED_CENTERLINE"}
-APPROVABLE_WITH_REVIEW_SOURCES = {"OSM_WATERWAY"}
-NEVER_AUTO_APPROVE_SOURCES = {"WATER_SKELETON", "HIFLEET_REFERENCE", "AIS_INFERRED", "HYDRORIVERS"}
-SUPPORTED_SOURCES = DIRECT_APPROVABLE_SOURCES | APPROVABLE_WITH_REVIEW_SOURCES | NEVER_AUTO_APPROVE_SOURCES
+DIRECT_PUBLISHABLE_SOURCES = {"MANUAL", "SEED_CENTERLINE"}
+PUBLISHABLE_AFTER_CONFIRMATION_SOURCES = {"OSM_WATERWAY"}
+NEVER_AUTO_PUBLISH_SOURCES = {"WATER_SKELETON", "HIFLEET_REFERENCE", "AIS_INFERRED", "HYDRORIVERS"}
+SUPPORTED_SOURCES = DIRECT_PUBLISHABLE_SOURCES | PUBLISHABLE_AFTER_CONFIRMATION_SOURCES | NEVER_AUTO_PUBLISH_SOURCES
 GRAPH_READY_QUALITY_CODES = {"READY", "READY_WITH_WARNING"}
 
 
@@ -171,23 +171,23 @@ def _resolve_status(
         is_current = False
         issues.append("CENTERLINE_LOW_CONFIDENCE")
 
-    if source_type_code in NEVER_AUTO_APPROVE_SOURCES:
+    if source_type_code in NEVER_AUTO_PUBLISH_SOURCES:
         review_status = "NEED_REVIEW"
         if quality in GRAPH_READY_QUALITY_CODES:
             quality = "NEED_REVIEW"
         is_current = False
-        issues.append("SOURCE_NOT_AUTO_APPROVABLE")
+        issues.append("SOURCE_NOT_AUTO_PUBLISHABLE")
 
-    if source_type_code == "OSM_WATERWAY" and review_status != "APPROVED":
+    if source_type_code == "OSM_WATERWAY" and review_status != "PUBLISHED":
         is_current = False
-        issues.append("OSM_NEEDS_REVIEW")
+        issues.append("OSM_NEEDS_CONFIRMATION")
 
-    if review_status != "APPROVED":
+    if review_status != "PUBLISHED":
         is_current = False
 
-    if is_current and (quality not in GRAPH_READY_QUALITY_CODES or review_status != "APPROVED"):
+    if is_current and (quality not in GRAPH_READY_QUALITY_CODES or review_status != "PUBLISHED"):
         is_current = False
-        issues.append("CURRENT_REQUIRES_APPROVED_READY")
+        issues.append("CURRENT_REQUIRES_PUBLISHED_READY")
 
     return review_status, quality, is_current, sorted(set(issues))
 
@@ -265,7 +265,7 @@ def _row_from_feature(
     confidence_score = max(0, min(100, _as_int(props.get("confidence_score"), 0)))
     requested_review_status = str(props.get("review_status_code") or "NEED_REVIEW").strip().upper()
     requested_quality = str(props.get("quality_code") or "NEED_REVIEW").strip().upper()
-    requested_current = _as_bool(props.get("is_current"), default=requested_review_status == "APPROVED")
+    requested_current = _as_bool(props.get("is_current"), default=requested_review_status == "PUBLISHED")
 
     broken = _line_is_broken(part_geometry)
     out_of_boundary = bool(
@@ -296,9 +296,9 @@ def _row_from_feature(
         "part_count": part_count,
         "issues": issues,
     }
-    approved_at = None
-    if review_status == "APPROVED":
-        approved_at = datetime.now(UTC).replace(tzinfo=None)
+    published_at = None
+    if review_status == "PUBLISHED":
+        published_at = datetime.now(UTC).replace(tzinfo=None)
 
     return (
         CenterlineImportRow(
@@ -318,7 +318,7 @@ def _row_from_feature(
             is_current=is_current,
             source_trace_json=source_trace,
             approved_by=_as_int(props.get("approved_by"), 0) or None,
-            approved_at=approved_at,
+            approved_at=published_at,
             bbox_min_lng=float(min_lng) if min_lng is not None else None,
             bbox_min_lat=float(min_lat) if min_lat is not None else None,
             bbox_max_lng=float(max_lng) if max_lng is not None else None,

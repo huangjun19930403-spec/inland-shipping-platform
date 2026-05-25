@@ -1,23 +1,23 @@
 {
   "report_version": "navigation_channel_water_area_match_v1",
-  "generated_at": "2026-05-22T11:24:12+00:00",
+  "generated_at": "2026-05-23T09:01:44+00:00",
   "dry_run": false,
   "write_candidate_boundaries": true,
   "source_code": "RIVER_SHAPEFILE_2026",
-  "match_batch_code": "REAL-WATER-MATCH-20260522",
+  "match_batch_code": "REAL-WATER-MATCH-REVIER-20260523-REPAIRED",
   "alias_config_path": "/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/scripts/seed_data/navigation/navigation_channel_aliases.json",
   "scope_config_path": "/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/scripts/seed_data/navigation/navigation_real_scope.json",
-  "output_path": "data_audit/navigation_channel_water_area_match_report.json",
+  "output_path": "/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/data_audit/navigation_channel_water_area_match_report.json",
   "channel_count": 104,
-  "water_area_count": 87078,
-  "match_row_count": 78,
-  "candidate_boundaries_written": 41,
+  "water_area_count": 87558,
+  "match_row_count": 106,
+  "candidate_boundaries_written": 43,
   "channels": [
     {
-      "channel_id": 1,
+      "channel_id": 314,
       "channel_code": "NC-YANGTZE",
       "channel_name": "长江干线",
-      "matched_water_area_count": 1,
+      "matched_water_area_count": 2,
       "best_score": 95,
       "confidence_code": "HIGH_CONFIDENCE",
       "review_status_code": "APPROVED",
@@ -25,9 +25,30 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 842,
+          "water_area_id": 48340,
           "water_name": "长江",
-          "source_layer_name": "rx",
+          "source_layer_name": "一级水系",
+          "source_object_id": "48162",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "长江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "APPROVED",
+          "issue_codes": [],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            117.03359988043019,
+            30.466999980364847,
+            122.06620007967001,
+            32.33240000965276
+          ]
+        },
+        {
+          "water_area_id": 85886,
+          "water_name": "长江",
+          "source_layer_name": "七级水系",
           "source_object_id": "842",
           "match_type_code": "EXACT_NAME",
           "matched_term": "长江",
@@ -36,34 +57,626 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "七级水系"
+            "rx"
           ],
           "bbox": [
-            118.63280016,
-            31.98560004,
-            118.64099988,
-            32.00000004
+            118.6328001595997,
+            31.98560004010983,
+            118.64099988034025,
+            32.00000003957024
           ]
         }
       ]
     },
     {
-      "channel_id": 2,
+      "channel_id": 315,
       "channel_code": "NC-XIJIANG",
       "channel_name": "西江航运干线",
-      "matched_water_area_count": 0,
-      "best_score": 0,
-      "confidence_code": "MISSING",
-      "review_status_code": "NEED_REVIEW",
-      "issue_codes": [
-        "LOW_MATCH_CONFIDENCE",
-        "NO_WATER_AREA_MATCH"
-      ],
-      "candidate_boundary_written": false,
-      "candidates": []
+      "matched_water_area_count": 26,
+      "best_score": 95,
+      "confidence_code": "HIGH_CONFIDENCE",
+      "review_status_code": "APPROVED",
+      "issue_codes": [],
+      "candidate_boundary_written": true,
+      "candidates": [
+        {
+          "water_area_id": 48194,
+          "water_name": "黔江",
+          "source_layer_name": "一级水系",
+          "source_object_id": "10",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "黔江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            109.53299988034024,
+            23.396000039570197,
+            110.1006000001899,
+            23.803399979825258
+          ]
+        },
+        {
+          "water_area_id": 48198,
+          "water_name": "红水河",
+          "source_layer_name": "一级水系",
+          "source_object_id": "103",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            107.48440008029951,
+            24.03639999036733,
+            107.57959991990043,
+            24.15799997991519
+          ]
+        },
+        {
+          "water_area_id": 48205,
+          "water_name": "红水河",
+          "source_layer_name": "一级水系",
+          "source_object_id": "11",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.49920011958989,
+            23.624800020104885,
+            109.53339984033045,
+            23.99759999974026
+          ]
+        },
+        {
+          "water_area_id": 48216,
+          "water_name": "红水河",
+          "source_layer_name": "一级水系",
+          "source_object_id": "12",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.36600012030937,
+            24.00560000983262,
+            108.49219991999036,
+            24.035400000010043
+          ]
+        },
+        {
+          "water_area_id": 48227,
+          "water_name": "红水河",
+          "source_layer_name": "一级水系",
+          "source_object_id": "13",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.25019999983022,
+            23.885600040109807,
+            108.25740000001008,
+            23.89799996982282
+          ]
+        },
+        {
+          "water_area_id": 48238,
+          "water_name": "红水河",
+          "source_layer_name": "一级水系",
+          "source_object_id": "14",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.01140012021943,
+            23.761600019925027,
+            108.01720008011966,
+            23.77160000983264
+          ]
+        },
+        {
+          "water_area_id": 48249,
+          "water_name": "红水河",
+          "source_layer_name": "一级水系",
+          "source_object_id": "15",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            107.51119992044005,
+            23.689800000369758,
+            108.00000000009999,
+            24.03739997982524
+          ]
+        },
+        {
+          "water_area_id": 48260,
+          "water_name": "红水河",
+          "source_layer_name": "一级水系",
+          "source_object_id": "16",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            106.13840003992993,
+            24.14819996955299,
+            107.61279984024048,
+            25.253199990187454
+          ]
+        },
+        {
+          "water_area_id": 48416,
+          "water_name": "浔江",
+          "source_layer_name": "一级水系",
+          "source_object_id": "9",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "浔江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_GEOMETRY"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            110.09999987989062,
+            23.359599989647847,
+            111.39680015959976,
+            23.596199999830162
+          ]
+        },
+        {
+          "water_area_id": 48422,
+          "water_name": "西江",
+          "source_layer_name": "一级水系",
+          "source_object_id": "95",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "西江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "APPROVED",
+          "issue_codes": [],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            111.39220007966998,
+            22.167800009562825,
+            113.43160007958011,
+            23.47740000001005
+          ]
+        },
+        {
+          "water_area_id": 48555,
+          "water_name": "郁江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28116",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "郁江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            109.55739995964046,
+            22.999799970092624,
+            110.10039983988077,
+            23.40219996035995
+          ]
+        },
+        {
+          "water_area_id": 48557,
+          "water_name": "郁江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28118",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "郁江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            109.50000012030938,
+            22.824800010012495,
+            109.64440008029953,
+            23.00000003957024
+          ]
+        },
+        {
+          "water_area_id": 48558,
+          "water_name": "郁江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28119",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "郁江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            109.24359984006065,
+            22.644999989557903,
+            109.50000012030938,
+            22.828400009652796
+          ]
+        },
+        {
+          "water_area_id": 48560,
+          "water_name": "郁江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28121",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "郁江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.79899983997069,
+            22.64020002001496,
+            108.97419996035995,
+            22.881400020194803
+          ]
+        },
+        {
+          "water_area_id": 48562,
+          "water_name": "右江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28123",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "右江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            107.96900004001986,
+            22.977600030017413,
+            108.00000000009999,
+            23.00000003957024
+          ]
+        },
+        {
+          "water_area_id": 48563,
+          "water_name": "右江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28124",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "右江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.00000000009999,
+            22.83200001019236,
+            108.10540007984986,
+            22.98079997973531
+          ]
+        },
+        {
+          "water_area_id": 48588,
+          "water_name": "郁江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28149",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "郁江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.96980003984004,
+            22.613400000010017,
+            109.24440011976975,
+            22.667200019565314
+          ]
+        },
+        {
+          "water_area_id": 48591,
+          "water_name": "珠江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28152",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "珠江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_GEOMETRY"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            113.10900011985973,
+            22.758599969912723,
+            113.67579996000018,
+            23.117400000010036
+          ]
+        },
+        {
+          "water_area_id": 48604,
+          "water_name": "右江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28165",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "右江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            106.50020004019973,
+            22.999799970092624,
+            107.99399987989062,
+            23.91180002974761
+          ]
+        },
+        {
+          "water_area_id": 48607,
+          "water_name": "右江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28168",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "右江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            106.06719995991028,
+            23.920599959820322,
+            106.35559991990044,
+            23.96459996991274
+          ]
+        },
+        {
+          "water_area_id": 48608,
+          "water_name": "右江",
+          "source_layer_name": "二级水系",
+          "source_object_id": "28169",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "右江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            106.45459992035012,
+            23.90480001001248,
+            106.50039983988074,
+            23.92620003010734
+          ]
+        },
+        {
+          "water_area_id": 48877,
+          "water_name": "桂江",
+          "source_layer_name": "三级水系",
+          "source_object_id": "27545",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "桂江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            110.63220012003956,
+            24.236999999650322,
+            110.79759996027002,
+            24.63479999992012
+          ]
+        },
+        {
+          "water_area_id": 48878,
+          "water_name": "桂江",
+          "source_layer_name": "三级水系",
+          "source_object_id": "27546",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "桂江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_GEOMETRY"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            110.79560016031922,
+            23.47219997964538,
+            111.3325999203501,
+            24.20720001037222
+          ]
+        },
+        {
+          "water_area_id": 51125,
+          "water_name": "郁江",
+          "source_layer_name": "五级水系",
+          "source_object_id": "28671",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "郁江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            108.74739995964046,
+            22.849000019835103,
+            108.75380003984003,
+            22.857800039840015
+          ]
+        },
+        {
+          "water_area_id": 51128,
+          "water_name": "西江",
+          "source_layer_name": "五级水系",
+          "source_object_id": "28674",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "西江",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "APPROVED",
+          "issue_codes": [],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            110.84240016013933,
+            22.201599960270016,
+            110.8738000802096,
+            22.3072000195653
+          ]
+        },
+        {
+          "water_area_id": 51365,
+          "water_name": "红水河",
+          "source_layer_name": "五级水系",
+          "source_object_id": "28911",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "红水河",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "NEED_REVIEW",
+          "issue_codes": [
+            "OUT_OF_CHANNEL_BOUNDARY_BBOX"
+          ],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            107.49719988007047,
+            23.99979996000019,
+            107.5151998800705,
+            24.005400030287205
+          ]
+        }
+      ]
     },
     {
-      "channel_id": 3,
+      "channel_id": 316,
       "channel_code": "NC-GRAND-CANAL",
       "channel_name": "京杭运河",
       "matched_water_area_count": 4,
@@ -77,9 +690,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 32814,
+          "water_area_id": 48303,
           "water_name": "京杭运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "一级水系",
           "source_object_id": "32814",
           "match_type_code": "EXACT_NAME",
           "matched_term": "京杭运河",
@@ -91,19 +704,19 @@
             "SEED_BOUNDARY_NEED_REVIEW"
           ],
           "duplicate_layer_names": [
-            "一级水系"
+            "rx"
           ],
           "bbox": [
-            119.39720004,
-            32.27560002,
-            119.50480008,
-            33.00000003
+            119.39720003975015,
+            32.27560001992504,
+            119.50480007975989,
+            33.00000003037718
           ]
         },
         {
-          "water_area_id": 32815,
+          "water_area_id": 48304,
           "water_name": "京杭运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "一级水系",
           "source_object_id": "32815",
           "match_type_code": "EXACT_NAME",
           "matched_term": "京杭运河",
@@ -115,19 +728,19 @@
             "SEED_BOUNDARY_NEED_REVIEW"
           ],
           "duplicate_layer_names": [
-            "一级水系"
+            "rx"
           ],
           "bbox": [
-            119.13459984,
-            33.00000003,
-            119.41359984,
-            33.47739999
+            119.13459983961093,
+            33.00000003037718,
+            119.41359984006067,
+            33.47739998991767
           ]
         },
         {
-          "water_area_id": 32816,
+          "water_area_id": 48305,
           "water_name": "京杭运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "一级水系",
           "source_object_id": "32816",
           "match_type_code": "EXACT_NAME",
           "matched_term": "京杭运河",
@@ -139,19 +752,19 @@
             "SEED_BOUNDARY_NEED_REVIEW"
           ],
           "duplicate_layer_names": [
-            "一级水系"
+            "rx"
           ],
           "bbox": [
-            118.93160016,
-            33.47319996,
-            119.13699996,
-            33.57939996
+            118.93160016031925,
+            33.47319995991029,
+            119.1369999601801,
+            33.579399959640455
           ]
         },
         {
-          "water_area_id": 32817,
+          "water_area_id": 48306,
           "water_name": "京杭运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "一级水系",
           "source_object_id": "32817",
           "match_type_code": "EXACT_NAME",
           "matched_term": "京杭运河",
@@ -163,19 +776,19 @@
             "SEED_BOUNDARY_NEED_REVIEW"
           ],
           "duplicate_layer_names": [
-            "一级水系"
+            "rx"
           ],
           "bbox": [
-            118.50000012,
-            33.69120003,
-            118.70899992,
-            33.82160004
+            118.50000012030932,
+            33.69120002965769,
+            118.70899991981048,
+            33.82160004010984
           ]
         }
       ]
     },
     {
-      "channel_id": 4,
+      "channel_id": 317,
       "channel_code": "NC-HUAIHE",
       "channel_name": "淮河航道",
       "matched_water_area_count": 2,
@@ -186,9 +799,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 8,
+          "water_area_id": 48405,
           "water_name": "淮河",
-          "source_layer_name": "rx",
+          "source_layer_name": "一级水系",
           "source_object_id": "8",
           "match_type_code": "EXACT_NAME",
           "matched_term": "淮河",
@@ -197,19 +810,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "一级水系"
+            "rx"
           ],
           "bbox": [
-            114.02920008,
-            32.27239998,
-            118.59040008,
-            33.19360002
+            114.02920008011961,
+            32.27239998027494,
+            118.59040008029956,
+            33.19360001992504
           ]
         },
         {
-          "water_area_id": 841,
+          "water_area_id": 85875,
           "water_name": "淮河",
-          "source_layer_name": "rx",
+          "source_layer_name": "七级水系",
           "source_object_id": "841",
           "match_type_code": "EXACT_NAME",
           "matched_term": "淮河",
@@ -218,19 +831,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "七级水系"
+            "rx"
           ],
           "bbox": [
-            118.47499992,
-            32.97639996,
-            118.48200012,
-            33.00000003
+            118.47499991981056,
+            32.976399960090134,
+            118.48200012030941,
+            33.00000003037718
           ]
         }
       ]
     },
     {
-      "channel_id": 5,
+      "channel_id": 318,
       "channel_code": "NC-QIANTANG-RIVER",
       "channel_name": "钱塘江航道",
       "matched_water_area_count": 3,
@@ -241,9 +854,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 28164,
+          "water_area_id": 48603,
           "water_name": "钱塘江",
-          "source_layer_name": "rx",
+          "source_layer_name": "二级水系",
           "source_object_id": "28164",
           "match_type_code": "EXACT_NAME",
           "matched_term": "钱塘江",
@@ -252,17 +865,17 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "二级水系"
+            "rx"
           ],
           "bbox": [
-            120.12720012,
-            30.18920004,
-            120.67499988,
-            30.40640001
+            120.12720011958993,
+            30.189200039750062,
+            120.67499988034024,
+            30.40640000965277
           ]
         },
         {
-          "water_area_id": 48063,
+          "water_area_id": 42295,
           "water_name": "钱塘江",
           "source_layer_name": "rx",
           "source_object_id": "48063",
@@ -276,14 +889,14 @@
           ],
           "duplicate_layer_names": [],
           "bbox": [
-            120.90700008,
-            30.366,
-            120.91020012,
-            30.36860001
+            120.90700008038948,
+            30.366000000099973,
+            120.91020012003958,
+            30.368600010282307
           ]
         },
         {
-          "water_area_id": 48064,
+          "water_area_id": 42296,
           "water_name": "钱塘江",
           "source_layer_name": "rx",
           "source_object_id": "48064",
@@ -297,16 +910,16 @@
           ],
           "duplicate_layer_names": [],
           "bbox": [
-            120.90939984,
-            30.36359997,
-            120.91160016,
-            30.36500001
+            120.90939984033048,
+            30.363599970362372,
+            120.91160016031915,
+            30.365000009742687
           ]
         }
       ]
     },
     {
-      "channel_id": 6,
+      "channel_id": 319,
       "channel_code": "NC-PEARL-RIVER",
       "channel_name": "珠江航道",
       "matched_water_area_count": 0,
@@ -321,7 +934,7 @@
       "candidates": []
     },
     {
-      "channel_id": 7,
+      "channel_id": 320,
       "channel_code": "NC-BEJIANG",
       "channel_name": "北江航道",
       "matched_water_area_count": 0,
@@ -336,7 +949,7 @@
       "candidates": []
     },
     {
-      "channel_id": 8,
+      "channel_id": 321,
       "channel_code": "NC-DONGJIANG",
       "channel_name": "东江航道",
       "matched_water_area_count": 0,
@@ -351,7 +964,7 @@
       "candidates": []
     },
     {
-      "channel_id": 9,
+      "channel_id": 322,
       "channel_code": "NC-AMUR-RIVER",
       "channel_name": "黑龙江航道",
       "matched_water_area_count": 0,
@@ -366,7 +979,7 @@
       "candidates": []
     },
     {
-      "channel_id": 10,
+      "channel_id": 323,
       "channel_code": "NC-SONGHUA-RIVER",
       "channel_name": "松花江航道",
       "matched_water_area_count": 0,
@@ -381,7 +994,7 @@
       "candidates": []
     },
     {
-      "channel_id": 11,
+      "channel_id": 324,
       "channel_code": "NC-HANJIANG",
       "channel_name": "汉江航道",
       "matched_water_area_count": 0,
@@ -396,7 +1009,7 @@
       "candidates": []
     },
     {
-      "channel_id": 12,
+      "channel_id": 325,
       "channel_code": "NC-GANJIANG",
       "channel_name": "赣江航道",
       "matched_water_area_count": 0,
@@ -411,7 +1024,7 @@
       "candidates": []
     },
     {
-      "channel_id": 13,
+      "channel_id": 326,
       "channel_code": "NC-YANGTZE-DELTA-HIGH-GRADE-NETWORK",
       "channel_name": "长三角高等级航道网",
       "matched_water_area_count": 0,
@@ -427,7 +1040,7 @@
       "candidates": []
     },
     {
-      "channel_id": 14,
+      "channel_id": 327,
       "channel_code": "NC-PEARL-DELTA-HIGH-GRADE-NETWORK",
       "channel_name": "珠三角高等级航道网",
       "matched_water_area_count": 0,
@@ -442,7 +1055,7 @@
       "candidates": []
     },
     {
-      "channel_id": 15,
+      "channel_id": 328,
       "channel_code": "NC-MINJIANG-SICHUAN",
       "channel_name": "岷江航道",
       "matched_water_area_count": 0,
@@ -457,7 +1070,7 @@
       "candidates": []
     },
     {
-      "channel_id": 16,
+      "channel_id": 329,
       "channel_code": "NC-JIALING-RIVER",
       "channel_name": "嘉陵江航道",
       "matched_water_area_count": 0,
@@ -472,7 +1085,7 @@
       "candidates": []
     },
     {
-      "channel_id": 17,
+      "channel_id": 330,
       "channel_code": "NC-WUJIANG",
       "channel_name": "乌江航道",
       "matched_water_area_count": 0,
@@ -487,7 +1100,7 @@
       "candidates": []
     },
     {
-      "channel_id": 18,
+      "channel_id": 331,
       "channel_code": "NC-XIANGJIANG",
       "channel_name": "湘江航道",
       "matched_water_area_count": 0,
@@ -502,7 +1115,7 @@
       "candidates": []
     },
     {
-      "channel_id": 19,
+      "channel_id": 332,
       "channel_code": "NC-YUANSHUI",
       "channel_name": "沅水航道",
       "matched_water_area_count": 0,
@@ -517,7 +1130,7 @@
       "candidates": []
     },
     {
-      "channel_id": 20,
+      "channel_id": 333,
       "channel_code": "NC-XINJIANG",
       "channel_name": "信江航道",
       "matched_water_area_count": 0,
@@ -532,7 +1145,7 @@
       "candidates": []
     },
     {
-      "channel_id": 21,
+      "channel_id": 334,
       "channel_code": "NC-YOUJIANG",
       "channel_name": "右江航道",
       "matched_water_area_count": 0,
@@ -547,7 +1160,7 @@
       "candidates": []
     },
     {
-      "channel_id": 22,
+      "channel_id": 335,
       "channel_code": "NC-ZUOJIANG",
       "channel_name": "左江航道",
       "matched_water_area_count": 0,
@@ -562,7 +1175,7 @@
       "candidates": []
     },
     {
-      "channel_id": 23,
+      "channel_id": 336,
       "channel_code": "NC-HONGSHUI-RIVER",
       "channel_name": "红水河航道",
       "matched_water_area_count": 0,
@@ -577,7 +1190,7 @@
       "candidates": []
     },
     {
-      "channel_id": 24,
+      "channel_id": 337,
       "channel_code": "NC-NANPAN-RIVER",
       "channel_name": "南盘江航道",
       "matched_water_area_count": 0,
@@ -592,7 +1205,7 @@
       "candidates": []
     },
     {
-      "channel_id": 25,
+      "channel_id": 338,
       "channel_code": "NC-BEIPAN-RIVER",
       "channel_name": "北盘江航道",
       "matched_water_area_count": 0,
@@ -607,7 +1220,7 @@
       "candidates": []
     },
     {
-      "channel_id": 26,
+      "channel_id": 339,
       "channel_code": "NC-LIUJIANG",
       "channel_name": "柳江航道",
       "matched_water_area_count": 0,
@@ -622,7 +1235,7 @@
       "candidates": []
     },
     {
-      "channel_id": 27,
+      "channel_id": 340,
       "channel_code": "NC-DULIUJIANG",
       "channel_name": "都柳江航道",
       "matched_water_area_count": 0,
@@ -637,7 +1250,7 @@
       "candidates": []
     },
     {
-      "channel_id": 28,
+      "channel_id": 341,
       "channel_code": "NC-QIANJIANG",
       "channel_name": "黔江航道",
       "matched_water_area_count": 0,
@@ -652,7 +1265,7 @@
       "candidates": []
     },
     {
-      "channel_id": 29,
+      "channel_id": 342,
       "channel_code": "NC-GUIJIANG",
       "channel_name": "桂江航道",
       "matched_water_area_count": 0,
@@ -667,7 +1280,7 @@
       "candidates": []
     },
     {
-      "channel_id": 30,
+      "channel_id": 343,
       "channel_code": "NC-MINJIANG-FUJIAN",
       "channel_name": "闽江航道",
       "matched_water_area_count": 0,
@@ -682,7 +1295,7 @@
       "candidates": []
     },
     {
-      "channel_id": 31,
+      "channel_id": 344,
       "channel_code": "NC-HUANGPU-RIVER",
       "channel_name": "黄浦江航道",
       "matched_water_area_count": 1,
@@ -693,9 +1306,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43532,
+          "water_area_id": 50000,
           "water_name": "黄浦江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43532",
           "match_type_code": "EXACT_NAME",
           "matched_term": "黄浦江",
@@ -704,19 +1317,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.21539984,
-            30.9564,
-            121.56940008,
-            31.39340004
+            121.2153998403304,
+            30.956399999560404,
+            121.56940007984986,
+            31.393400040379618
           ]
         }
       ]
     },
     {
-      "channel_id": 32,
+      "channel_id": 345,
       "channel_code": "NC-YANHE",
       "channel_name": "盐河",
       "matched_water_area_count": 0,
@@ -731,7 +1344,7 @@
       "candidates": []
     },
     {
-      "channel_id": 33,
+      "channel_id": 346,
       "channel_code": "NC-TONGYANG-LINE",
       "channel_name": "通扬线",
       "matched_water_area_count": 2,
@@ -742,9 +1355,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 44256,
+          "water_area_id": 50724,
           "water_name": "新通扬运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "44256",
           "match_type_code": "CONTAINS_NAME",
           "matched_term": "通扬运河",
@@ -753,19 +1366,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.57100012,
-            32.42539998,
-            119.68059996,
-            32.49299997
+            119.57100011985972,
+            32.42539997982527,
+            119.68059995982037,
+            32.49299997027248
           ]
         },
         {
-          "water_area_id": 44257,
+          "water_area_id": 50725,
           "water_name": "新通扬运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "44257",
           "match_type_code": "CONTAINS_NAME",
           "matched_term": "通扬运河",
@@ -774,19 +1387,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.73719988,
-            32.5062,
-            119.81900016,
-            32.51199996
+            119.73719988007042,
+            32.50619999983019,
+            119.81900016022928,
+            32.51199995973042
           ]
         }
       ]
     },
     {
-      "channel_id": 34,
+      "channel_id": 347,
       "channel_code": "NC-XICHENG-CANAL",
       "channel_name": "锡澄运河",
       "matched_water_area_count": 0,
@@ -801,7 +1414,7 @@
       "candidates": []
     },
     {
-      "channel_id": 35,
+      "channel_id": 348,
       "channel_code": "NC-DANJINLI-CAOHE",
       "channel_name": "丹金溧漕河",
       "matched_water_area_count": 1,
@@ -812,9 +1425,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43527,
+          "water_area_id": 49995,
           "water_name": "丹金溧漕河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43527",
           "match_type_code": "EXACT_NAME",
           "matched_term": "丹金溧漕河",
@@ -823,19 +1436,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.49279984,
-            31.63740003,
-            119.53379988,
-            31.72599999
+            119.49279984024054,
+            31.63740003028721,
+            119.53379988016036,
+            31.725999990007608
           ]
         }
       ]
     },
     {
-      "channel_id": 36,
+      "channel_id": 349,
       "channel_code": "NC-MANGDAO-RIVER",
       "channel_name": "芒稻河航道",
       "matched_water_area_count": 1,
@@ -846,9 +1459,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43053,
+          "water_area_id": 49521,
           "water_name": "芒稻河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43053",
           "match_type_code": "EXACT_NAME",
           "matched_term": "芒稻河",
@@ -857,19 +1470,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.54739996,
-            32.35740003,
-            119.60439984,
-            32.40960003
+            119.54739995964053,
+            32.35740003028724,
+            119.60439983988078,
+            32.40960003001743
           ]
         }
       ]
     },
     {
-      "channel_id": 37,
+      "channel_id": 350,
       "channel_code": "NC-YANSHAO-LINE",
       "channel_name": "盐邵线",
       "matched_water_area_count": 0,
@@ -884,7 +1497,7 @@
       "candidates": []
     },
     {
-      "channel_id": 38,
+      "channel_id": 351,
       "channel_code": "NC-YONGJIANG",
       "channel_name": "甬江航道",
       "matched_water_area_count": 1,
@@ -895,9 +1508,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43402,
+          "water_area_id": 49870,
           "water_name": "甬江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43402",
           "match_type_code": "EXACT_NAME",
           "matched_term": "甬江",
@@ -906,19 +1519,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.55600016,
-            29.87319996,
-            121.76039988,
-            29.97739998
+            121.55600015977961,
+            29.873199959910266,
+            121.76039988025036,
+            29.977399979825236
           ]
         }
       ]
     },
     {
-      "channel_id": 39,
+      "channel_id": 352,
       "channel_code": "NC-NENJIANG",
       "channel_name": "嫩江航道",
       "matched_water_area_count": 0,
@@ -933,7 +1546,7 @@
       "candidates": []
     },
     {
-      "channel_id": 40,
+      "channel_id": 353,
       "channel_code": "NC-FUCHUN-RIVER",
       "channel_name": "富春江航道",
       "matched_water_area_count": 3,
@@ -944,9 +1557,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 28035,
+          "water_area_id": 48474,
           "water_name": "富春江",
-          "source_layer_name": "rx",
+          "source_layer_name": "二级水系",
           "source_object_id": "28035",
           "match_type_code": "EXACT_NAME",
           "matched_term": "富春江",
@@ -955,19 +1568,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "二级水系"
+            "rx"
           ],
           "bbox": [
-            119.51020008,
-            29.52880002,
-            119.65700016,
-            29.71040004
+            119.51020007966997,
+            29.52880002010488,
+            119.65700016022925,
+            29.710400039929937
           ]
         },
         {
-          "water_area_id": 28037,
+          "water_area_id": 48476,
           "water_name": "富春江",
-          "source_layer_name": "rx",
+          "source_layer_name": "二级水系",
           "source_object_id": "28037",
           "match_type_code": "EXACT_NAME",
           "matched_term": "富春江",
@@ -976,19 +1589,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "二级水系"
+            "rx"
           ],
           "bbox": [
-            119.63419992,
-            29.709,
-            120.1824,
-            30.19740003
+            119.63419991999035,
+            29.708999999650302,
+            120.1823999995604,
+            30.197400030287213
           ]
         },
         {
-          "water_area_id": 28207,
+          "water_area_id": 48646,
           "water_name": "富春江水库",
-          "source_layer_name": "rx",
+          "source_layer_name": "二级水系",
           "source_object_id": "28207",
           "match_type_code": "CONTAINS_NAME",
           "matched_term": "富春江",
@@ -997,19 +1610,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "二级水系"
+            "rx"
           ],
           "bbox": [
-            119.50580016,
-            29.52819999,
-            119.66820012,
-            29.71040004
+            119.50580016004938,
+            29.5281999897378,
+            119.66820012003961,
+            29.710400039929937
           ]
         }
       ]
     },
     {
-      "channel_id": 41,
+      "channel_id": 354,
       "channel_code": "NC-YAMEN-WATERWAY",
       "channel_name": "崖门水道",
       "matched_water_area_count": 0,
@@ -1024,7 +1637,7 @@
       "candidates": []
     },
     {
-      "channel_id": 42,
+      "channel_id": 355,
       "channel_code": "NC-SHUNDE-WATERWAY",
       "channel_name": "顺德水道",
       "matched_water_area_count": 0,
@@ -1039,7 +1652,7 @@
       "candidates": []
     },
     {
-      "channel_id": 43,
+      "channel_id": 356,
       "channel_code": "NC-JIANGHAN-CANAL",
       "channel_name": "江汉运河",
       "matched_water_area_count": 0,
@@ -1056,7 +1669,7 @@
       "candidates": []
     },
     {
-      "channel_id": 44,
+      "channel_id": 357,
       "channel_code": "NC-HEYU-LINE",
       "channel_name": "合裕线",
       "matched_water_area_count": 0,
@@ -1073,7 +1686,7 @@
       "candidates": []
     },
     {
-      "channel_id": 45,
+      "channel_id": 358,
       "channel_code": "NC-SHAYING-RIVER",
       "channel_name": "沙颍河航道",
       "matched_water_area_count": 0,
@@ -1090,7 +1703,7 @@
       "candidates": []
     },
     {
-      "channel_id": 46,
+      "channel_id": 359,
       "channel_code": "NC-SUNAN-CANAL",
       "channel_name": "苏南运河",
       "matched_water_area_count": 0,
@@ -1107,7 +1720,7 @@
       "candidates": []
     },
     {
-      "channel_id": 47,
+      "channel_id": 360,
       "channel_code": "NC-SUBEI-CANAL",
       "channel_name": "苏北运河",
       "matched_water_area_count": 0,
@@ -1124,7 +1737,7 @@
       "candidates": []
     },
     {
-      "channel_id": 48,
+      "channel_id": 361,
       "channel_code": "NC-SUSHEN-INNER-PORT-LINE",
       "channel_name": "苏申内港线",
       "matched_water_area_count": 0,
@@ -1141,7 +1754,7 @@
       "candidates": []
     },
     {
-      "channel_id": 49,
+      "channel_id": 362,
       "channel_code": "NC-SULIAN-WATERWAY",
       "channel_name": "宿连航道相关水域",
       "matched_water_area_count": 0,
@@ -1156,7 +1769,7 @@
       "candidates": []
     },
     {
-      "channel_id": 50,
+      "channel_id": 363,
       "channel_code": "NC-XUSULIAN-CORRIDOR",
       "channel_name": "徐宿连通道",
       "matched_water_area_count": 0,
@@ -1173,7 +1786,7 @@
       "candidates": []
     },
     {
-      "channel_id": 51,
+      "channel_id": 364,
       "channel_code": "NC-ZHAJIAGOU",
       "channel_name": "赵家沟",
       "matched_water_area_count": 0,
@@ -1190,7 +1803,7 @@
       "candidates": []
     },
     {
-      "channel_id": 52,
+      "channel_id": 365,
       "channel_code": "NC-DALU-LINE",
       "channel_name": "大芦线",
       "matched_water_area_count": 0,
@@ -1207,7 +1820,7 @@
       "candidates": []
     },
     {
-      "channel_id": 53,
+      "channel_id": 366,
       "channel_code": "NC-DAPU-LINE",
       "channel_name": "大浦线",
       "matched_water_area_count": 0,
@@ -1224,7 +1837,7 @@
       "candidates": []
     },
     {
-      "channel_id": 54,
+      "channel_id": 367,
       "channel_code": "NC-HANGHUXI-LINE",
       "channel_name": "杭湖锡线",
       "matched_water_area_count": 0,
@@ -1241,7 +1854,7 @@
       "candidates": []
     },
     {
-      "channel_id": 55,
+      "channel_id": 368,
       "channel_code": "NC-MAO-RIVER",
       "channel_name": "泖河",
       "matched_water_area_count": 1,
@@ -1252,9 +1865,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43528,
+          "water_area_id": 49996,
           "water_name": "泖河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43528",
           "match_type_code": "EXACT_NAME",
           "matched_term": "泖河",
@@ -1263,19 +1876,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.0356,
-            30.99999996,
-            121.12779996,
-            31.05700002
+            121.03559999974027,
+            30.999999959730417,
+            121.12779996000017,
+            31.057000019835073
           ]
         }
       ]
     },
     {
-      "channel_id": 56,
+      "channel_id": 369,
       "channel_code": "NC-HENGLIAOJING",
       "channel_name": "横潦泾",
       "matched_water_area_count": 1,
@@ -1286,9 +1899,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43530,
+          "water_area_id": 49998,
           "water_name": "横潦泾",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43530",
           "match_type_code": "EXACT_NAME",
           "matched_term": "横潦泾",
@@ -1297,19 +1910,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.15699992,
-            30.94540002,
-            121.2156,
-            30.9618
+            121.15699991981046,
+            30.945400020194825,
+            121.21559999974022,
+            30.96180000036975
           ]
         }
       ]
     },
     {
-      "channel_id": 57,
+      "channel_id": 370,
       "channel_code": "NC-SHULIAOJING",
       "channel_name": "竖潦泾",
       "matched_water_area_count": 1,
@@ -1320,9 +1933,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43531,
+          "water_area_id": 49999,
           "water_name": "竖潦泾",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43531",
           "match_type_code": "EXACT_NAME",
           "matched_term": "竖潦泾",
@@ -1331,19 +1944,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.21160004,
-            30.94659999,
-            121.21800012,
-            30.96299997
+            121.21160004010983,
+            30.946599990097525,
+            121.2180001203094,
+            30.96299997027245
           ]
         }
       ]
     },
     {
-      "channel_id": 58,
+      "channel_id": 371,
       "channel_code": "NC-LIUHE-RIVER",
       "channel_name": "浏河",
       "matched_water_area_count": 1,
@@ -1354,9 +1967,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43534,
+          "water_area_id": 50002,
           "water_name": "浏河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43534",
           "match_type_code": "EXACT_NAME",
           "matched_term": "浏河",
@@ -1365,19 +1978,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.97599984,
-            31.32320004,
-            121.29980004,
-            31.51960002
+            120.9759998404204,
+            31.323200039750077,
+            121.29980003984008,
+            31.519600019925008
           ]
         }
       ]
     },
     {
-      "channel_id": 59,
+      "channel_id": 372,
       "channel_code": "NC-YUANHETANG",
       "channel_name": "元和塘",
       "matched_water_area_count": 1,
@@ -1388,9 +2001,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43536,
+          "water_area_id": 50004,
           "water_name": "元和塘",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43536",
           "match_type_code": "EXACT_NAME",
           "matched_term": "元和塘",
@@ -1399,19 +2012,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.609,
-            31.40659998,
-            120.67620012,
-            31.59780003
+            120.60899999965034,
+            31.406599980005126,
+            120.67620012003954,
+            31.597800029747646
           ]
         }
       ]
     },
     {
-      "channel_id": 60,
+      "channel_id": 373,
       "channel_code": "NC-TONGLU-CANAL",
       "channel_name": "通吕运河",
       "matched_water_area_count": 1,
@@ -1422,9 +2035,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 44258,
+          "water_area_id": 50726,
           "water_name": "通吕运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "44258",
           "match_type_code": "EXACT_NAME",
           "matched_term": "通吕运河",
@@ -1433,19 +2046,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.80800008,
-            32.00979996,
-            121.00119984,
-            32.04500004
+            120.8080000799398,
+            32.00979996000018,
+            121.00119983970092,
+            32.045000040019886
           ]
         }
       ]
     },
     {
-      "channel_id": 61,
+      "channel_id": 374,
       "channel_code": "NC-JIUWEIGANG",
       "channel_name": "九圩港",
       "matched_water_area_count": 1,
@@ -1456,9 +2069,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43584,
+          "water_area_id": 50052,
           "water_name": "九圩港",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43584",
           "match_type_code": "EXACT_NAME",
           "matched_term": "九圩港",
@@ -1467,19 +2080,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.73520016,
-            32.04060003,
-            120.95179992,
-            32.21559999
+            120.7352001599595,
+            32.04060002956777,
+            120.95179991963062,
+            32.21559998964784
           ]
         }
       ]
     },
     {
-      "channel_id": 62,
+      "channel_id": 375,
       "channel_code": "NC-GUANHE-RIVER",
       "channel_name": "灌河航道",
       "matched_water_area_count": 0,
@@ -1494,7 +2107,7 @@
       "candidates": []
     },
     {
-      "channel_id": 63,
+      "channel_id": 376,
       "channel_code": "NC-SHEYANG-RIVER",
       "channel_name": "射阳河航道",
       "matched_water_area_count": 3,
@@ -1505,9 +2118,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43594,
+          "water_area_id": 50062,
           "water_name": "射阳河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43594",
           "match_type_code": "EXACT_NAME",
           "matched_term": "射阳河",
@@ -1516,19 +2129,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.80680012,
-            32.97140001,
-            119.82359988,
-            32.99959998
+            119.80680012012954,
+            32.97140001010246,
+            119.82359988043015,
+            32.999599979555455
           ]
         },
         {
-          "water_area_id": 43600,
+          "water_area_id": 50068,
           "water_name": "射阳河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43600",
           "match_type_code": "EXACT_NAME",
           "matched_term": "射阳河",
@@ -1537,19 +2150,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.71779984,
-            33.62139999,
-            119.99999988,
-            33.89979996
+            119.71779983979081,
+            33.62139998991768,
+            119.99999987989065,
+            33.89979996000022
           ]
         },
         {
-          "water_area_id": 43630,
+          "water_area_id": 50098,
           "water_name": "射阳河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43630",
           "match_type_code": "EXACT_NAME",
           "matched_term": "射阳河",
@@ -1558,19 +2171,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.99999988,
-            33.73440003,
-            120.48220008,
-            33.95019996
+            119.99999987989065,
+            33.73440002983756,
+            120.48220007966995,
+            33.95019996035995
           ]
         }
       ]
     },
     {
-      "channel_id": 64,
+      "channel_id": 377,
       "channel_code": "NC-XINYANGGANG",
       "channel_name": "新洋港航道",
       "matched_water_area_count": 1,
@@ -1581,9 +2194,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43629,
+          "water_area_id": 50097,
           "water_name": "新洋港",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43629",
           "match_type_code": "EXACT_NAME",
           "matched_term": "新洋港",
@@ -1592,19 +2205,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.01939992,
-            33.34560003,
-            120.57900012,
-            33.642
+            120.01939992017026,
+            33.34560003001741,
+            120.57900011985976,
+            33.64200000009998
           ]
         }
       ]
     },
     {
-      "channel_id": 65,
+      "channel_id": 378,
       "channel_code": "NC-YUXI-RIVER",
       "channel_name": "裕溪河航道",
       "matched_water_area_count": 1,
@@ -1615,9 +2228,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43646,
+          "water_area_id": 50114,
           "water_name": "裕溪河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43646",
           "match_type_code": "EXACT_NAME",
           "matched_term": "裕溪河",
@@ -1626,19 +2239,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            117.84459996,
-            31.37380002,
-            118.30880016,
-            31.59800001
+            117.84459995982036,
+            31.37380001965522,
+            118.30880015959974,
+            31.59800001019238
           ]
         }
       ]
     },
     {
-      "channel_id": 66,
+      "channel_id": 379,
       "channel_code": "NC-SHUIYANG-RIVER",
       "channel_name": "水阳江航道",
       "matched_water_area_count": 2,
@@ -1649,9 +2262,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43417,
+          "water_area_id": 49885,
           "water_name": "水阳江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43417",
           "match_type_code": "EXACT_NAME",
           "matched_term": "水阳江",
@@ -1660,19 +2273,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.72699992,
-            31.28139999,
-            118.75160016,
-            31.28519997
+            118.72699991981051,
+            31.281399989917645,
+            118.75160016031919,
+            31.28519997000268
           ]
         },
         {
-          "water_area_id": 43418,
+          "water_area_id": 49886,
           "water_name": "水阳江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43418",
           "match_type_code": "EXACT_NAME",
           "matched_term": "水阳江",
@@ -1681,19 +2294,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.73999988,
-            30.83920002,
-            118.92459996,
-            31.22420004
+            118.73999987989066,
+            30.839200019565283,
+            118.9245999598204,
+            31.22420004019972
           ]
         }
       ]
     },
     {
-      "channel_id": 67,
+      "channel_id": 380,
       "channel_code": "NC-QINGYI-RIVER",
       "channel_name": "青弋江航道",
       "matched_water_area_count": 8,
@@ -1704,9 +2317,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43419,
+          "water_area_id": 49887,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43419",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1715,19 +2328,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.46959992,
-            30.99999996,
-            118.56139992,
-            31.31659998
+            118.46959991990047,
+            30.999999959730417,
+            118.56139992017029,
+            31.31659998000515
           ]
         },
         {
-          "water_area_id": 43420,
+          "water_area_id": 49888,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43420",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1736,19 +2349,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.39780008,
-            30.69399996,
-            118.43300016,
-            30.72740004
+            118.39780008020955,
+            30.693999959730434,
+            118.43300016022931,
+            30.72740004037962
           ]
         },
         {
-          "water_area_id": 43421,
+          "water_area_id": 49889,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43421",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1757,19 +2370,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.36739988,
-            30.67679997,
-            118.38539988,
-            30.68299998
+            118.3673998798007,
+            30.676799969642957,
+            118.38539987980073,
+            30.682999980364855
           ]
         },
         {
-          "water_area_id": 43422,
+          "water_area_id": 49890,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43422",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1778,19 +2391,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.47260016,
-            30.75879996,
-            118.48920012,
-            30.816
+            118.47260015986956,
+            30.758799959550572,
+            118.4892001195899,
+            30.81600000009996
           ]
         },
         {
-          "water_area_id": 43423,
+          "water_area_id": 49891,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43423",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1799,19 +2412,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.4832,
-            30.89400003,
-            118.48939992,
-            30.90639996
+            118.4832000002798,
+            30.89400003037713,
+            118.48939992017029,
+            30.90639996009014
           ]
         },
         {
-          "water_area_id": 43424,
+          "water_area_id": 49892,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43424",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1820,19 +2433,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.46940012,
-            30.8556,
-            118.47480012,
-            30.86399997
+            118.46940012021946,
+            30.855599999740264,
+            118.47480012012954,
+            30.863999969822828
           ]
         },
         {
-          "water_area_id": 43425,
+          "water_area_id": 49893,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43425",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1841,19 +2454,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.47840012,
-            30.91159998,
-            118.50940008,
-            30.99380004
+            118.47840011976973,
+            30.91159997955549,
+            118.50940007984991,
+            30.99380003984004
           ]
         },
         {
-          "water_area_id": 43426,
+          "water_area_id": 49894,
           "water_name": "青弋江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43426",
           "match_type_code": "EXACT_NAME",
           "matched_term": "青弋江",
@@ -1862,19 +2475,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.18699992,
-            30.53999997,
-            118.34300016,
-            30.66399999
+            118.18699991981055,
+            30.539999969822816,
+            118.34300016022928,
+            30.663999990007596
           ]
         }
       ]
     },
     {
-      "channel_id": 68,
+      "channel_id": 381,
       "channel_code": "NC-CAOE-RIVER",
       "channel_name": "曹娥江航道",
       "matched_water_area_count": 2,
@@ -1885,9 +2498,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43640,
+          "water_area_id": 50108,
           "water_name": "曹娥江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43640",
           "match_type_code": "EXACT_NAME",
           "matched_term": "曹娥江",
@@ -1896,19 +2509,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.63319992,
-            29.99979999,
-            120.87619992,
-            30.15299997
+            120.63319992044,
+            29.99979999027738,
+            120.87619991999043,
+            30.152999970272447
           ]
         },
         {
-          "water_area_id": 43641,
+          "water_area_id": 50109,
           "water_name": "曹娥江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43641",
           "match_type_code": "EXACT_NAME",
           "matched_term": "曹娥江",
@@ -1917,19 +2530,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.83339988,
-            29.75799996,
-            120.87939996,
-            29.99979999
+            120.83339987980071,
+            29.757999959730398,
+            120.87939995964052,
+            29.99979999027738
           ]
         }
       ]
     },
     {
-      "channel_id": 69,
+      "channel_id": 382,
       "channel_code": "NC-YUYAO-RIVER",
       "channel_name": "余姚江航道",
       "matched_water_area_count": 1,
@@ -1940,9 +2553,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43403,
+          "water_area_id": 49871,
           "water_name": "余姚江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43403",
           "match_type_code": "EXACT_NAME",
           "matched_term": "余姚江",
@@ -1951,19 +2564,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.16660004,
-            29.87299998,
-            121.56199992,
-            30.04440003
+            121.16660003966012,
+            29.872999980364852,
+            121.56199992026018,
+            30.04440002983756
           ]
         }
       ]
     },
     {
-      "channel_id": 70,
+      "channel_id": 383,
       "channel_code": "NC-FENGHUA-RIVER",
       "channel_name": "奉化江航道",
       "matched_water_area_count": 1,
@@ -1974,9 +2587,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43401,
+          "water_area_id": 49869,
           "water_name": "奉化江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43401",
           "match_type_code": "EXACT_NAME",
           "matched_term": "奉化江",
@@ -1985,19 +2598,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.43599992,
-            29.77139997,
-            121.5576,
-            29.87319996
+            121.4359999202602,
+            29.77139996973284,
+            121.5575999997402,
+            29.873199959910266
           ]
         }
       ]
     },
     {
-      "channel_id": 71,
+      "channel_id": 384,
       "channel_code": "NC-PUYANG-RIVER",
       "channel_name": "浦阳江航道",
       "matched_water_area_count": 2,
@@ -2008,9 +2621,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43404,
+          "water_area_id": 49872,
           "water_name": "浦阳江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43404",
           "match_type_code": "EXACT_NAME",
           "matched_term": "浦阳江",
@@ -2019,19 +2632,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.24860004,
-            29.84799996,
-            120.29839992,
-            29.99999997
+            120.24860003966012,
+            29.84799995973043,
+            120.29839991972062,
+            29.999999969822795
           ]
         },
         {
-          "water_area_id": 43405,
+          "water_area_id": 49873,
           "water_name": "浦阳江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43405",
           "match_type_code": "EXACT_NAME",
           "matched_term": "浦阳江",
@@ -2040,34 +2653,53 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.16680012,
-            29.99999997,
-            120.25460016,
-            30.10380003
+            120.16680012012955,
+            29.999999969822795,
+            120.2546001598696,
+            30.103800029747617
           ]
         }
       ]
     },
     {
-      "channel_id": 72,
+      "channel_id": 385,
       "channel_code": "NC-DONGTIAOXI",
       "channel_name": "东苕溪航道",
-      "matched_water_area_count": 0,
-      "best_score": 0,
-      "confidence_code": "MISSING",
-      "review_status_code": "NEED_REVIEW",
-      "issue_codes": [
-        "LOW_MATCH_CONFIDENCE",
-        "NO_WATER_AREA_MATCH"
-      ],
-      "candidate_boundary_written": false,
-      "candidates": []
+      "matched_water_area_count": 1,
+      "best_score": 95,
+      "confidence_code": "HIGH_CONFIDENCE",
+      "review_status_code": "APPROVED",
+      "issue_codes": [],
+      "candidate_boundary_written": true,
+      "candidates": [
+        {
+          "water_area_id": 49879,
+          "water_name": "东苕溪",
+          "source_layer_name": "四级水系",
+          "source_object_id": "43411",
+          "match_type_code": "EXACT_NAME",
+          "matched_term": "东苕溪",
+          "score": 95,
+          "confidence_code": "HIGH_CONFIDENCE",
+          "review_status_code": "APPROVED",
+          "issue_codes": [],
+          "duplicate_layer_names": [
+            "rx"
+          ],
+          "bbox": [
+            120.05560007958002,
+            30.628400039929943,
+            120.12080004028974,
+            30.82519998009508
+          ]
+        }
+      ]
     },
     {
-      "channel_id": 73,
+      "channel_id": 386,
       "channel_code": "NC-XITIAOXI",
       "channel_name": "西苕溪航道",
       "matched_water_area_count": 2,
@@ -2078,9 +2710,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43410,
+          "water_area_id": 49878,
           "water_name": "西苕溪",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43410",
           "match_type_code": "EXACT_NAME",
           "matched_term": "西苕溪",
@@ -2089,19 +2721,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.02240016,
-            30.86600004,
-            120.10060008,
-            30.8988
+            120.02240016013934,
+            30.866000039570224,
+            120.10060008002972,
+            30.89879999992013
           ]
         },
         {
-          "water_area_id": 43652,
+          "water_area_id": 50120,
           "water_name": "西苕溪",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43652",
           "match_type_code": "EXACT_NAME",
           "matched_term": "西苕溪",
@@ -2110,19 +2742,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.69139996,
-            30.72840003,
-            119.75299992,
-            30.78880002
+            119.69139995964053,
+            30.72840002983753,
+            119.75299991981046,
+            30.788800020104873
           ]
         }
       ]
     },
     {
-      "channel_id": 74,
+      "channel_id": 387,
       "channel_code": "NC-CHANGDOUGANG",
       "channel_name": "长兜港",
       "matched_water_area_count": 1,
@@ -2133,9 +2765,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43409,
+          "water_area_id": 49877,
           "water_name": "长兜港",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43409",
           "match_type_code": "EXACT_NAME",
           "matched_term": "长兜港",
@@ -2144,19 +2776,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            120.09920004,
-            30.89819997,
-            120.12819984,
-            30.94419996
+            120.09920003975014,
+            30.89819996955299,
+            120.12819984015061,
+            30.944199960359924
           ]
         }
       ]
     },
     {
-      "channel_id": 75,
+      "channel_id": 388,
       "channel_code": "NC-LANJIANG",
       "channel_name": "兰江航道",
       "matched_water_area_count": 1,
@@ -2167,9 +2799,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 28038,
+          "water_area_id": 48477,
           "water_name": "兰江",
-          "source_layer_name": "rx",
+          "source_layer_name": "二级水系",
           "source_object_id": "28038",
           "match_type_code": "EXACT_NAME",
           "matched_term": "兰江",
@@ -2178,19 +2810,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "二级水系"
+            "rx"
           ],
           "bbox": [
-            119.44599984,
-            29.1978,
-            119.54660004,
-            29.53019997
+            119.44599984042031,
+            29.197800000369796,
+            119.54660003966012,
+            29.530199969552996
           ]
         }
       ]
     },
     {
-      "channel_id": 76,
+      "channel_id": 389,
       "channel_code": "NC-XINAN-RIVER",
       "channel_name": "新安江航道",
       "matched_water_area_count": 5,
@@ -2201,9 +2833,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 27575,
+          "water_area_id": 48907,
           "water_name": "新安江",
-          "source_layer_name": "rx",
+          "source_layer_name": "三级水系",
           "source_object_id": "27575",
           "match_type_code": "EXACT_NAME",
           "matched_term": "新安江",
@@ -2212,19 +2844,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "三级水系"
+            "rx"
           ],
           "bbox": [
-            119.21140008,
-            29.46580002,
-            119.50859988,
-            29.55320001
+            119.21140007984991,
+            29.465800019655262,
+            119.50859987998058,
+            29.553200010372223
           ]
         },
         {
-          "water_area_id": 27576,
+          "water_area_id": 48908,
           "water_name": "新安江",
-          "source_layer_name": "rx",
+          "source_layer_name": "三级水系",
           "source_object_id": "27576",
           "match_type_code": "EXACT_NAME",
           "matched_term": "新安江",
@@ -2233,19 +2865,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "三级水系"
+            "rx"
           ],
           "bbox": [
-            118.13619996,
-            29.62539999,
-            118.73499984,
-            29.86620003
+            118.13619996035993,
+            29.62539998991764,
+            118.73499983997067,
+            29.866200030107336
           ]
         },
         {
-          "water_area_id": 27742,
+          "water_area_id": 49074,
           "water_name": "新安江",
-          "source_layer_name": "rx",
+          "source_layer_name": "三级水系",
           "source_object_id": "27742",
           "match_type_code": "EXACT_NAME",
           "matched_term": "新安江",
@@ -2254,19 +2886,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "三级水系"
+            "rx"
           ],
           "bbox": [
-            118.73499984,
-            29.48419998,
-            119.21360004,
-            29.72860002
+            118.73499983997067,
+            29.484199979645382,
+            119.21360004010978,
+            29.7286000203747
           ]
         },
         {
-          "water_area_id": 27746,
+          "water_area_id": 49078,
           "water_name": "新安江",
-          "source_layer_name": "rx",
+          "source_layer_name": "三级水系",
           "source_object_id": "27746",
           "match_type_code": "EXACT_NAME",
           "matched_term": "新安江",
@@ -2275,19 +2907,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "三级水系"
+            "rx"
           ],
           "bbox": [
-            119.50620012,
-            29.53279998,
-            119.51439984,
-            29.53819998
+            119.50620012003958,
+            29.53279997973533,
+            119.51439983988075,
+            29.538199979645412
           ]
         },
         {
-          "water_area_id": 27832,
+          "water_area_id": 49164,
           "water_name": "新安江水库",
-          "source_layer_name": "rx",
+          "source_layer_name": "三级水系",
           "source_object_id": "27832",
           "match_type_code": "CONTAINS_NAME",
           "matched_term": "新安江",
@@ -2296,19 +2928,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "三级水系"
+            "rx"
           ],
           "bbox": [
-            118.5786,
-            29.3706,
-            119.23719984,
-            29.82999996
+            118.57860000018991,
+            29.37060000018988,
+            119.2371998397009,
+            29.8299999597304
           ]
         }
       ]
     },
     {
-      "channel_id": 77,
+      "channel_id": 390,
       "channel_code": "NC-YIHE-RIVER",
       "channel_name": "沂河航道",
       "matched_water_area_count": 0,
@@ -2323,7 +2955,7 @@
       "candidates": []
     },
     {
-      "channel_id": 78,
+      "channel_id": 391,
       "channel_code": "NC-SHUHE-RIVER",
       "channel_name": "沭河航道",
       "matched_water_area_count": 0,
@@ -2338,7 +2970,7 @@
       "candidates": []
     },
     {
-      "channel_id": 79,
+      "channel_id": 392,
       "channel_code": "NC-XINYI-RIVER",
       "channel_name": "新沂河航道",
       "matched_water_area_count": 0,
@@ -2353,7 +2985,7 @@
       "candidates": []
     },
     {
-      "channel_id": 80,
+      "channel_id": 393,
       "channel_code": "NC-WOHE-RIVER",
       "channel_name": "涡河航道",
       "matched_water_area_count": 0,
@@ -2368,7 +3000,7 @@
       "candidates": []
     },
     {
-      "channel_id": 81,
+      "channel_id": 394,
       "channel_code": "NC-QINHUAI-NEW-RIVER",
       "channel_name": "秦淮新河",
       "matched_water_area_count": 1,
@@ -2379,9 +3011,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43031,
+          "water_area_id": 49499,
           "water_name": "秦淮新河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43031",
           "match_type_code": "EXACT_NAME",
           "matched_term": "秦淮新河",
@@ -2390,19 +3022,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.65120012,
-            31.95780003,
-            118.70240004,
-            31.97320002
+            118.65120011958993,
+            31.957800029747602,
+            118.70240003993001,
+            31.973200019565297
           ]
         }
       ]
     },
     {
-      "channel_id": 82,
+      "channel_id": 395,
       "channel_code": "NC-CHUHE-RIVER",
       "channel_name": "滁河航道",
       "matched_water_area_count": 7,
@@ -2413,9 +3045,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43519,
+          "water_area_id": 49987,
           "water_name": "滁河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43519",
           "match_type_code": "EXACT_NAME",
           "matched_term": "滁河",
@@ -2424,19 +3056,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.54839996,
-            32.1588,
-            118.5732,
-            32.18699997
+            118.54839996009014,
+            32.15879999992012,
+            118.57320000027983,
+            32.18699997027244
           ]
         },
         {
-          "water_area_id": 43520,
+          "water_area_id": 49988,
           "water_name": "滁河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43520",
           "match_type_code": "EXACT_NAME",
           "matched_term": "滁河",
@@ -2445,19 +3077,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.64540016,
-            32.21960004,
-            118.67079996,
-            32.25500001
+            118.64540015968964,
+            32.21960004010981,
+            118.67079995955055,
+            32.25500000974273
           ]
         },
         {
-          "water_area_id": 43521,
+          "water_area_id": 49989,
           "water_name": "滁河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43521",
           "match_type_code": "EXACT_NAME",
           "matched_term": "滁河",
@@ -2466,19 +3098,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.71299988,
-            32.34819996,
-            118.76159988,
-            32.38419996
+            118.71299988034025,
+            32.34819996035992,
+            118.76159988043025,
+            32.38419996035992
           ]
         },
         {
-          "water_area_id": 43522,
+          "water_area_id": 49990,
           "water_name": "滁河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43522",
           "match_type_code": "EXACT_NAME",
           "matched_term": "滁河",
@@ -2487,19 +3119,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.69319988,
-            32.34500001,
-            118.72680012,
-            32.35699998
+            118.69319988007044,
+            32.345000009742705,
+            118.7268001201295,
+            32.35699998036483
           ]
         },
         {
-          "water_area_id": 43523,
+          "water_area_id": 49991,
           "water_name": "滁河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43523",
           "match_type_code": "EXACT_NAME",
           "matched_term": "滁河",
@@ -2508,19 +3140,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.74880008,
-            32.3244,
-            118.77779988,
-            32.35940001
+            118.74880007975992,
+            32.3243999995604,
+            118.77779988016039,
+            32.35940001010243
           ]
         },
         {
-          "water_area_id": 43524,
+          "water_area_id": 49992,
           "water_name": "滁河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43524",
           "match_type_code": "EXACT_NAME",
           "matched_term": "滁河",
@@ -2529,19 +3161,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.91559996,
-            32.24439999,
-            119.0538,
-            32.25799998
+            118.91559996027001,
+            32.2443999903673,
+            119.05380000036973,
+            32.25799997991521
           ]
         },
         {
-          "water_area_id": 43525,
+          "water_area_id": 49993,
           "water_name": "滁河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43525",
           "match_type_code": "EXACT_NAME",
           "matched_term": "滁河",
@@ -2550,19 +3182,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            118.79219988,
-            32.229,
-            118.90599984,
-            32.34719997
+            118.79219987962085,
+            32.22899999965034,
+            118.90599984042035,
+            32.34719997000269
           ]
         }
       ]
     },
     {
-      "channel_id": 83,
+      "channel_id": 396,
       "channel_code": "NC-LUTING-RIVER",
       "channel_name": "卤汀河航道",
       "matched_water_area_count": 4,
@@ -2573,9 +3205,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43590,
+          "water_area_id": 50058,
           "water_name": "卤汀河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43590",
           "match_type_code": "EXACT_NAME",
           "matched_term": "卤汀河",
@@ -2584,19 +3216,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.87300016,
-            32.67739998,
-            119.8836,
-            32.69420001
+            119.87300016022925,
+            32.67739997982528,
+            119.88359999974023,
+            32.694200009922554
           ]
         },
         {
-          "water_area_id": 43591,
+          "water_area_id": 50059,
           "water_name": "卤汀河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43591",
           "match_type_code": "EXACT_NAME",
           "matched_term": "卤汀河",
@@ -2605,19 +3237,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.88399996,
-            32.59160001,
-            119.91539988,
-            32.68060002
+            119.88399995973043,
+            32.59160000983263,
+            119.9153998798007,
+            32.6806000203747
           ]
         },
         {
-          "water_area_id": 43592,
+          "water_area_id": 50060,
           "water_name": "卤汀河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43592",
           "match_type_code": "EXACT_NAME",
           "matched_term": "卤汀河",
@@ -2626,19 +3258,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.84119992,
-            32.70799998,
-            119.871,
-            32.77500003
+            119.84119992044009,
+            32.7079999799152,
+            119.87099999965028,
+            32.77500002992747
           ]
         },
         {
-          "water_area_id": 43593,
+          "water_area_id": 50061,
           "water_name": "卤汀河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43593",
           "match_type_code": "EXACT_NAME",
           "matched_term": "卤汀河",
@@ -2647,19 +3279,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.82399984,
-            32.82800004,
-            119.83179996,
-            32.92219998
+            119.82399984042036,
+            32.82800003957021,
+            119.83179996000024,
+            32.92219997964537
           ]
         }
       ]
     },
     {
-      "channel_id": 84,
+      "channel_id": 397,
       "channel_code": "NC-TAIDONG-RIVER",
       "channel_name": "泰东河",
       "matched_water_area_count": 2,
@@ -2670,9 +3302,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43587,
+          "water_area_id": 50055,
           "water_name": "泰东河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43587",
           "match_type_code": "EXACT_NAME",
           "matched_term": "泰东河",
@@ -2681,19 +3313,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.99999988,
-            32.58819999,
-            120.08900016,
-            32.65340004
+            119.99999987989065,
+            32.5881999897378,
+            120.08900016022926,
+            32.65340004037961
           ]
         },
         {
-          "water_area_id": 43588,
+          "water_area_id": 50056,
           "water_name": "泰东河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43588",
           "match_type_code": "EXACT_NAME",
           "matched_term": "泰东河",
@@ -2702,19 +3334,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.96120016,
-            32.57759997,
-            119.99999988,
-            32.59119996
+            119.9612001599595,
+            32.57759997036237,
+            119.99999987989065,
+            32.591199959910284
           ]
         }
       ]
     },
     {
-      "channel_id": 85,
+      "channel_id": 398,
       "channel_code": "NC-JINWAN-RIVER",
       "channel_name": "金湾河",
       "matched_water_area_count": 1,
@@ -2725,9 +3357,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43052,
+          "water_area_id": 49520,
           "water_name": "金湾河",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43052",
           "match_type_code": "EXACT_NAME",
           "matched_term": "金湾河",
@@ -2736,19 +3368,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.49800004,
-            32.40860004,
-            119.54800008,
-            32.4954
+            119.49800003957023,
+            32.40860003966014,
+            119.54800007993981,
+            32.49540000001002
           ]
         }
       ]
     },
     {
-      "channel_id": 86,
+      "channel_id": 399,
       "channel_code": "NC-FENSHUI-RIVER",
       "channel_name": "分水江航道",
       "matched_water_area_count": 1,
@@ -2759,9 +3391,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43408,
+          "water_area_id": 49876,
           "water_name": "分水江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43408",
           "match_type_code": "EXACT_NAME",
           "matched_term": "分水江",
@@ -2770,19 +3402,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            119.39600016,
-            29.79739998,
-            119.67980004,
-            29.99999997
+            119.39600015977965,
+            29.797399979825286,
+            119.67980003984007,
+            29.999999969822795
           ]
         }
       ]
     },
     {
-      "channel_id": 87,
+      "channel_id": 400,
       "channel_code": "NC-QIUPU-RIVER",
       "channel_name": "秋浦河航道",
       "matched_water_area_count": 0,
@@ -2797,7 +3429,7 @@
       "candidates": []
     },
     {
-      "channel_id": 88,
+      "channel_id": 401,
       "channel_code": "NC-LIANSHEN-LINE",
       "channel_name": "连申线",
       "matched_water_area_count": 0,
@@ -2814,7 +3446,7 @@
       "candidates": []
     },
     {
-      "channel_id": 89,
+      "channel_id": 402,
       "channel_code": "NC-WUSHEN-LINE",
       "channel_name": "芜申线—苏申外港线",
       "matched_water_area_count": 0,
@@ -2831,7 +3463,7 @@
       "candidates": []
     },
     {
-      "channel_id": 90,
+      "channel_id": 403,
       "channel_code": "NC-CHANGHUSHEN-LINE",
       "channel_name": "长湖申线—黄浦江—大浦线",
       "matched_water_area_count": 1,
@@ -2845,9 +3477,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 43532,
+          "water_area_id": 50000,
           "water_name": "黄浦江",
-          "source_layer_name": "rx",
+          "source_layer_name": "四级水系",
           "source_object_id": "43532",
           "match_type_code": "EXACT_NAME",
           "matched_term": "黄浦江",
@@ -2859,19 +3491,19 @@
             "SEED_BOUNDARY_NEED_REVIEW"
           ],
           "duplicate_layer_names": [
-            "四级水系"
+            "rx"
           ],
           "bbox": [
-            121.21539984,
-            30.9564,
-            121.56940008,
-            31.39340004
+            121.2153998403304,
+            30.956399999560404,
+            121.56940007984986,
+            31.393400040379618
           ]
         }
       ]
     },
     {
-      "channel_id": 91,
+      "channel_id": 404,
       "channel_code": "NC-HUAIHE-SEA-CHANNEL",
       "channel_name": "淮河出海航道—盐河",
       "matched_water_area_count": 2,
@@ -2885,9 +3517,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 8,
+          "water_area_id": 48405,
           "water_name": "淮河",
-          "source_layer_name": "rx",
+          "source_layer_name": "一级水系",
           "source_object_id": "8",
           "match_type_code": "EXACT_NAME",
           "matched_term": "淮河",
@@ -2900,19 +3532,19 @@
             "SEED_BOUNDARY_NEED_REVIEW"
           ],
           "duplicate_layer_names": [
-            "一级水系"
+            "rx"
           ],
           "bbox": [
-            114.02920008,
-            32.27239998,
-            118.59040008,
-            33.19360002
+            114.02920008011961,
+            32.27239998027494,
+            118.59040008029956,
+            33.19360001992504
           ]
         },
         {
-          "water_area_id": 841,
+          "water_area_id": 85875,
           "water_name": "淮河",
-          "source_layer_name": "rx",
+          "source_layer_name": "七级水系",
           "source_object_id": "841",
           "match_type_code": "EXACT_NAME",
           "matched_term": "淮河",
@@ -2925,19 +3557,19 @@
             "SEED_BOUNDARY_NEED_REVIEW"
           ],
           "duplicate_layer_names": [
-            "七级水系"
+            "rx"
           ],
           "bbox": [
-            118.47499992,
-            32.97639996,
-            118.48200012,
-            33.00000003
+            118.47499991981056,
+            32.976399960090134,
+            118.48200012030941,
+            33.00000003037718
           ]
         }
       ]
     },
     {
-      "channel_id": 92,
+      "channel_id": 405,
       "channel_code": "NC-HUJIASHEN-LINE",
       "channel_name": "湖嘉申线",
       "matched_water_area_count": 0,
@@ -2954,7 +3586,7 @@
       "candidates": []
     },
     {
-      "channel_id": 93,
+      "channel_id": 406,
       "channel_code": "NC-SUSHEN-OUTER-PORT-LINE",
       "channel_name": "苏申外港线—苏申内港线",
       "matched_water_area_count": 0,
@@ -2971,7 +3603,7 @@
       "candidates": []
     },
     {
-      "channel_id": 94,
+      "channel_id": 407,
       "channel_code": "NC-HANGYONG-CANAL",
       "channel_name": "杭甬运河",
       "matched_water_area_count": 1,
@@ -2982,9 +3614,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 28973,
+          "water_area_id": 51427,
           "water_name": "杭甬运河",
-          "source_layer_name": "rx",
+          "source_layer_name": "五级水系",
           "source_object_id": "28973",
           "match_type_code": "EXACT_NAME",
           "matched_term": "杭甬运河",
@@ -2993,19 +3625,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "五级水系"
+            "rx"
           ],
           "bbox": [
-            120.29119992,
-            30.12219999,
-            120.4002,
-            30.15980001
+            120.29119992044002,
+            30.122199989737794,
+            120.40019999983019,
+            30.159800009562844
           ]
         }
       ]
     },
     {
-      "channel_id": 95,
+      "channel_id": 408,
       "channel_code": "NC-HANGSHEN-LINE",
       "channel_name": "杭申线",
       "matched_water_area_count": 0,
@@ -3020,7 +3652,7 @@
       "candidates": []
     },
     {
-      "channel_id": 96,
+      "channel_id": 409,
       "channel_code": "NC-HANGPINGSHEN-LINE",
       "channel_name": "杭平申线",
       "matched_water_area_count": 0,
@@ -3035,7 +3667,7 @@
       "candidates": []
     },
     {
-      "channel_id": 97,
+      "channel_id": 410,
       "channel_code": "NC-WUSULI-RIVER",
       "channel_name": "乌苏里江航道",
       "matched_water_area_count": 0,
@@ -3050,7 +3682,7 @@
       "candidates": []
     },
     {
-      "channel_id": 98,
+      "channel_id": 411,
       "channel_code": "NC-TAIPU-RIVER",
       "channel_name": "太浦河",
       "matched_water_area_count": 1,
@@ -3061,9 +3693,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 28974,
+          "water_area_id": 51428,
           "water_name": "太浦河",
-          "source_layer_name": "rx",
+          "source_layer_name": "五级水系",
           "source_object_id": "28974",
           "match_type_code": "EXACT_NAME",
           "matched_term": "太浦河",
@@ -3072,19 +3704,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "五级水系"
+            "rx"
           ],
           "bbox": [
-            120.47500008,
-            30.99979998,
-            120.60159984,
-            31.01480001
+            120.47500008038946,
+            30.999799980185003,
+            120.60159984006066,
+            31.014800010012493
           ]
         }
       ]
     },
     {
-      "channel_id": 99,
+      "channel_id": 412,
       "channel_code": "NC-WANGYU-RIVER",
       "channel_name": "望虞河",
       "matched_water_area_count": 1,
@@ -3095,9 +3727,9 @@
       "candidate_boundary_written": true,
       "candidates": [
         {
-          "water_area_id": 28917,
+          "water_area_id": 51371,
           "water_name": "望虞河",
-          "source_layer_name": "rx",
+          "source_layer_name": "五级水系",
           "source_object_id": "28917",
           "match_type_code": "EXACT_NAME",
           "matched_term": "望虞河",
@@ -3106,19 +3738,19 @@
           "review_status_code": "APPROVED",
           "issue_codes": [],
           "duplicate_layer_names": [
-            "五级水系"
+            "rx"
           ],
           "bbox": [
-            120.62639988,
-            31.66859997,
-            120.82299984,
-            31.78119996
+            120.62639988025035,
+            31.668599969912748,
+            120.82299983997075,
+            31.781199959910282
           ]
         }
       ]
     },
     {
-      "channel_id": 100,
+      "channel_id": 413,
       "channel_code": "NC-DESHENG-RIVER",
       "channel_name": "德胜河",
       "matched_water_area_count": 0,
@@ -3133,7 +3765,7 @@
       "candidates": []
     },
     {
-      "channel_id": 101,
+      "channel_id": 414,
       "channel_code": "NC-JIAOMEN-WATERWAY",
       "channel_name": "蕉门水道",
       "matched_water_area_count": 0,
@@ -3148,7 +3780,7 @@
       "candidates": []
     },
     {
-      "channel_id": 102,
+      "channel_id": 415,
       "channel_code": "NC-HUTIAOMEN-WATERWAY",
       "channel_name": "虎跳门水道",
       "matched_water_area_count": 0,
@@ -3163,7 +3795,7 @@
       "candidates": []
     },
     {
-      "channel_id": 103,
+      "channel_id": 416,
       "channel_code": "NC-XIAOLAN-WATERWAY",
       "channel_name": "小榄水道",
       "matched_water_area_count": 0,
@@ -3178,7 +3810,7 @@
       "candidates": []
     },
     {
-      "channel_id": 104,
+      "channel_id": 417,
       "channel_code": "NC-HENGMEN-WATERWAY",
       "channel_name": "横门水道",
       "matched_water_area_count": 0,
@@ -3194,10 +3826,10 @@
     }
   ],
   "summary": {
-    "matched_channels": 41,
-    "missing_match_channels": 63,
-    "need_review_channels": 66,
-    "match_row_count": 78,
-    "candidate_boundaries_written": 41
+    "matched_channels": 43,
+    "missing_match_channels": 61,
+    "need_review_channels": 64,
+    "match_row_count": 106,
+    "candidate_boundaries_written": 43
   }
 }

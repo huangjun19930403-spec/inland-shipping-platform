@@ -5,6 +5,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+from shapely.geometry import shape
 
 import app.models  # noqa: F401
 from app.api.v1 import api_router
@@ -18,6 +19,7 @@ from app.models import (
 )
 from app.models.base import Base
 from app.modules.navigation.routing_service import NavigationRoutingEngineService
+from app.modules.navigation.engine.path_validator import PathValidator
 from app.modules.navigation.schemas import NavigationEndpointRequest, NavigationRouteGenerateRequest, VesselProfileRequest
 
 
@@ -68,6 +70,7 @@ def _edge(
     channel_id: int = 1,
     max_allowed_tonnage: float | None = None,
     unknown_constraint_flag: bool = False,
+    lock_required: bool = False,
 ) -> NavigationGraphEdge:
     return NavigationGraphEdge(
         id=id,
@@ -81,7 +84,7 @@ def _edge(
         length_km=11.1,
         direction_code="BIDIRECTIONAL",
         max_allowed_tonnage=max_allowed_tonnage,
-        lock_required=False,
+        lock_required=lock_required,
         bridge_count=0,
         base_cost=11.1,
         routing_enabled=True,
@@ -150,6 +153,47 @@ async def _seed_ready_graph(session: AsyncSession, *, disconnected: bool = False
     await session.commit()
 
 
+async def _seed_bending_graph_requires_expanded_bbox(session: AsyncSession) -> None:
+    session.add(
+        NavigationGraphVersion(
+            id=1,
+            version_code="TEST-BENDING-GRAPH",
+            version_name="Test bending graph",
+            scope_code="TEST",
+            node_count=3,
+            edge_count=2,
+            channel_count=1,
+            quality_score=95,
+            status_code="READY",
+            is_active=True,
+        )
+    )
+    session.add_all(
+        [
+            _node(id=1, graph_version_id=1, lng=120.0, lat=31.0, code="N1"),
+            _node(id=2, graph_version_id=1, lng=120.5, lat=33.0, code="N2"),
+            _node(id=3, graph_version_id=1, lng=121.0, lat=31.0, code="N3"),
+            _edge(
+                id=1,
+                graph_version_id=1,
+                from_node_id=1,
+                to_node_id=2,
+                code="E1",
+                geometry=_line((120.0, 31.0), (120.5, 33.0)),
+            ),
+            _edge(
+                id=2,
+                graph_version_id=1,
+                from_node_id=2,
+                to_node_id=3,
+                code="E2",
+                geometry=_line((120.5, 33.0), (121.0, 31.0)),
+            ),
+        ]
+    )
+    await session.commit()
+
+
 def _request(
     *,
     origin: tuple[float, float] = (120.0, 31.0),
@@ -165,6 +209,50 @@ def _request(
 
 def test_navigation_route_generate_api_is_registered() -> None:
     assert "/navigation/routes/generate" in {getattr(route, "path", None) for route in api_router.routes}
+
+
+def test_path_validator_reports_missing_production_water_and_boundary_context() -> None:
+    issues = PathValidator().validate_spatial_context(
+        _line((120.0, 31.0), (120.1, 31.0)),
+        water_geometries=[],
+        boundary_geometries=[],
+    )
+
+    assert {issue.issue_type_code for issue in issues} == {
+        "UNKNOWN_WATER_AREA_CONTEXT",
+        "UNKNOWN_CHANNEL_BOUNDARY_CONTEXT",
+    }
+
+
+def test_path_validator_fails_when_route_leaves_matched_water_body() -> None:
+    water = {
+        "type": "Polygon",
+        "coordinates": [[
+            [120.0, 31.01],
+            [120.1, 31.01],
+            [120.1, 31.02],
+            [120.0, 31.02],
+            [120.0, 31.01],
+        ]],
+    }
+    boundary = {
+        "type": "Polygon",
+        "coordinates": [[
+            [119.99, 30.99],
+            [120.11, 30.99],
+            [120.11, 31.03],
+            [119.99, 31.03],
+            [119.99, 30.99],
+        ]],
+    }
+
+    issues = PathValidator().validate_spatial_context(
+        _line((120.0, 31.0), (120.1, 31.0)),
+        water_geometries=[shape(water)],
+        boundary_geometries=[shape(boundary)],
+    )
+
+    assert "PATH_OUT_OF_WATER" in {issue.issue_type_code for issue in issues}
 
 
 @pytest.mark.asyncio
@@ -188,6 +276,70 @@ async def test_generate_route_success_persists_request_result_and_issues(session
     assert result.provider_code == "NAVIGATION_ENGINE"
     assert issue_count >= 1
     assert "UNKNOWN_CONSTRAINT_DATA" in {issue.issue_type_code for issue in response.issues}
+    assert result.quality_summary_json["graph_load_margin_degree"] == 0.5
+    assert result.quality_summary_json["loaded_edge_count"] == 2
+    assert result.quality_summary_json["duration_detail"]["default_speed_kmh"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_generate_route_expands_bbox_until_edges_are_loaded(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_bending_graph_requires_expanded_bbox(session)
+
+        response = await NavigationRoutingEngineService(session).generate_route(
+            _request(origin=(120.0, 31.0), destination=(121.0, 31.0))
+        )
+        result = (await session.execute(select(NavigationRouteResult))).scalar_one()
+
+    assert response.status_code == "SUCCESS"
+    assert result.quality_summary_json["graph_load_margin_degree"] >= 2.0
+    assert result.quality_summary_json["loaded_edge_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_successful_route_persists_blocked_edge_warning(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_ready_graph(session)
+        session.add(
+            _edge(
+                id=3,
+                graph_version_id=1,
+                from_node_id=1,
+                to_node_id=3,
+                code="E-BLOCKED-DIRECT",
+                geometry=_line((120.0, 31.0), (120.2, 31.0)),
+                max_allowed_tonnage=100,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationRoutingEngineService(session).generate_route(
+            _request(vessel_profile=VesselProfileRequest(deadweight_ton=500))
+        )
+        issues = list((await session.execute(select(NavigationRouteQualityIssue))).scalars())
+
+    assert response.status_code == "SUCCESS"
+    assert "VSL_TONNAGE_EXCEEDS_LIMIT" in {issue.issue_type_code for issue in response.issues}
+    assert "VSL_TONNAGE_EXCEEDS_LIMIT" in {issue.issue_type_code for issue in issues}
+
+
+@pytest.mark.asyncio
+async def test_duration_estimate_adds_lock_wait(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_ready_graph(session)
+        edge = await session.get(NavigationGraphEdge, 1)
+        assert edge is not None
+        edge.lock_required = True
+        await session.commit()
+
+        response = await NavigationRoutingEngineService(session).generate_route(_request())
+        result = (await session.execute(select(NavigationRouteResult))).scalar_one()
+
+    detail = result.quality_summary_json["duration_detail"]
+    assert response.passed_lock_count == 1
+    assert detail["lock_wait_total_hour"] == 1.0
+    assert response.estimated_duration_hour == detail["estimated_duration_hour"]
+    assert response.estimated_duration_hour > detail["base_sailing_hour"]
 
 
 @pytest.mark.asyncio

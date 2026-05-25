@@ -13,6 +13,7 @@ from app.models import NavigationAnnotationTask, NavigationChannelWaterBodyMatch
 from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.models.base import Base
 from app.modules.navigation.diagnostic_service import NavigationDiagnosticService
+from app.modules.navigation.production_service import NavigationProductionService
 from app.modules.navigation.schemas import NavigationCandidateConfirmRequest
 
 
@@ -194,6 +195,69 @@ async def _seed_xijiang(session: AsyncSession) -> None:
     await session.commit()
 
 
+async def _add_current_water_body_match(session: AsyncSession, channel_id: int = 1, water_body_id: int = 1) -> None:
+    session.add(
+        NavigationChannelWaterBodyMatch(
+            channel_id=channel_id,
+            water_body_id=water_body_id,
+            match_batch_code=f"TEST-MATCH-{channel_id}-{water_body_id}",
+            match_type_code="CONFIRMED_MATCH",
+            matched_term="西江",
+            score=95,
+            confidence_code="MANUAL_CONFIRMED",
+            source_water_area_ids_json=[water_body_id],
+            is_current=True,
+        )
+    )
+    await session.commit()
+
+
+async def _add_candidate_boundary(session: AsyncSession, boundary_id: int = 2) -> None:
+    session.add(
+        NavigationChannelBoundary(
+            id=boundary_id,
+            channel_id=1,
+            geometry_json=_polygon(110.82, 22.18, 110.96, 22.34),
+            bbox_min_lng=110.82,
+            bbox_min_lat=22.18,
+            bbox_max_lng=110.96,
+            bbox_max_lat=22.34,
+            ring_count=1,
+            point_count=5,
+            geometry_status_code="AVAILABLE",
+            boundary_quality_code="REVIEW",
+            connectivity_status_code="CONNECTED",
+            repair_status_code="NONE",
+            coverage_policy_code="RIVER_MATCH_CANDIDATE",
+            is_current=False,
+        )
+    )
+    await session.commit()
+
+
+async def _add_manual_published_boundary(session: AsyncSession, boundary_id: int = 3) -> None:
+    session.add(
+        NavigationChannelBoundary(
+            id=boundary_id,
+            channel_id=1,
+            geometry_json=_polygon(110.83, 22.19, 110.97, 22.35),
+            bbox_min_lng=110.83,
+            bbox_min_lat=22.19,
+            bbox_max_lng=110.97,
+            bbox_max_lat=22.35,
+            ring_count=1,
+            point_count=5,
+            geometry_status_code="AVAILABLE",
+            boundary_quality_code="MANUAL_PUBLISHED",
+            connectivity_status_code="CONNECTED",
+            repair_status_code="NONE",
+            coverage_policy_code="MANUAL_DRAW",
+            is_current=True,
+        )
+    )
+    await session.commit()
+
+
 @pytest.mark.asyncio
 async def test_xijiang_diagnostics_explain_seed_source_and_candidate_water_bodies(session_maker) -> None:
     async with session_maker() as session:
@@ -210,6 +274,7 @@ async def test_xijiang_diagnostics_explain_seed_source_and_candidate_water_bodie
     assert diagnostics.water_body_candidate_count > 0
     assert {"西江", "浔江"} <= {item.water_name for item in candidates.items}
     assert candidates.items[0].candidate_type_code in {"NAME_ALIAS_CANDIDATE", "SEED_BOUNDARY_NEARBY"}
+    assert candidates.items[0].source_water_area_ids
 
 
 @pytest.mark.asyncio
@@ -232,6 +297,64 @@ async def test_confirm_water_body_candidate_creates_current_match(session_maker)
 
 
 @pytest.mark.asyncio
+async def test_published_manual_boundary_takes_precedence_over_old_candidate(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_xijiang(session)
+        await _add_current_water_body_match(session)
+        await _add_candidate_boundary(session)
+        await _add_manual_published_boundary(session)
+
+        production_row = (await NavigationProductionService(session).channels())[0]
+        diagnostics = await NavigationDiagnosticService(session).channel_diagnostics(1, include_spatial=False)
+
+    assert production_row.production_stage_code == "BOUNDARY_PUBLISHED"
+    assert production_row.production_stage_name == "中心线待生产"
+    assert production_row.current_boundary_count == 1
+    assert production_row.candidate_boundary_count == 1
+    assert "NO_PUBLISHED_CENTERLINE" in production_row.blocker_codes
+    assert "BOUNDARY_CANDIDATE_TO_PUBLISH" not in production_row.blocker_codes
+    assert diagnostics.production_stage_code == production_row.production_stage_code
+    assert diagnostics.production_stage_name == production_row.production_stage_name
+    assert diagnostics.current_boundary_count == 1
+
+
+@pytest.mark.asyncio
+async def test_seed_current_boundary_does_not_count_as_published_boundary(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_xijiang(session)
+        await _add_current_water_body_match(session)
+
+        production_row = (await NavigationProductionService(session).channels())[0]
+        diagnostics = await NavigationDiagnosticService(session).channel_diagnostics(1, include_spatial=False)
+
+    assert production_row.production_stage_code == "WATER_MATCH_READY"
+    assert production_row.production_stage_name == "边界待生成"
+    assert production_row.current_boundary_count == 0
+    assert production_row.blocker_codes == ["NO_PUBLISHED_BOUNDARY"]
+    assert diagnostics.production_stage_code == production_row.production_stage_code
+    assert diagnostics.current_boundary_count == 0
+
+
+@pytest.mark.asyncio
+async def test_candidate_boundary_blocks_only_when_no_published_boundary(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_xijiang(session)
+        await _add_current_water_body_match(session)
+        await _add_candidate_boundary(session)
+
+        production_row = (await NavigationProductionService(session).channels())[0]
+        diagnostics = await NavigationDiagnosticService(session).channel_diagnostics(1, include_spatial=False)
+
+    assert production_row.production_stage_code == "BOUNDARY_CANDIDATE"
+    assert production_row.production_stage_name == "边界待发布"
+    assert production_row.current_boundary_count == 0
+    assert production_row.candidate_boundary_count == 1
+    assert production_row.blocker_codes == ["BOUNDARY_CANDIDATE_TO_PUBLISH"]
+    assert diagnostics.production_stage_code == production_row.production_stage_code
+    assert "BOUNDARY_CANDIDATE_TO_PUBLISH" in diagnostics.blocker_codes
+
+
+@pytest.mark.asyncio
 async def test_create_annotation_tasks_from_channel_diagnostics(session_maker) -> None:
     async with session_maker() as session:
         await _seed_xijiang(session)
@@ -241,5 +364,5 @@ async def test_create_annotation_tasks_from_channel_diagnostics(session_maker) -
 
     assert response.source_type_code == "CHANNEL_DIAGNOSTICS"
     assert response.created_count >= 2
-    assert {"WATER_BODY_MATCH_REPAIR", "CENTERLINE_REVIEW"} <= {row.task_type_code for row in rows}
+    assert {"WATER_BODY_MATCH_REPAIR", "CENTERLINE_REPAIR"} <= {row.task_type_code for row in rows}
     assert all(row.target_type_code == "NAVIGATION_CHANNEL" for row in rows)

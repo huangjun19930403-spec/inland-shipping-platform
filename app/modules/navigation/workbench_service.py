@@ -7,8 +7,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from pyproj import Geod
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from shapely.geometry import LineString, MultiPolygon, Polygon, shape
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models import (
@@ -60,6 +62,10 @@ FINAL_DRAFT_STATUSES = {"PUBLISHED", "REJECTED"}
 ARCHIVED_DRAFT_STATUSES = {"ARCHIVED", "DELETED"}
 REAL_WATER_SOURCE_CODE = "RIVER_SHAPEFILE_2026"
 DEFAULT_REAL_GRAPH_SCOPE = "REAL-JS-YRD"
+GEOD = Geod(ellps="WGS84")
+MIN_CENTERLINE_LENGTH_M = 20.0
+MIN_BOUNDARY_AREA_M2 = 100.0
+PUBLISH_BOUNDARY_TOLERANCE_DEGREE = 0.0002
 
 
 class NavigationWorkbenchService:
@@ -97,12 +103,12 @@ class NavigationWorkbenchService:
                 NavigationChannelCenterline.channel_id.in_(channel_ids)
             ),
         )
-        approved_centerline_counts = await self._counts_by_channel(
+        published_centerline_counts = await self._counts_by_channel(
             NavigationChannelCenterline.channel_id,
             select(NavigationChannelCenterline.channel_id, func.count()).where(
                 NavigationChannelCenterline.channel_id.in_(channel_ids),
                 NavigationChannelCenterline.is_current.is_(True),
-                NavigationChannelCenterline.review_status_code == "APPROVED",
+                NavigationChannelCenterline.review_status_code == "PUBLISHED",
                 NavigationChannelCenterline.quality_code.in_({"READY", "READY_WITH_WARNING"}),
             ),
         )
@@ -137,11 +143,11 @@ class NavigationWorkbenchService:
                 boundary_count=boundary_counts.get(channel.id, 0),
                 current_boundary_count=current_boundary_counts.get(channel.id, 0),
                 centerline_count=centerline_counts.get(channel.id, 0),
-                approved_current_centerline_count=approved_centerline_counts.get(channel.id, 0),
+                published_current_centerline_count=published_centerline_counts.get(channel.id, 0),
                 active_graph_edge_count=active_edge_counts.get(channel.id, 0),
                 current_water_body_match_count=current_match_counts.get(channel.id, 0),
                 boundary_status_code="READY" if current_boundary_counts.get(channel.id, 0) else "MISSING",
-                centerline_status_code="READY" if approved_centerline_counts.get(channel.id, 0) else "MISSING",
+                centerline_status_code="READY" if published_centerline_counts.get(channel.id, 0) else "MISSING",
                 graph_status_code="READY" if active_edge_counts.get(channel.id, 0) else "MISSING",
                 water_body_match_status_code="READY" if current_match_counts.get(channel.id, 0) else "MISSING",
             )
@@ -161,7 +167,7 @@ class NavigationWorkbenchService:
             ),
             "current_boundary_channel_count": sum(1 for row in channel_rows if row.current_boundary_count > 0),
             "water_body_matched_channel_count": sum(1 for row in channel_rows if row.current_water_body_match_count > 0),
-            "approved_centerline_channel_count": sum(1 for row in channel_rows if row.approved_current_centerline_count > 0),
+            "published_centerline_channel_count": sum(1 for row in channel_rows if row.published_current_centerline_count > 0),
             "active_graph_channel_count": sum(1 for row in channel_rows if row.active_graph_edge_count > 0),
             "draft_count": int(await self.session.scalar(select(func.count()).select_from(NavigationGeometryDraft)) or 0),
             "open_annotation_task_count": int(
@@ -178,7 +184,7 @@ class NavigationWorkbenchService:
             active_graph_version=self._graph_version_dict(active_graph_version) if active_graph_version else None,
             channels=channel_rows,
             warnings=[
-                "生产体验默认使用真实 revier 水系资产和清洗 seed 数据；MVP/示例数据不得作为 active graph。",
+                "生产体验默认使用真实 revier 水系资产和清洗预置数据；MVP/示例数据不得作为当前可用图网络。",
                 "READY 只代表业务路径图和几何结果可用，不代表官方安全通航确认。",
                 "无已发布 current centerline 的航道不会进入 graph，polygon/boundary 不能替代路径搜索。",
             ],
@@ -943,6 +949,9 @@ class NavigationWorkbenchService:
             draft.geometry_json = geometry
             for key, value in self._geometry_bbox(geometry).items():
                 setattr(draft, key, value)
+        if draft.status_code == "PUBLISH_BLOCKED":
+            draft.status_code = "DRAFT"
+            draft.quality_code = "NEED_REVIEW"
         await self.session.commit()
         return await self._draft_response_by_id(draft.id)
 
@@ -953,19 +962,26 @@ class NavigationWorkbenchService:
         published_by: int | None,
     ) -> NavigationGeometryDraftResponse:
         draft = await self._draft(draft_id)
-        if draft.status_code != "DRAFT":
-            raise ConflictError("只有 DRAFT 草稿可以发布")
-        if draft.draft_type_code == "CENTERLINE":
-            target_id = await self._publish_centerline(draft, published_by=published_by)
-            draft.publish_target_type_code = "CENTERLINE"
-        elif draft.draft_type_code == "BOUNDARY":
-            target_id = await self._publish_boundary(draft, published_by=published_by)
-            draft.publish_target_type_code = "BOUNDARY"
-        elif draft.draft_type_code == "WATER_AREA":
-            target_id = await self._publish_water_area(draft)
-            draft.publish_target_type_code = "WATER_AREA"
-        else:
-            raise ValidationError(f"Unsupported draft_type_code: {draft.draft_type_code}")
+        if draft.status_code not in {"DRAFT", "PUBLISH_BLOCKED"}:
+            raise ConflictError("只有 DRAFT 或 PUBLISH_BLOCKED 草稿可以发布")
+        try:
+            if draft.draft_type_code == "CENTERLINE":
+                target_id = await self._publish_centerline(draft, published_by=published_by)
+                draft.publish_target_type_code = "CENTERLINE"
+            elif draft.draft_type_code == "BOUNDARY":
+                target_id = await self._publish_boundary(draft, published_by=published_by)
+                draft.publish_target_type_code = "BOUNDARY"
+            elif draft.draft_type_code == "WATER_AREA":
+                target_id = await self._publish_water_area(draft)
+                draft.publish_target_type_code = "WATER_AREA"
+            else:
+                raise ValidationError(f"Unsupported draft_type_code: {draft.draft_type_code}")
+        except ValidationError as exc:
+            draft.status_code = "PUBLISH_BLOCKED"
+            draft.quality_code = "PUBLISH_BLOCKED"
+            draft.review_comment = exc.message[:512]
+            await self.session.commit()
+            raise
         draft.publish_target_id = target_id
         draft.status_code = "PUBLISHED"
         draft.quality_code = "READY"
@@ -1055,6 +1071,7 @@ class NavigationWorkbenchService:
         if draft.channel_id is None:
             raise ValidationError("发布中心线草稿必须选择航道")
         await self._ensure_channel(draft.channel_id)
+        await self._validate_centerline_publish(draft)
         rows = list(
             (
                 await self.session.execute(
@@ -1078,12 +1095,15 @@ class NavigationWorkbenchService:
             is_main_line=True,
             confidence_score=90,
             quality_code="READY",
-            review_status_code="APPROVED",
+            review_status_code="PUBLISHED",
             version_no=1,
             is_current=True,
-            source_trace_json={"navigation_geometry_draft_id": draft.id, **(draft.source_trace_json or {})},
-            approved_by=published_by,
-            approved_at=self._now(),
+            source_trace_json={
+                "navigation_geometry_draft_id": draft.id,
+                "published_by": published_by,
+                "published_at": self._now().isoformat(),
+                **(draft.source_trace_json or {}),
+            },
             bbox_min_lng=draft.bbox_min_lng,
             bbox_min_lat=draft.bbox_min_lat,
             bbox_max_lng=draft.bbox_max_lng,
@@ -1097,6 +1117,7 @@ class NavigationWorkbenchService:
         if draft.channel_id is None:
             raise ValidationError("发布航道边界草稿必须选择航道")
         await self._ensure_channel(draft.channel_id)
+        self._validate_boundary_publish(draft.geometry_json)
         rows = list(
             (
                 await self.session.execute(
@@ -1127,7 +1148,7 @@ class NavigationWorkbenchService:
             ring_count=self._ring_count(draft.geometry_json),
             point_count=self._point_count(draft.geometry_json),
             geometry_status_code="AVAILABLE",
-            boundary_quality_code="MANUAL_APPROVED",
+            boundary_quality_code="MANUAL_PUBLISHED",
             connectivity_status_code="NEED_REVIEW",
             repair_status_code="NONE",
             coverage_policy_code="MANUAL_DRAW",
@@ -1750,6 +1771,102 @@ class NavigationWorkbenchService:
         if row is None:
             return None
         return self._graph_version_response(row).model_dump()
+
+    def _publish_validation_error(self, code: str, message: str) -> ValidationError:
+        return ValidationError(f"{code}: {message}", code=code, detail={"error_code": code, "message": message})
+
+    async def _validate_centerline_publish(self, draft: NavigationGeometryDraft) -> None:
+        geometry = draft.geometry_json
+        try:
+            line = shape(geometry)
+        except Exception as exc:
+            raise self._publish_validation_error("CENTERLINE_GEOMETRY_INVALID", "中心线 GeoJSON 无法解析") from exc
+        if not isinstance(line, LineString) or line.is_empty or len(line.coords) < 2:
+            raise self._publish_validation_error("CENTERLINE_GEOMETRY_INVALID", "中心线必须是至少包含 2 个点的 LineString")
+        if not self._coordinates_legal(geometry):
+            raise self._publish_validation_error("CENTERLINE_COORDINATE_INVALID", "中心线经纬度不合法")
+        length_m = abs(float(GEOD.line_length([coord[0] for coord in line.coords], [coord[1] for coord in line.coords])))
+        if length_m < MIN_CENTERLINE_LENGTH_M:
+            raise self._publish_validation_error("CENTERLINE_TOO_SHORT", f"中心线长度 {length_m:.1f}m 小于 {MIN_CENTERLINE_LENGTH_M:.0f}m")
+        boundary = await self._current_available_boundary(draft.channel_id)
+        if boundary is None or not boundary.geometry_json:
+            return
+        try:
+            boundary_geometry = shape(boundary.geometry_json)
+        except Exception as exc:
+            raise self._publish_validation_error("CENTERLINE_OUT_OF_BOUNDARY", "当前边界几何无法用于中心线校验") from exc
+        if boundary_geometry.covers(line) or boundary_geometry.buffer(PUBLISH_BOUNDARY_TOLERANCE_DEGREE).covers(line):
+            return
+        raise self._publish_validation_error("CENTERLINE_OUT_OF_BOUNDARY", "中心线明显超出当前航道边界，禁止发布")
+
+    def _validate_boundary_publish(self, geometry: dict[str, Any]) -> None:
+        try:
+            polygon = shape(geometry)
+        except Exception as exc:
+            raise self._publish_validation_error("BOUNDARY_GEOMETRY_INVALID", "边界 GeoJSON 无法解析") from exc
+        if not isinstance(polygon, (Polygon, MultiPolygon)) or polygon.is_empty:
+            raise self._publish_validation_error("BOUNDARY_GEOMETRY_INVALID", "边界必须是 Polygon 或 MultiPolygon")
+        if not self._coordinates_legal(geometry):
+            raise self._publish_validation_error("BOUNDARY_GEOMETRY_INVALID", "边界经纬度不合法")
+        if not self._rings_closed(geometry):
+            raise self._publish_validation_error("BOUNDARY_RING_NOT_CLOSED", "边界环必须闭合")
+        if not polygon.is_valid:
+            raise self._publish_validation_error("BOUNDARY_GEOMETRY_INVALID", "边界几何不合法")
+        area_m2 = abs(float(GEOD.geometry_area_perimeter(polygon)[0]))
+        if area_m2 < MIN_BOUNDARY_AREA_M2:
+            raise self._publish_validation_error("BOUNDARY_AREA_TOO_SMALL", f"边界面积 {area_m2:.1f}m² 小于最低阈值")
+        min_lng, min_lat, max_lng, max_lat = polygon.bounds
+        if min_lng >= max_lng or min_lat >= max_lat:
+            raise self._publish_validation_error("BOUNDARY_GEOMETRY_INVALID", "边界 bbox 无效")
+
+    async def _current_available_boundary(self, channel_id: int | None) -> NavigationChannelBoundary | None:
+        if channel_id is None:
+            return None
+        return (
+            await self.session.execute(
+                select(NavigationChannelBoundary)
+                .where(
+                    NavigationChannelBoundary.channel_id == channel_id,
+                    NavigationChannelBoundary.is_current.is_(True),
+                    NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
+                )
+                .order_by(NavigationChannelBoundary.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    def _coordinates_legal(self, geometry: dict[str, Any]) -> bool:
+        pairs = self._coordinate_pairs(geometry.get("coordinates"))
+        raw_count = 0
+
+        def walk(item: Any) -> None:
+            nonlocal raw_count
+            if not isinstance(item, list):
+                return
+            if len(item) >= 2 and all(isinstance(item[index], (int, float)) for index in (0, 1)):
+                raw_count += 1
+                return
+            for child in item:
+                walk(child)
+
+        walk(geometry.get("coordinates"))
+        return raw_count > 0 and raw_count == len(pairs)
+
+    def _rings_closed(self, geometry: dict[str, Any]) -> bool:
+        geometry_type = geometry.get("type")
+        coordinates = geometry.get("coordinates")
+        polygons = [coordinates] if geometry_type == "Polygon" else coordinates if geometry_type == "MultiPolygon" else []
+        if not isinstance(polygons, list) or not polygons:
+            return False
+        for polygon in polygons:
+            if not isinstance(polygon, list) or not polygon:
+                return False
+            for ring in polygon:
+                if not isinstance(ring, list) or len(ring) < 4:
+                    return False
+                if ring[0] != ring[-1]:
+                    return False
+        return True
 
     def _normalized_geometry(self, geometry: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(geometry, dict):

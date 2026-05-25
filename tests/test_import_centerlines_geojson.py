@@ -136,7 +136,7 @@ async def test_import_approved_manual_centerline_and_query_graph_ready(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "MANUAL",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 96,
                     "is_current": True,
                 },
@@ -176,7 +176,7 @@ async def test_import_blocks_hifleet_reference_from_becoming_current(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "HIFLEET_REFERENCE",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 99,
                     "is_current": True,
                 },
@@ -203,7 +203,7 @@ async def test_import_blocks_hifleet_reference_from_becoming_current(
     assert row.quality_code == "NEED_REVIEW"
     assert row.is_current is False
     assert ready_rows == []
-    assert "SOURCE_NOT_AUTO_APPROVABLE" in {issue.issue_code for issue in summary.issues}
+    assert "SOURCE_NOT_AUTO_PUBLISHABLE" in {issue.issue_code for issue in summary.issues}
 
 
 @pytest.mark.asyncio
@@ -220,7 +220,7 @@ async def test_import_marks_centerline_out_of_boundary(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "MANUAL",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 92,
                     "is_current": True,
                 },
@@ -261,7 +261,7 @@ async def test_import_marks_non_line_geometry_as_broken(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "MANUAL",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 92,
                     "is_current": True,
                 },
@@ -303,7 +303,7 @@ async def test_import_detects_same_channel_duplicate_geometry_in_same_file(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "MANUAL",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 90,
                     "is_current": True,
                 },
@@ -315,7 +315,7 @@ async def test_import_detects_same_channel_duplicate_geometry_in_same_file(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "MANUAL",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 90,
                     "is_current": True,
                 },
@@ -337,7 +337,7 @@ async def test_import_detects_same_channel_duplicate_geometry_in_same_file(
     assert summary.rows_inserted == 2
     assert summary.rows_duplicated == 1
     assert rows[0].centerline_code == "CL-DUP-001"
-    assert rows[0].review_status_code == "APPROVED"
+    assert rows[0].review_status_code == "PUBLISHED"
     assert rows[0].is_current is True
     assert rows[1].centerline_code == "CL-DUP-002"
     assert rows[1].review_status_code == "REJECTED"
@@ -360,7 +360,7 @@ async def test_import_same_centerline_code_updates_without_duplicate_flag(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "MANUAL",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 90,
                     "is_current": True,
                 },
@@ -378,7 +378,7 @@ async def test_import_same_centerline_code_updates_without_duplicate_flag(
                     "channel_code": "TEST-MAIN",
                     "source_type_code": "MANUAL",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 94,
                     "is_current": True,
                 },
@@ -405,7 +405,7 @@ async def test_import_same_centerline_code_updates_without_duplicate_flag(
     assert second_summary.rows_duplicated == 0
     assert row.centerline_name == "updated name"
     assert row.confidence_score == 94
-    assert row.review_status_code == "APPROVED"
+    assert row.review_status_code == "PUBLISHED"
 
 
 @pytest.mark.asyncio
@@ -422,7 +422,7 @@ async def test_import_splits_multilinestring_parts_with_stable_codes(
                     "channel_code": "TEST-BRANCH",
                     "source_type_code": "SEED_CENTERLINE",
                     "quality_code": "READY",
-                    "review_status_code": "APPROVED",
+                    "review_status_code": "PUBLISHED",
                     "confidence_score": 95,
                     "is_current": True,
                 },
@@ -448,4 +448,4 @@ async def test_import_splits_multilinestring_parts_with_stable_codes(
     assert summary.rows_prepared == 2
     assert [row.centerline_code for row in rows] == ["CL-MULTI-part-001", "CL-MULTI-part-002"]
     assert all(row.source_type_code == "SEED_CENTERLINE" for row in rows)
-    assert all(row.review_status_code == "APPROVED" for row in rows)
+    assert all(row.review_status_code == "PUBLISHED" for row in rows)

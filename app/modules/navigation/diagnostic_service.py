@@ -42,6 +42,7 @@ DEFAULT_ALIAS_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "
 DEFAULT_SCOPE_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_real_scope.json"
 REAL_WATER_SOURCE_CODE = "RIVER_SHAPEFILE_2026"
 SEED_OVERLAP_SUSPECT_THRESHOLD = 0.35
+PUBLISHED_BOUNDARY_POLICIES = {"MANUAL_DRAW", "OFFICIAL_IMPORT"}
 LAYER_PRIORITY = {
     "一级水系": 1,
     "二级水系": 2,
@@ -102,7 +103,7 @@ class NavigationDiagnosticService:
             candidate_boundary_count=counts["candidate_boundary"],
             current_boundary_count=counts["boundary"],
             centerline_candidate_count=counts["centerline_candidate"],
-            approved_current_centerline_count=counts["centerline"],
+            published_current_centerline_count=counts["centerline"],
             active_graph_edge_count=counts["edge"],
             route_verified_count=counts["route"],
             issue_codes=issues,
@@ -327,6 +328,10 @@ class NavigationDiagnosticService:
                         NavigationChannelBoundary.channel_id == channel.id,
                         NavigationChannelBoundary.is_current.is_(True),
                         NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
+                        or_(
+                            NavigationChannelBoundary.coverage_policy_code.in_(PUBLISHED_BOUNDARY_POLICIES),
+                            NavigationChannelBoundary.boundary_quality_code == "MANUAL_PUBLISHED",
+                        ),
                     )
                 )
                 or 0
@@ -335,7 +340,7 @@ class NavigationDiagnosticService:
                 await self.session.scalar(
                     select(func.count()).select_from(NavigationChannelCenterline).where(
                         NavigationChannelCenterline.channel_id == channel.id,
-                        NavigationChannelCenterline.review_status_code != "APPROVED",
+                        NavigationChannelCenterline.review_status_code != "PUBLISHED",
                     )
                 )
                 or 0
@@ -345,7 +350,7 @@ class NavigationDiagnosticService:
                     select(func.count()).select_from(NavigationChannelCenterline).where(
                         NavigationChannelCenterline.channel_id == channel.id,
                         NavigationChannelCenterline.is_current.is_(True),
-                        NavigationChannelCenterline.review_status_code == "APPROVED",
+                        NavigationChannelCenterline.review_status_code == "PUBLISHED",
                         NavigationChannelCenterline.quality_code.in_({"READY", "READY_WITH_WARNING"}),
                     )
                 )
@@ -358,19 +363,19 @@ class NavigationDiagnosticService:
     def _production_stage(self, counts: dict[str, int]) -> tuple[str, str, list[str]]:
         if counts["match"] <= 0:
             return "NO_WATER_MATCH", "水体待归属", ["NO_WATER_BODY_MATCH"]
-        if counts["candidate_boundary"] > 0:
-            return "BOUNDARY_CANDIDATE", "边界待生产", ["BOUNDARY_CANDIDATE_TO_PUBLISH"]
         if counts["boundary"] <= 0:
-            return "WATER_MATCH_READY", "边界待生产", ["NO_CURRENT_BOUNDARY"]
+            if counts["candidate_boundary"] > 0:
+                return "BOUNDARY_CANDIDATE", "边界待发布", ["BOUNDARY_CANDIDATE_TO_PUBLISH"]
+            return "WATER_MATCH_READY", "边界待生成", ["NO_PUBLISHED_BOUNDARY"]
         if counts["centerline"] > 0 and counts["edge"] > 0 and counts["route"] > 0:
             return "ROUTE_VERIFIED", "路径已验证", []
         if counts["centerline"] > 0 and counts["edge"] > 0:
             return "GRAPH_READY", "路径待验证", []
         if counts["centerline"] > 0:
-            return "CENTERLINE_PUBLISHED", "Graph 待构建", []
+            return "CENTERLINE_PUBLISHED", "图网络待构建", []
         if counts["centerline_candidate"] > 0:
             return "CENTERLINE_CANDIDATE", "中心线待发布", ["CENTERLINE_CANDIDATE_TO_PUBLISH"]
-        return "BOUNDARY_PUBLISHED", "中心线待生产", ["NO_APPROVED_CENTERLINE"]
+        return "BOUNDARY_PUBLISHED", "中心线待生产", ["NO_PUBLISHED_CENTERLINE"]
 
     async def _active_graph_version(self) -> NavigationGraphVersion | None:
         return (
@@ -595,6 +600,11 @@ class NavigationDiagnosticService:
             confidence_code="HIGH_CONFIDENCE" if score >= 90 else ("MEDIUM_CONFIDENCE" if score >= 65 else "LOW_CONFIDENCE"),
             reason_codes=sorted(reason_codes),
             issue_codes=sorted(issue_codes),
+            source_water_area_ids=[
+                int(item)
+                for item in (row.source_water_area_ids_json or [])
+                if isinstance(item, int) or str(item).isdigit()
+            ][:500],
             already_matched=row.id in existing_ids,
         )
 
@@ -728,7 +738,7 @@ class NavigationDiagnosticService:
                 (
                     "SEED_BOUNDARY_REPAIR",
                     "SEED_BOUNDARY_SUSPECT",
-                    f"{item.channel_name} seed 边界疑似偏离真实水域，需要在边界生产页逐段修正后发布。",
+                    f"{item.channel_name} 预置参考边界疑似偏离真实水域，需要在边界生成页逐段修正后发布。",
                     "HIGH",
                 )
             )
@@ -744,9 +754,9 @@ class NavigationDiagnosticService:
         if "CENTERLINE_MISSING" in issues:
             specs.append(
                 (
-                    "CENTERLINE_REVIEW",
+                    "CENTERLINE_REPAIR",
                     "CENTERLINE_MISSING",
-                    f"{item.channel_name} 缺少已发布中心线，Graph 和路径生成被阻塞。",
+                    f"{item.channel_name} 缺少已发布中心线，图网络和路径生成被阻塞。",
                     "MEDIUM",
                 )
             )
@@ -755,7 +765,7 @@ class NavigationDiagnosticService:
                 (
                     "GRAPH_CONNECTIVITY_REPAIR",
                     "GRAPH_BLOCKED",
-                    f"{item.channel_name} 已有中心线但没有可用 Graph edge，需要重建并校验 graph。",
+                    f"{item.channel_name} 已有中心线但没有可用路径图边，需要重建并校验图网络。",
                     "MEDIUM",
                 )
             )
@@ -763,7 +773,7 @@ class NavigationDiagnosticService:
 
     def _next_action(self, stage_code: str, channel_id: int, issues: list[str]) -> tuple[str, str]:
         if "SEED_BOUNDARY_SUSPECT" in issues:
-            return "查看 seed 边界问题并进入边界生产", f"/navigation/production/boundaries?channel_id={channel_id}"
+            return "查看参考边界问题并进入边界生成", f"/navigation/production/boundaries?channel_id={channel_id}"
         if stage_code == "NO_WATER_MATCH":
             return "确认系统推荐水体归属", f"/navigation/production/water-matches?channel_id={channel_id}"
         if stage_code in {"WATER_MATCH_READY", "BOUNDARY_CANDIDATE"}:
@@ -771,7 +781,7 @@ class NavigationDiagnosticService:
         if stage_code in {"BOUNDARY_PUBLISHED", "CENTERLINE_CANDIDATE"}:
             return "生产并发布中心线", f"/navigation/production/centerlines?channel_id={channel_id}"
         if stage_code == "CENTERLINE_PUBLISHED":
-            return "构建 Graph", f"/navigation/production/graphs?channel_id={channel_id}"
+            return "构建图网络", f"/navigation/production/graphs?channel_id={channel_id}"
         if stage_code == "GRAPH_READY":
             return "验证路径", f"/navigation/routes?channel_id={channel_id}"
         return "查看诊断任务", f"/navigation/production/annotations?channel_id={channel_id}"
@@ -780,11 +790,11 @@ class NavigationDiagnosticService:
         warnings: list[str] = []
         if "SEED_BOUNDARY_SUSPECT" in issues:
             text_ratio = f"{overlap_ratio:.1%}" if overlap_ratio is not None else "未知"
-            warnings.append(f"当前 seed 边界与真实水域重叠比例为 {text_ratio}，只能作为参考，不能直接发布为可信生产边界。")
+            warnings.append(f"当前预置参考边界与真实水域重叠比例为 {text_ratio}，只能作为参考，不能直接发布为可信生产边界。")
         if "NO_WATER_BODY_MATCH" in issues:
             warnings.append("该航道还没有已确认规范水体归属，系统会先给出候选水体，用户只需要确认、移除或补充。")
         if "CENTERLINE_MISSING" in issues:
-            warnings.append("无已发布中心线，Graph 构建和路径生成必须失败；不能用 polygon 或 boundary 画假路线。")
+            warnings.append("无已发布中心线，图网络构建和路径生成必须失败；不能用水面或边界画假路线。")
         return warnings
 
     def _boundary_response(self, boundary: NavigationChannelBoundary | None) -> NavigationChannelDiagnosticBoundaryResponse | None:
@@ -819,11 +829,11 @@ class NavigationDiagnosticService:
             return "当前航道没有发布边界，地图不会使用网络查询临时补边界。"
         if boundary.coverage_policy_code in {"CHANNEL_CORRIDOR_ENVELOPE", "SEED_BOUNDARY"}:
             return (
-                f"当前地图边界来自本地 seed/数据库，不是网络查询；"
-                f"coverage_policy={boundary.coverage_policy_code}，"
-                f"channel_source_version={channel.source_version}。"
+                f"当前地图边界来自本地预置数据/数据库，不是网络查询；"
+                f"边界类型={self._boundary_source_code(boundary)}，"
+                f"来源版本={channel.source_version}。"
             )
-        return f"当前地图边界来自数据库资产：coverage_policy={boundary.coverage_policy_code}。"
+        return f"当前地图边界来自数据库资产：边界类型={self._boundary_source_code(boundary)}。"
 
     def _scope_for_channel(self, channel: NavigationChannel) -> dict[str, Any] | None:
         config = self._scope_config_data()

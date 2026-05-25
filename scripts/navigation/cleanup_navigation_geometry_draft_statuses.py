@@ -9,10 +9,10 @@ from app.models import NavigationGeometryDraft
 
 
 async def cleanup_navigation_geometry_draft_statuses() -> dict[str, int]:
-    """Remove the retired navigation draft submit/approve states.
+    """Remove retired navigation draft handoff states.
 
     Navigation geometry production now uses DRAFT -> PUBLISHED directly. Older
-    local records in SUBMITTED or APPROVED are editable production drafts again.
+    local records in SUBMITTED or the former published-by-review state are editable production drafts again.
     """
 
     async with AsyncSessionLocal() as session:

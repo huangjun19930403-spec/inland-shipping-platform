@@ -281,7 +281,7 @@ def _review_status(
         issues.add("CHANNEL_REVIEW_REQUIRED")
     if confidence_code in {"MISSING", "LOW_CONFIDENCE"}:
         issues.add("LOW_MATCH_CONFIDENCE")
-    review_status = "NEED_REVIEW" if issues else "APPROVED"
+    review_status = "NEED_REVIEW" if issues else "PUBLISHED"
     return review_status, sorted(issues)
 
 
@@ -490,7 +490,7 @@ async def build_channel_water_area_matches(
         for water_area, match, item_issues in ordered_matches:
             match_type_code, matched_term, score = match
             item_issue_codes = sorted(set(channel_issues + item_issues))
-            item_review_status = "NEED_REVIEW" if item_issue_codes else "APPROVED"
+            item_review_status = "NEED_REVIEW" if item_issue_codes else "PUBLISHED"
             item = MatchWriteItem(
                 water_area_id=water_area.id,
                 water_name=water_area.water_name,

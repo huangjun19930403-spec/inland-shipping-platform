@@ -14,11 +14,13 @@ class NavigationGraphLoader:
         session: AsyncSession,
         *,
         bbox_margin_degree: float = 1.0,
+        bbox_margin_degrees: tuple[float, ...] | None = None,
         max_node_count: int = 50_000,
         max_edge_count: int = 50_000,
     ) -> None:
         self.session = session
         self.bbox_margin_degree = bbox_margin_degree
+        self.bbox_margin_degrees = bbox_margin_degrees or (0.5, 1.0, 2.0, 4.0, 8.0)
         self.max_node_count = max_node_count
         self.max_edge_count = max_edge_count
 
@@ -57,7 +59,36 @@ class NavigationGraphLoader:
         origin: tuple[float, float],
         destination: tuple[float, float],
     ) -> LoadedGraph:
-        bbox = bbox_for_points([origin, destination], self.bbox_margin_degree)
+        last_bbox: dict[str, float] | None = None
+        for margin_degree in self._load_margins():
+            bbox = bbox_for_points([origin, destination], margin_degree)
+            last_bbox = bbox
+            loaded = await self._load_graph_in_bbox(
+                graph_version=graph_version,
+                bbox=bbox,
+                margin_degree=margin_degree,
+            )
+            if loaded is not None:
+                return loaded
+        raise RoutingEngineError(
+            "NO_ROUTING_EDGE_IN_EXPANDED_BBOX",
+            f"No routing-enabled graph edge found after expanding bbox to {self._load_margins()[-1]} degrees",
+            issues=[],
+        )
+
+    def _load_margins(self) -> tuple[float, ...]:
+        margins = tuple(float(item) for item in self.bbox_margin_degrees if float(item) > 0)
+        if not margins:
+            return (float(self.bbox_margin_degree),)
+        return tuple(dict.fromkeys(margins))
+
+    async def _load_graph_in_bbox(
+        self,
+        *,
+        graph_version: NavigationGraphVersion,
+        bbox: dict[str, float],
+        margin_degree: float,
+    ) -> LoadedGraph | None:
         node_rows = list(
             (
                 await self.session.execute(
@@ -76,11 +107,14 @@ class NavigationGraphLoader:
             ).scalars()
         )
         if len(node_rows) > self.max_node_count:
-            raise RoutingEngineError("GRAPH_LOAD_TOO_LARGE", "Graph node load exceeds configured limit")
+            raise RoutingEngineError(
+                "GRAPH_LOAD_TOO_LARGE",
+                f"Graph node load exceeds configured limit at bbox margin {margin_degree}",
+            )
 
         node_ids = {node.id for node in node_rows}
         if not node_ids:
-            raise RoutingEngineError("NO_ROUTING_EDGE_IN_BBOX", "No graph nodes found near route endpoints")
+            return None
 
         edge_rows = list(
             (
@@ -97,9 +131,12 @@ class NavigationGraphLoader:
             ).scalars()
         )
         if len(edge_rows) > self.max_edge_count:
-            raise RoutingEngineError("GRAPH_LOAD_TOO_LARGE", "Graph edge load exceeds configured limit")
+            raise RoutingEngineError(
+                "GRAPH_LOAD_TOO_LARGE",
+                f"Graph edge load exceeds configured limit at bbox margin {margin_degree}",
+            )
         if not any(edge.routing_enabled for edge in edge_rows):
-            raise RoutingEngineError("NO_ROUTING_EDGE_IN_BBOX", "No routing-enabled graph edge found near route endpoints")
+            return None
 
         edge_ids = {edge.id for edge in edge_rows}
         constraints_by_edge_id: dict[int, list[NavigationGraphEdgeConstraint]] = {edge_id: [] for edge_id in edge_ids}
@@ -122,4 +159,8 @@ class NavigationGraphLoader:
             nodes={node.id: node for node in node_rows},
             edges={edge.id: edge for edge in edge_rows},
             constraints_by_edge_id=constraints_by_edge_id,
+            load_bbox=bbox,
+            load_margin_degree=margin_degree,
+            loaded_node_count=len(node_rows),
+            loaded_edge_count=len(edge_rows),
         )

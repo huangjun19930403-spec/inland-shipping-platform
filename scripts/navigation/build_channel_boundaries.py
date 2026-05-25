@@ -214,7 +214,7 @@ def _review_status(
 
     if issues:
         return ("NEED_REVIEW", sorted(set(issues)))
-    return ("APPROVED", [])
+    return ("PUBLISHED", [])
 
 
 def _candidate_from_row(row: NavigationWaterArea, match: tuple[str, str, int]) -> MatchCandidate:

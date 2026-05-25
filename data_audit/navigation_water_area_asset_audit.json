@@ -1,0 +1,446 @@
+{
+  "source_code": "RIVER_SHAPEFILE_2026",
+  "revier_zip": "/Users/hj/Documents/河道数据/revier.zip",
+  "seed": {
+    "artifact": "/Users/hj/Documents/paltform_data_V2/inland-shipping-platform/scripts/seed_data/navigation/navigation_water_areas.jsonl.gz",
+    "manifest": {
+      "version": "navigation_water_areas_seed_v1",
+      "generated_at": "2026-05-23T08:57:19+00:00",
+      "source_code": "RIVER_SHAPEFILE_2026",
+      "artifact": "scripts/seed_data/navigation/navigation_water_areas.jsonl.gz",
+      "record_count": 92480,
+      "enabled_record_count": 92414,
+      "invalid_record_count": 66,
+      "named_record_count": 26723,
+      "layer_counts": {
+        "一级水系": 234,
+        "二级水系": 285,
+        "三级水系": 608,
+        "四级水系": 1407,
+        "五级水系": 4541,
+        "六级水系": 5175,
+        "七级水系": 27181,
+        "rx": 48192,
+        "rx8": 4857
+      },
+      "enabled_layer_counts": {
+        "一级水系": 234,
+        "二级水系": 285,
+        "三级水系": 608,
+        "四级水系": 1407,
+        "五级水系": 4539,
+        "六级水系": 5170,
+        "七级水系": 27156,
+        "rx": 48159,
+        "rx8": 4856
+      },
+      "invalid_layer_counts": {
+        "五级水系": 2,
+        "六级水系": 5,
+        "七级水系": 25,
+        "rx": 33,
+        "rx8": 1
+      },
+      "bbox": {
+        "min_lng": 73.67559984006061,
+        "min_lat": 16.05359997036237,
+        "max_lng": 135.1059998404204,
+        "max_lat": 53.55919998009506
+      },
+      "notes": [
+        "This seed artifact is produced from navigation_water_area and replaces runtime revier.zip extraction for local/production seeding.",
+        "It contains raw water-area assets only; it must not overwrite seed channel boundaries or create centerlines/graph edges."
+      ]
+    },
+    "layer_counts_from_jsonl": {
+      "一级水系": 234,
+      "二级水系": 285,
+      "三级水系": 608,
+      "四级水系": 1407,
+      "五级水系": 4541,
+      "六级水系": 5175,
+      "七级水系": 27181,
+      "rx": 48192,
+      "rx8": 4857
+    }
+  },
+  "layers": [
+    {
+      "layer_name": "一级水系",
+      "display_name": "一级水系",
+      "zip_count": 234,
+      "db_count": 234,
+      "db_enabled_count": 234,
+      "db_invalid_count": 0,
+      "zip_named_count": 209,
+      "db_named_count": 209,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "二级水系",
+      "display_name": "二级水系",
+      "zip_count": 285,
+      "db_count": 285,
+      "db_enabled_count": 285,
+      "db_invalid_count": 0,
+      "zip_named_count": 225,
+      "db_named_count": 225,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "三级水系",
+      "display_name": "三级水系",
+      "zip_count": 608,
+      "db_count": 608,
+      "db_enabled_count": 608,
+      "db_invalid_count": 0,
+      "zip_named_count": 529,
+      "db_named_count": 529,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "四级水系",
+      "display_name": "四级水系",
+      "zip_count": 1407,
+      "db_count": 1407,
+      "db_enabled_count": 1407,
+      "db_invalid_count": 0,
+      "zip_named_count": 1144,
+      "db_named_count": 1144,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "五级水系",
+      "display_name": "五级水系",
+      "zip_count": 4541,
+      "db_count": 4541,
+      "db_enabled_count": 4539,
+      "db_invalid_count": 2,
+      "zip_named_count": 2598,
+      "db_named_count": 2598,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "六级水系",
+      "display_name": "六级水系",
+      "zip_count": 5175,
+      "db_count": 5175,
+      "db_enabled_count": 5170,
+      "db_invalid_count": 5,
+      "zip_named_count": 2338,
+      "db_named_count": 2338,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "七级水系",
+      "display_name": "七级水系",
+      "zip_count": 27181,
+      "db_count": 27181,
+      "db_enabled_count": 27156,
+      "db_invalid_count": 25,
+      "zip_named_count": 4833,
+      "db_named_count": 4833,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "rx",
+      "display_name": "全量水域面（rx）",
+      "zip_count": 48192,
+      "db_count": 48192,
+      "db_enabled_count": 48159,
+      "db_invalid_count": 33,
+      "zip_named_count": 13374,
+      "db_named_count": 13374,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    },
+    {
+      "layer_name": "rx8",
+      "display_name": "备用水域面（rx8）",
+      "zip_count": 4857,
+      "db_count": 4857,
+      "db_enabled_count": 4856,
+      "db_invalid_count": 1,
+      "zip_named_count": 1473,
+      "db_named_count": 1473,
+      "missing_count": 0,
+      "double_line_river_as_canal_count": 0,
+      "recoverable_geometry_collection_count": 0
+    }
+  ],
+  "summary": {
+    "recoverable_geometry_collection_count": 0,
+    "remaining_invalid_count": 66,
+    "named_major_water_disabled_count": 0
+  },
+  "major_water_status": [
+    {
+      "water_name": "乌江",
+      "source_layer_name": "二级水系",
+      "record_count": 5,
+      "enabled_count": 5,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 107.37740015968967,
+        "min_lat": 27.649199970002655,
+        "max_lng": 108.51299999965033,
+        "max_lat": 29.715599970362405
+      }
+    },
+    {
+      "water_name": "乌江",
+      "source_layer_name": "rx",
+      "record_count": 5,
+      "enabled_count": 5,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 107.37740015968967,
+        "min_lat": 27.649199970002655,
+        "max_lng": 108.51299999965033,
+        "max_lat": 29.715599970362405
+      }
+    },
+    {
+      "water_name": "澜沧江",
+      "source_layer_name": "一级水系",
+      "record_count": 6,
+      "enabled_count": 6,
+      "repaired_count": 2,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 98.86780008020958,
+        "min_lat": 21.563600040109804,
+        "max_lng": 101.17140012021946,
+        "max_lat": 28.192200030107358
+      }
+    },
+    {
+      "water_name": "澜沧江",
+      "source_layer_name": "rx",
+      "record_count": 6,
+      "enabled_count": 6,
+      "repaired_count": 2,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 98.86780008020958,
+        "min_lat": 21.563600040109804,
+        "max_lng": 101.17140012021946,
+        "max_lat": 28.192200030107358
+      }
+    },
+    {
+      "water_name": "红水河",
+      "source_layer_name": "一级水系",
+      "record_count": 7,
+      "enabled_count": 7,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 106.13840003992993,
+        "min_lat": 23.624800020104885,
+        "max_lng": 109.53339984033045,
+        "max_lat": 25.253199990187454
+      }
+    },
+    {
+      "water_name": "红水河",
+      "source_layer_name": "四级水系",
+      "record_count": 2,
+      "enabled_count": 2,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 102.74699988034024,
+        "min_lat": 37.92760001992502,
+        "max_lng": 102.90780000036978,
+        "max_lat": 38.206400039929974
+      }
+    },
+    {
+      "water_name": "红水河",
+      "source_layer_name": "五级水系",
+      "record_count": 1,
+      "enabled_count": 1,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 107.49719988007047,
+        "min_lat": 23.99979996000019,
+        "max_lng": 107.5151998800705,
+        "max_lat": 24.005400030287205
+      }
+    },
+    {
+      "water_name": "红水河",
+      "source_layer_name": "rx",
+      "record_count": 10,
+      "enabled_count": 10,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 102.74699988034024,
+        "min_lat": 23.624800020104885,
+        "max_lng": 109.53339984033045,
+        "max_lat": 38.206400039929974
+      }
+    },
+    {
+      "water_name": "西江",
+      "source_layer_name": "一级水系",
+      "record_count": 1,
+      "enabled_count": 1,
+      "repaired_count": 1,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 111.39220007966998,
+        "min_lat": 22.167800009562825,
+        "max_lng": 113.43160007958011,
+        "max_lat": 23.47740000001005
+      }
+    },
+    {
+      "water_name": "西江",
+      "source_layer_name": "五级水系",
+      "record_count": 1,
+      "enabled_count": 1,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 110.84240016013933,
+        "min_lat": 22.201599960270016,
+        "max_lng": 110.8738000802096,
+        "max_lat": 22.3072000195653
+      }
+    },
+    {
+      "water_name": "西江",
+      "source_layer_name": "rx",
+      "record_count": 2,
+      "enabled_count": 2,
+      "repaired_count": 1,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 110.84240016013933,
+        "min_lat": 22.167800009562825,
+        "max_lng": 113.43160007958011,
+        "max_lat": 23.47740000001005
+      }
+    },
+    {
+      "water_name": "金沙江",
+      "source_layer_name": "一级水系",
+      "record_count": 9,
+      "enabled_count": 9,
+      "repaired_count": 3,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 97.51700016022926,
+        "min_lat": 25.961200019565297,
+        "max_lng": 104.63199984042035,
+        "max_lat": 32.645799990277396
+      }
+    },
+    {
+      "water_name": "金沙江",
+      "source_layer_name": "rx",
+      "record_count": 9,
+      "enabled_count": 9,
+      "repaired_count": 3,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 97.51700016022926,
+        "min_lat": 25.961200019565297,
+        "max_lng": 104.63199984042035,
+        "max_lat": 32.645799990277396
+      }
+    },
+    {
+      "water_name": "长江",
+      "source_layer_name": "一级水系",
+      "record_count": 3,
+      "enabled_count": 3,
+      "repaired_count": 3,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 104.62860000018992,
+        "min_lat": 28.701999990007607,
+        "max_lng": 122.06620007967001,
+        "max_lat": 32.33240000965276
+      }
+    },
+    {
+      "water_name": "长江",
+      "source_layer_name": "七级水系",
+      "record_count": 1,
+      "enabled_count": 1,
+      "repaired_count": 0,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 118.6328001595997,
+        "min_lat": 31.98560004010983,
+        "max_lng": 118.64099988034025,
+        "max_lat": 32.00000003957024
+      }
+    },
+    {
+      "water_name": "长江",
+      "source_layer_name": "rx",
+      "record_count": 4,
+      "enabled_count": 4,
+      "repaired_count": 3,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 104.62860000018992,
+        "min_lat": 28.701999990007607,
+        "max_lng": 122.06620007967001,
+        "max_lat": 32.33240000965276
+      }
+    },
+    {
+      "water_name": "黄河",
+      "source_layer_name": "一级水系",
+      "record_count": 29,
+      "enabled_count": 29,
+      "repaired_count": 3,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 98.31219984015058,
+        "min_lat": 33.33179997009262,
+        "max_lng": 119.24340012021946,
+        "max_lat": 40.88400003037714
+      }
+    },
+    {
+      "water_name": "黄河",
+      "source_layer_name": "rx",
+      "record_count": 29,
+      "enabled_count": 29,
+      "repaired_count": 3,
+      "invalid_count": 0,
+      "bbox": {
+        "min_lng": 98.31219984015058,
+        "min_lat": 33.33179997009262,
+        "max_lng": 119.24340012021946,
+        "max_lat": 40.88400003037714
+      }
+    }
+  ],
+  "issues": []
+}

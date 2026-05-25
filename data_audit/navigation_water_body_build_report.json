@@ -1,0 +1,167 @@
+{
+  "raw_feature_count": 92480,
+  "body_count": 39870,
+  "hierarchy_body_count": 37417,
+  "rx_fill_body_count": 2453,
+  "rx_fill_raw_only_count": 6144,
+  "rx_duplicate_link_count": 39406,
+  "rx8_raw_only_count": 4856,
+  "invalid_raw_only_count": 66,
+  "link_count": 81414,
+  "samples": {
+    "长江": {
+      "body_count": 2,
+      "feature_count": 4,
+      "roles": {
+        "PRIMARY_HIERARCHY": 2
+      },
+      "quality": {
+        "REPAIRED": 1,
+        "READY": 1
+      },
+      "bbox": [
+        {
+          "body_code": "NWB-73c0ab91ca9424f7c87c",
+          "source_layer": "一级水系",
+          "min_lng": 104.62860000018992,
+          "min_lat": 28.701999990007607,
+          "max_lng": 122.06620007967001,
+          "max_lat": 32.33240000965276
+        },
+        {
+          "body_code": "NWB-f0eca90edad540ab720e",
+          "source_layer": "七级水系",
+          "min_lng": 118.6328001595997,
+          "min_lat": 31.98560004010983,
+          "max_lng": 118.64099988034025,
+          "max_lat": 32.00000003957024
+        }
+      ]
+    },
+    "西江": {
+      "body_count": 2,
+      "feature_count": 2,
+      "roles": {
+        "PRIMARY_HIERARCHY": 2
+      },
+      "quality": {
+        "REPAIRED": 1,
+        "READY": 1
+      },
+      "bbox": [
+        {
+          "body_code": "NWB-9d942c0f698de5c8739b",
+          "source_layer": "一级水系",
+          "min_lng": 111.39220007966998,
+          "min_lat": 22.167800009562825,
+          "max_lng": 113.43160007958011,
+          "max_lat": 23.47740000001005
+        },
+        {
+          "body_code": "NWB-d5347a67548873eb8623",
+          "source_layer": "五级水系",
+          "min_lng": 110.84240016013933,
+          "min_lat": 22.201599960270016,
+          "max_lng": 110.8738000802096,
+          "max_lat": 22.3072000195653
+        }
+      ]
+    },
+    "京杭运河": {
+      "body_count": 1,
+      "feature_count": 6,
+      "roles": {
+        "PRIMARY_HIERARCHY": 1
+      },
+      "quality": {
+        "READY": 1
+      },
+      "bbox": [
+        {
+          "body_code": "NWB-f1b3568f3e54e987a78b",
+          "source_layer": "一级水系",
+          "min_lng": 118.25020007966998,
+          "min_lat": 32.27560001992504,
+          "max_lng": 119.50480007975989,
+          "max_lat": 34.00900001983507
+        }
+      ]
+    },
+    "乌江": {
+      "body_count": 1,
+      "feature_count": 5,
+      "roles": {
+        "PRIMARY_HIERARCHY": 1
+      },
+      "quality": {
+        "READY": 1
+      },
+      "bbox": [
+        {
+          "body_code": "NWB-104994dd326d7f8f3048",
+          "source_layer": "二级水系",
+          "min_lng": 107.37740015968967,
+          "min_lat": 27.649199970002655,
+          "max_lng": 108.51299999965033,
+          "max_lat": 29.715599970362405
+        }
+      ]
+    },
+    "红水河": {
+      "body_count": 3,
+      "feature_count": 10,
+      "roles": {
+        "PRIMARY_HIERARCHY": 3
+      },
+      "quality": {
+        "READY": 3
+      },
+      "bbox": [
+        {
+          "body_code": "NWB-11e140f454a17ae456ab",
+          "source_layer": "一级水系",
+          "min_lng": 106.13840003992993,
+          "min_lat": 23.624800020104885,
+          "max_lng": 109.53339984033045,
+          "max_lat": 25.253199990187454
+        },
+        {
+          "body_code": "NWB-20e5d6eb292e265a023c",
+          "source_layer": "四级水系",
+          "min_lng": 102.74699988034024,
+          "min_lat": 37.92760001992502,
+          "max_lng": 102.90780000036978,
+          "max_lat": 38.206400039929974
+        },
+        {
+          "body_code": "NWB-996da3826047cba8183c",
+          "source_layer": "五级水系",
+          "min_lng": 107.49719988007047,
+          "min_lat": 23.99979996000019,
+          "max_lng": 107.5151998800705,
+          "max_lat": 24.005400030287205
+        }
+      ]
+    },
+    "黄河": {
+      "body_count": 1,
+      "feature_count": 29,
+      "roles": {
+        "PRIMARY_HIERARCHY": 1
+      },
+      "quality": {
+        "REPAIRED": 1
+      },
+      "bbox": [
+        {
+          "body_code": "NWB-b508b502f6001570b2a6",
+          "source_layer": "一级水系",
+          "min_lng": 98.31219984015058,
+          "min_lat": 33.33179997009262,
+          "max_lng": 119.24340012021946,
+          "max_lat": 40.88400003037714
+        }
+      ]
+    }
+  }
+}

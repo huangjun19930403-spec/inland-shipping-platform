@@ -83,7 +83,7 @@ async def _seed_graph(session: AsyncSession) -> None:
             validation_report_json={
                 "annotation_task_candidates": [
                     {
-                        "task_type_code": "GRAPH_QUALITY_REVIEW",
+                        "task_type_code": "GRAPH_QUALITY_REPAIR",
                         "target_type_code": "GRAPH_VERSION",
                         "target_id": 1,
                         "issue_code": "GRAPH_DISCONNECTED",
@@ -210,7 +210,7 @@ async def test_create_tasks_from_route_quality_issue_links_issue_and_is_idempote
     assert issue is not None
     assert issue.related_annotation_task_id == first.task_ids[0]
     assert task is not None
-    assert task.task_type_code == "CONSTRAINT_DATA_REVIEW"
+    assert task.task_type_code == "CONSTRAINT_DATA_REPAIR"
     assert task.target_type_code == "ROUTE_QUALITY_ISSUE"
     assert task.channel_id == 1
     assert task.graph_version_id == 1
@@ -227,20 +227,20 @@ async def test_create_tasks_from_graph_validation_and_edge_quality(session_maker
 
     assert response.source_type_code == "GRAPH_VALIDATION"
     assert response.created_count >= 2
-    assert {"GRAPH_QUALITY_REVIEW", "CONSTRAINT_DATA_REVIEW"} <= {row.task_type_code for row in rows}
+    assert {"GRAPH_QUALITY_REPAIR", "CONSTRAINT_DATA_REPAIR"} <= {row.task_type_code for row in rows}
     assert any(row.target_type_code == "GRAPH_EDGE" and row.target_id == 1 for row in rows)
     assert all(row.suggestion_json["publish_allowed"] is False for row in rows)
 
 
 @pytest.mark.asyncio
-async def test_low_confidence_centerline_generates_review_task(session_maker) -> None:
+async def test_low_confidence_centerline_generates_repair_task(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)
         session.add(
             NavigationChannelCenterline(
                 id=1,
                 channel_id=1,
-                centerline_code="CL-REVIEW",
+                centerline_code="CL-REPAIR",
                 centerline_name="待复核中心线",
                 geometry_json=_line((120.0, 31.0), (120.1, 31.0)),
                 source_type_code="OSM_WATERWAY",
@@ -257,10 +257,10 @@ async def test_low_confidence_centerline_generates_review_task(session_maker) ->
 
     assert response.created_count == 1
     assert task is not None
-    assert task.task_type_code == "CENTERLINE_REVIEW"
+    assert task.task_type_code == "CENTERLINE_REPAIR"
     assert task.target_type_code == "CENTERLINE"
     assert task.target_id == 1
-    assert "centerline version" in " ".join(task.suggestion_json["next_actions"]).lower()
+    assert "中心线版本" in " ".join(task.suggestion_json["next_actions"])
 
 
 @pytest.mark.asyncio
@@ -278,7 +278,7 @@ async def test_suggestion_and_resolve_record_traceable_target_without_publishing
                 resolution_type_code="CENTERLINE_VERSION_CREATED",
                 resolution_target_type_code="CENTERLINE",
                 resolution_target_id=100,
-                suggestion_json={"operator_note": "已生成新中心线版本，待后续审核发布"},
+                suggestion_json={"operator_note": "已生成新中心线版本，待后续发布"},
             ),
             reviewed_by=5,
         )

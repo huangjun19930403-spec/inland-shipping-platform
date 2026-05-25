@@ -158,7 +158,7 @@ class NavigationWorkbenchChannelResponse(BaseModel):
     boundary_count: int = 0
     current_boundary_count: int = 0
     centerline_count: int = 0
-    approved_current_centerline_count: int = 0
+    published_current_centerline_count: int = 0
     active_graph_edge_count: int = 0
     current_water_body_match_count: int = 0
     boundary_status_code: str
@@ -199,7 +199,7 @@ class NavigationProductionChannelResponse(BaseModel):
     candidate_boundary_count: int = 0
     current_boundary_count: int = 0
     centerline_candidate_count: int = 0
-    approved_current_centerline_count: int = 0
+    published_current_centerline_count: int = 0
     active_graph_edge_count: int = 0
     route_verified_count: int = 0
     diagnostic_issue_codes: list[str] = Field(default_factory=list)
@@ -222,6 +222,46 @@ class NavigationChannelPipelineResponse(BaseModel):
     map_layer_query: dict[str, Any] = Field(default_factory=dict)
     available_actions: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class NavigationProductionLayerLegendResponse(BaseModel):
+    layer_code: str
+    layer_name: str
+    layer_role: str
+    enabled: bool = True
+    attention_level: str = "NORMAL"
+
+
+class NavigationProductionWorkspaceResponse(BaseModel):
+    channel: NavigationProductionChannelResponse
+    step_code: str
+    step_name: str
+    map_layers: NavigationMapLayerResponse
+    layer_legends: list[NavigationProductionLayerLegendResponse] = Field(default_factory=list)
+    water_matches: NavigationChannelWaterBodyMatchListResponse | None = None
+    water_candidates: NavigationWaterBodyCandidateListResponse | None = None
+    boundaries: list[NavigationBoundaryListItemResponse] = Field(default_factory=list)
+    centerlines: list[NavigationCenterlineListItemResponse] = Field(default_factory=list)
+    drafts: list[NavigationGeometryDraftResponse] = Field(default_factory=list)
+    available_actions: list[dict[str, Any]] = Field(default_factory=list)
+    blocker_codes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NavigationCandidateGenerateRequest(BaseModel):
+    force: bool = False
+    source_type_code: str | None = Field(default=None, max_length=64)
+
+
+class NavigationCandidateGenerateResponse(BaseModel):
+    status_code: str
+    message: str
+    created_count: int = 0
+    candidate_count: int = 0
+    next_path: str | None = None
+    boundary_ids: list[int] = Field(default_factory=list)
+    centerline_ids: list[int] = Field(default_factory=list)
+    blocker_codes: list[str] = Field(default_factory=list)
 
 
 class NavigationChannelDiagnosticBoundaryResponse(BaseModel):
@@ -252,7 +292,7 @@ class NavigationChannelDiagnosticResponse(BaseModel):
     candidate_boundary_count: int = 0
     current_boundary_count: int = 0
     centerline_candidate_count: int = 0
-    approved_current_centerline_count: int = 0
+    published_current_centerline_count: int = 0
     active_graph_edge_count: int = 0
     route_verified_count: int = 0
     issue_codes: list[str] = Field(default_factory=list)
@@ -287,6 +327,7 @@ class NavigationWaterBodyCandidateResponse(BaseModel):
     confidence_code: str
     reason_codes: list[str] = Field(default_factory=list)
     issue_codes: list[str] = Field(default_factory=list)
+    source_water_area_ids: list[int] = Field(default_factory=list)
     already_matched: bool = False
 
 

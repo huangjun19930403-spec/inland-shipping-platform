@@ -149,7 +149,7 @@ async def _seed_layers(session: AsyncSession) -> None:
             geometry_json=_line((120.0, 31.1), (120.2, 31.1)),
             source_type_code="MANUAL",
             quality_code="READY",
-            review_status_code="APPROVED",
+            review_status_code="PUBLISHED",
             confidence_score=95,
             is_current=True,
             bbox_min_lng=120.0,
@@ -292,6 +292,114 @@ async def test_map_layers_loads_bbox_limited_features(session_maker) -> None:
     assert [item.layer_type_code for item in response.graph_edges] == ["GRAPH_EDGE"]
     assert response.route_results[0].properties["quality_code"] == "READY_WITH_WARNING"
     assert response.quality_issues[0].properties["issue_type_code"] == "UNKNOWN_CONSTRAINT_DATA"
+
+
+@pytest.mark.asyncio
+async def test_map_layers_only_show_active_ready_graph_edges(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_layers(session)
+        session.add(
+            NavigationGraphVersion(
+                id=2,
+                version_code="GV-OLD",
+                version_name="Old graph",
+                scope_code="TEST",
+                node_count=2,
+                edge_count=1,
+                channel_count=1,
+                status_code="READY",
+                is_active=False,
+            )
+        )
+        session.add_all(
+            [
+                NavigationGraphNode(
+                    id=3,
+                    graph_version_id=2,
+                    node_code="OLD-N1",
+                    node_type_code="CENTERLINE_VERTEX",
+                    longitude=120.0,
+                    latitude=31.12,
+                    geometry_json={"type": "Point", "coordinates": [120.0, 31.12]},
+                    is_enabled=True,
+                    quality_code="READY",
+                    source_type_code="CENTERLINE_VERTEX",
+                ),
+                NavigationGraphNode(
+                    id=4,
+                    graph_version_id=2,
+                    node_code="OLD-N2",
+                    node_type_code="CENTERLINE_VERTEX",
+                    longitude=120.2,
+                    latitude=31.12,
+                    geometry_json={"type": "Point", "coordinates": [120.2, 31.12]},
+                    is_enabled=True,
+                    quality_code="READY",
+                    source_type_code="CENTERLINE_VERTEX",
+                ),
+                NavigationGraphEdge(
+                    id=2,
+                    graph_version_id=2,
+                    edge_code="OLD-E1",
+                    from_node_id=3,
+                    to_node_id=4,
+                    channel_id=1,
+                    geometry_json=_line((120.0, 31.12), (120.2, 31.12)),
+                    length_km=22.2,
+                    direction_code="BIDIRECTIONAL",
+                    routing_enabled=True,
+                    quality_code="READY",
+                    source_type_code="MANUAL",
+                    confidence_score=95,
+                ),
+            ]
+        )
+        await session.commit()
+
+        response = await NavigationMapLayerService(session).get_layers(
+            min_lng=119.9,
+            min_lat=30.9,
+            max_lng=120.3,
+            max_lat=31.3,
+            channel_id=None,
+            route_result_id=None,
+            include_water_area=False,
+            include_boundary=False,
+            include_centerline=False,
+            include_graph_edge=True,
+            limit=20,
+        )
+
+    assert [item.id for item in response.graph_edges] == [1]
+    assert response.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_map_layers_warns_without_active_ready_graph_version(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_layers(session)
+        version = await session.get(NavigationGraphVersion, 1)
+        assert version is not None
+        version.is_active = False
+        await session.commit()
+
+        response = await NavigationMapLayerService(session).get_layers(
+            min_lng=119.9,
+            min_lat=30.9,
+            max_lng=120.3,
+            max_lat=31.3,
+            channel_id=None,
+            route_result_id=1,
+            include_water_area=False,
+            include_boundary=False,
+            include_centerline=False,
+            include_graph_edge=True,
+            limit=20,
+        )
+
+    assert response.graph_edges == []
+    assert response.route_results
+    assert "NO_ACTIVE_READY_GRAPH_VERSION" in response.warnings
 
 
 @pytest.mark.asyncio

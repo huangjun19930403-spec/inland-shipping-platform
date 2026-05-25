@@ -100,7 +100,7 @@ def _centerline(
     code: str,
     geometry: dict,
     source_type_code: str = "MANUAL",
-    review_status_code: str = "APPROVED",
+    review_status_code: str = "PUBLISHED",
     quality_code: str = "READY",
     is_current: bool = True,
 ) -> NavigationChannelCenterline:
@@ -200,7 +200,7 @@ async def test_build_graph_fails_without_approved_current_centerline(session_mak
 
     assert summary.status_code == "FAILED"
     assert summary.edge_count == 0
-    assert "NO_APPROVED_CENTERLINE" in {issue.issue_code for issue in summary.issues}
+    assert "NO_PUBLISHED_CENTERLINE" in {issue.issue_code for issue in summary.issues}
 
 
 @pytest.mark.asyncio
@@ -358,6 +358,34 @@ async def test_out_of_boundary_edge_is_disabled_and_fails_validation(session_mak
     assert summary.status_code == "FAILED"
     assert edge.quality_code == "OUT_OF_BOUNDARY"
     assert edge.routing_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_near_boundary_edge_is_warning_not_intersects_pass(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel_with_centerline(
+            session,
+            boundary=_boundary(channel_id=1, min_lng=120.0, min_lat=31.0, max_lng=120.2, max_lat=31.2),
+            centerline=_centerline(
+                id=1,
+                channel_id=1,
+                code="CL-NEAR-001",
+                geometry=_line((120.0, 31.0), (120.2001, 31.2)),
+            ),
+        )
+
+        summary = await build_graph_from_centerlines(
+            session=session,
+            version_code="TEST-GRAPH-NEAR",
+            scope_code="TEST",
+            channel_codes=["TEST-MAIN"],
+        )
+        edge = (await session.execute(select(NavigationGraphEdge))).scalar_one()
+
+    assert summary.status_code == "READY"
+    assert edge.quality_code == "READY_WITH_WARNING"
+    assert edge.routing_enabled is True
+    assert "EDGE_NEAR_BOUNDARY_TOLERATED" in {issue.issue_code for issue in summary.issues}
 
 
 @pytest.mark.asyncio

@@ -43,8 +43,11 @@ from app.modules.navigation.schemas import (
     NavigationWaterBodyNameUpdateRequest,
     NavigationWaterAreaListResponse,
     NavigationCandidateConfirmRequest,
+    NavigationCandidateGenerateRequest,
+    NavigationCandidateGenerateResponse,
     NavigationWaterAreaSummaryResponse,
     NavigationWorkbenchSummaryResponse,
+    NavigationProductionWorkspaceResponse,
 )
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
@@ -74,6 +77,16 @@ async def get_navigation_channel_pipeline(
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationProductionService(db).pipeline(channel_id)
+
+
+@router.get("/channels/{channel_id}/production-workspace", response_model=NavigationProductionWorkspaceResponse)
+async def get_navigation_channel_production_workspace(
+    channel_id: int,
+    step: str = "boundary",
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).production_workspace(channel_id, step=step)
 
 
 @router.get("/channels/{channel_id}/diagnostics", response_model=NavigationChannelDiagnosticResponse)
@@ -129,6 +142,19 @@ async def list_navigation_channel_boundary_candidates(
     return await NavigationProductionService(db).boundary_candidates(channel_id=channel_id, limit=limit)
 
 
+@router.post("/channels/{channel_id}/boundary-candidates/generate", response_model=NavigationCandidateGenerateResponse)
+async def generate_navigation_channel_boundary_candidates(
+    channel_id: int,
+    body: NavigationCandidateGenerateRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).generate_boundary_candidates(
+        channel_id=channel_id,
+        body=body or NavigationCandidateGenerateRequest(),
+    )
+
+
 @router.get("/channels/{channel_id}/centerline-candidates", response_model=list[NavigationCenterlineListItemResponse])
 async def list_navigation_channel_centerline_candidates(
     channel_id: int,
@@ -137,6 +163,19 @@ async def list_navigation_channel_centerline_candidates(
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationProductionService(db).centerline_candidates(channel_id=channel_id, limit=limit)
+
+
+@router.post("/channels/{channel_id}/centerline-candidates/generate", response_model=NavigationCandidateGenerateResponse)
+async def generate_navigation_channel_centerline_candidates(
+    channel_id: int,
+    body: NavigationCandidateGenerateRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).generate_centerline_candidates(
+        channel_id=channel_id,
+        body=body or NavigationCandidateGenerateRequest(),
+    )
 
 
 @router.post("/osm/imports", response_model=NavigationOsmImportResponse)

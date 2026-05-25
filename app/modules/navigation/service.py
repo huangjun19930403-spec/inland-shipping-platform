@@ -27,7 +27,7 @@ class NavigationCenterlineService:
             .join(NavigationChannel, NavigationChannel.id == NavigationChannelCenterline.channel_id)
             .where(
                 NavigationChannel.is_enabled.is_(True),
-                NavigationChannelCenterline.review_status_code == "APPROVED",
+                NavigationChannelCenterline.review_status_code == "PUBLISHED",
                 NavigationChannelCenterline.is_current.is_(True),
                 NavigationChannelCenterline.quality_code.in_(GRAPH_READY_CENTERLINE_QUALITIES),
                 NavigationChannelCenterline.source_type_code.in_(GRAPH_READY_CENTERLINE_SOURCES),

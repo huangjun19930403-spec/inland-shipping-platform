@@ -137,8 +137,8 @@ class ConstrainedGraphSearch:
                 blocked_issues.append(
                     RouteIssue(
                         block_reason,
-                        "ERROR",
-                        f"Edge {edge.edge_code} is blocked by vessel or closure constraint",
+                        "WARNING",
+                        f"Edge {edge.edge_code} was excluded by vessel or closure constraint",
                         related_edge_id=edge.id,
                     )
                 )
@@ -172,7 +172,14 @@ class ConstrainedGraphSearch:
 
         if usable_edge_count == 0:
             code = "VESSEL_CONSTRAINT_BLOCKED" if blocked_edge_ids else "NO_ROUTING_EDGE_IN_BBOX"
-            raise RoutingEngineError(code, "No usable graph edge is available after constraints", issues=blocked_issues)
+            raise RoutingEngineError(
+                code,
+                "No usable graph edge is available after constraints",
+                issues=[
+                    RouteIssue(code, "ERROR", "No usable graph edge is available after constraints"),
+                    *blocked_issues,
+                ],
+            )
 
         start_key = self._attach_snap_node(nx_graph, graph, origin_snap, "ORIGIN", routing_preference_code)
         end_key = self._attach_snap_node(nx_graph, graph, destination_snap, "DESTINATION", routing_preference_code)
@@ -181,9 +188,23 @@ class ConstrainedGraphSearch:
         try:
             node_path = nx.shortest_path(nx_graph, start_key, end_key, weight="weight")
         except nx.NetworkXNoPath as exc:
-            raise RoutingEngineError("GRAPH_DISCONNECTED", "No connected graph path between snapped endpoints", issues=blocked_issues) from exc
+            raise RoutingEngineError(
+                "GRAPH_DISCONNECTED",
+                "No connected graph path between snapped endpoints",
+                issues=[
+                    RouteIssue("GRAPH_DISCONNECTED", "ERROR", "No connected graph path between snapped endpoints"),
+                    *blocked_issues,
+                ],
+            ) from exc
         except nx.NodeNotFound as exc:
-            raise RoutingEngineError("NO_PATH_FOUND", "Snapped endpoint is not present in loaded graph", issues=blocked_issues) from exc
+            raise RoutingEngineError(
+                "NO_PATH_FOUND",
+                "Snapped endpoint is not present in loaded graph",
+                issues=[
+                    RouteIssue("NO_PATH_FOUND", "ERROR", "Snapped endpoint is not present in loaded graph"),
+                    *blocked_issues,
+                ],
+            ) from exc
 
         segments: list[SearchSegment] = []
         total_cost = 0.0
@@ -200,7 +221,7 @@ class ConstrainedGraphSearch:
             segments=segments,
             total_cost=total_cost,
             blocked_edge_ids=blocked_edge_ids,
-            issues=[],
+            issues=blocked_issues,
         )
 
     def _attach_snap_node(

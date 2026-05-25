@@ -1,4 +1,4 @@
-"""Build navigation graph versions from approved centerlines.
+"""Build navigation graph versions from published centerlines.
 
 Round 7 creates graph versions, nodes, edges, and edge constraints. It never
 creates route requests/results and never uses polygon or boundary assets as
@@ -69,6 +69,7 @@ class GraphBuildConfig:
     short_edge_merge_m: float = 20.0
     short_edge_review_m: float = 50.0
     bbox_margin_degree: float = 0.02
+    boundary_tolerance_degree: float = 0.0002
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -439,8 +440,14 @@ def _edge_quality_for_segment(
     issues: list[str] = []
     quality = "READY"
     routing_enabled = True
-    if boundary is not None and not (boundary.covers(segment) or boundary.intersects(segment)):
-        return "OUT_OF_BOUNDARY", False, ["EDGE_OUT_OF_BOUNDARY"]
+    if boundary is not None:
+        if boundary.covers(segment):
+            pass
+        elif boundary.buffer(config.boundary_tolerance_degree).covers(segment):
+            quality = "READY_WITH_WARNING"
+            issues.append("EDGE_NEAR_BOUNDARY_TOLERATED")
+        else:
+            return "OUT_OF_BOUNDARY", False, ["EDGE_OUT_OF_BOUNDARY"]
     protected = from_node.node_type_code in PROTECTED_NODE_TYPES or to_node.node_type_code in PROTECTED_NODE_TYPES
     if length_m < config.short_edge_merge_m and not protected:
         return "DISABLED", False, ["SHORT_EDGE_DISABLED"]
@@ -496,9 +503,9 @@ async def build_graph_from_centerlines(
     if not centerlines:
         issues.append(
             GraphBuildIssue(
-                "NO_APPROVED_CENTERLINE",
+                "NO_PUBLISHED_CENTERLINE",
                 "BLOCKING",
-                "No approved/current centerline is available for graph building",
+                "No published current centerline is available for graph building",
             )
         )
         graph_version.status_code = "FAILED"
@@ -623,7 +630,7 @@ async def build_graph_from_centerlines(
                 GraphBuildIssue(
                     "NO_GRAPH_NEAR_TRANSPORT_NODE",
                     "WARNING",
-                    f"Transport node {node.code} is too far from approved centerline",
+                    f"Transport node {node.code} is too far from published centerline",
                     channel_id=centerline.row.channel_id,
                     distance_m=distance_m,
                 )
@@ -682,7 +689,7 @@ async def build_graph_from_centerlines(
                 GraphBuildIssue(
                     "CONSTRAINT_POINT_NOT_SNAPPED",
                     "WARNING",
-                    f"Constraint point {point.code} is too far from approved centerline",
+                    f"Constraint point {point.code} is too far from published centerline",
                     channel_id=centerline.row.channel_id,
                     distance_m=distance_m,
                 )
@@ -787,10 +794,11 @@ async def build_graph_from_centerlines(
                 config=config,
             )
             for issue_code in edge_issue_codes:
+                severity = "WARNING" if issue_code.startswith("SHORT") or issue_code == "EDGE_NEAR_BOUNDARY_TOLERATED" else "BLOCKING"
                 issues.append(
                     GraphBuildIssue(
                         issue_code,
-                        "WARNING" if issue_code.startswith("SHORT") else "BLOCKING",
+                        severity,
                         f"Edge candidate from centerline {row.centerline_code}: {issue_code}",
                         centerline_id=row.id,
                         channel_id=row.channel_id,
@@ -940,7 +948,7 @@ async def _prepare_schema() -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build navigation graph from approved centerlines.")
+    parser = argparse.ArgumentParser(description="Build navigation graph from published centerlines.")
     parser.add_argument("--version-code", required=True)
     parser.add_argument("--version-name", default=None)
     parser.add_argument("--scope-code", default="REAL-JS-YRD")

@@ -56,6 +56,10 @@ class LoadedGraph:
     nodes: dict[int, NavigationGraphNode]
     edges: dict[int, NavigationGraphEdge]
     constraints_by_edge_id: dict[int, list[NavigationGraphEdgeConstraint]] = field(default_factory=dict)
+    load_bbox: dict[str, float] | None = None
+    load_margin_degree: float | None = None
+    loaded_node_count: int = 0
+    loaded_edge_count: int = 0
 
 
 @dataclass(slots=True)

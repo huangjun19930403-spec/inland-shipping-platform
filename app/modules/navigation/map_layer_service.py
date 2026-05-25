@@ -11,6 +11,7 @@ from app.models import (
     NavigationChannelWaterBodyMatch,
     NavigationGraphEdge,
     NavigationGraphNode,
+    NavigationGraphVersion,
     NavigationRouteQualityIssue,
     NavigationRouteResult,
     NavigationWaterArea,
@@ -97,7 +98,13 @@ class NavigationMapLayerService:
         if include_centerline:
             centerlines = await self._centerline_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
         if include_graph_edge:
-            graph_edges = await self._graph_edge_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
+            graph_edges = await self._graph_edge_layers(
+                bbox,
+                layer_limit,
+                truncated_layers,
+                warnings,
+                channel_id=channel_id,
+            )
 
         return NavigationMapLayerResponse(
             bbox=bbox_to_gcj02(bbox),
@@ -409,12 +416,30 @@ class NavigationMapLayerService:
         bbox: dict[str, float],
         limit: int,
         truncated_layers: list[str],
+        warnings: list[str],
         *,
         channel_id: int | None,
     ) -> list[NavigationMapLayerFeatureResponse]:
+        active_graph_version_id = await self.session.scalar(
+            select(NavigationGraphVersion.id)
+            .where(
+                NavigationGraphVersion.is_active.is_(True),
+                NavigationGraphVersion.status_code == "READY",
+                NavigationGraphVersion.edge_count > 0,
+                NavigationGraphVersion.scope_code.not_like("MVP%"),
+            )
+            .order_by(NavigationGraphVersion.id.desc())
+        )
+        if active_graph_version_id is None:
+            warnings.append("NO_ACTIVE_READY_GRAPH_VERSION")
+            return []
         from_node = aliased(NavigationGraphNode)
         to_node = aliased(NavigationGraphNode)
         clauses = [
+            NavigationGraphEdge.graph_version_id == active_graph_version_id,
+            NavigationGraphVersion.is_active.is_(True),
+            NavigationGraphVersion.status_code == "READY",
+            NavigationGraphVersion.scope_code.not_like("MVP%"),
             NavigationGraphEdge.routing_enabled.is_(True),
             or_(
                 self._node_in_bbox(from_node, bbox),
@@ -427,6 +452,7 @@ class NavigationMapLayerService:
             (
                 await self.session.execute(
                     select(NavigationGraphEdge, from_node, to_node)
+                    .join(NavigationGraphVersion, NavigationGraphVersion.id == NavigationGraphEdge.graph_version_id)
                     .join(from_node, from_node.id == NavigationGraphEdge.from_node_id)
                     .join(to_node, to_node.id == NavigationGraphEdge.to_node_id)
                     .where(*clauses)

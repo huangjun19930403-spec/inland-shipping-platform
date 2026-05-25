@@ -19,11 +19,13 @@ from app.models import (
 from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.models.base import Base
 from app.modules.navigation.schemas import (
+    NavigationCandidateGenerateRequest,
     NavigationGeometryDraftCreateRequest,
     NavigationGraphBuildRequest,
     NavigationWaterBodyMatchCreateRequest,
     NavigationWaterBodyNameUpdateRequest,
 )
+from app.modules.navigation.production_service import NavigationProductionService
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
 
@@ -128,7 +130,7 @@ async def test_boundary_publish_preserves_seed_history_and_switches_current(sess
                 bbox_max_lng=120.24,
                 bbox_max_lat=31.12,
                 geometry_status_code="AVAILABLE",
-                boundary_quality_code="SEED_APPROVED",
+                boundary_quality_code="SEED_PUBLISHED",
                 connectivity_status_code="CONNECTED",
                 repair_status_code="NONE",
                 coverage_policy_code="SEED_BOUNDARY",
@@ -162,6 +164,103 @@ async def test_boundary_publish_preserves_seed_history_and_switches_current(sess
 
 
 @pytest.mark.asyncio
+async def test_publish_rejects_too_short_centerline_without_formal_asset(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        service = NavigationWorkbenchService(session)
+        draft = await service.create_geometry_draft(
+            NavigationGeometryDraftCreateRequest(
+                draft_type_code="CENTERLINE",
+                draft_name="过短中心线",
+                channel_id=1,
+                geometry_json={"type": "LineString", "coordinates": [[120.0, 31.0], [120.00001, 31.0]]},
+                source_type_code="GEOJSON_PASTE",
+            ),
+            created_by=7,
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await service.publish_geometry_draft(draft.id, published_by=8)
+        centerline_count = await session.scalar(select(func.count()).select_from(NavigationChannelCenterline))
+        draft_row = await session.get(NavigationGeometryDraft, draft.id)
+
+    assert "CENTERLINE_TOO_SHORT" in str(exc_info.value)
+    assert centerline_count == 0
+    assert draft_row is not None
+    assert draft_row.status_code == "PUBLISH_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_publish_rejects_centerline_out_of_current_boundary(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationChannelBoundary(
+                id=1,
+                channel_id=1,
+                geometry_json=_polygon(),
+                boundary_paths_low=_polygon()["coordinates"],
+                bbox_min_lng=119.98,
+                bbox_min_lat=30.98,
+                bbox_max_lng=120.24,
+                bbox_max_lat=31.12,
+                geometry_status_code="AVAILABLE",
+                boundary_quality_code="MANUAL_PUBLISHED",
+                connectivity_status_code="CONNECTED",
+                repair_status_code="NONE",
+                coverage_policy_code="MANUAL_DRAW",
+                is_current=True,
+            )
+        )
+        await session.commit()
+        service = NavigationWorkbenchService(session)
+        draft = await service.create_geometry_draft(
+            NavigationGeometryDraftCreateRequest(
+                draft_type_code="CENTERLINE",
+                draft_name="越界中心线",
+                channel_id=1,
+                geometry_json={"type": "LineString", "coordinates": [[121.0, 32.0], [121.2, 32.2]]},
+                source_type_code="GEOJSON_PASTE",
+            ),
+            created_by=7,
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await service.publish_geometry_draft(draft.id, published_by=8)
+        centerline_count = await session.scalar(select(func.count()).select_from(NavigationChannelCenterline))
+
+    assert "CENTERLINE_OUT_OF_BOUNDARY" in str(exc_info.value)
+    assert centerline_count == 0
+
+
+@pytest.mark.asyncio
+async def test_publish_rejects_unclosed_boundary_ring(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        service = NavigationWorkbenchService(session)
+        draft = await service.create_geometry_draft(
+            NavigationGeometryDraftCreateRequest(
+                draft_type_code="BOUNDARY",
+                draft_name="未闭合边界",
+                channel_id=1,
+                geometry_json={
+                    "type": "Polygon",
+                    "coordinates": [[[120.0, 31.0], [120.2, 31.0], [120.2, 31.2], [120.0, 31.2]]],
+                },
+                source_type_code="GEOJSON_PASTE",
+            ),
+            created_by=7,
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            await service.publish_geometry_draft(draft.id, published_by=8)
+        boundary_count = await session.scalar(select(func.count()).select_from(NavigationChannelBoundary))
+
+    assert "BOUNDARY_RING_NOT_CLOSED" in str(exc_info.value)
+    assert boundary_count == 0
+
+
+@pytest.mark.asyncio
 async def test_geometry_draft_can_be_archived_before_publish(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)
@@ -185,7 +284,7 @@ async def test_geometry_draft_can_be_archived_before_publish(session_maker) -> N
 
 
 @pytest.mark.asyncio
-async def test_graph_build_without_approved_centerline_fails_with_real_scope(session_maker) -> None:
+async def test_graph_build_without_published_centerline_fails_with_real_scope(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)
         service = NavigationWorkbenchService(session)
@@ -201,7 +300,7 @@ async def test_graph_build_without_approved_centerline_fails_with_real_scope(ses
     assert build.edge_count == 0
     assert graph_version is not None
     assert graph_version.scope_code == "REAL-JS-YRD"
-    assert graph_version.validation_report_json["issues"][0]["issue_code"] == "NO_APPROVED_CENTERLINE"
+    assert graph_version.validation_report_json["issues"][0]["issue_code"] == "NO_PUBLISHED_CENTERLINE"
 
 
 @pytest.mark.asyncio
@@ -565,3 +664,93 @@ async def test_workbench_assigns_and_renames_production_water_body_without_touch
     assert created.items[0].source_water_area_ids == [1]
     assert listed.total == 1
     assert removed.current_match_count == 0
+
+
+@pytest.mark.asyncio
+async def test_production_boundary_candidate_generation_uses_water_body_without_overwriting_seed(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationChannelBoundary(
+                id=1,
+                channel_id=1,
+                geometry_json=_polygon(),
+                boundary_paths_low=_polygon()["coordinates"],
+                bbox_min_lng=119.98,
+                bbox_min_lat=30.98,
+                bbox_max_lng=120.24,
+                bbox_max_lat=31.12,
+                geometry_status_code="AVAILABLE",
+                boundary_quality_code="SEED_REFERENCE",
+                connectivity_status_code="UNKNOWN",
+                repair_status_code="NONE",
+                coverage_policy_code="CHANNEL_CORRIDOR_ENVELOPE",
+                is_current=True,
+            )
+        )
+        session.add(
+            NavigationWaterBody(
+                id=1,
+                water_body_code="WB-CANDIDATE",
+                water_body_name="测试水体",
+                normalized_water_name="测试水体",
+                source_code="RIVER_SHAPEFILE_2026",
+                body_role_code="PRIMARY_HIERARCHY",
+                dedupe_status_code="DEDUPED",
+                source_layer_name="一级水系",
+                water_type_code="RIVER",
+                geometry_wgs84_json=_polygon(),
+                bbox_min_lng=119.98,
+                bbox_min_lat=30.98,
+                bbox_max_lng=120.24,
+                bbox_max_lat=31.12,
+                feature_count=1,
+                enabled_feature_count=1,
+                source_water_area_ids_json=[1],
+                is_enabled=True,
+            )
+        )
+        session.add(
+            NavigationChannelWaterBodyMatch(
+                id=1,
+                channel_id=1,
+                water_body_id=1,
+                match_batch_code="TEST-BODY-MATCH",
+                match_type_code="MANUAL_ADD",
+                score=96,
+                confidence_code="MANUAL_CONFIRMED",
+                issue_codes=[],
+                is_current=True,
+                source_water_area_ids_json=[1],
+            )
+        )
+        await session.commit()
+
+        response = await NavigationProductionService(session).generate_boundary_candidates(
+            channel_id=1,
+            body=NavigationCandidateGenerateRequest(),
+        )
+        boundaries = list((await session.execute(select(NavigationChannelBoundary).order_by(NavigationChannelBoundary.id))).scalars())
+
+    assert response.status_code == "CREATED"
+    assert response.created_count == 1
+    assert len(boundaries) == 2
+    assert boundaries[0].is_current is True
+    assert boundaries[0].coverage_policy_code == "CHANNEL_CORRIDOR_ENVELOPE"
+    assert boundaries[1].is_current is False
+    assert boundaries[1].coverage_policy_code == "RIVER_MATCH_CANDIDATE"
+
+
+@pytest.mark.asyncio
+async def test_production_centerline_candidate_generation_does_not_create_fake_line(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        response = await NavigationProductionService(session).generate_centerline_candidates(
+            channel_id=1,
+            body=NavigationCandidateGenerateRequest(),
+        )
+        centerline_count = await session.scalar(select(func.count()).select_from(NavigationChannelCenterline))
+
+    assert response.status_code == "WAITING_FOR_SOURCE"
+    assert response.created_count == 0
+    assert centerline_count == 0

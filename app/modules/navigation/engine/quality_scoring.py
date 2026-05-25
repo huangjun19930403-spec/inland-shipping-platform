@@ -62,7 +62,7 @@ class QualityScorer:
             if segment.quality_code in {"NEED_REVIEW", "SHORT_EDGE_REVIEW"}:
                 score -= 5
                 issues.append(
-                    RouteIssue("EDGE_NEED_MANUAL_REVIEW", "WARNING", "Path uses an edge that needs manual review", related_edge_id=segment.edge_id)
+                    RouteIssue("EDGE_NEED_MANUAL_REVIEW", "WARNING", "Path uses an edge that needs production repair", related_edge_id=segment.edge_id)
                 )
             if segment.unknown_constraint_flag and segment.edge_id not in seen_unknown_edges:
                 score -= 2

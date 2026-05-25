@@ -145,11 +145,11 @@ class NavigationAnnotationTaskService:
         candidates = self._validation_candidates(graph_version.validation_report_json)
         for candidate in candidates:
             task, created = await self._get_or_create_task(
-                task_type_code=str(candidate.get("task_type_code") or "GRAPH_QUALITY_REVIEW").upper(),
+                task_type_code=self._normalize_task_type(str(candidate.get("task_type_code") or "GRAPH_QUALITY_REPAIR")),
                 target_type_code=str(candidate.get("target_type_code") or "GRAPH_VERSION").upper(),
                 target_id=self._int_or_none(candidate.get("target_id")),
                 issue_code=str(candidate.get("issue_code") or "GRAPH_QUALITY_ISSUE").upper(),
-                issue_summary=str(candidate.get("issue_summary") or "Graph quality issue requires review"),
+                issue_summary=str(candidate.get("issue_summary") or "图网络质量问题需要处理"),
                 priority_code=str(candidate.get("priority_code") or "MEDIUM").upper(),
                 graph_version_id=graph_version.id,
                 created_by=created_by,
@@ -178,13 +178,13 @@ class NavigationAnnotationTaskService:
         )
         for edge in edge_rows:
             issue_code = "UNKNOWN_CONSTRAINT_DATA" if edge.unknown_constraint_flag else edge.quality_code
-            task_type = "CONSTRAINT_DATA_REVIEW" if edge.unknown_constraint_flag else "GRAPH_EDGE_REVIEW"
+            task_type = "CONSTRAINT_DATA_REPAIR" if edge.unknown_constraint_flag else "GRAPH_EDGE_REPAIR"
             task, created = await self._get_or_create_task(
                 task_type_code=task_type,
                 target_type_code="GRAPH_EDGE",
                 target_id=edge.id,
                 issue_code=issue_code,
-                issue_summary=f"Graph edge {edge.edge_code} requires review: {issue_code}",
+                issue_summary=f"路径图边 {edge.edge_code} 需要处理：{issue_code}",
                 priority_code="MEDIUM" if edge.routing_enabled else "HIGH",
                 geometry_json=edge.geometry_json,
                 channel_id=edge.channel_id,
@@ -219,7 +219,7 @@ class NavigationAnnotationTaskService:
                                 {"NEED_REVIEW", "LOW_CONFIDENCE", "BROKEN", "OUT_OF_BOUNDARY", "DUPLICATED"}
                             )
                         )
-                        | (NavigationChannelCenterline.review_status_code != "APPROVED"),
+                        | (NavigationChannelCenterline.review_status_code != "PUBLISHED"),
                     )
                     .order_by(NavigationChannelCenterline.id)
                 )
@@ -230,11 +230,14 @@ class NavigationAnnotationTaskService:
         existing_count = 0
         for centerline in rows:
             task, created = await self._get_or_create_task(
-                task_type_code="CENTERLINE_REVIEW",
+                task_type_code="CENTERLINE_REPAIR",
                 target_type_code="CENTERLINE",
                 target_id=centerline.id,
                 issue_code=centerline.quality_code,
-                issue_summary=f"Centerline {centerline.centerline_code} requires review: {centerline.quality_code}/{centerline.review_status_code}",
+                issue_summary=(
+                    f"Centerline {centerline.centerline_code} needs production repair: "
+                    f"{centerline.quality_code}/{centerline.review_status_code}"
+                ),
                 priority_code="HIGH" if centerline.quality_code in {"BROKEN", "OUT_OF_BOUNDARY"} else "MEDIUM",
                 geometry_json=centerline.geometry_json,
                 channel_id=centerline.channel_id,
@@ -368,14 +371,26 @@ class NavigationAnnotationTaskService:
 
     def _task_type_for_issue(self, issue_code: str) -> str:
         if issue_code == "UNKNOWN_CONSTRAINT_DATA" or issue_code.startswith("VSL_"):
-            return "CONSTRAINT_DATA_REVIEW"
+            return "CONSTRAINT_DATA_REPAIR"
         if issue_code in {"GRAPH_DISCONNECTED", "NO_ACTIVE_GRAPH_VERSION", "NO_ROUTING_EDGE_IN_BBOX"}:
             return "GRAPH_CONNECTIVITY_REPAIR"
         if "SNAP" in issue_code or "ORIGIN" in issue_code or "DESTINATION" in issue_code:
-            return "SNAP_REVIEW"
+            return "SNAP_REPAIR"
         if issue_code in {"LOW_CONFIDENCE_EDGE", "EDGE_NEED_MANUAL_REVIEW", "PATH_OUT_OF_CHANNEL_BOUNDARY"}:
-            return "GRAPH_EDGE_REVIEW"
-        return "ROUTE_QUALITY_REVIEW"
+            return "GRAPH_EDGE_REPAIR"
+        return "ROUTE_QUALITY_REPAIR"
+
+    def _normalize_task_type(self, task_type_code: str) -> str:
+        task_type = task_type_code.upper()
+        replacements = {
+            "GRAPH_QUALITY_REVIEW": "GRAPH_QUALITY_REPAIR",
+            "GRAPH_EDGE_REVIEW": "GRAPH_EDGE_REPAIR",
+            "CONSTRAINT_DATA_REVIEW": "CONSTRAINT_DATA_REPAIR",
+            "CENTERLINE_REVIEW": "CENTERLINE_REPAIR",
+            "SNAP_REVIEW": "SNAP_REPAIR",
+            "ROUTE_QUALITY_REVIEW": "ROUTE_QUALITY_REPAIR",
+        }
+        return replacements.get(task_type, task_type)
 
     def _priority_for_issue(self, issue_code: str, severity_code: str) -> str:
         if severity_code == "ERROR" or issue_code in {"GRAPH_DISCONNECTED", "PATH_OUT_OF_WATER"}:
@@ -396,7 +411,7 @@ class NavigationAnnotationTaskService:
             "issue_code": issue_code,
             "task_type_code": task_type_code,
             "publish_allowed": False,
-            "requires_human_review": True,
+            "requires_operator_confirmation": True,
             "next_actions": self._next_actions(issue_code, task_type_code),
         }
 
@@ -408,11 +423,11 @@ class NavigationAnnotationTaskService:
             "suggestion_source_code": "RULE_BASED_ASSISTANT",
             "generated_at": datetime.now(UTC).isoformat(),
             "publish_allowed": False,
-            "requires_human_review": True,
+            "requires_operator_confirmation": True,
             "guardrails": [
-                "Do not publish AI suggestions as ACTIVE graph edges",
-                "Create a new boundary/centerline/constraint version before rebuilding graph",
-                "Keep the previous graph version archived for route reproducibility",
+                "不要把 AI 建议直接发布为当前可用路径图边",
+                "重建图网络前应先创建新的边界、中心线或约束版本",
+                "保留上一版图网络，便于历史路径复现",
             ],
             "next_actions": self._next_actions(issue_code, task.task_type_code),
         }
@@ -422,31 +437,31 @@ class NavigationAnnotationTaskService:
             return [
                 "打开水系归属页查看系统推荐候选水域",
                 "确认真实水域归属；必要时补充 alias/scope 配置",
-                "生成候选边界后再进入边界生产页逐段修正",
+                "生成候选边界后再进入边界生成页逐段修正",
             ]
         if task_type_code == "SEED_BOUNDARY_REPAIR":
             return [
-                "打开边界生产页查看 seed 边界来源和真实水域重叠问题",
+                "打开边界生成页查看参考边界来源和真实水域重叠问题",
                 "从候选边界或水域归属复制为草稿，逐段编辑后发布当前边界",
-                "发布边界后再生产中心线，不要用 seed 边界直接生成路径",
+                "发布边界后再生产中心线，不要用参考边界直接生成路径",
             ]
-        if issue_code == "UNKNOWN_CONSTRAINT_DATA" or task_type_code == "CONSTRAINT_DATA_REVIEW":
+        if issue_code == "UNKNOWN_CONSTRAINT_DATA" or task_type_code in {"CONSTRAINT_DATA_REPAIR", "CONSTRAINT_DATA_REVIEW"}:
             return [
                 "补齐船闸、桥梁、吃水、吨级或限航数据",
-                "创建 navigation_graph_edge_constraint 或关联约束点资料",
-                "重新生成或校验 graph version",
+                "创建路径图边约束或关联约束点资料",
+                "重新生成或校验图网络版本",
             ]
-        if task_type_code == "CENTERLINE_REVIEW":
+        if task_type_code in {"CENTERLINE_REPAIR", "CENTERLINE_REVIEW"}:
             return [
-                "检查中心线是否位于 seed boundary 或 water area 内",
-                "人工修正后创建新的 centerline version",
-                "发布中心线版本后再参与 graph rebuild",
+                "检查中心线是否位于参考边界或真实水域内",
+                "人工修正后创建新的中心线版本",
+                "发布中心线版本后再参与图网络重建",
             ]
-        if task_type_code in {"GRAPH_CONNECTIVITY_REPAIR", "GRAPH_EDGE_REVIEW"}:
+        if task_type_code in {"GRAPH_CONNECTIVITY_REPAIR", "GRAPH_EDGE_REPAIR", "GRAPH_EDGE_REVIEW"}:
             return [
-                "定位断点、低置信 edge 或错连位置",
+                "定位断点、低置信路径图边或错连位置",
                 "通过人工连接点、码头接入或中心线版本修正生成候选数据",
-                "重建 graph version 并运行 validate_navigation_graph",
+                "重建图网络版本并运行图网络校验",
             ]
         return [
             "确认问题位置和关联数据来源",

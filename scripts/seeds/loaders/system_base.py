@@ -1619,7 +1619,7 @@ def _apply_production_menu_information_architecture() -> None:
     )
     by_code["NAVIGATION_WATER_MATCHES"] = navigation_production_menu(
         "NAVIGATION_WATER_MATCHES",
-        "水系归属",
+        "航道水系规划",
         "/navigation/production/water-matches",
         "modules/navigation/pages/NavigationWaterAreaMatchPage",
         sort_order=3,
@@ -1627,7 +1627,7 @@ def _apply_production_menu_information_architecture() -> None:
     )
     by_code["NAVIGATION_BOUNDARIES"] = navigation_production_menu(
         "NAVIGATION_BOUNDARIES",
-        "边界生产",
+        "边界生成",
         "/navigation/production/boundaries",
         "modules/navigation/pages/NavigationBoundaryReviewPage",
         sort_order=4,
@@ -1635,7 +1635,7 @@ def _apply_production_menu_information_architecture() -> None:
     )
     by_code["NAVIGATION_CENTERLINES"] = navigation_production_menu(
         "NAVIGATION_CENTERLINES",
-        "中心线生产",
+        "中心线生成",
         "/navigation/production/centerlines",
         "modules/navigation/pages/NavigationCenterlineProductionPage",
         sort_order=5,
@@ -1643,7 +1643,7 @@ def _apply_production_menu_information_architecture() -> None:
     )
     by_code["NAVIGATION_GRAPHS"] = navigation_production_menu(
         "NAVIGATION_GRAPHS",
-        "Graph 构建",
+        "图网络构建",
         "/navigation/production/graphs",
         "modules/navigation/pages/NavigationGraphBuildPage",
         sort_order=6,

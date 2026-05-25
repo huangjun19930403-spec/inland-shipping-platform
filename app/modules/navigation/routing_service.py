@@ -6,14 +6,17 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from shapely.geometry import shape
 
 from app.core.exceptions import ValidationError
 from app.models import (
+    NavigationChannelWaterBodyMatch,
     NavigationRouteQualityIssue,
     NavigationRouteRequest,
     NavigationRouteResult,
+    NavigationWaterBody,
 )
-from app.models.address import NavigationConstraintPoint, TransportNode
+from app.models.address import NavigationChannelBoundary, NavigationConstraintPoint, TransportNode
 from app.modules.navigation.engine.constrained_search import ConstrainedGraphSearch
 from app.modules.navigation.engine.graph_loader import NavigationGraphLoader
 from app.modules.navigation.engine.path_assembler import PathAssembler
@@ -31,6 +34,9 @@ from app.modules.navigation.schemas import (
 
 
 class NavigationRoutingEngineService:
+    DEFAULT_SPEED_KMH = 10.0
+    DEFAULT_LOCK_WAIT_HOUR = 1.0
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.loader = NavigationGraphLoader(session)
@@ -90,13 +96,17 @@ class NavigationRoutingEngineService:
                 routing_preference_code=request_row.routing_preference_code,
             )
             assembled = self.assembler.assemble(search_result)
-            validation_issues = self.validator.validate_geometry(assembled.geometry_json)
+            validation_issues = [
+                *self.validator.validate_geometry(assembled.geometry_json),
+                *(await self._validate_spatial_context(assembled.geometry_json, assembled.channel_ids)),
+            ]
             quality = self.scorer.score(
                 origin_snap=origin_snap,
                 destination_snap=destination_snap,
                 search_result=search_result,
                 validation_issues=validation_issues,
             )
+            duration_detail = self._duration_detail(assembled.distance_km, assembled.passed_lock_count)
             request_row.status_code = "SUCCESS" if quality.quality_code != "FAILED" else "FAILED"
             result_row = NavigationRouteResult(
                 request_id=request_row.id,
@@ -105,7 +115,7 @@ class NavigationRoutingEngineService:
                 status_code=quality.quality_code,
                 geometry_json=assembled.geometry_json,
                 distance_km=assembled.distance_km,
-                estimated_duration_hour=self._estimated_duration(assembled.distance_km),
+                estimated_duration_hour=duration_detail["estimated_duration_hour"],
                 edge_ids=assembled.edge_ids,
                 channel_ids=assembled.channel_ids,
                 passed_node_ids=assembled.passed_node_ids,
@@ -119,6 +129,11 @@ class NavigationRoutingEngineService:
                     "destination_snap": destination_snap.as_dict(),
                     "issue_count": len(quality.issues),
                     "search_cost": search_result.total_cost,
+                    "graph_load_bbox": loaded_graph.load_bbox,
+                    "graph_load_margin_degree": loaded_graph.load_margin_degree,
+                    "loaded_node_count": loaded_graph.loaded_node_count,
+                    "loaded_edge_count": loaded_graph.loaded_edge_count,
+                    "duration_detail": duration_detail,
                 },
                 provider_code="NAVIGATION_ENGINE",
                 engine_code="NAVIGATION_ROUTING_ENGINE_V1",
@@ -298,11 +313,86 @@ class NavigationRoutingEngineService:
             related_node_id=issue.related_node_id,
         )
 
-    def _estimated_duration(self, distance_km: float | None) -> float | None:
+    def _estimated_duration(self, distance_km: float | None, passed_lock_count: int = 0) -> float | None:
+        return self._duration_detail(distance_km, passed_lock_count)["estimated_duration_hour"]
+
+    def _duration_detail(self, distance_km: float | None, passed_lock_count: int = 0) -> dict[str, float | int | None]:
         if distance_km is None:
-            return None
-        return round(distance_km / 10.0, 2)
+            return {
+                "distance_km": None,
+                "default_speed_kmh": self.DEFAULT_SPEED_KMH,
+                "base_sailing_hour": None,
+                "passed_lock_count": int(passed_lock_count or 0),
+                "lock_wait_hour_each": self.DEFAULT_LOCK_WAIT_HOUR,
+                "lock_wait_total_hour": None,
+                "estimated_duration_hour": None,
+            }
+        base_sailing_hour = float(distance_km) / self.DEFAULT_SPEED_KMH
+        lock_count = int(passed_lock_count or 0)
+        lock_wait_total = lock_count * self.DEFAULT_LOCK_WAIT_HOUR
+        estimated = base_sailing_hour + lock_wait_total
+        return {
+            "distance_km": round(float(distance_km), 3),
+            "default_speed_kmh": self.DEFAULT_SPEED_KMH,
+            "base_sailing_hour": round(base_sailing_hour, 3),
+            "passed_lock_count": lock_count,
+            "lock_wait_hour_each": self.DEFAULT_LOCK_WAIT_HOUR,
+            "lock_wait_total_hour": round(lock_wait_total, 3),
+            "estimated_duration_hour": round(estimated, 2),
+        }
 
     def _request_no(self) -> str:
         timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         return f"NRR-{timestamp}-{uuid.uuid4().hex[:8].upper()}"
+
+    async def _validate_spatial_context(self, geometry_json: dict, channel_ids: list[int]) -> list[RouteIssue]:
+        if not channel_ids:
+            return self.validator.validate_spatial_context(
+                geometry_json,
+                water_geometries=[],
+                boundary_geometries=[],
+            )
+        route_geometry = shape(geometry_json)
+        min_lng, min_lat, max_lng, max_lat = route_geometry.bounds
+        water_rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationWaterBody)
+                    .join(
+                        NavigationChannelWaterBodyMatch,
+                        NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id,
+                    )
+                    .where(
+                        NavigationChannelWaterBodyMatch.channel_id.in_(channel_ids),
+                        NavigationChannelWaterBodyMatch.is_current.is_(True),
+                        NavigationWaterBody.is_enabled.is_(True),
+                        NavigationWaterBody.geometry_wgs84_json.is_not(None),
+                        NavigationWaterBody.bbox_max_lng >= min_lng,
+                        NavigationWaterBody.bbox_min_lng <= max_lng,
+                        NavigationWaterBody.bbox_max_lat >= min_lat,
+                        NavigationWaterBody.bbox_min_lat <= max_lat,
+                    )
+                    .distinct()
+                    .limit(300)
+                )
+            ).scalars()
+        )
+        boundary_rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationChannelBoundary).where(
+                        NavigationChannelBoundary.channel_id.in_(channel_ids),
+                        NavigationChannelBoundary.is_current.is_(True),
+                        NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
+                        NavigationChannelBoundary.geometry_json.is_not(None),
+                    )
+                )
+            ).scalars()
+        )
+        water_geometries = [shape(row.geometry_wgs84_json) for row in water_rows if row.geometry_wgs84_json]
+        boundary_geometries = [shape(row.geometry_json) for row in boundary_rows if row.geometry_json]
+        return self.validator.validate_spatial_context(
+            geometry_json,
+            water_geometries=water_geometries,
+            boundary_geometries=boundary_geometries,
+        )
