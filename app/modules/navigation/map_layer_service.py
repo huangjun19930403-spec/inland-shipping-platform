@@ -552,12 +552,16 @@ class NavigationMapLayerService:
             geometry_json=result.geometry_json,
             properties={
                 "request_id": result.request_id,
+                "result_no": result.result_no,
+                "result_type_code": result.result_type_code,
                 "status_code": result.status_code,
                 "quality_code": result.quality_code,
                 "quality_score": result.quality_score,
                 "distance_km": float(result.distance_km) if result.distance_km is not None else None,
                 "edge_ids": result.edge_ids or [],
                 "channel_ids": result.channel_ids or [],
+                "planning_mode_code": (result.quality_summary_json or {}).get("planning_mode_code"),
+                "cost_breakdown_summary": (result.quality_summary_json or {}).get("cost_breakdown_summary"),
             },
         )
         issues = list(

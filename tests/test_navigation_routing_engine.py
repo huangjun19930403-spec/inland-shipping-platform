@@ -43,13 +43,21 @@ def _line(*points: tuple[float, float]) -> dict:
     return {"type": "LineString", "coordinates": [[lng, lat] for lng, lat in points]}
 
 
-def _node(*, id: int, graph_version_id: int, lng: float, lat: float, code: str) -> NavigationGraphNode:
+def _node(
+    *,
+    id: int,
+    graph_version_id: int,
+    lng: float,
+    lat: float,
+    code: str,
+    node_type_code: str = "CENTERLINE_VERTEX",
+) -> NavigationGraphNode:
     return NavigationGraphNode(
         id=id,
         graph_version_id=graph_version_id,
         node_code=code,
         node_name=code,
-        node_type_code="CENTERLINE_VERTEX",
+        node_type_code=node_type_code,
         longitude=lng,
         latitude=lat,
         geometry_json={"type": "Point", "coordinates": [lng, lat]},
@@ -68,9 +76,13 @@ def _edge(
     code: str,
     geometry: dict,
     channel_id: int = 1,
+    length_km: float = 11.1,
     max_allowed_tonnage: float | None = None,
     unknown_constraint_flag: bool = False,
     lock_required: bool = False,
+    bridge_count: int = 0,
+    quality_code: str = "READY",
+    confidence_score: int = 95,
 ) -> NavigationGraphEdge:
     return NavigationGraphEdge(
         id=id,
@@ -81,16 +93,16 @@ def _edge(
         channel_id=channel_id,
         centerline_id=None,
         geometry_json=geometry,
-        length_km=11.1,
+        length_km=length_km,
         direction_code="BIDIRECTIONAL",
         max_allowed_tonnage=max_allowed_tonnage,
         lock_required=lock_required,
-        bridge_count=0,
-        base_cost=11.1,
+        bridge_count=bridge_count,
+        base_cost=length_km,
         routing_enabled=True,
-        quality_code="READY",
+        quality_code=quality_code,
         source_type_code="MANUAL",
-        confidence_score=95,
+        confidence_score=confidence_score,
         unknown_constraint_flag=unknown_constraint_flag,
     )
 
@@ -200,12 +212,18 @@ def _request(
     destination: tuple[float, float] = (120.2, 31.0),
     vessel_profile: VesselProfileRequest | None = None,
     graph_version_id: int | None = None,
+    planning_mode_code: str = "RECOMMENDED",
+    include_alternatives: bool = False,
+    alternative_count: int = 1,
 ) -> NavigationRouteGenerateRequest:
     return NavigationRouteGenerateRequest(
         origin=NavigationEndpointRequest(endpoint_type_code="LNG_LAT", longitude=origin[0], latitude=origin[1]),
         destination=NavigationEndpointRequest(endpoint_type_code="LNG_LAT", longitude=destination[0], latitude=destination[1]),
         vessel_profile=vessel_profile,
         graph_version_id=graph_version_id,
+        planning_mode_code=planning_mode_code,
+        include_alternatives=include_alternatives,
+        alternative_count=alternative_count,
     )
 
 
@@ -236,6 +254,91 @@ async def _seed_far_active_graph(session: AsyncSession) -> None:
                 code="FAR-E1",
                 geometry=_line((132.0, 43.0), (132.2, 43.0)),
                 channel_id=20,
+            ),
+        ]
+    )
+    await session.commit()
+
+
+async def _seed_strategy_graph(
+    session: AsyncSession,
+    *,
+    direct_quality: str = "LOW_CONFIDENCE",
+    direct_unknown: bool = True,
+    direct_lock: bool = False,
+) -> None:
+    session.add(
+        NavigationGraphVersion(
+            id=1,
+            version_code="TEST-STRATEGY-GRAPH",
+            version_name="Strategy graph",
+            scope_code="TEST",
+            node_count=4,
+            edge_count=5,
+            channel_count=1,
+            quality_score=95,
+            status_code="READY",
+            is_active=True,
+        )
+    )
+    session.add_all(
+        [
+            _node(id=1, graph_version_id=1, lng=120.0, lat=31.0, code="N1", node_type_code="PORT"),
+            _node(id=2, graph_version_id=1, lng=120.2, lat=31.0, code="N2", node_type_code="PORT"),
+            _node(id=3, graph_version_id=1, lng=120.1, lat=31.08, code="N3"),
+            _node(id=4, graph_version_id=1, lng=120.1, lat=30.94, code="N4"),
+        ]
+    )
+    session.add_all(
+        [
+            _edge(
+                id=1,
+                graph_version_id=1,
+                from_node_id=1,
+                to_node_id=2,
+                code="E-DIRECT",
+                geometry=_line((120.0, 31.0), (120.2, 31.0)),
+                length_km=10.0,
+                quality_code=direct_quality,
+                unknown_constraint_flag=direct_unknown,
+                lock_required=direct_lock,
+                confidence_score=50 if direct_quality == "LOW_CONFIDENCE" else 95,
+            ),
+            _edge(
+                id=2,
+                graph_version_id=1,
+                from_node_id=1,
+                to_node_id=3,
+                code="E-SAFE-A",
+                geometry=_line((120.0, 31.0), (120.1, 31.08)),
+                length_km=6.0,
+            ),
+            _edge(
+                id=3,
+                graph_version_id=1,
+                from_node_id=3,
+                to_node_id=2,
+                code="E-SAFE-B",
+                geometry=_line((120.1, 31.08), (120.2, 31.0)),
+                length_km=6.0,
+            ),
+            _edge(
+                id=4,
+                graph_version_id=1,
+                from_node_id=1,
+                to_node_id=4,
+                code="E-ALT-LOWER",
+                geometry=_line((120.0, 31.0), (120.1, 30.94)),
+                length_km=6.5,
+            ),
+            _edge(
+                id=5,
+                graph_version_id=1,
+                from_node_id=4,
+                to_node_id=2,
+                code="E-ALT-LOWER-B",
+                geometry=_line((120.1, 30.94), (120.2, 31.0)),
+                length_km=6.5,
             ),
         ]
     )
@@ -311,9 +414,78 @@ async def test_generate_route_success_persists_request_result_and_issues(session
     assert result.provider_code == "NAVIGATION_ENGINE"
     assert issue_count >= 1
     assert "UNKNOWN_CONSTRAINT_DATA" in {issue.issue_type_code for issue in response.issues}
+    assert response.alternatives == []
+    assert response.explain is not None
     assert result.quality_summary_json["graph_load_margin_degree"] == 0.5
     assert result.quality_summary_json["loaded_edge_count"] == 2
     assert result.quality_summary_json["duration_detail"]["default_speed_kmh"] == 10.0
+    assert result.quality_summary_json["planning_mode_code"] == "RECOMMENDED"
+    assert "cost_breakdown_summary" in result.quality_summary_json
+    assert result.quality_summary_json["edge_cost_breakdowns"]
+
+
+@pytest.mark.asyncio
+async def test_generate_route_shortest_prefers_distance_even_with_low_quality(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_strategy_graph(session)
+
+        response = await NavigationRoutingEngineService(session).generate_route(
+            _request(planning_mode_code="SHORTEST")
+        )
+        result = (await session.execute(select(NavigationRouteResult))).scalar_one()
+
+    assert response.status_code == "SUCCESS"
+    assert response.edge_ids == [1]
+    assert result.quality_summary_json["planning_mode_code"] == "SHORTEST"
+    assert result.quality_summary_json["edge_cost_breakdowns"][0]["quality_penalty"] == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_route_safest_avoids_low_confidence_unknown_edge(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_strategy_graph(session)
+
+        response = await NavigationRoutingEngineService(session).generate_route(
+            _request(planning_mode_code="SAFEST")
+    )
+
+    assert response.status_code == "SUCCESS"
+    assert 1 not in response.edge_ids
+    assert response.explain is not None
+    assert response.explain["planning_mode_code"] == "SAFEST"
+
+
+@pytest.mark.asyncio
+async def test_generate_route_lock_avoiding_reduces_lock_edges_when_alternative_exists(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_strategy_graph(session, direct_quality="READY", direct_unknown=False, direct_lock=True)
+
+        response = await NavigationRoutingEngineService(session).generate_route(
+            _request(planning_mode_code="LOCK_AVOIDING")
+        )
+
+    assert response.status_code == "SUCCESS"
+    assert 1 not in response.edge_ids
+    assert response.passed_lock_count == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_route_returns_and_persists_deduped_alternatives(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_strategy_graph(session)
+
+        response = await NavigationRoutingEngineService(session).generate_route(
+            _request(include_alternatives=True, alternative_count=3)
+        )
+        rows = list((await session.execute(select(NavigationRouteResult).order_by(NavigationRouteResult.result_no))).scalars())
+
+    assert response.status_code == "SUCCESS"
+    assert len(response.alternatives) >= 1
+    assert [row.result_no for row in rows] == list(range(1, len(rows) + 1))
+    assert rows[0].result_type_code == "RECOMMENDED"
+    assert all(row.result_type_code == "ALTERNATIVE" for row in rows[1:])
+    assert rows[0].quality_summary_json["alternative_count"] == len(rows)
+    assert response.alternatives[0].geometry_json is not None
 
 
 @pytest.mark.asyncio
@@ -419,6 +591,9 @@ async def test_generate_route_fails_without_active_graph_and_persists_failure(se
     assert request_row.status_code == "FAILED"
     assert result_row.quality_code == "FAILED"
     assert issue_row.issue_type_code == "NO_ACTIVE_GRAPH_VERSION"
+    assert response.explain is not None
+    assert response.explain["next_actions"]
+    assert result_row.quality_summary_json["failure_explain"]["next_actions"]
 
 
 @pytest.mark.asyncio
@@ -459,3 +634,5 @@ async def test_generate_route_reports_vessel_constraint_blocked(session_maker) -
     assert response.status_code == "FAILED"
     assert response.error_code == "VESSEL_CONSTRAINT_BLOCKED"
     assert "VSL_TONNAGE_EXCEEDS_LIMIT" in {issue.issue_type_code for issue in response.issues}
+    assert response.explain is not None
+    assert response.explain["blocked_edge_summary"]["VSL_TONNAGE_EXCEEDS_LIMIT"] == 2

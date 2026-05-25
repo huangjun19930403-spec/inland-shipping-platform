@@ -291,6 +291,8 @@ async def test_map_layers_loads_bbox_limited_features(session_maker) -> None:
     assert [item.layer_type_code for item in response.centerlines] == ["CENTERLINE"]
     assert [item.layer_type_code for item in response.graph_edges] == ["GRAPH_EDGE"]
     assert response.route_results[0].properties["quality_code"] == "READY_WITH_WARNING"
+    assert response.route_results[0].properties["result_no"] == 1
+    assert response.route_results[0].properties["result_type_code"] == "RECOMMENDED"
     assert response.quality_issues[0].properties["issue_type_code"] == "UNKNOWN_CONSTRAINT_DATA"
 
 

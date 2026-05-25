@@ -31,6 +31,10 @@ class NavigationRouteGenerateRequest(BaseModel):
     vessel_profile_json: dict[str, Any] | None = None
     routing_preference_code: str = Field(default="RECOMMENDED", max_length=64)
     graph_version_id: int | None = None
+    planning_mode_code: str = Field(default="RECOMMENDED", max_length=64)
+    alternative_count: int = Field(default=1, ge=1, le=5)
+    include_alternatives: bool = False
+    include_explain: bool = True
 
 
 class NavigationSnapResponse(BaseModel):
@@ -53,6 +57,23 @@ class NavigationRouteIssueResponse(BaseModel):
     related_node_id: int | None = None
 
 
+class NavigationRouteAlternativeResponse(BaseModel):
+    result_id: int
+    result_no: int
+    result_type_code: str
+    quality_code: str
+    quality_score: int | None = None
+    distance_km: float | None = None
+    estimated_duration_hour: float | None = None
+    edge_ids: list[int] = Field(default_factory=list)
+    channel_ids: list[int] = Field(default_factory=list)
+    passed_lock_count: int = 0
+    passed_bridge_count: int = 0
+    issues: list[NavigationRouteIssueResponse] = Field(default_factory=list)
+    explain: dict[str, Any] | None = None
+    geometry_json: dict[str, Any] | None = None
+
+
 class NavigationRouteGenerateResponse(BaseModel):
     request_id: int
     result_id: int
@@ -71,6 +92,8 @@ class NavigationRouteGenerateResponse(BaseModel):
     origin_snap: NavigationSnapResponse | None = None
     destination_snap: NavigationSnapResponse | None = None
     issues: list[NavigationRouteIssueResponse] = Field(default_factory=list)
+    alternatives: list[NavigationRouteAlternativeResponse] = Field(default_factory=list)
+    explain: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None
 

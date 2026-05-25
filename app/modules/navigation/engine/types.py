@@ -79,6 +79,7 @@ class SearchSegment:
     bridge_count: int
     unknown_constraint_flag: bool
     virtual: bool = False
+    cost_breakdown: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -87,7 +88,11 @@ class SearchResult:
     segments: list[SearchSegment]
     total_cost: float
     blocked_edge_ids: list[int] = field(default_factory=list)
+    blocked_edge_summary: dict[str, int] = field(default_factory=dict)
+    search_summary: dict[str, Any] = field(default_factory=dict)
     issues: list[RouteIssue] = field(default_factory=list)
+    algorithm_code: str = "DIJKSTRA"
+    planning_mode_code: str = "RECOMMENDED"
 
 
 class RoutingEngineError(Exception):
@@ -97,8 +102,10 @@ class RoutingEngineError(Exception):
         message: str,
         *,
         issues: list[RouteIssue] | None = None,
+        explain: dict[str, Any] | None = None,
     ) -> None:
         self.error_code = error_code
         self.message = message
         self.issues = issues or [RouteIssue(error_code, "ERROR", message)]
+        self.explain = explain or {}
         super().__init__(message)
