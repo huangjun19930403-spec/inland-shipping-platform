@@ -24,6 +24,8 @@ from app.modules.navigation.schemas import (
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
     NavigationGeometryDraftUpdateRequest,
+    NavigationGeometryDraftValidateRequest,
+    NavigationGeometryDraftValidationResponse,
     NavigationGraphActivateResponse,
     NavigationGraphBuildRequest,
     NavigationGraphBuildResponse,
@@ -36,6 +38,7 @@ from app.modules.navigation.schemas import (
     NavigationProductionSummaryResponse,
     NavigationRouteGenerateRequest,
     NavigationRouteGenerateResponse,
+    NavigationSnapReferencePointResponse,
     NavigationWaterBodyListItemResponse,
     NavigationWaterBodyListResponse,
     NavigationWaterBodyCandidateListResponse,
@@ -176,6 +179,16 @@ async def generate_navigation_channel_centerline_candidates(
         channel_id=channel_id,
         body=body or NavigationCandidateGenerateRequest(),
     )
+
+
+@router.get("/channels/{channel_id}/snap-references", response_model=list[NavigationSnapReferencePointResponse])
+async def list_navigation_channel_snap_references(
+    channel_id: int,
+    limit: int = 500,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).snap_references(channel_id=channel_id, limit=limit)
 
 
 @router.post("/osm/imports", response_model=NavigationOsmImportResponse)
@@ -404,6 +417,15 @@ async def list_navigation_geometry_drafts(
         channel_id=channel_id,
         limit=limit,
     )
+
+
+@router.post("/geometry-drafts/validate", response_model=NavigationGeometryDraftValidationResponse)
+async def validate_navigation_geometry_draft(
+    body: NavigationGeometryDraftValidateRequest,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).validate_geometry_draft(body)
 
 
 @router.post("/geometry-drafts", response_model=NavigationGeometryDraftResponse)

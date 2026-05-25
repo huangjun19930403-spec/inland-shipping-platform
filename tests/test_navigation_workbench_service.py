@@ -17,11 +17,12 @@ from app.models import (
     NavigationWaterBody,
     NavigationWaterBodyFeatureLink,
 )
-from app.models.address import NavigationChannel, NavigationChannelBoundary
+from app.models.address import NavigationChannel, NavigationChannelBoundary, NavigationConstraintPoint, TransportNode
 from app.models.base import Base
 from app.modules.navigation.schemas import (
     NavigationCandidateGenerateRequest,
     NavigationGeometryDraftCreateRequest,
+    NavigationGeometryDraftValidateRequest,
     NavigationGraphBuildRequest,
     NavigationWaterBodyMatchCreateRequest,
     NavigationWaterBodyNameUpdateRequest,
@@ -186,9 +187,12 @@ async def test_publish_rejects_too_short_centerline_without_formal_asset(session
         draft_row = await session.get(NavigationGeometryDraft, draft.id)
 
     assert "CENTERLINE_TOO_SHORT" in str(exc_info.value)
+    assert exc_info.value.detail["error_code"] == "CENTERLINE_TOO_SHORT"
+    assert exc_info.value.detail["issues"][0]["issue_code"] == "CENTERLINE_TOO_SHORT"
     assert centerline_count == 0
     assert draft_row is not None
     assert draft_row.status_code == "PUBLISH_BLOCKED"
+    assert draft_row.source_trace_json["validation_summary"]["error_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -259,6 +263,263 @@ async def test_publish_rejects_unclosed_boundary_ring(session_maker) -> None:
 
     assert "BOUNDARY_RING_NOT_CLOSED" in str(exc_info.value)
     assert boundary_count == 0
+
+
+@pytest.mark.asyncio
+async def test_validate_centerline_ready(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationChannelBoundary(
+                id=1,
+                channel_id=1,
+                geometry_json=_polygon(),
+                boundary_paths_low=_polygon()["coordinates"],
+                bbox_min_lng=119.98,
+                bbox_min_lat=30.98,
+                bbox_max_lng=120.24,
+                bbox_max_lat=31.12,
+                geometry_status_code="AVAILABLE",
+                boundary_quality_code="MANUAL_PUBLISHED",
+                connectivity_status_code="CONNECTED",
+                repair_status_code="NONE",
+                coverage_policy_code="MANUAL_DRAW",
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationWorkbenchService(session).validate_geometry_draft(
+            NavigationGeometryDraftValidateRequest(draft_type_code="CENTERLINE", channel_id=1, geometry_json=_line())
+        )
+
+    assert response.valid is True
+    assert response.publishable is True
+    assert response.quality_code == "READY"
+    assert response.length_m is not None and response.length_m > 0
+    assert response.point_count == 3
+    assert response.error_count == 0
+
+
+@pytest.mark.asyncio
+async def test_validate_centerline_too_short(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+
+        response = await NavigationWorkbenchService(session).validate_geometry_draft(
+            NavigationGeometryDraftValidateRequest(
+                draft_type_code="CENTERLINE",
+                channel_id=1,
+                geometry_json={"type": "LineString", "coordinates": [[120.0, 31.0], [120.00001, 31.0]]},
+            )
+        )
+
+    assert response.publishable is False
+    assert response.quality_code == "PUBLISH_BLOCKED"
+    assert "CENTERLINE_TOO_SHORT" in [issue.issue_code for issue in response.issues]
+
+
+@pytest.mark.asyncio
+async def test_validate_centerline_out_of_boundary(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationChannelBoundary(
+                id=1,
+                channel_id=1,
+                geometry_json=_polygon(),
+                boundary_paths_low=_polygon()["coordinates"],
+                bbox_min_lng=119.98,
+                bbox_min_lat=30.98,
+                bbox_max_lng=120.24,
+                bbox_max_lat=31.12,
+                geometry_status_code="AVAILABLE",
+                boundary_quality_code="MANUAL_PUBLISHED",
+                connectivity_status_code="CONNECTED",
+                repair_status_code="NONE",
+                coverage_policy_code="MANUAL_DRAW",
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationWorkbenchService(session).validate_geometry_draft(
+            NavigationGeometryDraftValidateRequest(
+                draft_type_code="CENTERLINE",
+                channel_id=1,
+                geometry_json={"type": "LineString", "coordinates": [[121.0, 32.0], [121.2, 32.2]]},
+            )
+        )
+
+    assert response.publishable is False
+    assert "CENTERLINE_OUT_OF_BOUNDARY" in [issue.issue_code for issue in response.issues]
+
+
+@pytest.mark.asyncio
+async def test_validate_boundary_ready(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+
+        response = await NavigationWorkbenchService(session).validate_geometry_draft(
+            NavigationGeometryDraftValidateRequest(draft_type_code="BOUNDARY", channel_id=1, geometry_json=_polygon())
+        )
+
+    assert response.valid is True
+    assert response.publishable is True
+    assert response.quality_code == "READY"
+    assert response.area_m2 is not None and response.area_m2 > 100
+    assert response.ring_count == 1
+
+
+@pytest.mark.asyncio
+async def test_validate_boundary_ring_not_closed(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+
+        response = await NavigationWorkbenchService(session).validate_geometry_draft(
+            NavigationGeometryDraftValidateRequest(
+                draft_type_code="BOUNDARY",
+                channel_id=1,
+                geometry_json={
+                    "type": "Polygon",
+                    "coordinates": [[[120.0, 31.0], [120.2, 31.0], [120.2, 31.2], [120.0, 31.2]]],
+                },
+            )
+        )
+
+    assert response.publishable is False
+    assert "BOUNDARY_RING_NOT_CLOSED" in [issue.issue_code for issue in response.issues]
+
+
+@pytest.mark.asyncio
+async def test_validate_boundary_area_too_small(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+
+        response = await NavigationWorkbenchService(session).validate_geometry_draft(
+            NavigationGeometryDraftValidateRequest(
+                draft_type_code="BOUNDARY",
+                channel_id=1,
+                geometry_json={
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [120.0, 31.0],
+                        [120.00001, 31.0],
+                        [120.00001, 31.00001],
+                        [120.0, 31.00001],
+                        [120.0, 31.0],
+                    ]],
+                },
+            )
+        )
+
+    assert response.publishable is False
+    assert "BOUNDARY_AREA_TOO_SMALL" in [issue.issue_code for issue in response.issues]
+
+
+@pytest.mark.asyncio
+async def test_snap_references_return_current_channel_context_points(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add_all(
+            [
+                NavigationChannelBoundary(
+                    id=1,
+                    channel_id=1,
+                    geometry_json=_polygon(),
+                    boundary_paths_low=_polygon()["coordinates"],
+                    bbox_min_lng=119.98,
+                    bbox_min_lat=30.98,
+                    bbox_max_lng=120.24,
+                    bbox_max_lat=31.12,
+                    geometry_status_code="AVAILABLE",
+                    boundary_quality_code="MANUAL_PUBLISHED",
+                    connectivity_status_code="CONNECTED",
+                    repair_status_code="NONE",
+                    coverage_policy_code="MANUAL_DRAW",
+                    is_current=True,
+                ),
+                NavigationChannelCenterline(
+                    id=1,
+                    channel_id=1,
+                    centerline_code="CL-CURRENT",
+                    geometry_json=_line(),
+                    source_type_code="MANUAL",
+                    quality_code="READY",
+                    review_status_code="PUBLISHED",
+                    confidence_score=90,
+                    is_current=True,
+                ),
+                NavigationChannelCenterline(
+                    id=2,
+                    channel_id=1,
+                    centerline_code="CL-CANDIDATE",
+                    geometry_json={"type": "LineString", "coordinates": [[120.01, 31.01], [120.05, 31.05]]},
+                    source_type_code="IMPORTED",
+                    quality_code="NEED_REPAIR",
+                    review_status_code="DRAFT",
+                    confidence_score=50,
+                    is_current=False,
+                ),
+                TransportNode(
+                    id=1,
+                    code="NODE-1",
+                    name="测试码头",
+                    node_type_code="PORT",
+                    province_code="320000",
+                    city_code="320500",
+                    city_region_id=1,
+                    longitude=120.10,
+                    latitude=31.05,
+                    status=1,
+                    lifecycle_status_code="ACTIVE",
+                ),
+                NavigationConstraintPoint(
+                    id=1,
+                    code="LOCK-1",
+                    name="测试船闸",
+                    constraint_type_code="LOCK",
+                    longitude=120.11,
+                    latitude=31.06,
+                    status=1,
+                ),
+            ]
+        )
+        await session.commit()
+
+        references = await NavigationWorkbenchService(session).snap_references(1)
+
+    ref_types = {row.ref_type_code for row in references}
+    assert "CENTERLINE_ENDPOINT" in ref_types
+    assert "CANDIDATE_ENDPOINT" in ref_types
+    assert "TRANSPORT_NODE" in ref_types
+    assert "CONSTRAINT_POINT" in ref_types
+    assert all(119.98 <= row.longitude <= 120.24 for row in references if row.ref_type_code in {"TRANSPORT_NODE", "CONSTRAINT_POINT"})
+
+
+@pytest.mark.asyncio
+async def test_create_geometry_draft_writes_validation_summary(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+
+        draft = await NavigationWorkbenchService(session).create_geometry_draft(
+            NavigationGeometryDraftCreateRequest(
+                draft_type_code="CENTERLINE",
+                draft_name="带校验摘要草稿",
+                channel_id=1,
+                geometry_json={"type": "LineString", "coordinates": [[120.0, 31.0], [120.00001, 31.0]]},
+                source_type_code="MANUAL_DRAW",
+            ),
+            created_by=7,
+        )
+        row = await session.get(NavigationGeometryDraft, draft.id)
+
+    assert draft.status_code == "DRAFT"
+    assert draft.quality_code == "PUBLISH_BLOCKED"
+    assert row is not None
+    summary = row.source_trace_json["validation_summary"]
+    assert summary["error_count"] == 1
+    assert "CENTERLINE_TOO_SHORT" in summary["issue_codes"]
 
 
 @pytest.mark.asyncio

@@ -599,6 +599,49 @@ class NavigationGeometryDraftResponse(BaseModel):
     publish_target_type_code: str | None = None
     publish_target_id: int | None = None
     bbox: dict[str, float | None] = Field(default_factory=dict)
+    source_trace_json: dict[str, Any] | None = None
+
+
+class NavigationGeometryDraftValidateRequest(BaseModel):
+    draft_type_code: str = Field(max_length=64)
+    channel_id: int | None = None
+    geometry_json: dict[str, Any]
+
+
+class NavigationGeometryDraftValidationIssueResponse(BaseModel):
+    issue_code: str
+    severity_code: str
+    message: str
+    suggestion: str | None = None
+    geometry_json: dict[str, Any] | None = None
+
+
+class NavigationGeometryDraftValidationResponse(BaseModel):
+    valid: bool
+    publishable: bool
+    quality_code: str
+    issue_count: int
+    error_count: int
+    warning_count: int
+    length_m: float | None = None
+    area_m2: float | None = None
+    point_count: int = 0
+    ring_count: int = 0
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+    issues: list[NavigationGeometryDraftValidationIssueResponse] = Field(default_factory=list)
+
+
+class NavigationSnapReferencePointResponse(BaseModel):
+    id: str
+    ref_type_code: str
+    ref_id: int | None = None
+    name: str | None = None
+    longitude: float
+    latitude: float
+    display_longitude: float | None = None
+    display_latitude: float | None = None
+    priority: int = 0
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class NavigationGeometryDraftCreateRequest(BaseModel):
