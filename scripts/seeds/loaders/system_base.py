@@ -1406,6 +1406,28 @@ def _apply_production_menu_information_architecture() -> None:
         if menu_code in by_code:
             by_code[menu_code] = {**by_code[menu_code], "visible_flag": 0, **changes}
 
+    def navigation_production_menu(
+        menu_code: str,
+        menu_name: str,
+        route_path: str,
+        component_path: str,
+        *,
+        sort_order: int,
+        icon: str = "MapLocation",
+    ) -> dict:
+        return {
+            "menu_code": menu_code,
+            "menu_name": menu_name,
+            "menu_type_code": "MENU",
+            "parent_code": "NAVIGATION_PRODUCTION_GROUP",
+            "route_path": route_path,
+            "component_path": component_path,
+            "icon": icon,
+            "sort_order": sort_order,
+            "visible_flag": 1,
+            "status_code": "ACTIVE",
+        }
+
     by_code["OVERVIEW_ROOT"] = _directory_menu("OVERVIEW_ROOT", "经营总览", icon="House", sort_order=10)
     update("DASHBOARD", menu_name="经营驾驶舱", parent_code="OVERVIEW_ROOT", sort_order=1)
 
@@ -1500,22 +1522,29 @@ def _apply_production_menu_information_architecture() -> None:
     update("ANALYSIS_TASK_LIST", menu_name="分析刷新任务", parent_code="ANALYSIS_OPERATION_GROUP", sort_order=2)
     update("TASK_RUNS_CENTER", menu_name="后台任务中心", parent_code="ANALYSIS_OPERATION_GROUP", sort_order=3)
 
-    update("APPROVAL_ROOT", menu_name="审批中心", icon="Select", sort_order=60)
-    update("FREIGHT_NORMALIZATION", menu_name="货源清洗", parent_code="FREIGHT_ROOT", sort_order=8)
-    by_code["QUALITY_VESSEL_ISSUES"] = _route_menu(
+    by_code["AUDIT_ROOT"] = _directory_menu("AUDIT_ROOT", "数据质量与治理", icon="Select", sort_order=60)
+    update("APPROVAL_ROOT", menu_name="审批中心", icon="Select", parent_code="AUDIT_ROOT", sort_order=2)
+    update("FREIGHT_NORMALIZATION", menu_name="货源清洗", parent_code="AUDIT_ROOT", sort_order=1)
+    by_code["QUALITY_VESSEL_ISSUES"] = {
+        **_route_menu(
         "VESSEL_QUALITY",
         "QUALITY_VESSEL_ISSUES",
         "船舶资料问题",
         parent_code="VESSEL_WORKBENCH_GROUP",
         sort_order=2,
-    )
-    by_code["QUALITY_VESSEL_TASKS"] = _route_menu(
+        ),
+        "visible_flag": 0,
+    }
+    by_code["QUALITY_VESSEL_TASKS"] = {
+        **_route_menu(
         "VESSEL_GOVERNANCE_TASKS",
         "QUALITY_VESSEL_TASKS",
         "船舶治理任务",
         parent_code="VESSEL_WORKBENCH_GROUP",
         sort_order=3,
-    )
+        ),
+        "visible_flag": 0,
+    }
     update("VESSEL_GOVERNANCE_DASHBOARD", menu_name="船舶问题看板", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=1)
     update("VESSEL_GOVERNANCE_TASKS", menu_name="船舶治理任务", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=2)
     update("VESSEL_QUALITY", menu_name="船舶资料问题", parent_code="VESSEL_WORKBENCH_GROUP", sort_order=3)
@@ -1526,7 +1555,7 @@ def _apply_production_menu_information_architecture() -> None:
     update("APPROVAL_PENDING", parent_code="APPROVAL_ROOT", sort_order=1)
     update("APPROVAL_SUBMITTED", parent_code="APPROVAL_ROOT", sort_order=2)
     update("APPROVAL_RECORDS", parent_code="APPROVAL_ROOT", visible_flag=1, sort_order=3)
-    update("APPROVAL_CONFIG_ROOT", menu_name="审批配置", icon="Setting", sort_order=61)
+    update("APPROVAL_CONFIG_ROOT", menu_name="审批配置", icon="Setting", parent_code="SYSTEM_SECURITY_GROUP", sort_order=5)
     update("APPROVAL_SUBJECTS", parent_code="APPROVAL_CONFIG_ROOT", sort_order=1)
     update("APPROVAL_FLOWS", parent_code="APPROVAL_CONFIG_ROOT", sort_order=2)
     update("ANALYSIS_TASK_ROOT", visible_flag=0, sort_order=98)
@@ -1566,17 +1595,79 @@ def _apply_production_menu_information_architecture() -> None:
     update("VESSEL_ASSETS", parent_code="VESSEL_ASSET_GROUP", sort_order=1)
     update("VESSEL_PROFILE_ENTRY", parent_code="VESSEL_ASSET_GROUP", sort_order=2)
     update("ROUTE_LIST", parent_code="ROUTE_ROOT", sort_order=1)
+    by_code["NAVIGATION_PRODUCTION_GROUP"] = _directory_menu(
+        "NAVIGATION_PRODUCTION_GROUP",
+        "航道图生产",
+        parent_code="ROUTE_ROOT",
+        icon="MapLocation",
+        sort_order=2,
+    )
+    by_code["NAVIGATION_PRODUCTION_OVERVIEW"] = navigation_production_menu(
+        "NAVIGATION_PRODUCTION_OVERVIEW",
+        "生产总览",
+        "/navigation/production",
+        "modules/navigation/pages/NavigationProductionOverviewPage",
+        sort_order=1,
+        icon="DataBoard",
+    )
+    by_code["NAVIGATION_WATER_AREAS"] = navigation_production_menu(
+        "NAVIGATION_WATER_AREAS",
+        "水系资产",
+        "/navigation/production/water-areas",
+        "modules/navigation/pages/NavigationWaterAreaAssetPage",
+        sort_order=2,
+    )
+    by_code["NAVIGATION_WATER_MATCHES"] = navigation_production_menu(
+        "NAVIGATION_WATER_MATCHES",
+        "水系归属",
+        "/navigation/production/water-matches",
+        "modules/navigation/pages/NavigationWaterAreaMatchPage",
+        sort_order=3,
+        icon="Guide",
+    )
+    by_code["NAVIGATION_BOUNDARIES"] = navigation_production_menu(
+        "NAVIGATION_BOUNDARIES",
+        "边界生产",
+        "/navigation/production/boundaries",
+        "modules/navigation/pages/NavigationBoundaryReviewPage",
+        sort_order=4,
+        icon="Crop",
+    )
+    by_code["NAVIGATION_CENTERLINES"] = navigation_production_menu(
+        "NAVIGATION_CENTERLINES",
+        "中心线生产",
+        "/navigation/production/centerlines",
+        "modules/navigation/pages/NavigationCenterlineProductionPage",
+        sort_order=5,
+        icon="Share",
+    )
+    by_code["NAVIGATION_GRAPHS"] = navigation_production_menu(
+        "NAVIGATION_GRAPHS",
+        "Graph 构建",
+        "/navigation/production/graphs",
+        "modules/navigation/pages/NavigationGraphBuildPage",
+        sort_order=6,
+        icon="Connection",
+    )
+    by_code["NAVIGATION_ANNOTATIONS"] = navigation_production_menu(
+        "NAVIGATION_ANNOTATIONS",
+        "标注任务",
+        "/navigation/production/annotations",
+        "modules/navigation/pages/NavigationAnnotationTaskPage",
+        sort_order=8,
+        icon="Warning",
+    )
     by_code["ROUTE_REGION_FOUNDATION_GROUP"] = _directory_menu(
         "ROUTE_REGION_FOUNDATION_GROUP",
         "航线与区域基础",
         parent_code="ROUTE_ROOT",
         icon="MapLocation",
-        sort_order=2,
+        sort_order=3,
     )
     update("ADDRESS_NAVIGATION_CHANNELS", parent_code="ROUTE_REGION_FOUNDATION_GROUP", sort_order=3)
-    update("NAVIGATION_WORKBENCH", parent_code="ROUTE_ROOT", sort_order=2)
-    update("NAVIGATION_ROUTE_TEST", parent_code="ROUTE_ROOT", sort_order=3)
-    update("VESSEL_CANDIDATE_ANALYSIS", parent_code="VESSEL_ROOT", visible_flag=1)
+    hide_if_exists("NAVIGATION_WORKBENCH", parent_code="NAVIGATION_PRODUCTION_GROUP", sort_order=99)
+    update("NAVIGATION_ROUTE_TEST", menu_name="路径验证", parent_code="NAVIGATION_PRODUCTION_GROUP", sort_order=7)
+    update("VESSEL_CANDIDATE_ANALYSIS", parent_code="VESSEL_ROOT", visible_flag=1, sort_order=3)
     hide_if_exists("FREIGHT_NORMALIZATION_ENTRY")
     update("FREIGHT_MANUAL_CREATE", visible_flag=0)
 
@@ -1630,26 +1721,32 @@ def _apply_production_menu_information_architecture() -> None:
         "TASK_RUNS_CENTER",
         "ROUTE_ROOT",
         "ROUTE_LIST",
-        "NAVIGATION_WORKBENCH",
+        "NAVIGATION_PRODUCTION_GROUP",
+        "NAVIGATION_PRODUCTION_OVERVIEW",
+        "NAVIGATION_WATER_AREAS",
+        "NAVIGATION_WATER_MATCHES",
+        "NAVIGATION_BOUNDARIES",
+        "NAVIGATION_CENTERLINES",
+        "NAVIGATION_GRAPHS",
         "NAVIGATION_ROUTE_TEST",
+        "NAVIGATION_ANNOTATIONS",
         "ROUTE_REGION_FOUNDATION_GROUP",
         "ADDRESS_NAVIGATION_CHANNELS",
-        "APPROVAL_ROOT",
+        "AUDIT_ROOT",
         "FREIGHT_NORMALIZATION",
-        "QUALITY_VESSEL_ISSUES",
-        "QUALITY_VESSEL_TASKS",
+        "APPROVAL_ROOT",
         "APPROVAL_PENDING",
         "APPROVAL_SUBMITTED",
         "APPROVAL_RECORDS",
-        "APPROVAL_CONFIG_ROOT",
-        "APPROVAL_SUBJECTS",
-        "APPROVAL_FLOWS",
         "SYSTEM_ROOT",
         "SYSTEM_SECURITY_GROUP",
         "SYSTEM_USER",
         "SYSTEM_ROLE",
         "SYSTEM_MENU",
         "SYSTEM_CONFIG",
+        "APPROVAL_CONFIG_ROOT",
+        "APPROVAL_SUBJECTS",
+        "APPROVAL_FLOWS",
         "SYSTEM_DICTIONARY_GROUP",
         "DICTIONARY_DICTS",
         "DICTIONARY_CODE_SEQUENCES",
@@ -3054,7 +3151,7 @@ def _should_preserve_existing_config_value(
 
 async def seed_system_base(*, preserve_existing_config_values: bool = True) -> None:
     async with AsyncSessionLocal() as session:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         role = await session.scalar(
             select(SysRole).where(SysRole.role_code == ROLE_SUPER_ADMIN["role_code"])

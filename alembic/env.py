@@ -1,6 +1,6 @@
 """
 Alembic环境配置
-支持异步 SQLAlchemy（SQLite / MySQL）
+支持异步 SQLAlchemy（PostgreSQL/PostGIS / MySQL / SQLite）
 """
 import asyncio
 from logging.config import fileConfig
@@ -8,6 +8,7 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy import text
 
 from alembic import context
 
@@ -61,6 +62,47 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    dialect_name = connection.dialect.name
+    if dialect_name == "postgresql":
+        connection.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(64) NOT NULL)"))
+        connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
+        connection.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE contype = 'p'
+                           AND conrelid = 'alembic_version'::regclass
+                    ) THEN
+                        ALTER TABLE alembic_version
+                        ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
+                    END IF;
+                END $$;
+                """
+            )
+        )
+    elif dialect_name == "mysql":
+        connection.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(64) NOT NULL)"))
+        connection.execute(text("ALTER TABLE alembic_version MODIFY version_num VARCHAR(64) NOT NULL"))
+        primary_key_count = connection.scalar(
+            text(
+                """
+                SELECT COUNT(*)
+                  FROM information_schema.table_constraints
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'alembic_version'
+                   AND constraint_type = 'PRIMARY KEY'
+                """
+            )
+        )
+        if not primary_key_count:
+            connection.execute(text("ALTER TABLE alembic_version ADD PRIMARY KEY (version_num)"))
+    if connection.in_transaction():
+        connection.commit()
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,

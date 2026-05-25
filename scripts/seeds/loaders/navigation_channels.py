@@ -10,6 +10,8 @@ import argparse
 import asyncio
 import json
 from datetime import datetime
+from datetime import timezone
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,8 @@ from app.models.base import Base
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NAVIGATION_CHANNEL_DATA_FILE = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_channels.json"
+COORDINATE_SCALE = Decimal("0.000000000000001")
+DEGREE_MEASURE_SCALE = Decimal("0.000000000000000001")
 
 
 def load_navigation_channel_seed(path: Path = NAVIGATION_CHANNEL_DATA_FILE) -> dict[str, Any]:
@@ -52,16 +56,64 @@ def _parse_datetime(value: Any) -> datetime | None:
     if not value:
         return None
     if isinstance(value, datetime):
-        return value
-    return datetime.fromisoformat(str(value))
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value))
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _quantize_decimal(value: Any, scale: Decimal) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value)).quantize(scale, rounding=ROUND_HALF_UP)
+
+
+def _normalize_boundary_numeric_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    for field in (
+        "center_longitude",
+        "center_latitude",
+        "display_center_longitude",
+        "display_center_latitude",
+        "bbox_min_lng",
+        "bbox_min_lat",
+        "bbox_max_lng",
+        "bbox_max_lat",
+    ):
+        payload[field] = _quantize_decimal(payload.get(field), COORDINATE_SCALE)
+    for field in ("source_shape_length_degree", "source_shape_area_degree"):
+        payload[field] = _quantize_decimal(payload.get(field), DEGREE_MEASURE_SCALE)
+    return payload
 
 
 async def _prepare_schema(drop_legacy: bool) -> None:
     async with engine.begin() as conn:
         if drop_legacy:
-            await conn.execute(text("DROP TABLE IF EXISTS water_system_boundary"))
-            await conn.execute(text("DROP TABLE IF EXISTS water_system"))
+            await _drop_legacy_table_if_exists(conn, "water_system_boundary")
+            await _drop_legacy_table_if_exists(conn, "water_system")
         await conn.run_sync(Base.metadata.create_all)
+
+
+async def _drop_legacy_table_if_exists(conn: Any, table_name: str) -> None:
+    if conn.dialect.name == "mysql":
+        exists = await conn.scalar(
+            text(
+                """
+                SELECT COUNT(*)
+                  FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                   AND table_name = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        )
+        if not exists:
+            return
+        await conn.execute(text(f"DROP TABLE `{table_name}`"))
+        return
+
+    await conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
 
 
 async def seed_navigation_channels(*, drop_legacy: bool = True) -> dict[str, int]:
@@ -89,6 +141,7 @@ async def seed_navigation_channels(*, drop_legacy: bool = True) -> dict[str, int
 
             boundary_payload = dict(record["boundary"])
             boundary_payload["imported_at"] = _parse_datetime(boundary_payload.get("imported_at"))
+            boundary_payload = _normalize_boundary_numeric_fields(boundary_payload)
             session.add(NavigationChannelBoundary(channel_id=channel.id, **boundary_payload))
 
             for segment_payload in record["segments"]:

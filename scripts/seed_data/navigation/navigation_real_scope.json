@@ -26,5 +26,20 @@
     "NC-ZHAJIAGOU",
     "NC-DALU-LINE",
     "NC-DAPU-LINE"
-  ]
+  ],
+  "scopes": {
+    "REAL-PEARL-XIJIANG": {
+      "scope_code": "REAL-PEARL-XIJIANG",
+      "description": "Pearl River/Xijiang production scope hint. It is only used to reduce water-area candidate noise and must not be used to generate routes.",
+      "bbox": {
+        "min_lng": 105.5,
+        "min_lat": 21.5,
+        "max_lng": 114.8,
+        "max_lat": 24.8
+      },
+      "priority_channel_codes": [
+        "NC-XIJIANG"
+      ]
+    }
+  }
 }

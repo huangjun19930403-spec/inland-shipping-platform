@@ -35,6 +35,7 @@ from app.models.route import (
 from app.models.navigation import (
     NavigationAnnotationTask,
     NavigationChannelCenterline,
+    NavigationChannelWaterBodyMatch,
     NavigationChannelWaterAreaMatch,
     NavigationGeometryDraft,
     NavigationGraphEdge,
@@ -45,6 +46,8 @@ from app.models.navigation import (
     NavigationRouteRequest,
     NavigationRouteResult,
     NavigationWaterArea,
+    NavigationWaterBody,
+    NavigationWaterBodyFeatureLink,
 )
 from app.models.commodity import (
     CommodityCategory,
@@ -208,6 +211,9 @@ __all__ = [
     "ShippingRoutePlanTrackVersion",
     "ShippingRoutePlanTrackVersionSegment",
     "NavigationWaterArea",
+    "NavigationWaterBody",
+    "NavigationWaterBodyFeatureLink",
+    "NavigationChannelWaterBodyMatch",
     "NavigationChannelWaterAreaMatch",
     "NavigationChannelCenterline",
     "NavigationGeometryDraft",

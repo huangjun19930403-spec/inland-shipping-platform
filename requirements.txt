@@ -6,6 +6,7 @@ greenlet==3.2.4
 alembic==1.16.5
 aiosqlite==0.22.1
 asyncmy==0.2.11
+asyncpg==0.31.0
 
 pydantic==2.12.5
 pydantic-settings==2.11.0

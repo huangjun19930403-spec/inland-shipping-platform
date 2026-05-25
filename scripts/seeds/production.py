@@ -23,6 +23,9 @@ from scripts.seeds.loaders.production_vessels import seed_production_vessels
 from scripts.seeds.loaders.system_base import seed_system_base
 from scripts.seeds.loaders.transport_nodes import seed_transport_nodes
 from scripts.seeds.manifest import validate_seed_manifest
+from scripts.navigation.refresh_postgis_geometry_columns import refresh_postgis_geometry_columns
+from scripts.navigation.build_water_bodies import build_navigation_water_bodies
+from scripts.navigation.backfill_channel_water_body_matches import backfill_channel_water_body_matches
 
 
 SeedStep = Callable[[], Awaitable[Any]]
@@ -40,6 +43,8 @@ PRODUCTION_SEED_STEPS: tuple[tuple[str, SeedStep], ...] = (
     ("admin_regions", seed_admin_regions),
     ("navigation_channels", seed_navigation_channels),
     ("navigation_water_areas", seed_navigation_water_areas),
+    ("navigation_water_bodies", build_navigation_water_bodies),
+    ("navigation_water_body_matches", backfill_channel_water_body_matches),
     ("navigation_constraints", seed_navigation_constraints),
     ("commodity_taxonomy", seed_commodity_taxonomy),
     ("commodity_standards", seed_commodity_standards),
@@ -57,6 +62,7 @@ async def seed_production_preset() -> None:
         await step()
     await seed_system_base(preserve_existing_config_values=True)
     await seed_approval_base()
+    await refresh_postgis_geometry_columns()
 
 
 if __name__ == "__main__":

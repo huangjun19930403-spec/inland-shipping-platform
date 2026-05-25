@@ -8,14 +8,17 @@ from sqlalchemy.orm import aliased
 
 from app.models import (
     NavigationChannelCenterline,
-    NavigationChannelWaterAreaMatch,
+    NavigationChannelWaterBodyMatch,
     NavigationGraphEdge,
     NavigationGraphNode,
     NavigationRouteQualityIssue,
     NavigationRouteResult,
     NavigationWaterArea,
+    NavigationWaterBody,
+    NavigationWaterBodyFeatureLink,
 )
 from app.models.address import NavigationChannel, NavigationChannelBoundary
+from app.modules.navigation.coordinate_transform import GCJ02_AMAP, WGS84, bbox_to_gcj02, geometry_to_gcj02_json
 from app.modules.navigation.schemas import NavigationMapLayerFeatureResponse, NavigationMapLayerResponse
 
 
@@ -39,6 +42,7 @@ class NavigationMapLayerService:
         include_centerline: bool,
         include_graph_edge: bool,
         limit: int | None,
+        water_area_ids: list[int] | None = None,
     ) -> NavigationMapLayerResponse:
         warnings: list[str] = []
         truncated_layers: list[str] = []
@@ -52,6 +56,14 @@ class NavigationMapLayerService:
             if bbox is None and route_results:
                 bbox = self._expanded_geometry_bbox(route_results[0].geometry_json, margin_degree=0.35)
 
+        selected_water_area_ids = self._clean_ids(water_area_ids)
+        if selected_water_area_ids:
+            water_bbox = await self._water_area_ids_bbox(selected_water_area_ids)
+            if water_bbox is not None:
+                bbox = water_bbox if bbox is None else self._merge_bbox(bbox, water_bbox)
+            else:
+                warnings.append("WATER_AREA_IDS_NOT_FOUND")
+
         if channel_id is not None:
             channel_bbox = await self._channel_layer_bbox(channel_id)
             if channel_bbox is not None:
@@ -62,8 +74,8 @@ class NavigationMapLayerService:
         if bbox is None:
             warnings.append("MAP_LAYER_BBOX_REQUIRED")
             return NavigationMapLayerResponse(
-                route_results=route_results,
-                quality_issues=quality_issues,
+                route_results=self._display_features(route_results),
+                quality_issues=self._display_features(quality_issues),
                 warnings=warnings,
             )
 
@@ -73,7 +85,13 @@ class NavigationMapLayerService:
         graph_edges: list[NavigationMapLayerFeatureResponse] = []
 
         if include_water_area:
-            water_areas = await self._water_area_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
+            water_areas = await self._water_area_layers(
+                bbox,
+                layer_limit,
+                truncated_layers,
+                channel_id=channel_id,
+                water_area_ids=selected_water_area_ids,
+            )
         if include_boundary:
             channel_boundaries = await self._boundary_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
         if include_centerline:
@@ -82,16 +100,36 @@ class NavigationMapLayerService:
             graph_edges = await self._graph_edge_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
 
         return NavigationMapLayerResponse(
-            bbox=bbox,
-            water_areas=water_areas,
-            channel_boundaries=channel_boundaries,
-            centerlines=centerlines,
-            graph_edges=graph_edges,
-            route_results=route_results,
-            quality_issues=quality_issues,
+            bbox=bbox_to_gcj02(bbox),
+            coordinate_system_code=WGS84,
+            display_coordinate_system_code=GCJ02_AMAP,
+            water_areas=self._display_features(water_areas),
+            channel_boundaries=self._display_features(channel_boundaries),
+            centerlines=self._display_features(centerlines),
+            graph_edges=self._display_features(graph_edges),
+            route_results=self._display_features(route_results),
+            quality_issues=self._display_features(quality_issues),
             truncated_layers=truncated_layers,
             warnings=warnings,
         )
+
+    def _display_features(self, items: list[NavigationMapLayerFeatureResponse]) -> list[NavigationMapLayerFeatureResponse]:
+        output: list[NavigationMapLayerFeatureResponse] = []
+        for item in items:
+            props = dict(item.properties or {})
+            props.setdefault("source_coordinate_system_code", WGS84)
+            props.setdefault("display_coordinate_system_code", GCJ02_AMAP)
+            output.append(
+                item.model_copy(
+                    update={
+                        "geometry_json": geometry_to_gcj02_json(item.geometry_json),
+                        "coordinate_system_code": WGS84,
+                        "display_coordinate_system_code": GCJ02_AMAP,
+                        "properties": props,
+                    }
+                )
+            )
+        return output
 
     def _bbox(
         self,
@@ -132,22 +170,64 @@ class NavigationMapLayerService:
         truncated_layers: list[str],
         *,
         channel_id: int | None,
+        water_area_ids: list[int] | None = None,
     ) -> list[NavigationMapLayerFeatureResponse]:
+        if water_area_ids:
+            rows = list(
+                (
+                    await self.session.execute(
+                        select(NavigationWaterArea)
+                        .where(
+                            NavigationWaterArea.id.in_(water_area_ids),
+                        )
+                        .order_by(NavigationWaterArea.id)
+                        .limit(limit + 1)
+                    )
+                ).scalars()
+            )
+            if len(rows) > limit:
+                truncated_layers.append("WATER_AREA")
+                rows = rows[:limit]
+            return [
+                NavigationMapLayerFeatureResponse(
+                    id=row.id,
+                    layer_type_code="SELECTED_WATER_AREA",
+                    name=row.water_name,
+                    geometry_json=self._water_area_geometry(row),
+                    properties={
+                        "source_code": row.source_code,
+                        "source_layer_name": row.source_layer_name,
+                        "source_layer_display_name": row.source_layer_display_name,
+                        "source_layer_role_code": row.source_layer_role_code,
+                        "source_object_id": row.source_object_id,
+                        "water_type_code": row.water_type_code,
+                        "water_level": row.water_level,
+                        "geometry_status_code": row.geometry_status_code,
+                        "geometry_display_mode": "BBOX_FALLBACK" if row.geometry_status_code == "INVALID" else "GEOMETRY",
+                        "area_km2": float(row.area_km2) if row.area_km2 is not None else None,
+                    },
+                )
+                for row in rows
+            ]
+
         if channel_id is not None:
             rows = list(
                 (
                     await self.session.execute(
-                        select(NavigationWaterArea, NavigationChannelWaterAreaMatch)
+                        select(NavigationWaterArea, NavigationWaterBody, NavigationChannelWaterBodyMatch)
+                        .join(NavigationWaterBodyFeatureLink, NavigationWaterBodyFeatureLink.water_area_id == NavigationWaterArea.id)
+                        .join(NavigationWaterBody, NavigationWaterBody.id == NavigationWaterBodyFeatureLink.water_body_id)
                         .join(
-                            NavigationChannelWaterAreaMatch,
-                            NavigationChannelWaterAreaMatch.water_area_id == NavigationWaterArea.id,
+                            NavigationChannelWaterBodyMatch,
+                            NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id,
                         )
                         .where(
                             NavigationWaterArea.is_enabled.is_(True),
-                            NavigationChannelWaterAreaMatch.channel_id == channel_id,
-                            NavigationChannelWaterAreaMatch.is_current.is_(True),
+                            NavigationWaterBody.is_enabled.is_(True),
+                            NavigationChannelWaterBodyMatch.channel_id == channel_id,
+                            NavigationChannelWaterBodyMatch.is_current.is_(True),
                         )
-                        .order_by(NavigationChannelWaterAreaMatch.score.desc(), NavigationWaterArea.id)
+                        .order_by(NavigationChannelWaterBodyMatch.score.desc(), NavigationWaterBody.source_layer_order, NavigationWaterArea.id)
                         .limit(limit + 1)
                     )
                 ).all()
@@ -159,11 +239,17 @@ class NavigationMapLayerService:
                 NavigationMapLayerFeatureResponse(
                     id=row.id,
                     layer_type_code="MATCHED_WATER_AREA",
-                    name=row.water_name,
-                    geometry_json=row.simplified_geometry_low_json or row.geometry_json,
+                    name=body.production_name or body.display_name or body.water_body_name or row.water_name,
+                    geometry_json=self._water_area_geometry(row),
                     properties={
+                        "water_body_id": body.id,
+                        "water_body_code": body.water_body_code,
+                        "body_role_code": body.body_role_code,
+                        "water_body_name": body.water_body_name,
+                        "production_name": body.production_name,
                         "source_code": row.source_code,
                         "source_layer_name": row.source_layer_name,
+                        "source_layer_display_name": row.source_layer_display_name,
                         "water_type_code": row.water_type_code,
                         "water_level": row.water_level,
                         "geometry_status_code": row.geometry_status_code,
@@ -173,11 +259,10 @@ class NavigationMapLayerService:
                         "matched_term": match.matched_term,
                         "score": match.score,
                         "confidence_code": match.confidence_code,
-                        "review_status_code": match.review_status_code,
                         "issue_codes": match.issue_codes or [],
                     },
                 )
-                for row, match in rows
+                for row, body, match in rows
             ]
 
         rows = list(
@@ -201,7 +286,7 @@ class NavigationMapLayerService:
                 id=row.id,
                 layer_type_code="WATER_AREA",
                 name=row.water_name,
-                geometry_json=row.simplified_geometry_low_json or row.geometry_json,
+                geometry_json=self._water_area_geometry(row),
                 properties={
                     "source_code": row.source_code,
                     "source_layer_name": row.source_layer_name,
@@ -381,6 +466,32 @@ class NavigationMapLayerService:
             & (node.latitude <= bbox["max_lat"])
         )
 
+    def _water_area_geometry(self, row: NavigationWaterArea) -> dict | None:
+        if row.geometry_status_code == "INVALID":
+            return self._bbox_polygon(row)
+        return row.simplified_geometry_low_json or row.geometry_json or self._bbox_polygon(row)
+
+    def _bbox_polygon(self, row) -> dict | None:
+        bbox = self._model_bbox(row)
+        if not bbox:
+            return None
+        min_lng = bbox["min_lng"]
+        min_lat = bbox["min_lat"]
+        max_lng = bbox["max_lng"]
+        max_lat = bbox["max_lat"]
+        return {
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [min_lng, min_lat],
+                    [max_lng, min_lat],
+                    [max_lng, max_lat],
+                    [min_lng, max_lat],
+                    [min_lng, min_lat],
+                ]
+            ],
+        }
+
     async def _route_layers(
         self,
         route_result_id: int,
@@ -438,10 +549,13 @@ class NavigationMapLayerService:
             (
                 await self.session.execute(
                     select(NavigationWaterArea)
-                    .join(NavigationChannelWaterAreaMatch, NavigationChannelWaterAreaMatch.water_area_id == NavigationWaterArea.id)
+                    .join(NavigationWaterBodyFeatureLink, NavigationWaterBodyFeatureLink.water_area_id == NavigationWaterArea.id)
+                    .join(NavigationWaterBody, NavigationWaterBody.id == NavigationWaterBodyFeatureLink.water_body_id)
+                    .join(NavigationChannelWaterBodyMatch, NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id)
                     .where(
-                        NavigationChannelWaterAreaMatch.channel_id == channel_id,
-                        NavigationChannelWaterAreaMatch.is_current.is_(True),
+                        NavigationChannelWaterBodyMatch.channel_id == channel_id,
+                        NavigationChannelWaterBodyMatch.is_current.is_(True),
+                        NavigationWaterBody.is_enabled.is_(True),
                         NavigationWaterArea.is_enabled.is_(True),
                     )
                 )
@@ -489,13 +603,53 @@ class NavigationMapLayerService:
             merged = self._merge_bbox(merged, box)
         return self._expand_bbox(merged, margin_degree=0.08)
 
+    async def _water_area_ids_bbox(self, water_area_ids: list[int]) -> dict[str, float] | None:
+        boxes: list[dict[str, float]] = []
+        rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationWaterArea).where(
+                        NavigationWaterArea.id.in_(water_area_ids),
+                    )
+                )
+            ).scalars()
+        )
+        for row in rows:
+            box = self._model_bbox(row)
+            if box:
+                boxes.append(box)
+        if not boxes:
+            return None
+        merged = boxes[0]
+        for box in boxes[1:]:
+            merged = self._merge_bbox(merged, box)
+        return self._expand_bbox(merged, margin_degree=0.03)
+
+    def _clean_ids(self, values: list[int] | None) -> list[int]:
+        if not values:
+            return []
+        output: list[int] = []
+        seen: set[int] = set()
+        for value in values:
+            try:
+                item = int(value)
+            except (TypeError, ValueError):
+                continue
+            if item <= 0 or item in seen:
+                continue
+            seen.add(item)
+            output.append(item)
+        return output[: self.max_limit]
+
     def _boundary_geometry(self, boundary: NavigationChannelBoundary) -> dict[str, Any] | None:
         if boundary.boundary_paths_low:
             return {
                 "type": "MultiPolygon",
                 "coordinates": [[ring] for ring in boundary.boundary_paths_low if isinstance(ring, list) and len(ring) >= 3],
             }
-        return boundary.geometry_json
+        if boundary.geometry_json:
+            return boundary.geometry_json
+        return None
 
     def _model_bbox(self, row: Any) -> dict[str, float] | None:
         values = (

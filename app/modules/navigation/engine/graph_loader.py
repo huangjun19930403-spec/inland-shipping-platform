@@ -26,9 +26,11 @@ class NavigationGraphLoader:
         if graph_version_id is not None:
             version = await self.session.scalar(
                 select(NavigationGraphVersion).where(
-                    NavigationGraphVersion.id == graph_version_id,
-                    NavigationGraphVersion.status_code == "READY",
-                )
+                NavigationGraphVersion.id == graph_version_id,
+                NavigationGraphVersion.status_code == "READY",
+                NavigationGraphVersion.edge_count > 0,
+                NavigationGraphVersion.scope_code.not_like("MVP%"),
+            )
             )
             if version is None:
                 raise RoutingEngineError("GRAPH_VERSION_NOT_READY", "Requested graph version is not READY")
@@ -39,6 +41,8 @@ class NavigationGraphLoader:
             .where(
                 NavigationGraphVersion.status_code == "READY",
                 NavigationGraphVersion.is_active.is_(True),
+                NavigationGraphVersion.edge_count > 0,
+                NavigationGraphVersion.scope_code.not_like("MVP%"),
             )
             .order_by(NavigationGraphVersion.id.desc())
         )

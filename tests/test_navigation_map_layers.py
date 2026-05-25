@@ -11,7 +11,7 @@ import app.models  # noqa: F401
 from app.api.v1 import api_router
 from app.models import (
     NavigationChannelCenterline,
-    NavigationChannelWaterAreaMatch,
+    NavigationChannelWaterBodyMatch,
     NavigationGraphEdge,
     NavigationGraphNode,
     NavigationGraphVersion,
@@ -19,9 +19,12 @@ from app.models import (
     NavigationRouteRequest,
     NavigationRouteResult,
     NavigationWaterArea,
+    NavigationWaterBody,
+    NavigationWaterBodyFeatureLink,
 )
 from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.models.base import Base
+from app.modules.navigation.coordinate_transform import bbox_to_gcj02
 from app.modules.navigation.map_layer_service import NavigationMapLayerService
 
 
@@ -79,6 +82,29 @@ async def _seed_layers(session: AsyncSession) -> None:
             is_enabled=True,
         )
     )
+    session.add(
+        NavigationWaterBody(
+            id=1,
+            water_body_code="WB-TEST",
+            water_body_name="测试水域",
+            normalized_water_name="测试水域",
+            source_code="TEST_RIVER",
+            body_role_code="PRIMARY_HIERARCHY",
+            dedupe_status_code="DEDUPED",
+            source_layer_name="rx",
+            water_type_code="RIVER",
+            geometry_wgs84_json=_polygon(),
+            bbox_min_lng=120.0,
+            bbox_min_lat=31.0,
+            bbox_max_lng=120.2,
+            bbox_max_lat=31.2,
+            feature_count=1,
+            enabled_feature_count=1,
+            source_water_area_ids_json=[1],
+            is_enabled=True,
+        )
+    )
+    session.add(NavigationWaterBodyFeatureLink(water_body_id=1, water_area_id=1, link_role_code="PRIMARY_HIERARCHY", is_primary=True))
     session.add(
         NavigationChannel(
             id=1,
@@ -257,7 +283,9 @@ async def test_map_layers_loads_bbox_limited_features(session_maker) -> None:
             limit=20,
         )
 
-    assert response.bbox == {"min_lng": 119.9, "min_lat": 30.9, "max_lng": 120.3, "max_lat": 31.3}
+    assert response.coordinate_system_code == "WGS84"
+    assert response.display_coordinate_system_code == "GCJ02_AMAP"
+    assert response.bbox == bbox_to_gcj02({"min_lng": 119.9, "min_lat": 30.9, "max_lng": 120.3, "max_lat": 31.3})
     assert [item.layer_type_code for item in response.water_areas] == ["WATER_AREA"]
     assert [item.layer_type_code for item in response.channel_boundaries] == ["CHANNEL_BOUNDARY"]
     assert [item.layer_type_code for item in response.centerlines] == ["CENTERLINE"]
@@ -291,6 +319,33 @@ async def test_map_layers_requires_bbox_for_background_layers(session_maker) -> 
 
 
 @pytest.mark.asyncio
+async def test_map_layers_can_load_selected_water_area_ids_without_channel_or_bbox(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_layers(session)
+
+        response = await NavigationMapLayerService(session).get_layers(
+            min_lng=None,
+            min_lat=None,
+            max_lng=None,
+            max_lat=None,
+            channel_id=None,
+            route_result_id=None,
+            include_water_area=True,
+            include_boundary=False,
+            include_centerline=False,
+            include_graph_edge=False,
+            limit=20,
+            water_area_ids=[1],
+        )
+
+    assert response.warnings == []
+    assert response.bbox is not None
+    assert [item.id for item in response.water_areas] == [1]
+    assert response.water_areas[0].layer_type_code == "SELECTED_WATER_AREA"
+    assert response.channel_boundaries == []
+
+
+@pytest.mark.asyncio
 async def test_map_layers_with_channel_id_uses_persisted_matches_not_fixed_bbox(session_maker) -> None:
     async with session_maker() as session:
         await _seed_layers(session)
@@ -317,18 +372,18 @@ async def test_map_layers_with_channel_id_uses_persisted_matches_not_fixed_bbox(
             )
         )
         session.add(
-            NavigationChannelWaterAreaMatch(
+            NavigationChannelWaterBodyMatch(
                 id=1,
                 channel_id=1,
-                water_area_id=1,
+                water_body_id=1,
                 match_batch_code="TEST-BATCH",
                 match_type_code="EXACT_NAME",
                 matched_term="测试水域",
                 score=95,
                 confidence_code="HIGH_CONFIDENCE",
-                review_status_code="APPROVED",
                 issue_codes=[],
                 is_current=True,
+                source_water_area_ids_json=[1],
             )
         )
         await session.commit()

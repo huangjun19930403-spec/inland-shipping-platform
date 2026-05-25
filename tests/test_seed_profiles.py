@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.integrations.config_keys import AMAP_ROUTE_GEOMETRY_MODE
+from app.integrations.config_keys import AMAP_JS_API_KEY, AMAP_ROUTE_GEOMETRY_MODE, DASHSCOPE_API_KEY, HIFLEET_PASSWORD
 from scripts.seeds import cli as seed_cli
 from scripts.seeds import profiles
 from scripts.seeds.manifest import load_seed_manifest, validate_seed_manifest
@@ -247,6 +247,15 @@ def test_system_base_preserves_existing_non_empty_config_values() -> None:
     )
 
 
+def test_system_base_preserves_existing_local_integration_config_values() -> None:
+    for config_key in (AMAP_JS_API_KEY, DASHSCOPE_API_KEY, HIFLEET_PASSWORD):
+        assert _should_preserve_existing_config_value(
+            config=SimpleNamespace(config_key=config_key, config_value="local-secret-value"),
+            config_item={"config_key": config_key, "config_value": "", "sensitive_flag": 1},
+            preserve_existing_config_values=True,
+        )
+
+
 def test_system_base_upgrades_legacy_route_geometry_fallback() -> None:
     config = SimpleNamespace(
         config_key=AMAP_ROUTE_GEOMETRY_MODE,
@@ -303,8 +312,40 @@ def test_system_base_uses_analysis_platform_information_architecture() -> None:
     assert menu_by_code["FREIGHT_MANUAL_CREATE"]["menu_name"] == "补录样本"
     assert menu_by_code["FREIGHT_SUPPLY_DEMAND_FIT"]["route_path"] == "/freight/supply-demand-fit"
     assert menu_by_code["FREIGHT_SUPPLY_DEMAND_FIT"]["permission_code"] == "VESSEL:READ"
+    assert menu_by_code["APPROVAL_ROOT"]["parent_code"] == "AUDIT_ROOT"
+    assert menu_by_code["APPROVAL_CONFIG_ROOT"]["parent_code"] == "SYSTEM_SECURITY_GROUP"
+    assert menu_by_code["NAVIGATION_ROUTE_TEST"]["parent_code"] == "NAVIGATION_PRODUCTION_GROUP"
+    assert menu_by_code["NAVIGATION_ROUTE_TEST"]["menu_name"] == "路径验证"
+    assert menu_by_code["NAVIGATION_BOUNDARIES"]["menu_name"] == "边界生产"
+    assert menu_by_code["QUALITY_VESSEL_ISSUES"]["visible_flag"] == 0
+    assert menu_by_code["QUALITY_VESSEL_TASKS"]["visible_flag"] == 0
     assert "FREIGHT_SUPPLY_DEMAND_FIT" in ROLE_MENU_CODES["DATA_STEWARD"]
     assert "FREIGHT_SUPPLY_DEMAND_FIT" in ROLE_MENU_CODES["OPS_ANALYST"]
     assert "FREIGHT_SUPPLY_DEMAND_FIT" not in ROLE_MENU_CODES["BUSINESS_INPUTTER"]
     menu_order = [item["menu_code"] for item in MENUS]
     assert menu_order.index("ROUTE_ROOT") < menu_order.index("ROUTE_LIST")
+
+
+def test_visible_backend_menus_do_not_have_hidden_parents_or_duplicate_routes() -> None:
+    menu_by_code = {item["menu_code"]: item for item in MENUS}
+    visible_menus = [item for item in MENUS if item.get("visible_flag") == 1 and item.get("status_code") == "ACTIVE"]
+
+    for item in visible_menus:
+        parent_code = item.get("parent_code")
+        if parent_code:
+            parent = menu_by_code[parent_code]
+            assert parent["visible_flag"] == 1, item["menu_code"]
+
+    visible_routes: dict[str, str] = {}
+    for item in visible_menus:
+        route_path = item.get("route_path")
+        if not route_path:
+            continue
+        assert route_path not in visible_routes, (route_path, visible_routes[route_path], item["menu_code"])
+        visible_routes[route_path] = item["menu_code"]
+
+    sort_keys: set[tuple[str | None, int]] = set()
+    for item in visible_menus:
+        key = (item.get("parent_code"), int(item["sort_order"]))
+        assert key not in sort_keys, (item.get("parent_code"), item["sort_order"], item["menu_code"])
+        sort_keys.add(key)

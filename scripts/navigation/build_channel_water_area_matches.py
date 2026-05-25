@@ -13,28 +13,31 @@ import asyncio
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from shapely.geometry import mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal, engine
 from app.models import NavigationChannelWaterAreaMatch, NavigationWaterArea
 from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.models.base import Base
+from scripts.navigation.refresh_postgis_geometry_columns import refresh_postgis_geometry_columns
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ALIAS_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_channel_aliases.json"
 DEFAULT_SCOPE_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_real_scope.json"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data_audit" / "navigation_channel_water_area_match_report.json"
 DEFAULT_BATCH_PREFIX = "REAL-WATER-MATCH"
+COORDINATE_SCALE = Decimal("0.000000000000001")
+DEGREE_MEASURE_SCALE = Decimal("0.000000000000000001")
 
 LAYER_PRIORITY = {
-    "rx": 0,
     "一级水系": 1,
     "二级水系": 2,
     "三级水系": 3,
@@ -42,7 +45,8 @@ LAYER_PRIORITY = {
     "五级水系": 5,
     "六级水系": 6,
     "七级水系": 7,
-    "rx8": 8,
+    "rx": 80,
+    "rx8": 90,
 }
 
 
@@ -120,6 +124,12 @@ def _norm(value: Any) -> str | None:
     return text
 
 
+def _quantize_decimal(value: Any, scale: Decimal) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value)).quantize(scale, rounding=ROUND_HALF_UP)
+
+
 def _terms_for_channel(channel: NavigationChannel, alias_config: dict[str, Any]) -> dict[str, set[str]]:
     configured = alias_config.get("channels", {}).get(channel.channel_code, {})
     exact_terms: set[str] = set()
@@ -178,6 +188,29 @@ def _scope_bbox(scope_config: dict[str, Any]) -> list[float] | None:
     if not bbox:
         return None
     return [float(bbox["min_lng"]), float(bbox["min_lat"]), float(bbox["max_lng"]), float(bbox["max_lat"])]
+
+
+def _scope_for_channel(channel: NavigationChannel, scope_config: dict[str, Any]) -> dict[str, Any] | None:
+    if channel.channel_code in set(scope_config.get("priority_channel_codes") or []):
+        return scope_config
+    for scope_code, scope in (scope_config.get("scopes") or {}).items():
+        if channel.channel_code in set(scope.get("priority_channel_codes") or []):
+            return {"scope_code": scope.get("scope_code") or scope_code, **scope}
+    return None
+
+
+def _scope_bbox_for_channel(channel: NavigationChannel, scope_config: dict[str, Any]) -> list[float] | None:
+    scope = _scope_for_channel(channel, scope_config)
+    if scope:
+        return _scope_bbox(scope)
+    return _scope_bbox(scope_config)
+
+
+def _scope_code_for_channel(channel: NavigationChannel, scope_config: dict[str, Any]) -> str | None:
+    scope = _scope_for_channel(channel, scope_config)
+    if scope:
+        return str(scope.get("scope_code") or "")
+    return scope_config.get("scope_code")
 
 
 def _layer_priority(layer_name: str | None) -> int:
@@ -277,16 +310,16 @@ def _boundary_payload(channel_id: int, geometry: BaseGeometry) -> dict[str, Any]
         "boundary_paths_low": None,
         "boundary_paths_medium": None,
         "boundary_paths_high": None,
-        "center_longitude": centroid.x,
-        "center_latitude": centroid.y,
-        "display_center_longitude": centroid.x,
-        "display_center_latitude": centroid.y,
-        "bbox_min_lng": min_lng,
-        "bbox_min_lat": min_lat,
-        "bbox_max_lng": max_lng,
-        "bbox_max_lat": max_lat,
-        "source_shape_length_degree": geometry.length,
-        "source_shape_area_degree": geometry.area,
+        "center_longitude": _quantize_decimal(centroid.x, COORDINATE_SCALE),
+        "center_latitude": _quantize_decimal(centroid.y, COORDINATE_SCALE),
+        "display_center_longitude": _quantize_decimal(centroid.x, COORDINATE_SCALE),
+        "display_center_latitude": _quantize_decimal(centroid.y, COORDINATE_SCALE),
+        "bbox_min_lng": _quantize_decimal(min_lng, COORDINATE_SCALE),
+        "bbox_min_lat": _quantize_decimal(min_lat, COORDINATE_SCALE),
+        "bbox_max_lng": _quantize_decimal(max_lng, COORDINATE_SCALE),
+        "bbox_max_lat": _quantize_decimal(max_lat, COORDINATE_SCALE),
+        "source_shape_length_degree": _quantize_decimal(geometry.length, DEGREE_MEASURE_SCALE),
+        "source_shape_area_degree": _quantize_decimal(geometry.area, DEGREE_MEASURE_SCALE),
         "ring_count": ring_count,
         "point_count": point_count,
         "geometry_status_code": "AVAILABLE",
@@ -354,7 +387,6 @@ async def build_channel_water_area_matches(
 ) -> BuildMatchReport:
     alias_config = load_json(alias_config_path)
     scope_config = load_json(scope_config_path)
-    scope_bbox = _scope_bbox(scope_config)
     batch_code = match_batch_code or f"{DEFAULT_BATCH_PREFIX}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
 
     channel_query = (
@@ -366,14 +398,18 @@ async def build_channel_water_area_matches(
         channel_query = channel_query.where(NavigationChannel.channel_code.in_(list(channel_codes)))
     channels = list((await session.execute(channel_query)).scalars())
 
-    water_query = select(NavigationWaterArea).where(NavigationWaterArea.is_enabled.is_(True))
+    water_query = select(NavigationWaterArea).where(
+        NavigationWaterArea.is_enabled.is_(True),
+        NavigationWaterArea.source_layer_name != "rx8",
+        or_(
+            NavigationWaterArea.source_layer_role_code.is_(None),
+            NavigationWaterArea.source_layer_role_code != "BACKUP_WATER_AREA",
+        ),
+    )
     if source_code:
         water_query = water_query.where(NavigationWaterArea.source_code == source_code)
     raw_water_areas = list((await session.execute(water_query)).scalars())
-    scoped_water_areas = [
-        row for row in raw_water_areas if scope_bbox is None or _bbox_intersects(_bbox(row), scope_bbox)
-    ]
-    water_areas, duplicate_layers_by_id = _dedupe_water_areas(scoped_water_areas)
+    all_water_areas, duplicate_layers_by_id = _dedupe_water_areas(raw_water_areas)
 
     current_boundaries = {
         boundary.channel_id: boundary
@@ -408,6 +444,10 @@ async def build_channel_water_area_matches(
 
     for channel in channels:
         terms = _terms_for_channel(channel, alias_config)
+        channel_scope_bbox = _scope_bbox_for_channel(channel, scope_config)
+        water_areas = [
+            row for row in all_water_areas if channel_scope_bbox is None or _bbox_intersects(_bbox(row), channel_scope_bbox)
+        ]
         boundary = current_boundaries.get(channel.id)
         boundary_bbox = _bbox(boundary) if boundary else None
         boundary_geometry = _boundary_geometry(boundary)
@@ -484,7 +524,7 @@ async def build_channel_water_area_matches(
                             "source_layer_name": water_area.source_layer_name,
                             "source_object_id": water_area.source_object_id,
                             "duplicate_layer_names": duplicate_layers_by_id.get(water_area.id, []),
-                            "scope_code": scope_config.get("scope_code"),
+                            "scope_code": _scope_code_for_channel(channel, scope_config),
                             "alias_config_version": alias_config.get("version"),
                         },
                     )
@@ -514,6 +554,8 @@ async def build_channel_water_area_matches(
 
     if not dry_run:
         await session.commit()
+        if session.get_bind().dialect.name == "postgresql":
+            await refresh_postgis_geometry_columns()
 
     if dry_run:
         match_row_count = sum(item.matched_water_area_count for item in reports)

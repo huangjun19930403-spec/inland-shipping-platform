@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user, require_permission
 from app.modules.navigation.annotation_service import NavigationAnnotationTaskService
+from app.modules.navigation.diagnostic_service import NavigationDiagnosticService
 from app.modules.navigation.map_layer_service import NavigationMapLayerService
+from app.modules.navigation.production_service import NavigationProductionService
 from app.modules.navigation.routing_service import NavigationRoutingEngineService
 from app.modules.navigation.schemas import (
     NavigationAnnotationSuggestionResponse,
@@ -16,8 +18,9 @@ from app.modules.navigation.schemas import (
     NavigationAnnotationTaskResponse,
     NavigationBoundaryListItemResponse,
     NavigationCenterlineListItemResponse,
-    NavigationChannelWaterAreaMatchListResponse,
-    NavigationGeometryDraftApproveRequest,
+    NavigationChannelDiagnosticResponse,
+    NavigationChannelWaterBodyMatchListResponse,
+    NavigationDiagnosticsRunResponse,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
     NavigationGeometryDraftUpdateRequest,
@@ -26,14 +29,123 @@ from app.modules.navigation.schemas import (
     NavigationGraphBuildResponse,
     NavigationGraphVersionListItemResponse,
     NavigationMapLayerResponse,
+    NavigationOsmImportRequest,
+    NavigationOsmImportResponse,
+    NavigationChannelPipelineResponse,
+    NavigationProductionChannelResponse,
+    NavigationProductionSummaryResponse,
     NavigationRouteGenerateRequest,
     NavigationRouteGenerateResponse,
-    NavigationWaterAreaListItemResponse,
+    NavigationWaterBodyListItemResponse,
+    NavigationWaterBodyListResponse,
+    NavigationWaterBodyCandidateListResponse,
+    NavigationWaterBodyMatchCreateRequest,
+    NavigationWaterBodyNameUpdateRequest,
+    NavigationWaterAreaListResponse,
+    NavigationCandidateConfirmRequest,
+    NavigationWaterAreaSummaryResponse,
     NavigationWorkbenchSummaryResponse,
 )
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
 router = APIRouter()
+
+
+@router.get("/production/summary", response_model=NavigationProductionSummaryResponse)
+async def get_navigation_production_summary(
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).summary()
+
+
+@router.get("/production/channels", response_model=list[NavigationProductionChannelResponse])
+async def list_navigation_production_channels(
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).channels()
+
+
+@router.get("/channels/{channel_id}/pipeline", response_model=NavigationChannelPipelineResponse)
+async def get_navigation_channel_pipeline(
+    channel_id: int,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).pipeline(channel_id)
+
+
+@router.get("/channels/{channel_id}/diagnostics", response_model=NavigationChannelDiagnosticResponse)
+async def get_navigation_channel_diagnostics(
+    channel_id: int,
+    include_spatial: bool = False,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationDiagnosticService(db).channel_diagnostics(channel_id, include_spatial=include_spatial)
+
+
+@router.get("/channels/{channel_id}/water-body-candidates", response_model=NavigationWaterBodyCandidateListResponse)
+async def list_navigation_channel_water_body_candidates(
+    channel_id: int,
+    limit: int = 80,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationDiagnosticService(db).water_body_candidates(channel_id, limit=limit)
+
+
+@router.post(
+    "/channels/{channel_id}/water-body-candidates/{water_body_id}/confirm",
+    response_model=NavigationChannelWaterBodyMatchListResponse,
+)
+async def confirm_navigation_channel_water_body_candidate(
+    channel_id: int,
+    water_body_id: int,
+    body: NavigationCandidateConfirmRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationDiagnosticService(db).confirm_water_body_candidate(channel_id, water_body_id, body)
+
+
+@router.post("/diagnostics/run", response_model=NavigationDiagnosticsRunResponse)
+async def run_navigation_channel_diagnostics(
+    include_spatial: bool = False,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationDiagnosticService(db).run_diagnostics(include_spatial=include_spatial)
+
+
+@router.get("/channels/{channel_id}/boundary-candidates", response_model=list[NavigationBoundaryListItemResponse])
+async def list_navigation_channel_boundary_candidates(
+    channel_id: int,
+    limit: int = 120,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).boundary_candidates(channel_id=channel_id, limit=limit)
+
+
+@router.get("/channels/{channel_id}/centerline-candidates", response_model=list[NavigationCenterlineListItemResponse])
+async def list_navigation_channel_centerline_candidates(
+    channel_id: int,
+    limit: int = 120,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).centerline_candidates(channel_id=channel_id, limit=limit)
+
+
+@router.post("/osm/imports", response_model=NavigationOsmImportResponse)
+async def create_navigation_osm_import(
+    body: NavigationOsmImportRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationProductionService(db).create_osm_import(body)
 
 
 @router.get("/workbench/summary", response_model=NavigationWorkbenchSummaryResponse)
@@ -44,25 +156,171 @@ async def get_navigation_workbench_summary(
     return await NavigationWorkbenchService(db).summary()
 
 
-@router.get("/water-areas", response_model=list[NavigationWaterAreaListItemResponse])
+@router.get("/water-areas/summary", response_model=NavigationWaterAreaSummaryResponse)
+async def get_navigation_water_area_summary(
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).water_area_summary()
+
+
+@router.get("/water-bodies", response_model=NavigationWaterBodyListResponse)
+async def list_navigation_water_bodies(
+    keyword: str | None = None,
+    channel_id: int | None = None,
+    body_role_code: str | None = None,
+    dedupe_status_code: str | None = None,
+    source_layer_code: str | None = None,
+    layer_role_code: str | None = None,
+    water_type_code: str | None = None,
+    geometry_status_code: str | None = None,
+    name_status_code: str | None = None,
+    only_matched: bool = False,
+    only_unmatched: bool = False,
+    include_invalid: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_water_bodies(
+        keyword=keyword,
+        channel_id=channel_id,
+        body_role_code=body_role_code,
+        dedupe_status_code=dedupe_status_code,
+        source_layer_code=source_layer_code,
+        layer_role_code=layer_role_code,
+        water_type_code=water_type_code,
+        geometry_status_code=geometry_status_code,
+        name_status_code=name_status_code,
+        only_matched=only_matched,
+        only_unmatched=only_unmatched,
+        include_invalid=include_invalid,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.patch("/water-bodies/{water_body_id}/name", response_model=NavigationWaterBodyListItemResponse)
+async def update_navigation_water_body_name(
+    water_body_id: int,
+    body: NavigationWaterBodyNameUpdateRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).update_water_body_name(water_body_id=water_body_id, body=body)
+
+
+@router.get("/water-bodies/{group_key}/features", response_model=NavigationWaterAreaListResponse)
+async def list_navigation_water_body_features(
+    group_key: str,
+    page: int = 1,
+    page_size: int = 100,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_water_body_features(
+        group_key=group_key,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/water-bodies/{group_key}/map-layers", response_model=NavigationMapLayerResponse)
+async def get_navigation_water_body_map_layers(
+    group_key: str,
+    limit: int = 500,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).water_body_map_layers(group_key=group_key, limit=limit)
+
+
+@router.get("/water-areas", response_model=NavigationWaterAreaListResponse)
 async def list_navigation_water_areas(
     keyword: str | None = None,
     channel_id: int | None = None,
-    limit: int = 50,
+    source_layer_name: str | None = None,
+    source_layer_code: str | None = None,
+    layer_role_code: str | None = None,
+    water_type_code: str | None = None,
+    geometry_status_code: str | None = None,
+    only_unmatched: bool = False,
+    include_invalid: bool = False,
+    sort: str = "layer_order",
+    page: int = 1,
+    page_size: int = 50,
     current_user=Depends(require_permission("ROUTE:READ")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await NavigationWorkbenchService(db).list_water_areas(keyword=keyword, channel_id=channel_id, limit=limit)
+    return await NavigationWorkbenchService(db).list_water_areas(
+        keyword=keyword,
+        channel_id=channel_id,
+        source_layer_name=source_layer_name,
+        source_layer_code=source_layer_code,
+        layer_role_code=layer_role_code,
+        water_type_code=water_type_code,
+        geometry_status_code=geometry_status_code,
+        only_unmatched=only_unmatched,
+        include_invalid=include_invalid,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
 
 
-@router.get("/channels/{channel_id}/water-area-matches", response_model=NavigationChannelWaterAreaMatchListResponse)
-async def list_navigation_channel_water_area_matches(
+@router.get("/raw-water-areas/diagnostics", response_model=NavigationWaterAreaListResponse)
+async def list_navigation_raw_water_area_diagnostics(
+    keyword: str | None = None,
+    source_layer_code: str | None = None,
+    layer_role_code: str | None = None,
+    water_type_code: str | None = None,
+    geometry_status_code: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_water_areas(
+        keyword=keyword,
+        source_layer_code=source_layer_code,
+        layer_role_code=layer_role_code,
+        water_type_code=water_type_code,
+        geometry_status_code=geometry_status_code,
+        include_invalid=True,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/channels/{channel_id}/water-body-matches", response_model=NavigationChannelWaterBodyMatchListResponse)
+async def list_navigation_channel_water_body_matches(
     channel_id: int,
-    limit: int = 200,
+    limit: int = 500,
     current_user=Depends(require_permission("ROUTE:READ")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await NavigationWorkbenchService(db).list_water_area_matches(channel_id=channel_id, limit=limit)
+    return await NavigationWorkbenchService(db).list_water_body_matches(channel_id=channel_id, limit=limit)
+
+
+@router.post("/channels/{channel_id}/water-body-matches", response_model=NavigationChannelWaterBodyMatchListResponse)
+async def create_navigation_channel_water_body_match(
+    channel_id: int,
+    body: NavigationWaterBodyMatchCreateRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).create_water_body_match(channel_id=channel_id, body=body)
+
+
+@router.delete("/channels/{channel_id}/water-body-matches/{match_id}", response_model=NavigationChannelWaterBodyMatchListResponse)
+async def remove_navigation_channel_water_body_match(
+    channel_id: int,
+    match_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).remove_water_body_match(channel_id=channel_id, match_id=match_id)
 
 
 @router.get("/centerlines", response_model=list[NavigationCenterlineListItemResponse])
@@ -131,32 +389,6 @@ async def update_navigation_geometry_draft(
     return await NavigationWorkbenchService(db).update_geometry_draft(draft_id, body)
 
 
-@router.post("/geometry-drafts/{draft_id}/submit", response_model=NavigationGeometryDraftResponse)
-async def submit_navigation_geometry_draft(
-    draft_id: int,
-    current_user=Depends(require_permission("ROUTE:WRITE")),
-    db: AsyncSession = Depends(get_db),
-):
-    return await NavigationWorkbenchService(db).submit_geometry_draft(
-        draft_id,
-        submitted_by=getattr(current_user, "id", None),
-    )
-
-
-@router.post("/geometry-drafts/{draft_id}/approve", response_model=NavigationGeometryDraftResponse)
-async def approve_navigation_geometry_draft(
-    draft_id: int,
-    body: NavigationGeometryDraftApproveRequest | None = None,
-    current_user=Depends(require_permission("ROUTE:WRITE")),
-    db: AsyncSession = Depends(get_db),
-):
-    return await NavigationWorkbenchService(db).approve_geometry_draft(
-        draft_id,
-        body or NavigationGeometryDraftApproveRequest(),
-        reviewed_by=getattr(current_user, "id", None),
-    )
-
-
 @router.post("/geometry-drafts/{draft_id}/publish", response_model=NavigationGeometryDraftResponse)
 async def publish_navigation_geometry_draft(
     draft_id: int,
@@ -167,6 +399,15 @@ async def publish_navigation_geometry_draft(
         draft_id,
         published_by=getattr(current_user, "id", None),
     )
+
+
+@router.delete("/geometry-drafts/{draft_id}", response_model=NavigationGeometryDraftResponse)
+async def archive_navigation_geometry_draft(
+    draft_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).archive_geometry_draft(draft_id)
 
 
 @router.post("/graph-versions/build", response_model=NavigationGraphBuildResponse)
@@ -205,6 +446,7 @@ async def generate_navigation_route(
 @router.get("/map-layers", response_model=NavigationMapLayerResponse)
 async def get_navigation_map_layers(
     channel_id: int | None = None,
+    water_area_ids: str | None = None,
     min_lng: float | None = None,
     min_lat: float | None = None,
     max_lng: float | None = None,
@@ -223,6 +465,7 @@ async def get_navigation_map_layers(
         max_lng=max_lng,
         max_lat=max_lat,
         channel_id=channel_id,
+        water_area_ids=_parse_id_list(water_area_ids),
         route_result_id=route_result_id,
         include_water_area=include_water_area,
         include_boundary=include_boundary,
@@ -232,11 +475,27 @@ async def get_navigation_map_layers(
     )
 
 
+def _parse_id_list(value: str | None) -> list[int] | None:
+    if not value:
+        return None
+    output: list[int] = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            output.append(int(item))
+        except ValueError:
+            continue
+    return output or None
+
+
 @router.get("/annotation-tasks", response_model=NavigationAnnotationTaskListResponse)
 async def list_navigation_annotation_tasks(
     status_code: str | None = None,
     task_type_code: str | None = None,
     target_type_code: str | None = None,
+    channel_id: int | None = None,
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
@@ -245,6 +504,7 @@ async def list_navigation_annotation_tasks(
         status_code=status_code,
         task_type_code=task_type_code,
         target_type_code=target_type_code,
+        channel_id=channel_id,
         page=page,
         page_size=page_size,
     )
@@ -280,6 +540,18 @@ async def create_navigation_annotation_tasks_from_centerlines(
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationAnnotationTaskService(db).create_from_centerline_quality(
+        created_by=getattr(current_user, "id", None),
+    )
+
+
+@router.post("/annotation-tasks/from-diagnostics", response_model=NavigationAnnotationTaskBatchCreateResponse)
+async def create_navigation_annotation_tasks_from_diagnostics(
+    channel_id: int | None = None,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationDiagnosticService(db).create_annotation_tasks_from_diagnostics(
+        channel_id=channel_id,
         created_by=getattr(current_user, "id", None),
     )
 

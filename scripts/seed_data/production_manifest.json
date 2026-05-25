@@ -29,6 +29,16 @@
       "loader": "scripts.navigation.export_water_area_seed.export_navigation_water_area_seed"
     },
     {
+      "resource": "navigation_water_bodies",
+      "path": "data_audit/navigation_water_body_build_report.json",
+      "loader": "scripts.navigation.build_water_bodies.build_navigation_water_bodies"
+    },
+    {
+      "resource": "navigation_water_body_matches",
+      "path": "data_audit/navigation_channel_water_body_match_backfill_report.json",
+      "loader": "scripts.navigation.backfill_channel_water_body_matches.backfill_channel_water_body_matches"
+    },
+    {
       "resource": "navigation_constraints",
       "path": "scripts/seed_data/navigation_constraints/constraint_points.json",
       "loader": "scripts.seeds.loaders.navigation_constraints.seed_navigation_constraints"

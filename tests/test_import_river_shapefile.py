@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 import shapefile
 import sqlalchemy as sa
+from shapely.geometry import GeometryCollection, LineString, Polygon
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -16,7 +17,7 @@ import app.models  # noqa: F401
 from app.models import NavigationWaterArea
 from app.models.address import NavigationChannelBoundary
 from app.models.base import Base
-from scripts.navigation.import_river_shapefile import import_river_shapefile, iter_layer_rows
+from scripts.navigation.import_river_shapefile import _repair_polygonal_geometry, import_river_shapefile, iter_layer_rows
 
 
 @pytest_asyncio.fixture
@@ -125,6 +126,64 @@ def test_iter_layer_rows_reads_attrs_bbox_and_repairs_geometry(tmp_path: Path) -
     assert repaired.simplified_geometry_low_json is not None
 
 
+def test_repair_polygonal_geometry_extracts_polygons_from_geometry_collection() -> None:
+    collection = GeometryCollection(
+        [
+            LineString([(120.0, 31.0), (120.1, 31.1)]),
+            Polygon(
+                [
+                    (120.0, 31.0),
+                    (120.2, 31.0),
+                    (120.2, 31.2),
+                    (120.0, 31.2),
+                    (120.0, 31.0),
+                ]
+            ),
+        ]
+    )
+
+    geometry, status = _repair_polygonal_geometry(collection)
+
+    assert status == "REPAIRED"
+    assert geometry.geom_type == "Polygon"
+    assert geometry.is_valid
+
+
+def test_iter_layer_rows_classifies_double_line_river_as_river(tmp_path: Path) -> None:
+    base_path = tmp_path / "一级水系"
+    _write_polygon_layer(
+        base_path,
+        [
+            {
+                "object_id": 1,
+                "name": "红水河",
+                "remark": "一级常年双线河",
+                "shape_length": 1.2,
+                "shape_area": 0.02,
+                "ring": [
+                    [120.0, 31.0],
+                    [120.1, 31.0],
+                    [120.1, 31.1],
+                    [120.0, 31.1],
+                    [120.0, 31.0],
+                ],
+            }
+        ],
+    )
+    rows = list(
+        iter_layer_rows(
+            shp_path=base_path.with_suffix(".shp"),
+            source_code="TEST_RIVER",
+            layer_name="一级水系",
+        )
+    )
+
+    assert rows[0].source_layer_code == "LEVEL_1"
+    assert rows[0].source_layer_display_name == "一级水系"
+    assert rows[0].source_layer_order == 1
+    assert rows[0].water_type_code == "RIVER"
+
+
 def test_iter_layer_rows_supports_geometry_only_layer_without_dbf(tmp_path: Path) -> None:
     shp_path = _sample_layer(tmp_path, "rx8")
     shp_path.with_suffix(".dbf").unlink()
@@ -143,6 +202,31 @@ def test_iter_layer_rows_supports_geometry_only_layer_without_dbf(tmp_path: Path
     assert rows[0].water_name is None
     assert rows[0].water_level == 8
     assert rows[0].geometry_status_code == "VALID"
+
+
+@pytest.mark.asyncio
+async def test_import_zip_reads_rx8_double_dot_dbf(tmp_path: Path) -> None:
+    shp_path = _sample_layer(tmp_path, "rx8")
+    zip_path = tmp_path / "revier-rx8-test.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for path in tmp_path.glob("rx8.*"):
+            arcname = path.name
+            if path.suffix == ".dbf":
+                arcname = "rx8..dbf"
+            elif path.suffix == ".prj":
+                arcname = "rx8..prj"
+            archive.write(path, arcname=arcname)
+
+    summary = await import_river_shapefile(
+        input_path=zip_path,
+        source_code="TEST_RIVER",
+        layers=["rx8"],
+        dry_run=True,
+    )
+
+    assert summary.layers[0].rows_read == 2
+    assert summary.layers[0].rows_valid == 1
+    assert summary.layers[0].rows_repaired == 1
 
 
 @pytest.mark.asyncio

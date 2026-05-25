@@ -1,0 +1,51 @@
+services:
+  navigation-postgis:
+    image: postgis/postgis:16-3.5
+    platform: linux/amd64
+    container_name: inland-navigation-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: inland_shipping
+      POSTGRES_USER: inland
+      POSTGRES_PASSWORD: inland_local_dev
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "54329:5432"
+    volumes:
+      - navigation_postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inland -d inland_shipping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  navigation-mysql:
+    image: mysql:8.4
+    container_name: inland-navigation-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: inland_shipping
+      MYSQL_USER: inland
+      MYSQL_PASSWORD: inland_local_dev
+      MYSQL_ROOT_PASSWORD: inland_root_dev
+      TZ: Asia/Shanghai
+    command:
+      [
+        "mysqld",
+        "--character-set-server=utf8mb4",
+        "--collation-server=utf8mb4_0900_ai_ci",
+        "--default-time-zone=+08:00",
+      ]
+    ports:
+      - "33069:3306"
+    volumes:
+      - navigation_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uinland -pinland_local_dev --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  navigation_postgis_data:
+  navigation_mysql_data:

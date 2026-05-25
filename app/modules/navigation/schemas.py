@@ -80,11 +80,15 @@ class NavigationMapLayerFeatureResponse(BaseModel):
     layer_type_code: str
     name: str | None = None
     geometry_json: dict[str, Any] | None = None
+    coordinate_system_code: str = "WGS84"
+    display_coordinate_system_code: str = "GCJ02_AMAP"
     properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class NavigationMapLayerResponse(BaseModel):
     bbox: dict[str, float] | None = None
+    coordinate_system_code: str = "WGS84"
+    display_coordinate_system_code: str = "GCJ02_AMAP"
     water_areas: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     channel_boundaries: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     centerlines: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
@@ -156,11 +160,11 @@ class NavigationWorkbenchChannelResponse(BaseModel):
     centerline_count: int = 0
     approved_current_centerline_count: int = 0
     active_graph_edge_count: int = 0
-    current_water_area_match_count: int = 0
+    current_water_body_match_count: int = 0
     boundary_status_code: str
     centerline_status_code: str
     graph_status_code: str
-    water_area_match_status_code: str = "MISSING"
+    water_body_match_status_code: str = "MISSING"
 
 
 class NavigationWorkbenchSummaryResponse(BaseModel):
@@ -170,53 +174,325 @@ class NavigationWorkbenchSummaryResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class NavigationProductionStepResponse(BaseModel):
+    step_code: str
+    step_name: str
+    status_code: str
+    count: int = 0
+    blocker_code: str | None = None
+    next_path: str | None = None
+
+
+class NavigationProductionChannelResponse(BaseModel):
+    id: int
+    channel_code: str
+    channel_name: str
+    display_name: str | None = None
+    planning_level_code: str | None = None
+    channel_type_code: str | None = None
+    production_stage_code: str
+    production_stage_name: str
+    next_action_label: str
+    next_path: str
+    blocker_codes: list[str] = Field(default_factory=list)
+    current_water_body_match_count: int = 0
+    candidate_boundary_count: int = 0
+    current_boundary_count: int = 0
+    centerline_candidate_count: int = 0
+    approved_current_centerline_count: int = 0
+    active_graph_edge_count: int = 0
+    route_verified_count: int = 0
+    diagnostic_issue_codes: list[str] = Field(default_factory=list)
+    water_body_candidate_count: int = 0
+    seed_boundary_overlap_ratio: float | None = None
+    steps: list[NavigationProductionStepResponse] = Field(default_factory=list)
+    available_actions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class NavigationProductionSummaryResponse(BaseModel):
+    stats: dict[str, int] = Field(default_factory=dict)
+    stage_counts: dict[str, int] = Field(default_factory=dict)
+    active_graph_version: dict[str, Any] | None = None
+    channels: list[NavigationProductionChannelResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NavigationChannelPipelineResponse(BaseModel):
+    channel: NavigationProductionChannelResponse
+    map_layer_query: dict[str, Any] = Field(default_factory=dict)
+    available_actions: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NavigationChannelDiagnosticBoundaryResponse(BaseModel):
+    id: int | None = None
+    coverage_policy_code: str | None = None
+    boundary_quality_code: str | None = None
+    connectivity_status_code: str | None = None
+    repair_status_code: str | None = None
+    geometry_status_code: str | None = None
+    coordinate_system_code: str | None = None
+    ring_count: int = 0
+    point_count: int = 0
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+
+
+class NavigationChannelDiagnosticResponse(BaseModel):
+    channel_id: int
+    channel_code: str
+    channel_name: str
+    production_stage_code: str
+    production_stage_name: str
+    current_boundary: NavigationChannelDiagnosticBoundaryResponse | None = None
+    boundary_source_code: str = "NONE"
+    boundary_source_explanation: str
+    seed_boundary_overlap_ratio: float | None = None
+    current_water_body_match_count: int = 0
+    water_body_candidate_count: int = 0
+    candidate_boundary_count: int = 0
+    current_boundary_count: int = 0
+    centerline_candidate_count: int = 0
+    approved_current_centerline_count: int = 0
+    active_graph_edge_count: int = 0
+    route_verified_count: int = 0
+    issue_codes: list[str] = Field(default_factory=list)
+    blocker_codes: list[str] = Field(default_factory=list)
+    recommended_next_action: str
+    recommended_path: str
+    suggested_terms: list[str] = Field(default_factory=list)
+    source_trace_json: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NavigationWaterBodyCandidateResponse(BaseModel):
+    water_body_id: int
+    water_body_code: str | None = None
+    water_name: str | None = None
+    normalized_water_name: str | None = None
+    display_name: str | None = None
+    production_name: str | None = None
+    source_code: str
+    body_role_code: str
+    source_layer_name: str | None = None
+    source_layer_display_name: str | None = None
+    source_layer_role_code: str | None = None
+    water_type_code: str
+    feature_count: int = 0
+    area_km2: float | None = None
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+    display_bbox: dict[str, float | None] = Field(default_factory=dict)
+    candidate_type_code: str
+    matched_term: str | None = None
+    score: int
+    confidence_code: str
+    reason_codes: list[str] = Field(default_factory=list)
+    issue_codes: list[str] = Field(default_factory=list)
+    already_matched: bool = False
+
+
+class NavigationWaterBodyCandidateListResponse(BaseModel):
+    channel_id: int
+    channel_code: str
+    channel_name: str
+    total: int
+    suggested_terms: list[str] = Field(default_factory=list)
+    issue_codes: list[str] = Field(default_factory=list)
+    items: list[NavigationWaterBodyCandidateResponse] = Field(default_factory=list)
+
+
+class NavigationCandidateConfirmRequest(BaseModel):
+    score: int = Field(default=92, ge=0, le=100)
+    candidate_type_code: str = Field(default="CONFIRMED_MATCH", max_length=64)
+    issue_codes: list[str] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class NavigationDiagnosticsRunResponse(BaseModel):
+    channel_count: int
+    issue_counts: dict[str, int] = Field(default_factory=dict)
+    items: list[NavigationChannelDiagnosticResponse] = Field(default_factory=list)
+
+
+class NavigationOsmImportRequest(BaseModel):
+    source_path: str | None = Field(default=None, max_length=512)
+    scope_code: str = Field(default="REAL-JS-YRD", max_length=64)
+    province_codes: list[str] = Field(default_factory=lambda: ["JS", "ZJ", "SH", "AH"])
+    dry_run: bool = True
+
+
+class NavigationOsmImportResponse(BaseModel):
+    status_code: str
+    imported_count: int = 0
+    candidate_count: int = 0
+    message: str
+    next_path: str | None = None
+
+
 class NavigationWaterAreaListItemResponse(BaseModel):
     id: int
     source_code: str
     source_layer_name: str
+    source_layer_code: str | None = None
+    source_layer_display_name: str | None = None
+    source_layer_role_code: str | None = None
+    source_layer_order: int | None = None
+    source_file_name: str | None = None
+    source_object_id: str | None = None
+    has_attributes: bool = True
+    raw_properties_summary: dict[str, Any] | None = None
     water_name: str | None = None
+    normalized_water_name: str | None = None
     water_type_code: str
     geometry_status_code: str
     bbox: dict[str, float | None] = Field(default_factory=dict)
+    center_lng: float | None = None
+    center_lat: float | None = None
     area_km2: float | None = None
+    match_count: int = 0
+    is_matched: bool = False
+    matched_channels: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class NavigationChannelWaterAreaMatchItemResponse(BaseModel):
+class NavigationWaterAreaListResponse(BaseModel):
+    items: list[NavigationWaterAreaListItemResponse] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+
+
+class NavigationWaterBodyListItemResponse(BaseModel):
+    group_key: str
+    id: int | None = None
+    water_body_code: str | None = None
+    source_code: str
+    body_role_code: str | None = None
+    dedupe_status_code: str | None = None
+    source_layer_code: str | None = None
+    source_layer_name: str | None = None
+    source_layer_display_name: str | None = None
+    source_layer_role_code: str | None = None
+    source_layer_order: int | None = None
+    water_name: str | None = None
+    normalized_water_name: str | None = None
+    display_name: str | None = None
+    production_name: str | None = None
+    name_status_code: str = "RAW_NAMED"
+    name_source_code: str | None = None
+    name_note: str | None = None
+    water_type_code: str
+    feature_count: int
+    enabled_count: int
+    repaired_count: int
+    invalid_count: int
+    total_area_km2: float | None = None
+    quality_code: str | None = None
+    source_layer_summary: dict[str, Any] | None = None
+    coordinate_system_code: str = "WGS84"
+    display_coordinate_system_code: str = "GCJ02_AMAP"
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+    display_bbox: dict[str, float | None] = Field(default_factory=dict)
+    match_count: int = 0
+    is_matched: bool = False
+    matched_channels: list[dict[str, Any]] = Field(default_factory=list)
+    representative_water_area_ids: list[int] = Field(default_factory=list)
+
+
+class NavigationWaterBodyListResponse(BaseModel):
+    items: list[NavigationWaterBodyListItemResponse] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+
+
+class NavigationWaterAreaLayerSummaryResponse(BaseModel):
+    source_layer_name: str
+    source_layer_code: str | None = None
+    source_layer_display_name: str | None = None
+    source_layer_role_code: str | None = None
+    source_layer_order: int | None = None
+    count: int
+    raw_count: int = 0
+    enabled_count: int = 0
+    invalid_count: int = 0
+    named_count: int = 0
+
+
+class NavigationWaterAreaSummaryResponse(BaseModel):
+    total_count: int
+    raw_total_count: int = 0
+    enabled_count: int = 0
+    invalid_count: int = 0
+    real_count: int
+    named_count: int
+    unnamed_count: int
+    matched_count: int
+    unmatched_count: int
+    water_body_count: int = 0
+    standard_body_count: int = 0
+    hierarchy_body_count: int = 0
+    rx_fill_body_count: int = 0
+    rx_duplicate_link_count: int = 0
+    rx8_body_count: int = 0
+    invalid_body_count: int = 0
+    matched_water_body_count: int = 0
+    unmatched_water_body_count: int = 0
+    unnamed_water_body_count: int = 0
+    layer_counts: list[NavigationWaterAreaLayerSummaryResponse] = Field(default_factory=list)
+
+
+class NavigationWaterBodyNameUpdateRequest(BaseModel):
+    production_name: str = Field(min_length=1, max_length=128)
+    name_note: str | None = Field(default=None, max_length=512)
+
+
+class NavigationChannelWaterBodyMatchItemResponse(BaseModel):
     id: int
     channel_id: int
     channel_code: str | None = None
     channel_name: str | None = None
-    water_area_id: int
+    water_body_id: int
+    water_body_code: str | None = None
     water_name: str | None = None
+    production_name: str | None = None
     source_code: str
-    source_layer_name: str
-    source_object_id: str
+    body_role_code: str
+    source_layer_name: str | None = None
+    source_layer_display_name: str | None = None
     water_type_code: str
+    feature_count: int = 0
     match_batch_code: str
     match_type_code: str
     matched_term: str | None = None
     score: int
     confidence_code: str
-    review_status_code: str
     issue_codes: list[str] = Field(default_factory=list)
     is_current: bool
     bbox: dict[str, float | None] = Field(default_factory=dict)
+    source_water_area_ids: list[int] = Field(default_factory=list)
     source_trace_json: dict[str, Any] | None = None
 
 
-class NavigationChannelWaterAreaMatchListResponse(BaseModel):
+class NavigationChannelWaterBodyMatchListResponse(BaseModel):
     channel_id: int
     channel_code: str
     channel_name: str
     current_match_count: int
     best_score: int | None = None
     confidence_code: str = "MISSING"
-    review_status_code: str = "NEED_REVIEW"
     issue_codes: list[str] = Field(default_factory=list)
-    candidate_boundary_count: int = 0
-    current_boundary_count: int = 0
     match_batch_code: str | None = None
-    items: list[NavigationChannelWaterAreaMatchItemResponse] = Field(default_factory=list)
+    items: list[NavigationChannelWaterBodyMatchItemResponse] = Field(default_factory=list)
+
+
+class NavigationWaterBodyMatchCreateRequest(BaseModel):
+    water_body_id: int
+    match_type_code: str = Field(default="MANUAL_ADD", max_length=64)
+    matched_term: str | None = Field(default=None, max_length=128)
+    score: int = Field(default=90, ge=0, le=100)
+    confidence_code: str = Field(default="MANUAL_CONFIRMED", max_length=64)
+    issue_codes: list[str] = Field(default_factory=list)
+    match_batch_code: str | None = Field(default=None, max_length=96)
+    source_trace_json: dict[str, Any] | None = None
 
 
 class NavigationCenterlineListItemResponse(BaseModel):
@@ -303,11 +579,6 @@ class NavigationGeometryDraftUpdateRequest(BaseModel):
     geometry_json: dict[str, Any] | None = None
     source_type_code: str | None = Field(default=None, max_length=64)
     source_trace_json: dict[str, Any] | None = None
-    review_comment: str | None = Field(default=None, max_length=512)
-
-
-class NavigationGeometryDraftApproveRequest(BaseModel):
-    review_comment: str | None = Field(default=None, max_length=512)
 
 
 class NavigationGraphBuildRequest(BaseModel):

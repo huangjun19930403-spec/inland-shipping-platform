@@ -15,38 +15,34 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.models import NavigationWaterArea
+from app.modules.navigation.water_area_layers import water_area_layer_order, water_area_layer_meta
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_water_areas.jsonl.gz"
 DEFAULT_MANIFEST = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_water_areas_manifest.json"
 DEFAULT_SOURCE_CODE = "RIVER_SHAPEFILE_2026"
 
-LAYER_ORDER = {
-    "rx": 0,
-    "一级水系": 1,
-    "二级水系": 2,
-    "三级水系": 3,
-    "四级水系": 4,
-    "五级水系": 5,
-    "六级水系": 6,
-    "七级水系": 7,
-    "rx8": 8,
-}
-
-
 def _float(value: Any) -> float | None:
     return float(value) if value is not None else None
 
 
 def _layer_order(name: str | None) -> int:
-    return LAYER_ORDER.get(str(name or ""), 99)
+    return water_area_layer_order(name)
 
 
 def _row_payload(row: NavigationWaterArea) -> dict[str, Any]:
+    meta = water_area_layer_meta(row.source_layer_name)
     return {
         "source_code": row.source_code,
         "source_layer_name": row.source_layer_name,
+        "source_layer_code": row.source_layer_code or meta.source_layer_code,
+        "source_layer_display_name": row.source_layer_display_name or meta.source_layer_display_name,
+        "source_layer_role_code": row.source_layer_role_code or meta.source_layer_role_code,
+        "source_layer_order": row.source_layer_order if row.source_layer_order is not None else meta.source_layer_order,
+        "source_file_name": row.source_file_name,
         "source_object_id": row.source_object_id,
+        "has_attributes": bool(row.has_attributes),
+        "raw_properties_json": row.raw_properties_json,
         "water_name": row.water_name,
         "normalized_water_name": row.normalized_water_name,
         "alias_names": row.alias_names,
@@ -92,7 +88,11 @@ async def export_navigation_water_area_seed(
     rows.sort(key=lambda row: (_layer_order(row.source_layer_name), row.source_layer_name, row.source_object_id, row.id))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     layer_counts: Counter[str] = Counter()
+    enabled_layer_counts: Counter[str] = Counter()
+    invalid_layer_counts: Counter[str] = Counter()
     named_count = 0
+    enabled_count = 0
+    invalid_count = 0
     bbox = {"min_lng": None, "min_lat": None, "max_lng": None, "max_lat": None}
 
     with gzip.open(output_path, "wt", encoding="utf-8") as handle:
@@ -103,6 +103,12 @@ async def export_navigation_water_area_seed(
             layer_counts[row.source_layer_name] += 1
             if row.water_name:
                 named_count += 1
+            if row.is_enabled:
+                enabled_count += 1
+                enabled_layer_counts[row.source_layer_name] += 1
+            if row.geometry_status_code == "INVALID" or not row.is_enabled:
+                invalid_count += 1
+                invalid_layer_counts[row.source_layer_name] += 1
             if row.bbox_min_lng is not None:
                 bbox["min_lng"] = _float(row.bbox_min_lng) if bbox["min_lng"] is None else min(float(bbox["min_lng"]), float(row.bbox_min_lng))
                 bbox["min_lat"] = _float(row.bbox_min_lat) if bbox["min_lat"] is None else min(float(bbox["min_lat"]), float(row.bbox_min_lat))
@@ -115,8 +121,12 @@ async def export_navigation_water_area_seed(
         "source_code": source_code,
         "artifact": str(output_path.relative_to(PROJECT_ROOT)),
         "record_count": len(rows),
+        "enabled_record_count": enabled_count,
+        "invalid_record_count": invalid_count,
         "named_record_count": named_count,
         "layer_counts": dict(sorted(layer_counts.items(), key=lambda item: _layer_order(item[0]))),
+        "enabled_layer_counts": dict(sorted(enabled_layer_counts.items(), key=lambda item: _layer_order(item[0]))),
+        "invalid_layer_counts": dict(sorted(invalid_layer_counts.items(), key=lambda item: _layer_order(item[0]))),
         "bbox": bbox,
         "notes": [
             "This seed artifact is produced from navigation_water_area and replaces runtime revier.zip extraction for local/production seeding.",

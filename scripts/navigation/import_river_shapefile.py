@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import tempfile
 import zipfile
@@ -20,7 +21,7 @@ from typing import Any
 import shapefile
 from pyproj import CRS, Geod, Transformer
 from shapely import make_valid
-from shapely.geometry import mapping, shape
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform as shapely_transform
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal, engine
 from app.models import NavigationWaterArea
 from app.models.base import Base
+from app.modules.navigation.water_area_layers import water_area_layer_meta
 
 DEFAULT_LAYERS = (
     "rx",
@@ -50,7 +52,14 @@ GEOD = Geod(ellps="WGS84")
 class WaterAreaRow:
     source_code: str
     source_layer_name: str
+    source_layer_code: str | None
+    source_layer_display_name: str | None
+    source_layer_role_code: str | None
+    source_layer_order: int | None
+    source_file_name: str | None
     source_object_id: str
+    has_attributes: bool
+    raw_properties_json: dict[str, Any] | None
     water_name: str | None
     normalized_water_name: str | None
     alias_names: list[str] | None
@@ -139,8 +148,70 @@ def _index_shapefiles(root: Path) -> dict[str, Path]:
     return {path.stem: path for path in root.rglob("*.shp")}
 
 
+def _index_zip_shapefiles(archive: zipfile.ZipFile) -> dict[str, str]:
+    return {Path(name).stem: name for name in archive.namelist() if name.lower().endswith(".shp")}
+
+
+def _zip_component(names: set[str], base: str, suffix: str) -> str | None:
+    suffix = suffix.lstrip(".")
+    candidates = (f"{base}.{suffix}", f"{base}..{suffix}")
+    for candidate in candidates:
+        if candidate in names:
+            return candidate
+    return None
+
+
+def _zip_reader(archive: zipfile.ZipFile, shp_entry: str) -> tuple[shapefile.Reader, CRS | None, bool]:
+    names = set(archive.namelist())
+    base = shp_entry[:-4]
+    shx_entry = _zip_component(names, base, "shx")
+    dbf_entry = _zip_component(names, base, "dbf")
+    cpg_entry = _zip_component(names, base, "cpg")
+    prj_entry = _zip_component(names, base, "prj")
+    encoding = "utf-8"
+    if cpg_entry:
+        encoding = archive.read(cpg_entry).decode("utf-8", errors="ignore").strip() or "utf-8"
+    kwargs: dict[str, Any] = {"shp": io.BytesIO(archive.read(shp_entry)), "encoding": encoding}
+    if shx_entry:
+        kwargs["shx"] = io.BytesIO(archive.read(shx_entry))
+    if dbf_entry:
+        kwargs["dbf"] = io.BytesIO(archive.read(dbf_entry))
+    source_crs = None
+    if prj_entry:
+        try:
+            source_crs = CRS.from_wkt(archive.read(prj_entry).decode("utf-8", errors="ignore"))
+        except Exception:
+            source_crs = None
+    return shapefile.Reader(**kwargs), source_crs, bool(dbf_entry)
+
+
+def _component_path(shp_path: Path, suffix: str) -> Path | None:
+    suffix = suffix.lstrip(".")
+    candidates = (
+        shp_path.with_suffix(f".{suffix}"),
+        shp_path.parent / f"{shp_path.stem}..{suffix}",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _open_reader(shp_path: Path) -> shapefile.Reader:
+    shx_path = _component_path(shp_path, "shx")
+    dbf_path = _component_path(shp_path, "dbf")
+    kwargs: dict[str, Any] = {"shp": str(shp_path), "encoding": _read_encoding(shp_path)}
+    if shx_path is not None:
+        kwargs["shx"] = str(shx_path)
+    if dbf_path is not None:
+        kwargs["dbf"] = str(dbf_path)
+    return shapefile.Reader(**kwargs)
+
+
 def _read_encoding(shp_path: Path) -> str:
-    cpg_path = shp_path.with_suffix(".cpg")
+    cpg_path = _component_path(shp_path, "cpg")
+    if cpg_path is None:
+        cpg_path = shp_path.with_suffix(".cpg")
     if not cpg_path.exists():
         return "utf-8"
     value = cpg_path.read_text(encoding="utf-8", errors="ignore").strip()
@@ -148,8 +219,8 @@ def _read_encoding(shp_path: Path) -> str:
 
 
 def _read_crs(shp_path: Path) -> CRS | None:
-    prj_path = shp_path.with_suffix(".prj")
-    if not prj_path.exists():
+    prj_path = _component_path(shp_path, "prj")
+    if prj_path is None or not prj_path.exists():
         return None
     try:
         return CRS.from_wkt(prj_path.read_text(encoding="utf-8", errors="ignore"))
@@ -164,6 +235,54 @@ def _to_wgs84(geometry: BaseGeometry, source_crs: CRS | None) -> BaseGeometry:
     return shapely_transform(transformer.transform, geometry)
 
 
+def _polygonal_geometry(geometry: BaseGeometry) -> BaseGeometry:
+    if geometry.is_empty:
+        return GeometryCollection()
+    if isinstance(geometry, (Polygon, MultiPolygon)):
+        return geometry
+    parts: list[Polygon] = []
+    if hasattr(geometry, "geoms"):
+        for item in geometry.geoms:
+            polygonal = _polygonal_geometry(item)
+            if isinstance(polygonal, Polygon):
+                parts.append(polygonal)
+            elif isinstance(polygonal, MultiPolygon):
+                parts.extend(list(polygonal.geoms))
+    if not parts:
+        return GeometryCollection()
+    if len(parts) == 1:
+        return parts[0]
+    return MultiPolygon(parts)
+
+
+def _repair_polygonal_geometry(geometry: BaseGeometry) -> tuple[BaseGeometry, str]:
+    if geometry.is_empty:
+        return geometry, "INVALID"
+
+    status = "VALID"
+    if not geometry.is_valid:
+        geometry = make_valid(geometry)
+        status = "REPAIRED"
+
+    polygonal = _polygonal_geometry(geometry)
+    if polygonal.is_empty:
+        return geometry, "INVALID"
+    if polygonal is not geometry and status == "VALID":
+        status = "REPAIRED"
+    geometry = polygonal
+
+    if not geometry.is_valid:
+        geometry = make_valid(geometry)
+        status = "REPAIRED"
+        geometry = _polygonal_geometry(geometry)
+        if geometry.is_empty or not geometry.is_valid:
+            return geometry, "INVALID"
+
+    if geometry.geom_type not in {"Polygon", "MultiPolygon"}:
+        return geometry, "INVALID"
+    return geometry, status
+
+
 def _normalise_name(value: Any) -> str | None:
     if value is None:
         return None
@@ -174,28 +293,18 @@ def _normalise_name(value: Any) -> str | None:
 
 
 def _water_level_from_layer(layer_name: str) -> int | None:
-    mapping_by_layer = {
-        "一级水系": 1,
-        "二级水系": 2,
-        "三级水系": 3,
-        "四级水系": 4,
-        "五级水系": 5,
-        "六级水系": 6,
-        "七级水系": 7,
-        "rx8": 8,
-    }
-    return mapping_by_layer.get(layer_name)
+    return water_area_layer_meta(layer_name).water_level
 
 
 def _water_type(name: str | None, remark: str | None) -> str:
     text = f"{name or ''} {remark or ''}"
-    if any(token in text for token in ("运河", "漕河", "渠", "航道", "线")):
-        return "CANAL"
-    if any(token in text for token in ("湖", "荡", "淀")):
-        return "LAKE"
     if any(token in text for token in ("水库", "库区")):
         return "RESERVOIR"
-    if any(token in text for token in ("江", "河", "溪", "水")):
+    if any(token in text for token in ("湖", "荡", "淀", "泡", "海子", "淖尔")):
+        return "LAKE"
+    if any(token in text for token in ("运河", "漕河", "渠道", "灌渠", "干渠", "支渠")):
+        return "CANAL"
+    if any(token in text for token in ("江", "河", "溪", "水道", "涌", "港", "双线河", "单线河")):
         return "RIVER"
     return "UNKNOWN"
 
@@ -231,6 +340,10 @@ def _shape_record_attrs(shape_record: Any) -> dict[str, Any]:
         return {}
 
 
+def _json_safe_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in attrs.items()}
+
+
 def iter_layer_rows(
     *,
     shp_path: Path,
@@ -239,9 +352,55 @@ def iter_layer_rows(
     limit: int | None = None,
     low_value_area_km2: float = 0.001,
 ) -> Iterator[WaterAreaRow]:
-    reader = shapefile.Reader(str(shp_path), encoding=_read_encoding(shp_path))
+    reader = _open_reader(shp_path)
     source_crs = _read_crs(shp_path)
-    has_dbf = shp_path.with_suffix(".dbf").exists()
+    has_dbf = _component_path(shp_path, "dbf") is not None
+    yield from _iter_reader_rows(
+        reader=reader,
+        source_crs=source_crs,
+        has_dbf=has_dbf,
+        source_file_name=shp_path.name,
+        source_code=source_code,
+        layer_name=layer_name,
+        limit=limit,
+        low_value_area_km2=low_value_area_km2,
+    )
+
+
+def iter_zip_layer_rows(
+    *,
+    archive: zipfile.ZipFile,
+    shp_entry: str,
+    source_code: str,
+    layer_name: str,
+    limit: int | None = None,
+    low_value_area_km2: float = 0.001,
+) -> Iterator[WaterAreaRow]:
+    reader, source_crs, has_dbf = _zip_reader(archive, shp_entry)
+    yield from _iter_reader_rows(
+        reader=reader,
+        source_crs=source_crs,
+        has_dbf=has_dbf,
+        source_file_name=Path(shp_entry).name,
+        source_code=source_code,
+        layer_name=layer_name,
+        limit=limit,
+        low_value_area_km2=low_value_area_km2,
+    )
+
+
+def _iter_reader_rows(
+    *,
+    reader: shapefile.Reader,
+    source_crs: CRS | None,
+    has_dbf: bool,
+    source_file_name: str,
+    source_code: str,
+    layer_name: str,
+    limit: int | None,
+    low_value_area_km2: float,
+) -> Iterator[WaterAreaRow]:
+    layer_meta = water_area_layer_meta(layer_name)
 
     shape_iterable: Iterator[tuple[Any, dict[str, Any]]]
     if has_dbf:
@@ -263,20 +422,7 @@ def iter_layer_rows(
         except Exception:
             geometry = shape({"type": "GeometryCollection", "geometries": []})
 
-        geometry_status = "VALID"
-        if geometry.is_empty:
-            geometry_status = "INVALID"
-        elif not geometry.is_valid:
-            repaired = make_valid(geometry)
-            if repaired.is_empty or not repaired.is_valid:
-                geometry = repaired
-                geometry_status = "INVALID"
-            else:
-                geometry = repaired
-                geometry_status = "REPAIRED"
-
-        if geometry.geom_type not in {"Polygon", "MultiPolygon"}:
-            geometry_status = "INVALID"
+        geometry, geometry_status = _repair_polygonal_geometry(geometry)
 
         bounds = geometry.bounds if not geometry.is_empty else (None, None, None, None)
         bbox_min_lng, bbox_min_lat, bbox_max_lng, bbox_max_lat = bounds
@@ -287,7 +433,14 @@ def iter_layer_rows(
         yield WaterAreaRow(
             source_code=source_code,
             source_layer_name=layer_name,
+            source_layer_code=layer_meta.source_layer_code,
+            source_layer_display_name=layer_meta.source_layer_display_name,
+            source_layer_role_code=layer_meta.source_layer_role_code,
+            source_layer_order=layer_meta.source_layer_order,
+            source_file_name=source_file_name,
             source_object_id=str(object_id),
+            has_attributes=has_dbf,
+            raw_properties_json=_json_safe_attrs(attrs) if attrs else None,
             water_name=water_name,
             normalized_water_name=_normalise_name(water_name),
             alias_names=None,
@@ -337,6 +490,56 @@ async def _upsert_row(session: AsyncSession, row: WaterAreaRow) -> str:
     return "updated"
 
 
+async def _consume_layers(
+    *,
+    summary: ImportSummary,
+    layers: Sequence[str],
+    row_iter_factory: Callable[[str], Iterator[WaterAreaRow] | None],
+    dry_run: bool,
+    strict_layers: bool,
+    batch_size: int,
+    session: AsyncSession | None,
+) -> None:
+    for layer_name in layers:
+        layer_summary = LayerImportSummary(layer_name=layer_name)
+        summary.layers.append(layer_summary)
+        rows_iter = row_iter_factory(layer_name)
+        if rows_iter is None:
+            layer_summary.status = "MISSING"
+            layer_summary.message = f"Layer shapefile not found: {layer_name}"
+            if strict_layers:
+                raise FileNotFoundError(layer_summary.message)
+            continue
+
+        pending = 0
+        for row in rows_iter:
+            layer_summary.rows_read += 1
+            if row.geometry_status_code == "REPAIRED":
+                layer_summary.rows_repaired += 1
+            elif row.geometry_status_code == "INVALID":
+                layer_summary.rows_invalid += 1
+            else:
+                layer_summary.rows_valid += 1
+            if row.is_low_value:
+                layer_summary.rows_low_value += 1
+
+            if dry_run or session is None:
+                continue
+
+            action = await _upsert_row(session, row)
+            if action == "inserted":
+                layer_summary.rows_inserted += 1
+            else:
+                layer_summary.rows_updated += 1
+            pending += 1
+            if pending >= batch_size:
+                await session.commit()
+                pending = 0
+
+        if session is not None and pending:
+            await session.commit()
+
+
 async def import_river_shapefile(
     *,
     input_path: Path,
@@ -355,65 +558,70 @@ async def import_river_shapefile(
     if not dry_run and prepare_schema:
         await _prepare_schema()
 
-    with _materialized_input(input_path) as root:
-        shapefiles = _index_shapefiles(root)
-        session_cm = session_factory() if not dry_run else None
-        session: AsyncSession | None = None
-        try:
-            if session_cm is not None:
-                session = await session_cm.__aenter__()
+    session_cm = session_factory() if not dry_run else None
+    session: AsyncSession | None = None
+    try:
+        if session_cm is not None:
+            session = await session_cm.__aenter__()
 
-            for layer_name in layers:
-                layer_summary = LayerImportSummary(layer_name=layer_name)
-                summary.layers.append(layer_summary)
-                shp_path = shapefiles.get(layer_name)
-                if shp_path is None:
-                    layer_summary.status = "MISSING"
-                    layer_summary.message = f"Layer shapefile not found: {layer_name}"
-                    if strict_layers:
-                        raise FileNotFoundError(layer_summary.message)
-                    continue
+        if input_path.is_file() and input_path.suffix.lower() == ".zip":
+            with zipfile.ZipFile(input_path) as archive:
+                shapefiles = _index_zip_shapefiles(archive)
 
-                pending = 0
-                for row in iter_layer_rows(
-                    shp_path=shp_path,
-                    source_code=source_code,
-                    layer_name=layer_name,
-                    limit=limit_per_layer,
-                    low_value_area_km2=low_value_area_km2,
-                ):
-                    layer_summary.rows_read += 1
-                    if row.geometry_status_code == "REPAIRED":
-                        layer_summary.rows_repaired += 1
-                    elif row.geometry_status_code == "INVALID":
-                        layer_summary.rows_invalid += 1
-                    else:
-                        layer_summary.rows_valid += 1
-                    if row.is_low_value:
-                        layer_summary.rows_low_value += 1
+                def row_iter_for_zip(layer_name: str) -> Iterator[WaterAreaRow] | None:
+                    shp_entry = shapefiles.get(layer_name)
+                    if shp_entry is None:
+                        return None
+                    return iter_zip_layer_rows(
+                        archive=archive,
+                        shp_entry=shp_entry,
+                        source_code=source_code,
+                        layer_name=layer_name,
+                        limit=limit_per_layer,
+                        low_value_area_km2=low_value_area_km2,
+                    )
 
-                    if dry_run or session is None:
-                        continue
+                await _consume_layers(
+                    summary=summary,
+                    layers=layers,
+                    row_iter_factory=row_iter_for_zip,
+                    dry_run=dry_run,
+                    strict_layers=strict_layers,
+                    batch_size=batch_size,
+                    session=session,
+                )
+        else:
+            with _materialized_input(input_path) as root:
+                shapefiles = _index_shapefiles(root)
 
-                    action = await _upsert_row(session, row)
-                    if action == "inserted":
-                        layer_summary.rows_inserted += 1
-                    else:
-                        layer_summary.rows_updated += 1
-                    pending += 1
-                    if pending >= batch_size:
-                        await session.commit()
-                        pending = 0
+                def row_iter_for_dir(layer_name: str) -> Iterator[WaterAreaRow] | None:
+                    shp_path = shapefiles.get(layer_name)
+                    if shp_path is None:
+                        return None
+                    return iter_layer_rows(
+                        shp_path=shp_path,
+                        source_code=source_code,
+                        layer_name=layer_name,
+                        limit=limit_per_layer,
+                        low_value_area_km2=low_value_area_km2,
+                    )
 
-                if session is not None and pending:
-                    await session.commit()
-        except Exception:
-            if session is not None:
-                await session.rollback()
-            raise
-        finally:
-            if session_cm is not None:
-                await session_cm.__aexit__(None, None, None)
+                await _consume_layers(
+                    summary=summary,
+                    layers=layers,
+                    row_iter_factory=row_iter_for_dir,
+                    dry_run=dry_run,
+                    strict_layers=strict_layers,
+                    batch_size=batch_size,
+                    session=session,
+                )
+    except Exception:
+        if session is not None:
+            await session.rollback()
+        raise
+    finally:
+        if session_cm is not None:
+            await session_cm.__aexit__(None, None, None)
 
     return summary
 

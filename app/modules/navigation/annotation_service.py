@@ -45,6 +45,7 @@ class NavigationAnnotationTaskService:
         status_code: str | None = None,
         task_type_code: str | None = None,
         target_type_code: str | None = None,
+        channel_id: int | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> NavigationAnnotationTaskListResponse:
@@ -57,6 +58,8 @@ class NavigationAnnotationTaskService:
             stmt = stmt.where(NavigationAnnotationTask.task_type_code == task_type_code.upper())
         if target_type_code:
             stmt = stmt.where(NavigationAnnotationTask.target_type_code == target_type_code.upper())
+        if channel_id:
+            stmt = stmt.where(NavigationAnnotationTask.channel_id == channel_id)
         total = int((await self.session.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar_one() or 0)
         rows = list(
             (
@@ -415,6 +418,18 @@ class NavigationAnnotationTaskService:
         }
 
     def _next_actions(self, issue_code: str, task_type_code: str) -> list[str]:
+        if task_type_code == "WATER_AREA_MATCH_REPAIR":
+            return [
+                "打开水系归属页查看系统推荐候选水域",
+                "确认真实水域归属；必要时补充 alias/scope 配置",
+                "生成候选边界后再进入边界生产页逐段修正",
+            ]
+        if task_type_code == "SEED_BOUNDARY_REPAIR":
+            return [
+                "打开边界生产页查看 seed 边界来源和真实水域重叠问题",
+                "从候选边界或水域归属复制为草稿，逐段编辑后发布当前边界",
+                "发布边界后再生产中心线，不要用 seed 边界直接生成路径",
+            ]
         if issue_code == "UNKNOWN_CONSTRAINT_DATA" or task_type_code == "CONSTRAINT_DATA_REVIEW":
             return [
                 "补齐船闸、桥梁、吃水、吨级或限航数据",
@@ -425,7 +440,7 @@ class NavigationAnnotationTaskService:
             return [
                 "检查中心线是否位于 seed boundary 或 water area 内",
                 "人工修正后创建新的 centerline version",
-                "审核通过后再参与 graph rebuild",
+                "发布中心线版本后再参与 graph rebuild",
             ]
         if task_type_code in {"GRAPH_CONNECTIVITY_REPAIR", "GRAPH_EDGE_REVIEW"}:
             return [
@@ -434,9 +449,9 @@ class NavigationAnnotationTaskService:
                 "重建 graph version 并运行 validate_navigation_graph",
             ]
         return [
-            "复核问题位置和关联数据来源",
+            "确认问题位置和关联数据来源",
             "生成新的 boundary、centerline 或 constraint 版本",
-            "人工审核后再发布 graph version",
+            "发布修正数据后再重建 graph version",
         ]
 
     def _int_or_none(self, value: Any) -> int | None:
