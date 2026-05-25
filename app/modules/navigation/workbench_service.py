@@ -1183,7 +1183,12 @@ class NavigationWorkbenchService:
         return (
             await self.session.execute(
                 select(NavigationGraphVersion)
-                .where(NavigationGraphVersion.is_active.is_(True))
+                .where(
+                    NavigationGraphVersion.is_active.is_(True),
+                    NavigationGraphVersion.status_code == "READY",
+                    NavigationGraphVersion.scope_code.not_like("MVP%"),
+                    NavigationGraphVersion.edge_count > 0,
+                )
                 .order_by(NavigationGraphVersion.id.desc())
                 .limit(1)
             )

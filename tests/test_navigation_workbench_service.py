@@ -383,6 +383,80 @@ async def test_workbench_lists_channel_water_body_matches(session_maker) -> None
 
 
 @pytest.mark.asyncio
+async def test_workbench_summary_active_graph_version_uses_production_ready_filter(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add_all(
+            [
+                NavigationGraphVersion(
+                    id=1,
+                    version_code="GV-READY",
+                    version_name="Ready graph",
+                    scope_code="REAL-READY",
+                    status_code="READY",
+                    is_active=True,
+                    node_count=2,
+                    edge_count=1,
+                    channel_count=1,
+                    quality_score=90,
+                ),
+                NavigationGraphVersion(
+                    id=2,
+                    version_code="GV-FAILED",
+                    version_name="Failed graph",
+                    scope_code="REAL-FAILED",
+                    status_code="FAILED",
+                    is_active=True,
+                    node_count=2,
+                    edge_count=1,
+                    channel_count=1,
+                    quality_score=10,
+                ),
+                NavigationGraphVersion(
+                    id=3,
+                    version_code="GV-MVP",
+                    version_name="MVP graph",
+                    scope_code="MVP-TEST",
+                    status_code="READY",
+                    is_active=True,
+                    node_count=2,
+                    edge_count=1,
+                    channel_count=1,
+                    quality_score=70,
+                ),
+                NavigationGraphVersion(
+                    id=4,
+                    version_code="GV-EMPTY",
+                    version_name="Empty graph",
+                    scope_code="REAL-EMPTY",
+                    status_code="READY",
+                    is_active=True,
+                    node_count=0,
+                    edge_count=0,
+                    channel_count=0,
+                    quality_score=0,
+                ),
+            ]
+        )
+        await session.commit()
+
+        summary = await NavigationWorkbenchService(session).summary()
+        ready_graph = await session.get(NavigationGraphVersion, 1)
+        assert ready_graph is not None
+        ready_graph.is_active = False
+        await session.commit()
+
+        invalid_only_summary = await NavigationWorkbenchService(session).summary()
+
+    assert summary.active_graph_version is not None
+    assert summary.active_graph_version["version_code"] == "GV-READY"
+    assert summary.active_graph_version["status_code"] == "READY"
+    assert summary.active_graph_version["scope_code"] == "REAL-READY"
+    assert summary.active_graph_version["edge_count"] == 1
+    assert invalid_only_summary.active_graph_version is None
+
+
+@pytest.mark.asyncio
 async def test_workbench_active_graph_counts_include_all_active_ready_scopes(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)
