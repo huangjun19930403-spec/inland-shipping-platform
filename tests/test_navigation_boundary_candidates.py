@@ -188,3 +188,37 @@ async def test_generate_boundary_candidates_exists_message_includes_source_summa
     assert response.next_path == "/navigation/production/boundaries?channel_id=1"
     assert "已存在 3 个边界候选" in response.message
     assert "可以直接载入候选边界修正" in response.message
+
+
+@pytest.mark.asyncio
+async def test_generated_boundary_candidates_drive_production_channel_counts_and_stage(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_matched_water_body(session)
+        service = NavigationProductionService(session)
+
+        generated = await service.generate_boundary_candidates(
+            channel_id=1,
+            body=NavigationCandidateGenerateRequest(),
+        )
+        channels = await service.channels()
+        workspace = await service.production_workspace(channel_id=1, step="boundary")
+        candidates = await service.boundary_candidates(channel_id=1)
+
+    row = channels[0]
+    boundary_step = next(step for step in row.steps if step.step_code == "BOUNDARY")
+    candidate_types = {item.coverage_policy_code for item in candidates}
+    assert generated.created_count == 3
+    assert row.candidate_boundary_count >= 3
+    assert row.production_stage_code == "BOUNDARY_CANDIDATE"
+    assert row.next_action_label == "修正并确认边界"
+    assert boundary_step.status_code == "NEED_REVIEW"
+    assert boundary_step.count >= 3
+    assert workspace.channel.candidate_boundary_count >= 3
+    assert workspace.channel.production_stage_code == "BOUNDARY_CANDIDATE"
+    assert len(workspace.boundaries) >= 3
+    assert {
+        "WATER_BODY_UNION_RAW",
+        "WATER_BODY_UNION_CLEANED",
+        "WATER_BODY_UNION_SIMPLIFIED",
+    }.issubset(candidate_types)

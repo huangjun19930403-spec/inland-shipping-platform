@@ -442,7 +442,8 @@ class NavigationProductionService:
             select(NavigationChannelBoundary.channel_id, func.count()).where(
                 NavigationChannelBoundary.channel_id.in_(channel_ids),
                 NavigationChannelBoundary.is_current.is_(False),
-                NavigationChannelBoundary.coverage_policy_code == "RIVER_MATCH_CANDIDATE",
+                NavigationChannelBoundary.coverage_policy_code.in_(BOUNDARY_CANDIDATE_POLICIES),
+                NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
             ),
         )
         centerline_candidate_counts = await self.workbench._counts_by_channel(
