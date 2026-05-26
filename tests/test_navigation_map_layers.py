@@ -294,6 +294,9 @@ async def test_map_layers_loads_bbox_limited_features(session_maker) -> None:
     assert response.route_results[0].properties["result_no"] == 1
     assert response.route_results[0].properties["result_type_code"] == "RECOMMENDED"
     assert response.quality_issues[0].properties["issue_type_code"] == "UNKNOWN_CONSTRAINT_DATA"
+    assert response.layer_counts["GRAPH_EDGE"] == 1
+    assert response.layer_counts["ROUTE_RESULT"] == 1
+    assert response.layer_limits["GRAPH_EDGE"] == 20
 
 
 @pytest.mark.asyncio

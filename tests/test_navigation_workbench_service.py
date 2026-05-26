@@ -213,6 +213,10 @@ async def test_boundary_publish_preserves_seed_history_and_switches_current(sess
     assert boundaries[1].source_trace_json["caused_downstream_stale"] is True
     assert workspace.downstream_stale["centerline_stale"] is True
     assert workspace.downstream_stale["graph_stale"] is True
+    assert workspace.current_boundary_bbox is not None
+    assert workspace.current_centerline_bbox is not None
+    assert workspace.boundary_water_bbox_coverage_ratio is not None
+    assert workspace.centerline_boundary_bbox_coverage_ratio is not None
     assert drafts[0].status_code == "PUBLISHED"
 
 

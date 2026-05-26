@@ -45,6 +45,29 @@
 
 ## 本轮修复
 
+### 2026-05-26 下一轮可用性增补
+
+本轮不再录屏，重点处理真实操作中继续暴露的三个可用性问题：区段数量上来后无法按问题批量处理、路径验证大图层截断提示不清、边界/中心线/Graph 覆盖差异不够直观。
+
+1. 中心线区段批量质量处理
+   - 后端区段列表新增 `issue_code` 筛选和 `issue_stats` 聚合。
+   - `issue_stats` 按问题类型统计受影响区段数，并保留最高严重级别。
+   - 前端区段列表新增“质量报告”，支持从问题类型 chip 或下拉框直接筛选问题段。
+   - `只看问题段` 改用统一问题解析逻辑，兼容 `validation_summary_json.issues` 与 `issue_summary_json.issue_codes`。
+
+2. 覆盖范围可视化
+   - 工作台响应新增 `current_centerline_bbox`、`active_graph_bbox`。
+   - 工作台响应新增边界/中心线/Graph 的 bbox 覆盖比例。
+   - 中心线页新增覆盖面板，同屏展示已归属水体、当前发布边界、当前中心线、当前 Graph 的范围、状态和覆盖比例。
+   - 操作员可以直接看到“边界完整但中心线/Graph 只覆盖局部”的差异，不再只靠地图肉眼判断。
+
+3. 路径验证图层截断
+   - 地图图层响应新增 `layer_counts`、`layer_limits`。
+   - 路径验证页图层状态显示 `160/160+` 这类截断标记。
+   - 截断 tag 改为明确文案：仅显示前 N 条，避免把当前视口渲染结果误解成完整 Graph。
+
+### 2026-05-26 完整流验收修复
+
 1. 地图载体
    - 增加程序 fit 事件窗口，避免 AMap 异步 `moveend` 被误判为用户拖拽后继续漂移。
    - 保存、刷新、选择、分页、校验不再自动 fit；只有定位按钮触发 fit。
@@ -102,10 +125,10 @@
 ## 测试结果
 
 - `.venv/bin/python -m compileall app scripts`：通过
-- navigation focused pytest：81 passed
-  - 覆盖：centerline segments、boundary candidates、boundary draft ops、workbench service、routing engine、map layers。
+- navigation focused pytest：82 passed
+  - 覆盖：centerline segments、boundary candidates、boundary draft ops、workbench service、routing engine、map layers、diagnostic service。
 - full pytest：未通过
-  - 结果：326 passed，2 skipped，41 failed，26 errors
+  - 结果：327 passed，2 skipped，41 failed，26 errors
   - navigation 本轮新增/修改测试已通过。
   - 主要非本轮失败示例：freight collection 中 `Region(audit_status=...)` 与模型字段不匹配；另有 node contacts/photos、production remediation、quote/rate estimator、route track、vessel spatial 等既有失败。
 - `npm run type-check`：通过
@@ -125,6 +148,6 @@
 ## 遗留问题与下一轮方案
 
 1. 当前路径结果是 `READY_WITH_WARNING`，原因是约束数据缺失、水体覆盖约 72.3%、边界覆盖仍需要人工复核。下一轮应做“约束数据完整度面板”和“边界/水体覆盖差异专门诊断”。
-2. 中心线本轮可完整生成，但仍是 seed 导向线主导的生产初稿。下一轮应增加批量质量报告、按问题类型筛选、局部重算/拒绝本次生成。
-3. 路径页地图选点已经可用，但视频脚本也证明大图层 limit 会误导自动验收。下一轮应让路径页直接显示 Graph 全量覆盖 bbox、当前视口边数/截断状态，并在图层截断时提示用户。
+2. 中心线本轮已有按问题类型筛选，但仍缺“局部重算/拒绝本次生成/批量确认策略”。下一轮应把这些做成明确的生产动作，并保留操作日志。
+3. 路径页已显示图层截断，但还没有 Graph 全量覆盖诊断卡。下一轮应直接展示 Graph 全量 bbox、当前视口 bbox、节点/边总量、已加载数量和截断原因。
 4. 菜单 seed 当前已将“航道图生产”和“航线与区域基础”放在同一航线与区域中心下，并隐藏旧工作台入口；后续如果继续做信息架构，应只调整文案和入口，不拆数据表。

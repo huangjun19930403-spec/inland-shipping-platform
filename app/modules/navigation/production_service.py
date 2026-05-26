@@ -219,9 +219,14 @@ class NavigationProductionService:
             channel_reference_bbox=channel_reference_bbox,
             matched_water_body_bbox=matched_water_body_bbox,
             current_boundary_bbox=current_boundary_bbox,
+            current_centerline_bbox=centerline_bbox,
+            active_graph_bbox=graph_bbox,
             boundary_coverage_status=self._coverage_status(channel_reference_bbox, current_boundary_bbox),
             centerline_coverage_status=self._coverage_status(current_boundary_bbox, centerline_bbox, stale=downstream_stale.get("centerline_stale")),
             graph_coverage_status=self._coverage_status(current_boundary_bbox, graph_bbox, stale=downstream_stale.get("graph_stale")),
+            boundary_water_bbox_coverage_ratio=self._coverage_ratio(channel_reference_bbox, current_boundary_bbox),
+            centerline_boundary_bbox_coverage_ratio=self._coverage_ratio(current_boundary_bbox, centerline_bbox),
+            graph_boundary_bbox_coverage_ratio=self._coverage_ratio(current_boundary_bbox, graph_bbox),
             downstream_stale=downstream_stale,
             available_actions=row.available_actions,
             blocker_codes=row.blocker_codes,
@@ -484,6 +489,14 @@ class NavigationProductionService:
         if ratio < 0.65:
             return "COVERAGE_INCOMPLETE"
         return "READY"
+
+    def _coverage_ratio(self, expected: dict[str, float] | None, actual: dict[str, float] | None) -> float | None:
+        if expected is None or actual is None:
+            return None
+        expected_area = max((expected["max_lng"] - expected["min_lng"]) * (expected["max_lat"] - expected["min_lat"]), 1e-9)
+        inter_lng = max(0.0, min(expected["max_lng"], actual["max_lng"]) - max(expected["min_lng"], actual["min_lng"]))
+        inter_lat = max(0.0, min(expected["max_lat"], actual["max_lat"]) - max(expected["min_lat"], actual["min_lat"]))
+        return round((inter_lng * inter_lat) / expected_area, 4)
 
     def _normalize_workspace_step(self, step: str) -> str:
         value = (step or "").strip().upper().replace("-", "_")

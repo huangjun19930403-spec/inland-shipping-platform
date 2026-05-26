@@ -61,6 +61,14 @@ class NavigationMapLayerService:
         warnings: list[str] = []
         truncated_layers: list[str] = []
         layer_limit = max(1, min(int(limit or self.default_limit), self.max_limit))
+        layer_limits = self._layer_limits(
+            layer_limit,
+            include_water_area=include_water_area,
+            include_boundary=include_boundary,
+            include_centerline=include_centerline,
+            include_centerline_segments=include_centerline_segments,
+            include_graph_edge=include_graph_edge,
+        )
         bbox = self._bbox(min_lng=min_lng, min_lat=min_lat, max_lng=max_lng, max_lat=max_lat)
 
         route_results: list[NavigationMapLayerFeatureResponse] = []
@@ -90,6 +98,16 @@ class NavigationMapLayerService:
             return NavigationMapLayerResponse(
                 route_results=self._display_features(route_results),
                 quality_issues=self._display_features(quality_issues),
+                layer_counts=self._layer_counts(
+                    water_areas=[],
+                    channel_boundaries=[],
+                    centerlines=[],
+                    centerline_segments=[],
+                    graph_edges=[],
+                    route_results=route_results,
+                    quality_issues=quality_issues,
+                ),
+                layer_limits=layer_limits,
                 warnings=warnings,
             )
 
@@ -139,8 +157,57 @@ class NavigationMapLayerService:
             route_results=self._display_features(route_results),
             quality_issues=self._display_features(quality_issues),
             truncated_layers=truncated_layers,
+            layer_counts=self._layer_counts(
+                water_areas=water_areas,
+                channel_boundaries=channel_boundaries,
+                centerlines=centerlines,
+                centerline_segments=centerline_segments,
+                graph_edges=graph_edges,
+                route_results=route_results,
+                quality_issues=quality_issues,
+            ),
+            layer_limits=layer_limits,
             warnings=warnings,
         )
+
+    def _layer_limits(
+        self,
+        layer_limit: int,
+        *,
+        include_water_area: bool,
+        include_boundary: bool,
+        include_centerline: bool,
+        include_centerline_segments: bool,
+        include_graph_edge: bool,
+    ) -> dict[str, int]:
+        return {
+            "WATER_AREA": layer_limit if include_water_area else 0,
+            "CHANNEL_BOUNDARY": layer_limit if include_boundary else 0,
+            "CENTERLINE": layer_limit if include_centerline else 0,
+            "CENTERLINE_SEGMENT": layer_limit if include_centerline_segments else 0,
+            "GRAPH_EDGE": layer_limit if include_graph_edge else 0,
+        }
+
+    def _layer_counts(
+        self,
+        *,
+        water_areas: list[NavigationMapLayerFeatureResponse],
+        channel_boundaries: list[NavigationMapLayerFeatureResponse],
+        centerlines: list[NavigationMapLayerFeatureResponse],
+        centerline_segments: list[NavigationMapLayerFeatureResponse],
+        graph_edges: list[NavigationMapLayerFeatureResponse],
+        route_results: list[NavigationMapLayerFeatureResponse],
+        quality_issues: list[NavigationMapLayerFeatureResponse],
+    ) -> dict[str, int]:
+        return {
+            "WATER_AREA": len(water_areas),
+            "CHANNEL_BOUNDARY": len(channel_boundaries),
+            "CENTERLINE": len(centerlines),
+            "CENTERLINE_SEGMENT": len(centerline_segments),
+            "GRAPH_EDGE": len(graph_edges),
+            "ROUTE_RESULT": len(route_results),
+            "QUALITY_ISSUE": len(quality_issues),
+        }
 
     def _display_features(self, items: list[NavigationMapLayerFeatureResponse]) -> list[NavigationMapLayerFeatureResponse]:
         output: list[NavigationMapLayerFeatureResponse] = []

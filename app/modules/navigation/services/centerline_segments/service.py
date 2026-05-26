@@ -8,6 +8,7 @@ from app.core.exceptions import NotFoundError
 from app.models import NavigationCenterlineSegment
 from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.modules.navigation.schemas import (
+    NavigationCenterlineSegmentIssueStatResponse,
     NavigationCenterlineSegmentListResponse,
     NavigationCenterlineSegmentResponse,
     NavigationCenterlineSegmentSplitRequest,
@@ -35,6 +36,7 @@ class NavigationCenterlineSegmentService(
         *,
         status_code: str | None = None,
         only_problem: bool = False,
+        issue_code: str | None = None,
         limit: int | None = None,
         page: int = 1,
         page_size: int = 50,
@@ -51,8 +53,11 @@ class NavigationCenterlineSegmentService(
                 item
                 for item in rows
                 if item.segment_status_code in {"NEED_REPAIR", "PUBLISH_BLOCKED"}
-                or int((item.issue_summary_json or {}).get("issue_count") or 0) > 0
+                or self._segment_issue_count(item) > 0
             ]
+        if issue_code:
+            target_issue = issue_code.upper()
+            rows = [item for item in rows if target_issue in self._segment_issue_codes(item)]
         if limit is not None:
             page = 1
             page_size = self._limit(limit, 300, 10000)
@@ -73,6 +78,7 @@ class NavigationCenterlineSegmentService(
             need_repair_count=self._need_repair_count(all_rows),
             confirmed_count=confirmed_count,
             publishable=bool(all_rows) and all(item.segment_status_code == "CONFIRMED" for item in all_rows),
+            issue_stats=self._issue_stats(all_rows),
             items=items,
         )
 
@@ -346,3 +352,68 @@ class NavigationCenterlineSegmentService(
             item.segment_no = f"{index + 1:03d}"
             item.previous_segment_id = int(rows[index - 1].id) if index > 0 else None
             item.next_segment_id = int(rows[index + 1].id) if index + 1 < len(rows) else None
+
+    def _segment_issue_count(self, row: NavigationCenterlineSegment) -> int:
+        issue_summary = row.issue_summary_json if isinstance(row.issue_summary_json, dict) else {}
+        count = issue_summary.get("issue_count")
+        if isinstance(count, int):
+            return count
+        entries = self._segment_issue_entries(row)
+        return len(entries)
+
+    def _segment_issue_codes(self, row: NavigationCenterlineSegment) -> set[str]:
+        return {code for code, _severity in self._segment_issue_entries(row)}
+
+    def _segment_issue_entries(self, row: NavigationCenterlineSegment) -> list[tuple[str, str]]:
+        validation_summary = row.validation_summary_json if isinstance(row.validation_summary_json, dict) else {}
+        entries = self._issues_from_raw(validation_summary.get("issues"))
+        if entries:
+            return entries
+        issue_summary = row.issue_summary_json if isinstance(row.issue_summary_json, dict) else {}
+        entries = self._issues_from_raw(issue_summary.get("issues"))
+        if entries:
+            return entries
+        codes = issue_summary.get("issue_codes")
+        if not isinstance(codes, list):
+            return []
+        severity = "ERROR" if int(issue_summary.get("error_count") or 0) > 0 else "WARNING"
+        return [(str(code).upper(), severity) for code in codes if code]
+
+    def _issues_from_raw(self, raw_issues: object) -> list[tuple[str, str]]:
+        if not isinstance(raw_issues, list):
+            return []
+        entries: list[tuple[str, str]] = []
+        for item in raw_issues:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("issue_code") or item.get("issue_type_code") or item.get("code")
+            if not code:
+                continue
+            severity = item.get("severity_code") or item.get("severity") or "WARNING"
+            entries.append((str(code).upper(), str(severity).upper()))
+        return entries
+
+    def _issue_stats(self, rows: list[NavigationCenterlineSegment]) -> list[NavigationCenterlineSegmentIssueStatResponse]:
+        counts: dict[str, dict[str, int | str]] = {}
+        for row in rows:
+            seen_for_row: set[str] = set()
+            for code, severity in self._segment_issue_entries(row):
+                if code in seen_for_row:
+                    continue
+                seen_for_row.add(code)
+                stat = counts.setdefault(code, {"count": 0, "severity_code": "WARNING"})
+                stat["count"] = int(stat["count"]) + 1
+                if severity == "ERROR":
+                    stat["severity_code"] = "ERROR"
+        severity_rank = {"ERROR": 0, "WARNING": 1}
+        return [
+            NavigationCenterlineSegmentIssueStatResponse(
+                issue_type_code=code,
+                severity_code=str(payload["severity_code"]),
+                count=int(payload["count"]),
+            )
+            for code, payload in sorted(
+                counts.items(),
+                key=lambda item: (severity_rank.get(str(item[1]["severity_code"]), 2), -int(item[1]["count"]), item[0]),
+            )
+        ]

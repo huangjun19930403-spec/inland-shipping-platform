@@ -373,6 +373,37 @@ async def test_out_of_boundary_centerline_segment_cannot_confirm(session_maker) 
 
 
 @pytest.mark.asyncio
+async def test_list_centerline_segments_reports_and_filters_issue_stats(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        service = NavigationCenterlineSegmentService(session)
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
+        row = (await service.list_segments(1)).items[0]
+        await service.update_segment(
+            row.id,
+            NavigationCenterlineSegmentUpdateRequest(
+                geometry_json={"type": "LineString", "coordinates": [[121.00, 32.00], [121.10, 32.00]]},
+                source_type_code="MAP_EDIT",
+            ),
+        )
+
+        all_response = await service.list_segments(1)
+        filtered_response = await service.list_segments(1, issue_code="SEGMENT_OUT_OF_BOUNDARY")
+        missing_response = await service.list_segments(1, issue_code="SEGMENT_TOO_SHORT")
+
+    issue_stats = {item.issue_type_code: item for item in all_response.issue_stats}
+    assert issue_stats["SEGMENT_OUT_OF_BOUNDARY"].severity_code == "ERROR"
+    assert issue_stats["SEGMENT_OUT_OF_BOUNDARY"].count == 1
+    assert filtered_response.total_count == 1
+    assert filtered_response.items[0].id == row.id
+    assert missing_response.total_count == 0
+
+
+@pytest.mark.asyncio
 async def test_legal_centerline_segment_can_confirm(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)

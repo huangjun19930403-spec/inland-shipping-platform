@@ -120,6 +120,8 @@ class NavigationMapLayerResponse(BaseModel):
     route_results: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     quality_issues: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     truncated_layers: list[str] = Field(default_factory=list)
+    layer_counts: dict[str, int] = Field(default_factory=dict)
+    layer_limits: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -273,9 +275,14 @@ class NavigationProductionWorkspaceResponse(BaseModel):
     channel_reference_bbox: dict[str, float | None] | None = None
     matched_water_body_bbox: dict[str, float | None] | None = None
     current_boundary_bbox: dict[str, float | None] | None = None
+    current_centerline_bbox: dict[str, float | None] | None = None
+    active_graph_bbox: dict[str, float | None] | None = None
     boundary_coverage_status: str | None = None
     centerline_coverage_status: str | None = None
     graph_coverage_status: str | None = None
+    boundary_water_bbox_coverage_ratio: float | None = None
+    centerline_boundary_bbox_coverage_ratio: float | None = None
+    graph_boundary_bbox_coverage_ratio: float | None = None
     downstream_stale: dict[str, Any] = Field(default_factory=dict)
     available_actions: list[dict[str, Any]] = Field(default_factory=list)
     blocker_codes: list[str] = Field(default_factory=list)
@@ -646,6 +653,12 @@ class NavigationCenterlineSegmentResponse(BaseModel):
     updated_at: str | None = None
 
 
+class NavigationCenterlineSegmentIssueStatResponse(BaseModel):
+    issue_type_code: str
+    severity_code: str = "WARNING"
+    count: int = 0
+
+
 class NavigationCenterlineSegmentListResponse(BaseModel):
     channel_id: int
     total_count: int
@@ -654,6 +667,7 @@ class NavigationCenterlineSegmentListResponse(BaseModel):
     need_repair_count: int
     confirmed_count: int
     publishable: bool
+    issue_stats: list[NavigationCenterlineSegmentIssueStatResponse] = Field(default_factory=list)
     items: list[NavigationCenterlineSegmentResponse] = Field(default_factory=list)
 
 
