@@ -590,26 +590,30 @@ class NavigationRoutingEngineService:
             )
         route_geometry = shape(geometry_json)
         min_lng, min_lat, max_lng, max_lat = route_geometry.bounds
+        water_body_ids = (
+            select(NavigationWaterBody.id)
+            .join(
+                NavigationChannelWaterBodyMatch,
+                NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id,
+            )
+            .where(
+                NavigationChannelWaterBodyMatch.channel_id.in_(channel_ids),
+                NavigationChannelWaterBodyMatch.is_current.is_(True),
+                NavigationWaterBody.is_enabled.is_(True),
+                NavigationWaterBody.geometry_wgs84_json.is_not(None),
+                NavigationWaterBody.bbox_max_lng >= min_lng,
+                NavigationWaterBody.bbox_min_lng <= max_lng,
+                NavigationWaterBody.bbox_max_lat >= min_lat,
+                NavigationWaterBody.bbox_min_lat <= max_lat,
+            )
+            .distinct()
+            .limit(300)
+            .subquery()
+        )
         water_rows = list(
             (
                 await self.session.execute(
-                    select(NavigationWaterBody)
-                    .join(
-                        NavigationChannelWaterBodyMatch,
-                        NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id,
-                    )
-                    .where(
-                        NavigationChannelWaterBodyMatch.channel_id.in_(channel_ids),
-                        NavigationChannelWaterBodyMatch.is_current.is_(True),
-                        NavigationWaterBody.is_enabled.is_(True),
-                        NavigationWaterBody.geometry_wgs84_json.is_not(None),
-                        NavigationWaterBody.bbox_max_lng >= min_lng,
-                        NavigationWaterBody.bbox_min_lng <= max_lng,
-                        NavigationWaterBody.bbox_max_lat >= min_lat,
-                        NavigationWaterBody.bbox_min_lat <= max_lat,
-                    )
-                    .distinct()
-                    .limit(300)
+                    select(NavigationWaterBody).where(NavigationWaterBody.id.in_(select(water_body_ids.c.id)))
                 )
             ).scalars()
         )

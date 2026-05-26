@@ -15,6 +15,7 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentPublishRequest,
     NavigationCenterlineSegmentUpdateRequest,
 )
+from app.modules.navigation.service import NavigationCenterlineService
 from app.modules.navigation.services.centerline_segments import NavigationCenterlineSegmentService
 
 
@@ -258,6 +259,7 @@ async def test_publish_confirmed_centerline_segments_creates_published_centerlin
         response = await service.publish_segments(1, NavigationCenterlineSegmentPublishRequest(publish_name="测试合并中心线"))
         centerline = await session.get(NavigationChannelCenterline, response.centerline_id)
         stored_segments = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
+        graph_ready = await NavigationCenterlineService(session).list_graph_ready_centerlines(channel_codes=["TEST-CHANNEL"])
 
     assert response.status_code == "PUBLISHED"
     assert response.centerline_id is not None
@@ -265,4 +267,5 @@ async def test_publish_confirmed_centerline_segments_creates_published_centerlin
     assert centerline.review_status_code == "PUBLISHED"
     assert centerline.is_current is True
     assert centerline.source_type_code == "CENTERLINE_SEGMENT_MERGE"
+    assert [row.id for row in graph_ready] == [centerline.id]
     assert all(row.segment_status_code == "PUBLISHED" for row in stored_segments)
