@@ -15,7 +15,7 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentPublishRequest,
     NavigationCenterlineSegmentUpdateRequest,
 )
-from app.modules.navigation.services.centerline_segment_service import NavigationCenterlineSegmentService
+from app.modules.navigation.services.centerline_segments import NavigationCenterlineSegmentService
 
 
 @pytest_asyncio.fixture

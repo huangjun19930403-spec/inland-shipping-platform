@@ -61,7 +61,7 @@ from app.modules.navigation.schemas import (
     NavigationWorkbenchSummaryResponse,
     NavigationProductionWorkspaceResponse,
 )
-from app.modules.navigation.services.centerline_segment_service import NavigationCenterlineSegmentService
+from app.modules.navigation.services.centerline_segments import NavigationCenterlineSegmentService
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
 router = APIRouter()
