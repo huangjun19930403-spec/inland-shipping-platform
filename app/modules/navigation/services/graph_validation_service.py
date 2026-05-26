@@ -131,6 +131,26 @@ async def validate_navigation_graph(
         issues.append(GraphValidationIssue("NO_GRAPH_NODE", "BLOCKING", "Graph version has no nodes"))
     if not edges:
         issues.append(GraphValidationIssue("NO_GRAPH_EDGE", "BLOCKING", "Graph version has no edges"))
+    source_summary = graph_version.source_summary_json if isinstance(graph_version.source_summary_json, dict) else {}
+    source_segment_ids = [
+        int(item)
+        for item in (source_summary.get("centerline_segment_ids") or [])
+        if isinstance(item, int) or (isinstance(item, str) and item.isdigit())
+    ]
+    if len(source_segment_ids) >= 10 and len(edges) <= 1:
+        issues.append(
+            GraphValidationIssue(
+                "GRAPH_UNDERSPLIT_FOR_LONG_CHANNEL",
+                "BLOCKING",
+                "Graph was built as one edge from many published centerline segments; rebuild from segment topology.",
+                annotation_candidate=_candidate(
+                    "GRAPH_UNDERSPLIT_FOR_LONG_CHANNEL",
+                    "GRAPH_VERSION",
+                    graph_version.id,
+                    "Rebuild graph from published centerline segment topology",
+                ),
+            )
+        )
 
     endpoint_ids: set[int] = set()
     for edge in routing_edges:
@@ -170,17 +190,19 @@ async def validate_navigation_graph(
     for node in nodes:
         if node.id not in endpoint_ids:
             message = f"Node {node.node_code} is not connected to an enabled edge"
+            severity = "WARNING" if node.source_type_code in {"TRANSPORT_NODE", "SNAP_CONNECTOR", "CONSTRAINT_POINT"} else "BLOCKING"
             issues.append(
                 GraphValidationIssue(
                     "ISOLATED_NODE",
-                    "BLOCKING",
+                    severity,
                     message,
                     node_id=node.id,
-                    annotation_candidate=_candidate("ISOLATED_NODE", "GRAPH_NODE", node.id, message),
+                    annotation_candidate=_candidate("ISOLATED_NODE", "GRAPH_NODE", node.id, message) if severity == "BLOCKING" else None,
                 )
             )
 
-    components = _components(nodes, routing_edges) if nodes else []
+    routable_node_ids = endpoint_ids
+    components = _components([node for node in nodes if node.id in routable_node_ids], routing_edges) if routable_node_ids else []
     non_empty_components = [component for component in components if component]
     if len(non_empty_components) > 1:
         message = f"Graph has {len(non_empty_components)} disconnected components"

@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.models import NavigationCenterlineSegment, NavigationChannelCenterline, NavigationGraphVersion
-from app.models.address import NavigationChannel, NavigationChannelBoundary
+from app.models.address import NavigationChannel, NavigationChannelBoundary, NavigationChannelSegment
 from app.models.base import Base
 from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentGenerateRequest,
@@ -97,6 +97,33 @@ async def _seed_current_boundary(session: AsyncSession) -> None:
     await session.commit()
 
 
+async def _seed_guide_segment(session: AsyncSession) -> None:
+    session.add(
+        NavigationChannelSegment(
+            id=1,
+            channel_id=1,
+            segment_code="TEST-CHANNEL-S01",
+            segment_name="测试航道导向线",
+            segment_kind_code="MAIN",
+            sequence_no=1,
+            source_summary="test",
+            geometry_status_code="AVAILABLE",
+            boundary_quality_code="READY",
+            connectivity_status_code="CONNECTED",
+            repair_status_code="NONE",
+            guide_geometry_json={"type": "LineString", "coordinates": [[120.01, 31.025], [120.23, 31.025]]},
+            guide_source_type_code="TEST_GUIDE",
+            guide_quality_code="READY",
+            guide_length_m=20_000,
+            guide_bbox_min_lng=120.01,
+            guide_bbox_min_lat=31.025,
+            guide_bbox_max_lng=120.23,
+            guide_bbox_max_lat=31.025,
+        )
+    )
+    await session.commit()
+
+
 @pytest.mark.asyncio
 async def test_generate_centerline_segments_blocks_without_current_boundary(session_maker) -> None:
     async with session_maker() as session:
@@ -120,21 +147,57 @@ async def test_generate_centerline_segments_from_boundary_rough_line(session_mak
 
         response = await NavigationCenterlineSegmentService(session).generate_segments(
             1,
-            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0),
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
         )
         rows = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
 
     assert response.status_code == "CREATED"
     assert response.segment_count >= 2
     assert response.need_repair_count == response.segment_count
-    assert {row.source_type_code for row in rows} == {"BOUNDARY_MEDIAL_AXIS_ROUGH"}
+    assert {row.source_type_code for row in rows} == {"BOUNDARY_ROUGH_LOCAL"}
     assert all(row.segment_no for row in rows)
     assert all(row.length_m and row.length_m > 0 for row in rows)
     assert all(row.bbox_min_lng is not None for row in rows)
     assert all(row.source_trace_json["source_boundary_id"] == 1 for row in rows)
     assert all(row.source_trace_json["source_centerline_id"] is None for row in rows)
-    assert all(row.source_trace_json["source_mode"] == "BOUNDARY" for row in rows)
+    assert all(row.source_trace_json["source_mode"] == "BOUNDARY_ROUGH_LOCAL" for row in rows)
     assert all(row.source_trace_json["algorithm"] for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_default_generate_centerline_segments_requires_guide(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+
+        response = await NavigationCenterlineSegmentService(session).generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0),
+        )
+
+    assert response.status_code == "BLOCKED"
+    assert "CENTERLINE_GUIDE_MISSING" in response.blocker_codes
+
+
+@pytest.mark.asyncio
+async def test_default_generate_centerline_segments_uses_guide_boundary_clip(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        await _seed_guide_segment(session)
+
+        response = await NavigationCenterlineSegmentService(session).generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0),
+        )
+        rows = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
+
+    assert response.status_code == "CREATED"
+    assert response.segment_count >= 2
+    assert {row.centerline_id for row in rows} == {None}
+    assert {row.source_type_code for row in rows} == {"CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"}
+    assert all(row.source_trace_json["source_mode"] == "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP" for row in rows)
+    assert all(row.source_trace_json["source_guide_segment_ids"] == [1] for row in rows)
 
 
 @pytest.mark.asyncio
@@ -169,7 +232,7 @@ async def test_generate_centerline_segments_boundary_mode_ignores_old_published_
     assert response.status_code == "CREATED"
     assert response.segment_count >= 2
     assert {row.centerline_id for row in rows} == {None}
-    assert {row.source_type_code for row in rows} == {"BOUNDARY_MEDIAL_AXIS_ROUGH"}
+    assert {row.source_type_code for row in rows} == {"BOUNDARY_ROUGH_LOCAL"}
     assert all(row.length_m and row.length_m > 1000 for row in rows)
     assert all(row.source_trace_json["source_centerline_id"] is None for row in rows)
 
@@ -216,9 +279,15 @@ async def test_generate_centerline_segments_exists_without_force(session_maker) 
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        created = await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0))
+        created = await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
 
-        response = await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0))
+        response = await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
 
     assert created.status_code == "CREATED"
     assert response.status_code == "EXISTS"
@@ -232,7 +301,10 @@ async def test_list_centerline_segments_returns_counts(session_maker) -> None:
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0))
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
 
         response = await service.list_segments(1)
 
@@ -241,6 +313,8 @@ async def test_list_centerline_segments_returns_counts(session_maker) -> None:
     assert response.confirmed_count == 0
     assert response.publishable is False
     assert len(response.items) == response.total_count
+    assert response.page == 1
+    assert response.page_size == 50
 
 
 @pytest.mark.asyncio
@@ -249,7 +323,10 @@ async def test_update_centerline_segment_geometry_revalidates(session_maker) -> 
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0))
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
         row = (await service.list_segments(1)).items[0]
 
         updated = await service.update_segment(
@@ -272,7 +349,10 @@ async def test_out_of_boundary_centerline_segment_cannot_confirm(session_maker) 
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0))
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
         row = (await service.list_segments(1)).items[0]
         await service.update_segment(
             row.id,
@@ -298,7 +378,10 @@ async def test_legal_centerline_segment_can_confirm(session_maker) -> None:
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0))
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
         row = (await service.list_segments(1)).items[0]
 
         confirmed = await service.confirm_segment(row.id)
@@ -313,7 +396,10 @@ async def test_publish_centerline_segments_blocks_until_all_confirmed(session_ma
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0))
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
         rows = (await service.list_segments(1)).items
         assert len(rows) >= 2
         await service.confirm_segment(rows[0].id)
@@ -330,7 +416,10 @@ async def test_publish_confirmed_centerline_segments_creates_published_centerlin
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0))
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
         rows = (await service.list_segments(1)).items
         for row in rows:
             await service.confirm_segment(row.id)
@@ -366,7 +455,10 @@ async def test_segment_archive_split_merge_reverse_operations_keep_chain(session
         await _seed_channel(session)
         await _seed_current_boundary(session)
         service = NavigationCenterlineSegmentService(session)
-        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0))
+        await service.generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0, source_mode="BOUNDARY_ROUGH_LOCAL"),
+        )
         row = (await service.list_segments(1)).items[0]
 
         split_response = await service.split_segment(row.id, NavigationCenterlineSegmentSplitRequest(split_ratio=0.5))

@@ -47,8 +47,19 @@ class NavigationCenterlineSegmentValidatorMixin:
             )
         if boundary is None:
             issues.append(self._issue("NO_PUBLISHED_BOUNDARY", "ERROR", "当前航道缺少已发布边界。"))
+        elif row.source_type_code == "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP":
+            trace = row.source_trace_json if isinstance(row.source_trace_json, dict) else {}
+            coverage_ratio = trace.get("coverage_ratio")
+            if isinstance(coverage_ratio, (int, float)) and float(coverage_ratio) < 0.98:
+                issues.append(
+                    self._issue(
+                        "SEGMENT_BOUNDARY_CLIP_REVIEW",
+                        "WARNING",
+                        "区段来自导向线与边界裁剪，覆盖率未达到 98%，请人工复核局部缺口。",
+                    )
+                )
         else:
-            boundary_geometry = make_valid(shape(self._geojson_geometry(boundary.geometry_json)))
+            boundary_geometry = self._cached_boundary_geometry(boundary)
             if not boundary_geometry.buffer(BOUNDARY_TOLERANCE_DEGREE).covers(line):
                 issues.append(
                     self._issue(
@@ -75,6 +86,18 @@ class NavigationCenterlineSegmentValidatorMixin:
             length_m=length_m,
             point_count=len(coords),
         )
+
+    def _cached_boundary_geometry(self, boundary: Any):
+        cache = getattr(self, "_boundary_geometry_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(self, "_boundary_geometry_cache", cache)
+        key = int(boundary.id)
+        geometry = cache.get(key)
+        if geometry is None:
+            geometry = make_valid(shape(self._geojson_geometry(boundary.geometry_json)))
+            cache[key] = geometry
+        return geometry
 
     async def _append_endpoint_issues(
         self,

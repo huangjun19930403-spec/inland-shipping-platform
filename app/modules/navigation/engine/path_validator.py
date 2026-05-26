@@ -35,6 +35,7 @@ class PathValidator:
         issues: list[RouteIssue] = []
         water_union = _safe_union(water_geometries)
         boundary_union = _safe_union(boundary_geometries)
+        water_ratio: float | None = None
 
         if water_union is None:
             issues.append(
@@ -78,14 +79,24 @@ class PathValidator:
         else:
             boundary_ratio = _line_coverage_ratio(geometry, boundary_union)
             if boundary_ratio < 0.70:
-                issues.append(
-                    RouteIssue(
-                        "PATH_OUT_OF_CHANNEL_BOUNDARY",
-                        "ERROR",
-                        f"Route channel-boundary coverage is too low: {boundary_ratio:.1%}",
-                        suggestion="Fix and publish the channel boundary, then rebuild the graph.",
+                if water_ratio is not None and water_ratio >= 0.70:
+                    issues.append(
+                        RouteIssue(
+                            "PATH_CHANNEL_BOUNDARY_WARNING",
+                            "WARNING",
+                            f"Route channel-boundary coverage is {boundary_ratio:.1%}; water coverage is {water_ratio:.1%}.",
+                            suggestion="Review the published boundary and centerline alignment.",
+                        )
                     )
-                )
+                else:
+                    issues.append(
+                        RouteIssue(
+                            "PATH_OUT_OF_CHANNEL_BOUNDARY",
+                            "ERROR",
+                            f"Route channel-boundary coverage is too low: {boundary_ratio:.1%}",
+                            suggestion="Fix and publish the channel boundary, then rebuild the graph.",
+                        )
+                    )
             elif boundary_ratio < 0.90:
                 issues.append(
                     RouteIssue(

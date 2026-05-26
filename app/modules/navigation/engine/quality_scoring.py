@@ -53,6 +53,7 @@ class QualityScorer:
                 issues.append(issue)
 
         seen_unknown_edges: set[int] = set()
+        unknown_constraint_penalty = 0
         for segment in search_result.segments:
             if segment.quality_code in {"LOW_CONFIDENCE"}:
                 score -= 3
@@ -65,7 +66,9 @@ class QualityScorer:
                     RouteIssue("EDGE_NEED_MANUAL_REVIEW", "WARNING", "Path uses an edge that needs production repair", related_edge_id=segment.edge_id)
                 )
             if segment.unknown_constraint_flag and segment.edge_id not in seen_unknown_edges:
-                score -= 2
+                if unknown_constraint_penalty < 20:
+                    score -= 2
+                    unknown_constraint_penalty += 2
                 seen_unknown_edges.add(segment.edge_id or -1)
                 issues.append(
                     RouteIssue(

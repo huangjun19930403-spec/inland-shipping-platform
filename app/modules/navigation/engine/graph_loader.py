@@ -66,6 +66,15 @@ class NavigationGraphLoader:
         origin: tuple[float, float],
         destination: tuple[float, float],
     ) -> LoadedGraph:
+        scope_bbox = self._scope_bbox(graph_version)
+        if scope_bbox is not None and int(graph_version.edge_count or 0) <= self.max_edge_count:
+            loaded = await self._load_graph_in_bbox(
+                graph_version=graph_version,
+                bbox=scope_bbox,
+                margin_degree=0.0,
+            )
+            if loaded is not None:
+                return loaded
         last_bbox: dict[str, float] | None = None
         for margin_degree in self._load_margins():
             bbox = bbox_for_points([origin, destination], margin_degree)
@@ -88,6 +97,20 @@ class NavigationGraphLoader:
         if not margins:
             return (float(self.bbox_margin_degree),)
         return tuple(dict.fromkeys(margins))
+
+    def _scope_bbox(self, graph_version: NavigationGraphVersion) -> dict[str, float] | None:
+        bbox = graph_version.build_scope_bbox_json if isinstance(graph_version.build_scope_bbox_json, dict) else None
+        if not bbox:
+            return None
+        try:
+            return {
+                "min_lng": float(bbox["min_lng"]),
+                "min_lat": float(bbox["min_lat"]),
+                "max_lng": float(bbox["max_lng"]),
+                "max_lat": float(bbox["max_lat"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            return None
 
     async def _load_graph_in_bbox(
         self,

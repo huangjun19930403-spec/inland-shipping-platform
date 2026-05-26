@@ -169,6 +169,7 @@ class NavigationProductionService:
             include_water_area=include_water,
             include_boundary=include_boundary,
             include_centerline=include_centerline,
+            include_centerline_segments=step_code == "CENTERLINE",
             include_graph_edge=include_graph,
             limit=260,
         )
@@ -195,6 +196,12 @@ class NavigationProductionService:
         if current_centerline is None:
             current_centerline = await self._current_centerline_item(channel_id)
         active_graph_version = await self._active_graph_version()
+        downstream_stale = self._downstream_stale(current_boundary, current_centerline, active_graph_version)
+        matched_water_body_bbox = self._features_bbox(map_layers.water_areas)
+        current_boundary_bbox = self._geometry_bbox(current_boundary.geometry_json) if current_boundary else None
+        channel_reference_bbox = matched_water_body_bbox or current_boundary_bbox
+        centerline_bbox = self._geometry_bbox(current_centerline.geometry_json) if current_centerline else None
+        graph_bbox = self._graph_bbox(active_graph_version) if active_graph_version else None
         return NavigationProductionWorkspaceResponse(
             channel=row,
             step_code=step_code,
@@ -209,7 +216,13 @@ class NavigationProductionService:
             current_boundary=current_boundary,
             current_centerline=current_centerline,
             active_graph_version=self.workbench._graph_version_dict(active_graph_version) if active_graph_version else None,
-            downstream_stale=self._downstream_stale(current_boundary, current_centerline, active_graph_version),
+            channel_reference_bbox=channel_reference_bbox,
+            matched_water_body_bbox=matched_water_body_bbox,
+            current_boundary_bbox=current_boundary_bbox,
+            boundary_coverage_status=self._coverage_status(channel_reference_bbox, current_boundary_bbox),
+            centerline_coverage_status=self._coverage_status(current_boundary_bbox, centerline_bbox, stale=downstream_stale.get("centerline_stale")),
+            graph_coverage_status=self._coverage_status(current_boundary_bbox, graph_bbox, stale=downstream_stale.get("graph_stale")),
+            downstream_stale=downstream_stale,
             available_actions=row.available_actions,
             blocker_codes=row.blocker_codes,
             warnings=self._warnings_for(row),
@@ -400,6 +413,77 @@ class NavigationProductionService:
             "graph_stale": graph_stale,
             "any_stale": centerline_stale or graph_stale,
         }
+
+    def _features_bbox(self, items: list[Any]) -> dict[str, float] | None:
+        boxes = [self._geometry_bbox(item.geometry_json) for item in items if item.geometry_json]
+        boxes = [box for box in boxes if box is not None]
+        if not boxes:
+            return None
+        return {
+            "min_lng": min(box["min_lng"] for box in boxes),
+            "min_lat": min(box["min_lat"] for box in boxes),
+            "max_lng": max(box["max_lng"] for box in boxes),
+            "max_lat": max(box["max_lat"] for box in boxes),
+        }
+
+    def _geometry_bbox(self, geometry_json: dict[str, Any] | None) -> dict[str, float] | None:
+        coords: list[tuple[float, float]] = []
+
+        def walk(value: Any) -> None:
+            if not isinstance(value, list):
+                return
+            if len(value) >= 2 and isinstance(value[0], (int, float)) and isinstance(value[1], (int, float)):
+                coords.append((float(value[0]), float(value[1])))
+                return
+            for child in value:
+                walk(child)
+
+        if isinstance(geometry_json, dict):
+            geometry = geometry_json.get("geometry") if geometry_json.get("type") == "Feature" else geometry_json
+            if isinstance(geometry, dict):
+                walk(geometry.get("coordinates"))
+        if not coords:
+            return None
+        return {
+            "min_lng": min(lng for lng, _lat in coords),
+            "min_lat": min(lat for _lng, lat in coords),
+            "max_lng": max(lng for lng, _lat in coords),
+            "max_lat": max(lat for _lng, lat in coords),
+        }
+
+    def _graph_bbox(self, graph_version: NavigationGraphVersion) -> dict[str, float] | None:
+        bbox = graph_version.build_scope_bbox_json if isinstance(graph_version.build_scope_bbox_json, dict) else None
+        if not bbox:
+            return None
+        if {"min_lng", "min_lat", "max_lng", "max_lat"}.issubset(bbox):
+            return {
+                "min_lng": float(bbox["min_lng"]),
+                "min_lat": float(bbox["min_lat"]),
+                "max_lng": float(bbox["max_lng"]),
+                "max_lat": float(bbox["max_lat"]),
+            }
+        return None
+
+    def _coverage_status(
+        self,
+        expected: dict[str, float] | None,
+        actual: dict[str, float] | None,
+        *,
+        stale: bool | None = False,
+    ) -> str:
+        if actual is None:
+            return "MISSING"
+        if stale:
+            return "STALE"
+        if expected is None:
+            return "UNKNOWN"
+        expected_area = max((expected["max_lng"] - expected["min_lng"]) * (expected["max_lat"] - expected["min_lat"]), 1e-9)
+        inter_lng = max(0.0, min(expected["max_lng"], actual["max_lng"]) - max(expected["min_lng"], actual["min_lng"]))
+        inter_lat = max(0.0, min(expected["max_lat"], actual["max_lat"]) - max(expected["min_lat"], actual["min_lat"]))
+        ratio = (inter_lng * inter_lat) / expected_area
+        if ratio < 0.65:
+            return "COVERAGE_INCOMPLETE"
+        return "READY"
 
     def _normalize_workspace_step(self, step: str) -> str:
         value = (step or "").strip().upper().replace("-", "_")

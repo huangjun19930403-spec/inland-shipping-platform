@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     NavigationChannelCenterline,
+    NavigationCenterlineSegment,
     NavigationGraphEdge,
     NavigationGraphEdgeConstraint,
     NavigationGraphNode,
@@ -104,8 +105,11 @@ class GraphBuildSummary:
 
 @dataclass(slots=True)
 class CenterlineAsset:
+    asset_id: int
     row: NavigationChannelCenterline
     geometry: LineString
+    segment_id: int | None = None
+    boundary_validation_required: bool = True
 
 
 @dataclass(slots=True)
@@ -231,11 +235,14 @@ def _source_summary(centerlines: list[CenterlineAsset]) -> dict[str, Any]:
     by_source: dict[str, int] = defaultdict(int)
     channel_ids: set[int] = set()
     centerline_ids: list[int] = []
+    centerline_segment_ids: list[int] = []
     source_boundary_ids: set[int] = set()
     for item in centerlines:
         by_source[item.row.source_type_code] += 1
         channel_ids.add(item.row.channel_id)
         centerline_ids.append(item.row.id)
+        if item.segment_id is not None:
+            centerline_segment_ids.append(item.segment_id)
         trace = item.row.source_trace_json if isinstance(item.row.source_trace_json, dict) else {}
         boundary_id = trace.get("source_boundary_id") or trace.get("based_on_boundary_id")
         if isinstance(boundary_id, int):
@@ -244,7 +251,9 @@ def _source_summary(centerlines: list[CenterlineAsset]) -> dict[str, Any]:
             source_boundary_ids.add(int(boundary_id))
     return {
         "centerline_count": len(centerlines),
-        "centerline_ids": centerline_ids,
+        "centerline_ids": sorted(set(centerline_ids)),
+        "centerline_segment_ids": sorted(centerline_segment_ids),
+        "source_segment_topology_preserved": bool(centerline_segment_ids),
         "channel_ids": sorted(channel_ids),
         "source_boundary_ids": sorted(source_boundary_ids),
         "source_type_counts": dict(sorted(by_source.items())),
@@ -279,6 +288,16 @@ async def _load_centerline_assets(
     assets: list[CenterlineAsset] = []
     issues: list[GraphBuildIssue] = []
     for row in rows:
+        trace = row.source_trace_json if isinstance(row.source_trace_json, dict) else {}
+        segment_ids = [
+            int(item)
+            for item in (trace.get("segment_ids") or [])
+            if isinstance(item, int) or (isinstance(item, str) and item.isdigit())
+        ]
+        segment_assets = await _load_segment_assets(session, row, segment_ids)
+        if segment_assets:
+            assets.extend(segment_assets)
+            continue
         geometry = shape(row.geometry_json)
         if not isinstance(geometry, LineString) or geometry.is_empty or len(geometry.coords) < 2:
             issues.append(
@@ -291,8 +310,56 @@ async def _load_centerline_assets(
                 )
             )
             continue
-        assets.append(CenterlineAsset(row=row, geometry=geometry))
+        assets.append(CenterlineAsset(asset_id=int(row.id), row=row, geometry=geometry))
     return assets, issues
+
+
+async def _load_segment_assets(
+    session: AsyncSession,
+    centerline: NavigationChannelCenterline,
+    segment_ids: list[int],
+) -> list[CenterlineAsset]:
+    if not segment_ids:
+        return []
+    rows = list(
+        (
+            await session.execute(
+                select(NavigationCenterlineSegment).where(
+                    NavigationCenterlineSegment.id.in_(segment_ids),
+                    NavigationCenterlineSegment.channel_id == centerline.channel_id,
+                    NavigationCenterlineSegment.geometry_json.is_not(None),
+                    NavigationCenterlineSegment.segment_status_code.in_(("PUBLISHED", "CONFIRMED", "CANDIDATE", "NEED_REPAIR")),
+                )
+            )
+        ).scalars()
+    )
+    by_id = {int(row.id): row for row in rows}
+    assets: list[CenterlineAsset] = []
+    for segment_id in segment_ids:
+        row = by_id.get(int(segment_id))
+        if row is None:
+            continue
+        geometry = shape(row.geometry_json)
+        if isinstance(geometry, LineString) and not geometry.is_empty and len(geometry.coords) >= 2:
+            assets.append(
+                CenterlineAsset(
+                    asset_id=-int(row.id),
+                    row=centerline,
+                    geometry=geometry,
+                    segment_id=int(row.id),
+                    boundary_validation_required=not _segment_allows_boundary_passthrough(row),
+                )
+            )
+    return assets
+
+
+def _segment_allows_boundary_passthrough(row: NavigationCenterlineSegment) -> bool:
+    trace = row.source_trace_json if isinstance(row.source_trace_json, dict) else {}
+    return (
+        row.source_type_code == "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"
+        and trace.get("boundary_clip_mode") == "GUIDE_PASSTHROUGH_BBOX_READY"
+        and float(trace.get("bbox_coverage_ratio") or 0) >= 0.9
+    )
 
 
 async def _load_boundaries(session: AsyncSession, channel_ids: set[int]) -> dict[int, BaseGeometry]:
@@ -543,8 +610,8 @@ async def build_graph_from_centerlines(
 
     for asset in centerlines:
         coords = list(asset.geometry.coords)
-        split_points[asset.row.id].append(SplitPointSpec(point=Point(coords[0]), is_endpoint=True))
-        split_points[asset.row.id].append(SplitPointSpec(point=Point(coords[-1]), is_endpoint=True))
+        split_points[asset.asset_id].append(SplitPointSpec(point=Point(coords[0]), is_endpoint=True))
+        split_points[asset.asset_id].append(SplitPointSpec(point=Point(coords[-1]), is_endpoint=True))
 
     for index, left in enumerate(centerlines):
         for right in centerlines[index + 1 :]:
@@ -563,10 +630,10 @@ async def build_graph_from_centerlines(
                 )
                 continue
             for point in _intersection_points(intersection):
-                split_points[left.row.id].append(
+                split_points[left.asset_id].append(
                     SplitPointSpec(point=point, node_type_code="CHANNEL_JUNCTION", source_type_code="CENTERLINE_INTERSECTION")
                 )
-                split_points[right.row.id].append(
+                split_points[right.asset_id].append(
                     SplitPointSpec(point=point, node_type_code="CHANNEL_JUNCTION", source_type_code="CENTERLINE_INTERSECTION")
                 )
 
@@ -639,7 +706,7 @@ async def build_graph_from_centerlines(
             )
             continue
         snap_confidence = 95 if distance_m <= config.transport_auto_snap_m else 70
-        split_points[centerline.row.id].append(
+        split_points[centerline.asset_id].append(
             SplitPointSpec(
                 point=split_point,
                 node_type_code="SNAP_CONNECTOR",
@@ -698,7 +765,7 @@ async def build_graph_from_centerlines(
             )
             continue
         node_type = _node_kind_for_constraint(point)
-        split_points[centerline.row.id].append(
+        split_points[centerline.asset_id].append(
             SplitPointSpec(
                 point=split_point,
                 node_type_code=node_type,
@@ -712,9 +779,9 @@ async def build_graph_from_centerlines(
     centerline_nodes: dict[tuple[int, tuple[int, int]], NavigationGraphNode] = {}
     split_points_by_centerline: dict[int, list[SplitPointSpec]] = {}
     for asset in centerlines:
-        points = _dedupe_split_points(split_points[asset.row.id], asset.geometry)
+        points = _dedupe_split_points(split_points[asset.asset_id], asset.geometry)
         points = _merge_short_nonprotected_points(points, asset.geometry, config, issues, asset.row)
-        split_points_by_centerline[asset.row.id] = points
+        split_points_by_centerline[asset.asset_id] = points
         for point in points:
             node = add_node(
                 point=point.point,
@@ -725,7 +792,7 @@ async def build_graph_from_centerlines(
                 snap_distance_m=point.snap_distance_m,
                 snap_confidence=point.snap_confidence,
             )
-            centerline_nodes[(asset.row.id, _point_key(point.point))] = node
+            centerline_nodes[(asset.asset_id, _point_key(point.point))] = node
 
     await session.flush()
     edge_constraint_pairs: list[tuple[NavigationGraphEdge, NavigationGraphNode]] = []
@@ -777,26 +844,32 @@ async def build_graph_from_centerlines(
 
     for asset in centerlines:
         row = asset.row
-        points = split_points_by_centerline[row.id]
+        points = split_points_by_centerline[asset.asset_id]
         for index in range(len(points) - 1):
             from_point = points[index]
             to_point = points[index + 1]
             segment = _split_segment(asset.geometry, from_point.point, to_point.point)
             if segment is None:
                 continue
-            from_node = centerline_nodes[(row.id, _point_key(from_point.point))]
-            to_node = centerline_nodes[(row.id, _point_key(to_point.point))]
+            from_node = centerline_nodes[(asset.asset_id, _point_key(from_point.point))]
+            to_node = centerline_nodes[(asset.asset_id, _point_key(to_point.point))]
             length_m = _line_length_km(segment) * 1000
             quality, routing_enabled, edge_issue_codes = _edge_quality_for_segment(
                 segment=segment,
                 from_node=from_node,
                 to_node=to_node,
-                boundary=boundaries.get(row.channel_id),
+                boundary=boundaries.get(row.channel_id) if asset.boundary_validation_required else None,
                 length_m=length_m,
                 config=config,
             )
+            if not asset.boundary_validation_required:
+                quality = "READY_WITH_WARNING" if quality == "READY" else quality
+                edge_issue_codes = [*edge_issue_codes, "GUIDE_PASSTHROUGH_BOUNDARY_REVIEW"]
             for issue_code in edge_issue_codes:
-                severity = "WARNING" if issue_code.startswith("SHORT") or issue_code == "EDGE_NEAR_BOUNDARY_TOLERATED" else "BLOCKING"
+                severity = "WARNING" if (
+                    issue_code.startswith("SHORT")
+                    or issue_code in {"EDGE_NEAR_BOUNDARY_TOLERATED", "GUIDE_PASSTHROUGH_BOUNDARY_REVIEW"}
+                ) else "BLOCKING"
                 issues.append(
                     GraphBuildIssue(
                         issue_code,

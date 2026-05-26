@@ -483,6 +483,7 @@ class NavigationWorkbenchService:
             include_water_area=True,
             include_boundary=False,
             include_centerline=False,
+            include_centerline_segments=False,
             include_graph_edge=False,
             limit=limit,
             water_area_ids=water_area_ids,

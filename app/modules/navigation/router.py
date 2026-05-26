@@ -217,7 +217,10 @@ async def list_navigation_channel_centerline_segments(
     channel_id: int,
     status_code: str | None = None,
     only_problem: bool = False,
-    limit: int = 300,
+    limit: int | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    include_geometry: bool = True,
     current_user=Depends(require_permission("ROUTE:READ")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -226,6 +229,9 @@ async def list_navigation_channel_centerline_segments(
         status_code=status_code,
         only_problem=only_problem,
         limit=limit,
+        page=page,
+        page_size=page_size,
+        include_geometry=include_geometry,
     )
 
 
@@ -667,6 +673,7 @@ async def get_navigation_map_layers(
     include_water_area: bool = True,
     include_boundary: bool = True,
     include_centerline: bool = True,
+    include_centerline_segments: bool = False,
     include_graph_edge: bool = True,
     limit: int | None = None,
     db: AsyncSession = Depends(get_db),
@@ -682,6 +689,7 @@ async def get_navigation_map_layers(
         include_water_area=include_water_area,
         include_boundary=include_boundary,
         include_centerline=include_centerline,
+        include_centerline_segments=include_centerline_segments,
         include_graph_edge=include_graph_edge,
         limit=limit,
     )

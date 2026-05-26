@@ -35,10 +35,14 @@ class NavigationCenterlineSegmentService(
         *,
         status_code: str | None = None,
         only_problem: bool = False,
-        limit: int = 300,
+        limit: int | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        include_geometry: bool = True,
     ) -> NavigationCenterlineSegmentListResponse:
         await self._ensure_channel(channel_id)
-        rows = await self._active_segments(channel_id, limit=limit)
+        all_rows = await self._active_segments(channel_id, limit=10000)
+        rows = list(all_rows)
         if status_code:
             status = status_code.upper()
             rows = [item for item in rows if item.segment_status_code == status]
@@ -49,15 +53,27 @@ class NavigationCenterlineSegmentService(
                 if item.segment_status_code in {"NEED_REPAIR", "PUBLISH_BLOCKED"}
                 or int((item.issue_summary_json or {}).get("issue_count") or 0) > 0
             ]
-        all_rows = await self._active_segments(channel_id, limit=1000)
-        confirmed_count = sum(1 for item in all_rows if item.segment_status_code == "CONFIRMED")
+        if limit is not None:
+            page = 1
+            page_size = self._limit(limit, 300, 10000)
+        else:
+            page = max(1, int(page or 1))
+            page_size = self._limit(page_size, 50, 500)
+        start = (page - 1) * page_size
+        page_rows = rows[start : start + page_size]
+        confirmed_count = self._operator_confirmed_count(all_rows)
+        items = [self._response(item) for item in page_rows]
+        if not include_geometry:
+            items = [item.model_copy(update={"geometry_json": None}) for item in items]
         return NavigationCenterlineSegmentListResponse(
             channel_id=channel_id,
-            total_count=len(all_rows),
+            total_count=len(rows),
+            page=page,
+            page_size=page_size,
             need_repair_count=self._need_repair_count(all_rows),
             confirmed_count=confirmed_count,
-            publishable=bool(all_rows) and confirmed_count == len(all_rows),
-            items=[self._response(item) for item in rows[: self._limit(limit, 300, 1000)]],
+            publishable=bool(all_rows) and all(item.segment_status_code == "CONFIRMED" for item in all_rows),
+            items=items,
         )
 
     async def update_segment(
@@ -262,7 +278,7 @@ class NavigationCenterlineSegmentService(
                         NavigationCenterlineSegment.segment_status_code.in_(ACTIVE_SEGMENT_STATUSES),
                     )
                     .order_by(NavigationCenterlineSegment.segment_no, NavigationCenterlineSegment.id)
-                    .limit(self._limit(limit, 300, 1000))
+                    .limit(self._limit(limit, 1000, 10000))
                 )
             ).scalars()
         )

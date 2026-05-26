@@ -115,6 +115,7 @@ class NavigationMapLayerResponse(BaseModel):
     water_areas: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     channel_boundaries: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     centerlines: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
+    centerline_segments: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     graph_edges: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     route_results: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     quality_issues: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
@@ -269,6 +270,12 @@ class NavigationProductionWorkspaceResponse(BaseModel):
     current_boundary: NavigationBoundaryListItemResponse | None = None
     current_centerline: NavigationCenterlineListItemResponse | None = None
     active_graph_version: dict[str, Any] | None = None
+    channel_reference_bbox: dict[str, float | None] | None = None
+    matched_water_body_bbox: dict[str, float | None] | None = None
+    current_boundary_bbox: dict[str, float | None] | None = None
+    boundary_coverage_status: str | None = None
+    centerline_coverage_status: str | None = None
+    graph_coverage_status: str | None = None
     downstream_stale: dict[str, Any] = Field(default_factory=dict)
     available_actions: list[dict[str, Any]] = Field(default_factory=list)
     blocker_codes: list[str] = Field(default_factory=list)
@@ -590,7 +597,7 @@ class NavigationCenterlineListItemResponse(BaseModel):
 class NavigationCenterlineSegmentGenerateRequest(BaseModel):
     force: bool = False
     segment_length_km: float = Field(default=5.0, gt=0, le=100)
-    source_mode: str = Field(default="BOUNDARY", max_length=32)
+    source_mode: str = Field(default="CHANNEL_GUIDE_WITH_BOUNDARY_CLIP", max_length=32)
 
 
 class NavigationCenterlineSegmentGenerateResponse(BaseModel):
@@ -642,6 +649,8 @@ class NavigationCenterlineSegmentResponse(BaseModel):
 class NavigationCenterlineSegmentListResponse(BaseModel):
     channel_id: int
     total_count: int
+    page: int = 1
+    page_size: int = 50
     need_repair_count: int
     confirmed_count: int
     publishable: bool

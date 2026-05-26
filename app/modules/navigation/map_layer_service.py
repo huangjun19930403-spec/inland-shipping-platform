@@ -8,6 +8,7 @@ from sqlalchemy.orm import aliased
 
 from app.models import (
     NavigationChannelCenterline,
+    NavigationCenterlineSegment,
     NavigationChannelWaterBodyMatch,
     NavigationGraphEdge,
     NavigationGraphNode,
@@ -52,6 +53,7 @@ class NavigationMapLayerService:
         include_water_area: bool,
         include_boundary: bool,
         include_centerline: bool,
+        include_centerline_segments: bool = False,
         include_graph_edge: bool,
         limit: int | None,
         water_area_ids: list[int] | None = None,
@@ -94,6 +96,7 @@ class NavigationMapLayerService:
         water_areas: list[NavigationMapLayerFeatureResponse] = []
         channel_boundaries: list[NavigationMapLayerFeatureResponse] = []
         centerlines: list[NavigationMapLayerFeatureResponse] = []
+        centerline_segments: list[NavigationMapLayerFeatureResponse] = []
         graph_edges: list[NavigationMapLayerFeatureResponse] = []
 
         if include_water_area:
@@ -108,6 +111,13 @@ class NavigationMapLayerService:
             channel_boundaries = await self._boundary_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
         if include_centerline:
             centerlines = await self._centerline_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
+        if include_centerline_segments:
+            centerline_segments = await self._centerline_segment_layers(
+                bbox,
+                layer_limit,
+                truncated_layers,
+                channel_id=channel_id,
+            )
         if include_graph_edge:
             graph_edges = await self._graph_edge_layers(
                 bbox,
@@ -124,6 +134,7 @@ class NavigationMapLayerService:
             water_areas=self._display_features(water_areas),
             channel_boundaries=self._display_features(channel_boundaries),
             centerlines=self._display_features(centerlines),
+            centerline_segments=self._display_features(centerline_segments),
             graph_edges=self._display_features(graph_edges),
             route_results=self._display_features(route_results),
             quality_issues=self._display_features(quality_issues),
@@ -421,6 +432,54 @@ class NavigationMapLayerService:
                 },
             )
             for centerline, channel in rows
+        ]
+
+    async def _centerline_segment_layers(
+        self,
+        bbox: dict[str, float],
+        limit: int,
+        truncated_layers: list[str],
+        *,
+        channel_id: int | None,
+    ) -> list[NavigationMapLayerFeatureResponse]:
+        clauses = [
+            NavigationChannel.is_enabled.is_(True),
+            NavigationCenterlineSegment.segment_status_code.in_(("NEED_REPAIR", "CANDIDATE", "CONFIRMED", "PUBLISH_BLOCKED", "PUBLISHED")),
+            *self._bbox_intersects(NavigationCenterlineSegment, bbox),
+        ]
+        if channel_id is not None:
+            clauses.append(NavigationCenterlineSegment.channel_id == channel_id)
+        rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationCenterlineSegment, NavigationChannel)
+                    .join(NavigationChannel, NavigationChannel.id == NavigationCenterlineSegment.channel_id)
+                    .where(*clauses)
+                    .order_by(NavigationCenterlineSegment.channel_id, NavigationCenterlineSegment.segment_no, NavigationCenterlineSegment.id)
+                    .limit(limit + 1)
+                )
+            ).all()
+        )
+        if len(rows) > limit:
+            truncated_layers.append("CENTERLINE_SEGMENT")
+            rows = rows[:limit]
+        return [
+            NavigationMapLayerFeatureResponse(
+                id=segment.id,
+                layer_type_code="CENTERLINE_SEGMENT",
+                name=segment.segment_name,
+                geometry_json=segment.geometry_json,
+                properties={
+                    "channel_id": channel.id,
+                    "channel_code": channel.channel_code,
+                    "segment_no": segment.segment_no,
+                    "segment_status_code": segment.segment_status_code,
+                    "source_type_code": segment.source_type_code,
+                    "quality_code": segment.quality_code,
+                    "length_m": float(segment.length_m) if segment.length_m is not None else None,
+                },
+            )
+            for segment, channel in rows
         ]
 
     async def _graph_edge_layers(

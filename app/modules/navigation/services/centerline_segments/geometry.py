@@ -236,6 +236,9 @@ class NavigationCenterlineSegmentGeometryMixin:
     def _need_repair_count(self, rows: list[NavigationCenterlineSegment]) -> int:
         return sum(1 for item in rows if item.segment_status_code in {"NEED_REPAIR", "PUBLISH_BLOCKED"})
 
+    def _operator_confirmed_count(self, rows: list[NavigationCenterlineSegment]) -> int:
+        return sum(1 for item in rows if item.segment_status_code in {"CONFIRMED", "PUBLISHED"})
+
     def _dump_model(self, model: Any) -> dict[str, Any]:
         if hasattr(model, "model_dump"):
             return model.model_dump()
