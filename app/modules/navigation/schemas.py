@@ -590,6 +590,7 @@ class NavigationCenterlineListItemResponse(BaseModel):
 class NavigationCenterlineSegmentGenerateRequest(BaseModel):
     force: bool = False
     segment_length_km: float = Field(default=5.0, gt=0, le=100)
+    source_mode: str = Field(default="BOUNDARY", max_length=32)
 
 
 class NavigationCenterlineSegmentGenerateResponse(BaseModel):
@@ -632,6 +633,8 @@ class NavigationCenterlineSegmentResponse(BaseModel):
     source_trace_json: dict[str, Any] | None = None
     source_boundary_id: int | None = None
     based_on_boundary_id: int | None = None
+    source_mode: str | None = None
+    source_algorithm: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -648,6 +651,10 @@ class NavigationCenterlineSegmentListResponse(BaseModel):
 class NavigationCenterlineSegmentUpdateRequest(BaseModel):
     geometry_json: dict[str, Any]
     source_type_code: str = Field(default="MAP_EDIT", max_length=64)
+
+
+class NavigationCenterlineSegmentSplitRequest(BaseModel):
+    split_ratio: float = Field(default=0.5, gt=0, lt=1)
 
 
 class NavigationCenterlineSegmentPublishRequest(BaseModel):
@@ -683,6 +690,10 @@ class NavigationBoundaryListItemResponse(BaseModel):
     downstream_stale: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class NavigationBoundaryArchiveRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=256)
 
 
 class NavigationGraphVersionListItemResponse(BaseModel):

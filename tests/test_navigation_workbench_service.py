@@ -1202,6 +1202,63 @@ async def test_production_boundary_candidate_generation_uses_water_body_without_
 
 
 @pytest.mark.asyncio
+async def test_boundary_archive_hides_non_current_and_blocks_current(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        geometry = _polygon()
+        session.add_all(
+            [
+                NavigationChannelBoundary(
+                    id=1,
+                    channel_id=1,
+                    geometry_json=geometry,
+                    boundary_paths_low=geometry["coordinates"],
+                    bbox_min_lng=119.98,
+                    bbox_min_lat=30.98,
+                    bbox_max_lng=120.24,
+                    bbox_max_lat=31.12,
+                    geometry_status_code="AVAILABLE",
+                    boundary_quality_code="MANUAL_PUBLISHED",
+                    connectivity_status_code="CONNECTED",
+                    repair_status_code="NONE",
+                    coverage_policy_code="MANUAL_DRAW",
+                    is_current=True,
+                ),
+                NavigationChannelBoundary(
+                    id=2,
+                    channel_id=1,
+                    geometry_json=geometry,
+                    boundary_paths_low=geometry["coordinates"],
+                    bbox_min_lng=119.98,
+                    bbox_min_lat=30.98,
+                    bbox_max_lng=120.24,
+                    bbox_max_lat=31.12,
+                    geometry_status_code="AVAILABLE",
+                    boundary_quality_code="AUTO_CANDIDATE",
+                    connectivity_status_code="CONNECTED",
+                    repair_status_code="NONE",
+                    coverage_policy_code="WATER_BODY_UNION_SIMPLIFIED",
+                    is_current=False,
+                ),
+            ]
+        )
+        await session.commit()
+        service = NavigationWorkbenchService(session)
+
+        with pytest.raises(Exception) as exc_info:
+            await service.archive_boundary(1, reason="current should stay")
+        archived = await service.archive_boundary(2, reason="hide noisy candidate")
+        visible = await service.list_boundaries(channel_id=1)
+        all_rows = await service.list_boundaries(channel_id=1, include_archived=True)
+
+    assert exc_info.value.code == "CURRENT_BOUNDARY_ARCHIVE_BLOCKED"
+    assert archived.geometry_status_code == "ARCHIVED"
+    assert archived.source_trace_json["archive_reason"] == "hide noisy candidate"
+    assert [item.id for item in visible] == [1]
+    assert {item.id for item in all_rows} == {1, 2}
+
+
+@pytest.mark.asyncio
 async def test_production_centerline_candidate_generation_does_not_create_fake_line(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)

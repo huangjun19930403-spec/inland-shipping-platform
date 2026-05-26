@@ -47,6 +47,8 @@ class NavigationCenterlineSegmentGeometryMixin:
             source_trace_json=row.source_trace_json,
             source_boundary_id=self._trace_int(row.source_trace_json, "source_boundary_id", "based_on_boundary_id"),
             based_on_boundary_id=self._trace_int(row.source_trace_json, "source_boundary_id", "based_on_boundary_id"),
+            source_mode=self._trace_str(row.source_trace_json, "source_mode"),
+            source_algorithm=self._trace_str(row.source_trace_json, "algorithm", "source_algorithm"),
             created_at=self._iso_datetime(row.created_at),
             updated_at=self._iso_datetime(row.updated_at),
         )
@@ -62,6 +64,14 @@ class NavigationCenterlineSegmentGeometryMixin:
                 return value
             if isinstance(value, str) and value.isdigit():
                 return int(value)
+        return None
+
+    def _trace_str(self, source_trace_json: dict[str, Any] | None, *keys: str) -> str | None:
+        trace = source_trace_json if isinstance(source_trace_json, dict) else {}
+        for key in keys:
+            value = trace.get(key)
+            if isinstance(value, str) and value:
+                return value
         return None
 
     def _geometry_json(self, geometry: LineString) -> dict[str, Any]:

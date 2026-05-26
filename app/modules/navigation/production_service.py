@@ -226,6 +226,7 @@ class NavigationProductionService:
                         NavigationChannelBoundary.channel_id == channel_id,
                         NavigationChannelBoundary.is_current.is_(False),
                         NavigationChannelBoundary.coverage_policy_code.in_(BOUNDARY_CANDIDATE_POLICIES),
+                        NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
                     )
                     .order_by(NavigationChannelBoundary.id.desc())
                     .limit(max(1, min(limit, 300)))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 
 from app.core.exceptions import NotFoundError
 from app.models import NavigationCenterlineSegment
@@ -10,6 +10,7 @@ from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentListResponse,
     NavigationCenterlineSegmentResponse,
+    NavigationCenterlineSegmentSplitRequest,
     NavigationCenterlineSegmentUpdateRequest,
 )
 from app.modules.navigation.services.centerline_segments.generator import NavigationCenterlineSegmentGeneratorMixin
@@ -108,6 +109,123 @@ class NavigationCenterlineSegmentService(
         await self.session.refresh(row)
         return self._response(row)
 
+    async def archive_segment(self, segment_id: int) -> NavigationCenterlineSegmentListResponse:
+        row = await self._segment(segment_id)
+        row.segment_status_code = "ARCHIVED"
+        trace = dict(row.source_trace_json or {})
+        trace["archived_at"] = self._now().isoformat()
+        trace["archive_reason"] = "operator_deleted_segment"
+        row.source_trace_json = trace
+        await self.session.flush()
+        await self._rechain_active_segments(int(row.channel_id))
+        await self.session.commit()
+        return await self.list_segments(int(row.channel_id))
+
+    async def split_segment(
+        self,
+        segment_id: int,
+        body: NavigationCenterlineSegmentSplitRequest,
+    ) -> NavigationCenterlineSegmentListResponse:
+        row = await self._segment(segment_id)
+        if row.geometry_json is None:
+            self._fail("SEGMENT_GEOMETRY_INVALID", "中心线区段缺少几何，无法拆分")
+        line = self._line_from_json(row.geometry_json, code="SEGMENT_GEOMETRY_INVALID")
+        first_line, second_line = self._split_line_at_ratio(line, float(body.split_ratio))
+        if first_line is None or second_line is None:
+            self._fail("SEGMENT_SPLIT_FAILED", "当前区段太短或几何无效，无法拆分")
+        ordered = await self._active_segments(int(row.channel_id))
+        insert_at = next((index for index, item in enumerate(ordered) if int(item.id) == int(row.id)), len(ordered) - 1)
+        row.geometry_json = self._geometry_json(first_line)
+        row.source_type_code = "MAP_EDIT"
+        row.centerline_id = None
+        row.source_trace_json = {
+            **(row.source_trace_json or {}),
+            "split_at": self._now().isoformat(),
+            "split_ratio": body.split_ratio,
+            "last_edit_source_type_code": "MAP_EDIT",
+        }
+        self._apply_geometry_metrics(row, first_line)
+        new_row = NavigationCenterlineSegment(
+            channel_id=row.channel_id,
+            centerline_id=None,
+            segment_no=row.segment_no,
+            segment_name=f"{row.segment_name} 拆分段",
+            segment_status_code="NEED_REPAIR",
+            geometry_json=self._geometry_json(second_line),
+            source_type_code="MAP_EDIT",
+            quality_code="READY_WITH_WARNING",
+            source_trace_json={
+                **(row.source_trace_json or {}),
+                "split_from_segment_id": int(row.id),
+                "split_at": self._now().isoformat(),
+                "source_mode": "MAP_EDIT",
+                "source_type_code": "MAP_EDIT",
+            },
+        )
+        self._apply_geometry_metrics(new_row, second_line)
+        self.session.add(new_row)
+        await self.session.flush()
+        ordered = [item for item in ordered if int(item.id) != int(row.id)]
+        ordered[insert_at:insert_at] = [row, new_row]
+        self._rechain_rows(ordered)
+        await self._validate_mutated_segment(row)
+        await self._validate_mutated_segment(new_row)
+        await self.session.commit()
+        return await self.list_segments(int(row.channel_id))
+
+    async def merge_next_segment(self, segment_id: int) -> NavigationCenterlineSegmentListResponse:
+        row = await self._segment(segment_id)
+        if row.next_segment_id is None:
+            self._fail("SEGMENT_MERGE_FAILED", "当前区段没有下一段，无法合并")
+        next_row = await self._segment(int(row.next_segment_id))
+        if row.geometry_json is None or next_row.geometry_json is None:
+            self._fail("SEGMENT_GEOMETRY_INVALID", "中心线区段缺少几何，无法合并")
+        line = self._line_from_json(row.geometry_json, code="SEGMENT_GEOMETRY_INVALID")
+        next_line = self._line_from_json(next_row.geometry_json, code="SEGMENT_GEOMETRY_INVALID")
+        coords = [(float(lng), float(lat)) for lng, lat, *_rest in line.coords]
+        next_coords = [(float(lng), float(lat)) for lng, lat, *_rest in next_line.coords]
+        if coords and next_coords and self._distance_m(coords[-1], next_coords[0]) <= ENDPOINT_AUTO_SNAP_M:
+            next_coords[0] = coords[-1]
+        merged_line = LineString(self._clean_coords([*coords, *next_coords]))
+        row.geometry_json = self._geometry_json(merged_line)
+        row.source_type_code = "MAP_EDIT"
+        row.centerline_id = None
+        trace = dict(row.source_trace_json or {})
+        trace["merged_next_segment_id"] = int(next_row.id)
+        trace["merged_at"] = self._now().isoformat()
+        trace["last_edit_source_type_code"] = "MAP_EDIT"
+        row.source_trace_json = trace
+        self._apply_geometry_metrics(row, merged_line)
+        next_row.segment_status_code = "ARCHIVED"
+        next_trace = dict(next_row.source_trace_json or {})
+        next_trace["archived_at"] = self._now().isoformat()
+        next_trace["archive_reason"] = f"merged_into_segment:{row.id}"
+        next_row.source_trace_json = next_trace
+        await self.session.flush()
+        await self._rechain_active_segments(int(row.channel_id))
+        await self._validate_mutated_segment(row)
+        await self.session.commit()
+        return await self.list_segments(int(row.channel_id))
+
+    async def reverse_segment(self, segment_id: int) -> NavigationCenterlineSegmentResponse:
+        row = await self._segment(segment_id)
+        if row.geometry_json is None:
+            self._fail("SEGMENT_GEOMETRY_INVALID", "中心线区段缺少几何，无法反向")
+        line = self._line_from_json(row.geometry_json, code="SEGMENT_GEOMETRY_INVALID")
+        reversed_line = LineString(list(line.coords)[::-1])
+        row.geometry_json = self._geometry_json(reversed_line)
+        row.source_type_code = "MAP_EDIT"
+        row.centerline_id = None
+        trace = dict(row.source_trace_json or {})
+        trace["reversed_at"] = self._now().isoformat()
+        trace["last_edit_source_type_code"] = "MAP_EDIT"
+        row.source_trace_json = trace
+        self._apply_geometry_metrics(row, reversed_line)
+        await self._validate_mutated_segment(row)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._response(row)
+
     async def _ensure_channel(self, channel_id: int) -> NavigationChannel:
         channel = await self.session.get(NavigationChannel, channel_id)
         if channel is None:
@@ -173,3 +291,42 @@ class NavigationCenterlineSegmentService(
             if self._distance_m(coords[-1], next_start) <= ENDPOINT_AUTO_SNAP_M:
                 coords[-1] = next_start
         return LineString(self._clean_coords(coords))
+
+    async def _validate_mutated_segment(self, row: NavigationCenterlineSegment) -> None:
+        validation = await self._validate_row(row)
+        self._apply_validation(row, validation, generated_from_boundary=False)
+        row.segment_status_code = "PUBLISH_BLOCKED" if validation.error_count else "NEED_REPAIR" if validation.warning_count else "CANDIDATE"
+        row.quality_code = validation.quality_code
+
+    def _split_line_at_ratio(self, line: LineString, ratio: float) -> tuple[LineString | None, LineString | None]:
+        coords = [(float(lng), float(lat)) for lng, lat, *_rest in line.coords]
+        if len(coords) < 2:
+            return None, None
+        split_point = line.interpolate(ratio, normalized=True)
+        split_coord = (float(split_point.x), float(split_point.y))
+        first_coords = [coords[0]]
+        second_coords = [split_coord]
+        for coord in coords[1:-1]:
+            projected = line.project(Point(coord), normalized=True)
+            if projected < ratio:
+                first_coords.append(coord)
+            else:
+                second_coords.append(coord)
+        first_coords.append(split_coord)
+        second_coords.append(coords[-1])
+        first_clean = self._clean_coords(first_coords)
+        second_clean = self._clean_coords(second_coords)
+        first = LineString(first_clean) if len(first_clean) >= 2 else None
+        second = LineString(second_clean) if len(second_clean) >= 2 else None
+        if first is None or second is None or self._length_m(first) < 1.0 or self._length_m(second) < 1.0:
+            return None, None
+        return first, second
+
+    async def _rechain_active_segments(self, channel_id: int) -> None:
+        self._rechain_rows(await self._active_segments(channel_id, limit=1000))
+
+    def _rechain_rows(self, rows: list[NavigationCenterlineSegment]) -> None:
+        for index, item in enumerate(rows):
+            item.segment_no = f"{index + 1:03d}"
+            item.previous_segment_id = int(rows[index - 1].id) if index > 0 else None
+            item.next_segment_id = int(rows[index + 1].id) if index + 1 < len(rows) else None

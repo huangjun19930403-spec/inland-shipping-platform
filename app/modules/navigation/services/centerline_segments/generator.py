@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
+from collections import defaultdict
+from heapq import heappop, heappush
 from typing import Any
 
 from sqlalchemy import or_, select
-from shapely.geometry import GeometryCollection, LineString, Point, shape
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, MultiPoint, Point, shape
+from shapely.ops import voronoi_diagram
 from shapely.validation import make_valid
 
 from app.models import NavigationCenterlineSegment, NavigationChannelCenterline
@@ -47,20 +50,27 @@ class NavigationCenterlineSegmentGeneratorMixin:
         for item in active_segments:
             item.segment_status_code = "ARCHIVED"
 
-        source = await self._source_lines(channel_id)
+        source_mode = (body.source_mode or "BOUNDARY").upper()
+        if source_mode not in {"BOUNDARY", "CURRENT_CENTERLINE"}:
+            return self._generation_blocked(channel_id, "中心线区段来源模式无效，请选择基于当前边界或从当前中心线切段。")
+
+        source = await self._source_lines(channel_id) if source_mode == "CURRENT_CENTERLINE" else None
+        algorithm = None
         if source is None:
-            line = self._rough_line_from_boundary(boundary.geometry_json)
-            if line is None:
-                return self._generation_blocked(channel_id, "当前边界无法自动生成粗中心线，请在区段工作台中补画起始区段。")
-            lines = [line]
+            if source_mode == "CURRENT_CENTERLINE":
+                return self._generation_blocked(channel_id, "当前航道没有可切段的已发布中心线，请改用基于当前边界生成。")
+            lines, algorithm = self._rough_lines_from_boundary(boundary.geometry_json)
+            if not lines:
+                return self._generation_blocked(channel_id, "当前边界无法抽取中心线，请使用“重画当前区段”或手工补画首段开始。")
             centerline_id = None
-            source_type = "BOUNDARY_DERIVED_ROUGH"
+            source_type = "BOUNDARY_MEDIAL_AXIS_ROUGH"
         else:
             lines, centerline_id, source_type = source
+            algorithm = "CURRENT_CENTERLINE_SPLIT"
 
         segment_lines = self._split_source_lines(lines, float(body.segment_length_km or 5.0))
         if not segment_lines:
-            return self._generation_blocked(channel_id, "当前中心线来源无法拆分为有效区段，请补画起始区段。")
+            return self._generation_blocked(channel_id, "当前边界无法拆分为有效中心线区段，请使用“重画当前区段”或手工补画首段开始。")
 
         rows: list[NavigationCenterlineSegment] = []
         for index, line in enumerate(segment_lines, start=1):
@@ -69,15 +79,17 @@ class NavigationCenterlineSegmentGeneratorMixin:
                 centerline_id=centerline_id,
                 segment_no=f"{index:03d}",
                 segment_name=f"{channel.channel_name}中心线区段 {index:03d}",
-                segment_status_code="NEED_REPAIR" if source_type == "BOUNDARY_DERIVED_ROUGH" else "CANDIDATE",
+                segment_status_code="NEED_REPAIR" if source_type == "BOUNDARY_MEDIAL_AXIS_ROUGH" else "CANDIDATE",
                 geometry_json=self._geometry_json(line),
                 source_type_code=source_type,
-                quality_code="READY_WITH_WARNING" if source_type == "BOUNDARY_DERIVED_ROUGH" else "READY",
+                quality_code="READY_WITH_WARNING" if source_type == "BOUNDARY_MEDIAL_AXIS_ROUGH" else "READY",
                 source_trace_json={
+                    "source_mode": source_mode,
                     "source_type_code": source_type,
                     "source_centerline_id": centerline_id,
                     "source_boundary_id": int(boundary.id),
                     "based_on_boundary_id": int(boundary.id),
+                    "algorithm": algorithm,
                     "segment_length_km": body.segment_length_km,
                     "generated_at": self._now().isoformat(),
                     "force": body.force,
@@ -95,7 +107,7 @@ class NavigationCenterlineSegmentGeneratorMixin:
 
         for row in rows:
             validation = await self._validate_row(row)
-            self._apply_validation(row, validation, generated_from_boundary=source_type == "BOUNDARY_DERIVED_ROUGH")
+            self._apply_validation(row, validation, generated_from_boundary=source_type == "BOUNDARY_MEDIAL_AXIS_ROUGH")
         await self.session.commit()
 
         created_rows = await self._active_segments(channel_id)
@@ -148,13 +160,13 @@ class NavigationCenterlineSegmentGeneratorMixin:
                 return lines, int(row.id), source_type
         return None
 
-    def _rough_line_from_boundary(self, geometry_json: dict[str, Any]) -> LineString | None:
+    def _rough_lines_from_boundary(self, geometry_json: dict[str, Any]) -> tuple[list[LineString], str | None]:
         try:
             geometry = make_valid(shape(self._geojson_geometry(geometry_json)))
         except Exception:
-            return None
+            return [], None
         if geometry.is_empty:
-            return None
+            return [], None
         polygons = []
         if geometry.geom_type == "Polygon":
             polygons = [geometry]
@@ -163,8 +175,36 @@ class NavigationCenterlineSegmentGeneratorMixin:
         elif isinstance(geometry, GeometryCollection):
             polygons = [part for part in geometry.geoms if part.geom_type == "Polygon"]
         if not polygons:
-            return None
-        polygon = max(polygons, key=lambda item: item.area)
+            return [], None
+        polygons = sorted(polygons, key=lambda item: item.area, reverse=True)
+        max_area = float(polygons[0].area)
+        min_area = max(max_area * 0.01, 1e-10)
+        lines: list[LineString] = []
+        algorithms: set[str] = set()
+        for polygon in polygons[:40]:
+            if float(polygon.area) < min_area:
+                continue
+            line = self._medial_axis_line_from_polygon(polygon)
+            if line is not None and self._length_m(line) >= 20.0:
+                lines.append(line)
+                algorithms.add("VORONOI_MEDIAL_AXIS_V1")
+                continue
+            line = self._bbox_line_from_polygon(polygon)
+            if line is not None and self._length_m(line) >= 20.0:
+                lines.append(line)
+                algorithms.add("BOUNDARY_BBOX_CENTERLINE_FALLBACK")
+        if not lines:
+            return [], None
+        algorithm = "BOUNDARY_COMPONENT_MEDIAL_AXIS_V1" if len(algorithms) > 1 or len(lines) > 1 else next(iter(algorithms))
+        return lines, algorithm
+
+    def _rough_line_from_boundary(self, geometry_json: dict[str, Any]) -> tuple[LineString | None, str | None]:
+        lines, algorithm = self._rough_lines_from_boundary(geometry_json)
+        if not lines:
+            return None, None
+        return max(lines, key=self._length_m), algorithm
+
+    def _bbox_line_from_polygon(self, polygon: Any) -> LineString | None:
         min_lng, min_lat, max_lng, max_lat = polygon.bounds
         if max_lng <= min_lng or max_lat <= min_lat:
             return None
@@ -175,6 +215,183 @@ class NavigationCenterlineSegmentGeneratorMixin:
             mid_lng = (min_lng + max_lng) / 2
             guide = LineString([(mid_lng, min_lat), (mid_lng, max_lat)])
         return self._longest_line(guide.intersection(polygon))
+
+    def _medial_axis_line_from_polygon(self, polygon: Any) -> LineString | None:
+        min_lng, min_lat, max_lng, max_lat = polygon.bounds
+        span = max(max_lng - min_lng, max_lat - min_lat)
+        if span <= 0:
+            return None
+        tolerance = max(span / 900.0, 0.00008)
+        working = make_valid(polygon.simplify(tolerance, preserve_topology=True))
+        if working.is_empty:
+            working = polygon
+        points = self._sample_polygon_boundary_points(working, max_points=260)
+        if len(points) < 4:
+            return None
+        try:
+            diagram = voronoi_diagram(
+                MultiPoint(points),
+                envelope=working.envelope.buffer(span * 0.05),
+                edges=True,
+            )
+        except Exception:
+            return None
+        candidates = self._internal_voronoi_lines(diagram, working)
+        if not candidates:
+            return None
+        return self._longest_graph_path(candidates)
+
+    def _sample_polygon_boundary_points(self, polygon: Any, *, max_points: int) -> list[tuple[float, float]]:
+        rings = [polygon.exterior, *list(getattr(polygon, "interiors", []))]
+        weighted = [(ring, max(float(ring.length), 0.0)) for ring in rings if ring and ring.length > 0]
+        total = sum(length for _ring, length in weighted)
+        if total <= 0:
+            return []
+        points: list[tuple[float, float]] = []
+        for ring, length in weighted:
+            count = max(8, int(max_points * (length / total)))
+            count = min(count, max_points - len(points))
+            if count <= 0:
+                break
+            for index in range(count):
+                point = ring.interpolate(index / count, normalized=True)
+                points.append((float(point.x), float(point.y)))
+        return self._dedupe_coords(points)
+
+    def _internal_voronoi_lines(self, diagram: Any, polygon: Any) -> list[LineString]:
+        raw_lines = self._flatten_lines(diagram)
+        lines: list[LineString] = []
+        min_lng, min_lat, max_lng, max_lat = polygon.bounds
+        min_span = max(min(max_lng - min_lng, max_lat - min_lat), 0.00001)
+        boundary_distance_floor = min_span * 0.002
+        for line in raw_lines:
+            clipped = line.intersection(polygon)
+            for candidate in self._flatten_lines(clipped):
+                if len(candidate.coords) < 2:
+                    continue
+                midpoint = candidate.interpolate(0.5, normalized=True)
+                if not polygon.contains(midpoint):
+                    continue
+                if midpoint.distance(polygon.boundary) < boundary_distance_floor:
+                    continue
+                cleaned_coords = self._clean_coords([(float(lng), float(lat)) for lng, lat, *_rest in candidate.coords])
+                if len(cleaned_coords) < 2:
+                    continue
+                cleaned = LineString(cleaned_coords)
+                if self._length_m(cleaned) >= 10.0:
+                    lines.append(cleaned)
+        return lines
+
+    def _flatten_lines(self, geometry: Any) -> list[LineString]:
+        if geometry is None or geometry.is_empty:
+            return []
+        if isinstance(geometry, LineString):
+            return [geometry] if len(geometry.coords) >= 2 else []
+        if isinstance(geometry, MultiLineString):
+            return [line for line in geometry.geoms if len(line.coords) >= 2]
+        if isinstance(geometry, GeometryCollection):
+            lines: list[LineString] = []
+            for part in geometry.geoms:
+                lines.extend(self._flatten_lines(part))
+            return lines
+        return []
+
+    def _longest_graph_path(self, lines: list[LineString]) -> LineString | None:
+        graph: dict[tuple[float, float], list[tuple[tuple[float, float], float]]] = defaultdict(list)
+        for line in lines:
+            coords = self._dedupe_coords([(float(lng), float(lat)) for lng, lat, *_rest in line.coords])
+            for start, end in zip(coords, coords[1:]):
+                if start == end:
+                    continue
+                weight = self._distance_m(start, end)
+                graph[start].append((end, weight))
+                graph[end].append((start, weight))
+        if not graph:
+            return None
+        best_path: list[tuple[float, float]] = []
+        best_distance = 0.0
+        visited: set[tuple[float, float]] = set()
+        for node in list(graph):
+            if node in visited:
+                continue
+            component = self._component_nodes(graph, node)
+            visited.update(component)
+            farthest, _distance, _parents = self._dijkstra_farthest(graph, node, component)
+            other, distance, parents = self._dijkstra_farthest(graph, farthest, component)
+            path = self._restore_path(parents, farthest, other)
+            if distance > best_distance and len(path) >= 2:
+                best_distance = distance
+                best_path = path
+        if len(best_path) < 2:
+            return None
+        return LineString(self._clean_coords(best_path))
+
+    def _component_nodes(
+        self,
+        graph: dict[tuple[float, float], list[tuple[tuple[float, float], float]]],
+        start: tuple[float, float],
+    ) -> set[tuple[float, float]]:
+        stack = [start]
+        seen = {start}
+        while stack:
+            node = stack.pop()
+            for neighbor, _weight in graph[node]:
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+        return seen
+
+    def _dijkstra_farthest(
+        self,
+        graph: dict[tuple[float, float], list[tuple[tuple[float, float], float]]],
+        start: tuple[float, float],
+        allowed: set[tuple[float, float]],
+    ) -> tuple[tuple[float, float], float, dict[tuple[float, float], tuple[float, float] | None]]:
+        distances = {start: 0.0}
+        parents: dict[tuple[float, float], tuple[float, float] | None] = {start: None}
+        heap = [(0.0, start)]
+        while heap:
+            distance, node = heappop(heap)
+            if distance > distances.get(node, math.inf):
+                continue
+            for neighbor, weight in graph[node]:
+                if neighbor not in allowed:
+                    continue
+                next_distance = distance + weight
+                if next_distance < distances.get(neighbor, math.inf):
+                    distances[neighbor] = next_distance
+                    parents[neighbor] = node
+                    heappush(heap, (next_distance, neighbor))
+        farthest = max(distances, key=lambda item: distances[item])
+        return farthest, distances[farthest], parents
+
+    def _restore_path(
+        self,
+        parents: dict[tuple[float, float], tuple[float, float] | None],
+        start: tuple[float, float],
+        end: tuple[float, float],
+    ) -> list[tuple[float, float]]:
+        path = [end]
+        current = end
+        while current != start:
+            parent = parents.get(current)
+            if parent is None:
+                return []
+            path.append(parent)
+            current = parent
+        path.reverse()
+        return path
+
+    def _dedupe_coords(self, coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        output: list[tuple[float, float]] = []
+        seen: set[tuple[float, float]] = set()
+        for lng, lat in coords:
+            coord = (round(float(lng), 8), round(float(lat), 8))
+            if coord in seen:
+                continue
+            seen.add(coord)
+            output.append(coord)
+        return output
 
     def _split_source_lines(self, lines: list[LineString], segment_length_km: float) -> list[LineString]:
         output: list[LineString] = []

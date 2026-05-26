@@ -13,6 +13,7 @@ from app.models.base import Base
 from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentGenerateRequest,
     NavigationCenterlineSegmentPublishRequest,
+    NavigationCenterlineSegmentSplitRequest,
     NavigationCenterlineSegmentUpdateRequest,
 )
 from app.modules.navigation.service import NavigationCenterlineService
@@ -126,11 +127,87 @@ async def test_generate_centerline_segments_from_boundary_rough_line(session_mak
     assert response.status_code == "CREATED"
     assert response.segment_count >= 2
     assert response.need_repair_count == response.segment_count
-    assert {row.source_type_code for row in rows} == {"BOUNDARY_DERIVED_ROUGH"}
+    assert {row.source_type_code for row in rows} == {"BOUNDARY_MEDIAL_AXIS_ROUGH"}
     assert all(row.segment_no for row in rows)
     assert all(row.length_m and row.length_m > 0 for row in rows)
     assert all(row.bbox_min_lng is not None for row in rows)
     assert all(row.source_trace_json["source_boundary_id"] == 1 for row in rows)
+    assert all(row.source_trace_json["source_centerline_id"] is None for row in rows)
+    assert all(row.source_trace_json["source_mode"] == "BOUNDARY" for row in rows)
+    assert all(row.source_trace_json["algorithm"] for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_generate_centerline_segments_boundary_mode_ignores_old_published_centerline(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        session.add(
+            NavigationChannelCenterline(
+                id=99,
+                channel_id=1,
+                centerline_code="OLD-TINY",
+                centerline_name="旧手画小线",
+                geometry_json={"type": "LineString", "coordinates": [[120.01, 31.01], [120.011, 31.011]]},
+                source_type_code="CENTERLINE_SEGMENT_MERGE",
+                direction_code="BIDIRECTIONAL",
+                is_main_line=True,
+                confidence_score=80,
+                quality_code="READY",
+                review_status_code="PUBLISHED",
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationCenterlineSegmentService(session).generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="BOUNDARY"),
+        )
+        rows = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
+
+    assert response.status_code == "CREATED"
+    assert response.segment_count >= 2
+    assert {row.centerline_id for row in rows} == {None}
+    assert {row.source_type_code for row in rows} == {"BOUNDARY_MEDIAL_AXIS_ROUGH"}
+    assert all(row.length_m and row.length_m > 1000 for row in rows)
+    assert all(row.source_trace_json["source_centerline_id"] is None for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_generate_centerline_segments_current_centerline_mode_reuses_current_centerline(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        session.add(
+            NavigationChannelCenterline(
+                id=99,
+                channel_id=1,
+                centerline_code="CURRENT-LINE",
+                centerline_name="当前中心线",
+                geometry_json={"type": "LineString", "coordinates": [[120.02, 31.025], [120.20, 31.025]]},
+                source_type_code="CENTERLINE_SEGMENT_MERGE",
+                direction_code="BIDIRECTIONAL",
+                is_main_line=True,
+                confidence_score=90,
+                quality_code="READY",
+                review_status_code="PUBLISHED",
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationCenterlineSegmentService(session).generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(segment_length_km=3.0, source_mode="CURRENT_CENTERLINE"),
+        )
+        rows = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
+
+    assert response.status_code == "CREATED"
+    assert rows
+    assert {row.centerline_id for row in rows} == {99}
+    assert {row.source_type_code for row in rows} == {"PUBLISHED"}
+    assert all(row.source_trace_json["source_mode"] == "CURRENT_CENTERLINE" for row in rows)
 
 
 @pytest.mark.asyncio
@@ -281,3 +358,33 @@ async def test_publish_confirmed_centerline_segments_creates_published_centerlin
     assert graph_version is not None
     assert graph_version.source_summary_json["source_boundary_ids"] == [1]
     assert all(row.segment_status_code == "PUBLISHED" for row in stored_segments)
+
+
+@pytest.mark.asyncio
+async def test_segment_archive_split_merge_reverse_operations_keep_chain(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        service = NavigationCenterlineSegmentService(session)
+        await service.generate_segments(1, NavigationCenterlineSegmentGenerateRequest(segment_length_km=50.0))
+        row = (await service.list_segments(1)).items[0]
+
+        split_response = await service.split_segment(row.id, NavigationCenterlineSegmentSplitRequest(split_ratio=0.5))
+        assert split_response.total_count == 2
+        first, second = split_response.items
+        assert first.next_segment_id == second.id
+        assert second.previous_segment_id == first.id
+
+        reversed_first = await service.reverse_segment(first.id)
+        assert reversed_first.source_type_code == "MAP_EDIT"
+
+        merged_response = await service.merge_next_segment(first.id)
+        assert merged_response.total_count == 1
+        assert merged_response.items[0].previous_segment_id is None
+        assert merged_response.items[0].next_segment_id is None
+
+        archived_response = await service.archive_segment(merged_response.items[0].id)
+        stored_rows = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
+
+    assert archived_response.total_count == 0
+    assert any(row.segment_status_code == "ARCHIVED" for row in stored_rows)

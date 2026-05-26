@@ -836,12 +836,15 @@ class NavigationWorkbenchService:
         *,
         channel_id: int | None = None,
         limit: int = 50,
+        include_archived: bool = False,
     ) -> list[NavigationBoundaryListItemResponse]:
         stmt = select(NavigationChannelBoundary, NavigationChannel).join(
             NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id
         )
         if channel_id:
             stmt = stmt.where(NavigationChannelBoundary.channel_id == channel_id)
+        if not include_archived:
+            stmt = stmt.where(NavigationChannelBoundary.geometry_status_code != "ARCHIVED")
         rows = list(
             (
                 await self.session.execute(
@@ -852,27 +855,53 @@ class NavigationWorkbenchService:
                 )
             ).all()
         )
-        return [
-            NavigationBoundaryListItemResponse(
-                id=boundary.id,
-                channel_id=boundary.channel_id,
-                channel_code=channel.channel_code,
-                channel_name=channel.channel_name,
-                boundary_quality_code=boundary.boundary_quality_code,
-                geometry_status_code=boundary.geometry_status_code,
-                connectivity_status_code=boundary.connectivity_status_code,
-                repair_status_code=boundary.repair_status_code,
-                coverage_policy_code=boundary.coverage_policy_code,
-                is_current=boundary.is_current,
-                geometry_json=boundary.geometry_json,
-                source_trace_json=boundary.source_trace_json,
-                previous_boundary_id=self._trace_int(boundary.source_trace_json, "previous_boundary_id"),
-                caused_downstream_stale=self._trace_bool(boundary.source_trace_json, "caused_downstream_stale"),
-                created_at=self._iso_datetime(boundary.created_at),
-                updated_at=self._iso_datetime(boundary.updated_at),
+        return [self._boundary_item_response(boundary, channel) for boundary, channel in rows]
+
+    async def archive_boundary(self, boundary_id: int, *, reason: str | None = None) -> NavigationBoundaryListItemResponse:
+        row = await self.session.get(NavigationChannelBoundary, boundary_id)
+        if row is None:
+            raise NotFoundError("NavigationChannelBoundary", boundary_id)
+        if row.is_current:
+            raise ValidationError(
+                "当前版本不能归档，请先发布新版本。",
+                code="CURRENT_BOUNDARY_ARCHIVE_BLOCKED",
+                detail={"error_code": "CURRENT_BOUNDARY_ARCHIVE_BLOCKED", "message": "当前版本不能归档，请先发布新版本。"},
             )
-            for boundary, channel in rows
-        ]
+        row.geometry_status_code = "ARCHIVED"
+        trace = dict(row.source_trace_json or {})
+        trace["archived_at"] = self._now().isoformat()
+        trace["archive_reason"] = reason or "operator_hide_boundary_version"
+        row.source_trace_json = trace
+        await self.session.flush()
+        await self.session.refresh(row)
+        channel = await self.session.get(NavigationChannel, row.channel_id)
+        response = self._boundary_item_response(row, channel)
+        await self.session.commit()
+        return response
+
+    def _boundary_item_response(
+        self,
+        boundary: NavigationChannelBoundary,
+        channel: NavigationChannel | None,
+    ) -> NavigationBoundaryListItemResponse:
+        return NavigationBoundaryListItemResponse(
+            id=boundary.id,
+            channel_id=boundary.channel_id,
+            channel_code=channel.channel_code if channel else None,
+            channel_name=channel.channel_name if channel else None,
+            boundary_quality_code=boundary.boundary_quality_code,
+            geometry_status_code=boundary.geometry_status_code,
+            connectivity_status_code=boundary.connectivity_status_code,
+            repair_status_code=boundary.repair_status_code,
+            coverage_policy_code=boundary.coverage_policy_code,
+            is_current=boundary.is_current,
+            geometry_json=boundary.geometry_json,
+            source_trace_json=boundary.source_trace_json,
+            previous_boundary_id=self._trace_int(boundary.source_trace_json, "previous_boundary_id"),
+            caused_downstream_stale=self._trace_bool(boundary.source_trace_json, "caused_downstream_stale"),
+            created_at=self._iso_datetime(boundary.created_at),
+            updated_at=self._iso_datetime(boundary.updated_at),
+        )
 
     async def list_graph_versions(self, *, limit: int = 30) -> list[NavigationGraphVersionListItemResponse]:
         rows = list(

@@ -16,6 +16,7 @@ from app.modules.navigation.schemas import (
     NavigationAnnotationTaskListResponse,
     NavigationAnnotationTaskResolveRequest,
     NavigationAnnotationTaskResponse,
+    NavigationBoundaryArchiveRequest,
     NavigationBoundaryListItemResponse,
     NavigationCenterlineListItemResponse,
     NavigationChannelDiagnosticResponse,
@@ -29,6 +30,7 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentPublishRequest,
     NavigationCenterlineSegmentPublishResponse,
     NavigationCenterlineSegmentResponse,
+    NavigationCenterlineSegmentSplitRequest,
     NavigationCenterlineSegmentUpdateRequest,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
@@ -244,6 +246,46 @@ async def confirm_navigation_centerline_segment(
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationCenterlineSegmentService(db).confirm_segment(segment_id)
+
+
+@router.post("/centerline-segments/{segment_id}/archive", response_model=NavigationCenterlineSegmentListResponse)
+async def archive_navigation_centerline_segment(
+    segment_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).archive_segment(segment_id)
+
+
+@router.post("/centerline-segments/{segment_id}/split", response_model=NavigationCenterlineSegmentListResponse)
+async def split_navigation_centerline_segment(
+    segment_id: int,
+    body: NavigationCenterlineSegmentSplitRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).split_segment(
+        segment_id,
+        body or NavigationCenterlineSegmentSplitRequest(),
+    )
+
+
+@router.post("/centerline-segments/{segment_id}/merge-next", response_model=NavigationCenterlineSegmentListResponse)
+async def merge_next_navigation_centerline_segment(
+    segment_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).merge_next_segment(segment_id)
+
+
+@router.post("/centerline-segments/{segment_id}/reverse", response_model=NavigationCenterlineSegmentResponse)
+async def reverse_navigation_centerline_segment(
+    segment_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).reverse_segment(segment_id)
 
 
 @router.post(
@@ -470,10 +512,28 @@ async def list_navigation_centerlines(
 async def list_navigation_boundaries(
     channel_id: int | None = None,
     limit: int = 50,
+    include_archived: bool = False,
     current_user=Depends(require_permission("ROUTE:READ")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await NavigationWorkbenchService(db).list_boundaries(channel_id=channel_id, limit=limit)
+    return await NavigationWorkbenchService(db).list_boundaries(
+        channel_id=channel_id,
+        limit=limit,
+        include_archived=include_archived,
+    )
+
+
+@router.post("/channel-boundaries/{boundary_id}/archive", response_model=NavigationBoundaryListItemResponse)
+async def archive_navigation_channel_boundary(
+    boundary_id: int,
+    body: NavigationBoundaryArchiveRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).archive_boundary(
+        boundary_id,
+        reason=(body or NavigationBoundaryArchiveRequest()).reason,
+    )
 
 
 @router.get("/graph-versions", response_model=list[NavigationGraphVersionListItemResponse])
