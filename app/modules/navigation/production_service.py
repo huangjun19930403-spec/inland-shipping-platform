@@ -188,6 +188,13 @@ class NavigationProductionService:
             centerlines = await self.centerline_candidates(channel_id=channel_id, limit=200)
             drafts = await self.workbench.list_geometry_drafts(channel_id=channel_id, limit=80)
             drafts = [draft for draft in drafts if draft.draft_type_code == "CENTERLINE"]
+        current_boundary = next((item for item in boundaries if item.is_current), None)
+        if current_boundary is None:
+            current_boundary = await self._current_boundary_item(channel_id)
+        current_centerline = next((item for item in centerlines if item.is_current and item.review_status_code == "PUBLISHED"), None)
+        if current_centerline is None:
+            current_centerline = await self._current_centerline_item(channel_id)
+        active_graph_version = await self._active_graph_version()
         return NavigationProductionWorkspaceResponse(
             channel=row,
             step_code=step_code,
@@ -199,6 +206,10 @@ class NavigationProductionService:
             boundaries=boundaries,
             centerlines=centerlines,
             drafts=drafts,
+            current_boundary=current_boundary,
+            current_centerline=current_centerline,
+            active_graph_version=self.workbench._graph_version_dict(active_graph_version) if active_graph_version else None,
+            downstream_stale=self._downstream_stale(current_boundary, current_centerline, active_graph_version),
             available_actions=row.available_actions,
             blocker_codes=row.blocker_codes,
             warnings=self._warnings_for(row),
@@ -332,9 +343,62 @@ class NavigationProductionService:
                 coverage_policy_code=boundary.coverage_policy_code,
                 is_current=boundary.is_current,
                 geometry_json=boundary.geometry_json,
+                source_trace_json=boundary.source_trace_json,
+                previous_boundary_id=self.workbench._trace_int(boundary.source_trace_json, "previous_boundary_id"),
+                caused_downstream_stale=self.workbench._trace_bool(boundary.source_trace_json, "caused_downstream_stale"),
+                created_at=self.workbench._iso_datetime(boundary.created_at),
+                updated_at=self.workbench._iso_datetime(boundary.updated_at),
             )
             for boundary, channel in rows
         ]
+
+    async def _current_boundary_item(self, channel_id: int) -> NavigationBoundaryListItemResponse | None:
+        boundaries = await self.workbench.list_boundaries(channel_id=channel_id, limit=300)
+        return next((item for item in boundaries if item.is_current and item.geometry_status_code == "AVAILABLE"), None)
+
+    async def _current_centerline_item(self, channel_id: int):
+        centerlines = await self.workbench.list_centerlines(channel_id=channel_id, limit=100)
+        return next((item for item in centerlines if item.is_current and item.review_status_code == "PUBLISHED"), None)
+
+    def _downstream_stale(
+        self,
+        current_boundary: NavigationBoundaryListItemResponse | None,
+        current_centerline: Any | None,
+        active_graph_version: NavigationGraphVersion | None,
+    ) -> dict[str, Any]:
+        boundary_id = current_boundary.id if current_boundary else None
+        centerline_boundary_id = current_centerline.based_on_boundary_id if current_centerline else None
+        graph_summary = active_graph_version.source_summary_json if active_graph_version is not None else None
+        graph_boundary_ids = []
+        if isinstance(graph_summary, dict):
+            raw_ids = graph_summary.get("source_boundary_ids") or []
+            graph_boundary_ids = [int(item) for item in raw_ids if isinstance(item, int) or (isinstance(item, str) and item.isdigit())]
+        boundary_caused_stale = bool(current_boundary and current_boundary.caused_downstream_stale)
+        centerline_stale = bool(
+            boundary_id
+            and current_centerline
+            and (
+                (centerline_boundary_id and int(centerline_boundary_id) != int(boundary_id))
+                or (boundary_caused_stale and not centerline_boundary_id)
+            )
+        )
+        graph_stale = bool(
+            boundary_id
+            and active_graph_version
+            and (
+                (graph_boundary_ids and int(boundary_id) not in graph_boundary_ids)
+                or (boundary_caused_stale and not graph_boundary_ids)
+            )
+        )
+        return {
+            "current_boundary_id": boundary_id,
+            "current_centerline_boundary_id": centerline_boundary_id,
+            "active_graph_boundary_ids": graph_boundary_ids,
+            "boundary_caused_downstream_stale": boundary_caused_stale,
+            "centerline_stale": centerline_stale,
+            "graph_stale": graph_stale,
+            "any_stale": centerline_stale or graph_stale,
+        }
 
     def _normalize_workspace_step(self, step: str) -> str:
         value = (step or "").strip().upper().replace("-", "_")

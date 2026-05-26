@@ -45,7 +45,24 @@ class NavigationCenterlineSegmentGeometryMixin:
             issue_summary_json=row.issue_summary_json,
             validation_summary_json=row.validation_summary_json,
             source_trace_json=row.source_trace_json,
+            source_boundary_id=self._trace_int(row.source_trace_json, "source_boundary_id", "based_on_boundary_id"),
+            based_on_boundary_id=self._trace_int(row.source_trace_json, "source_boundary_id", "based_on_boundary_id"),
+            created_at=self._iso_datetime(row.created_at),
+            updated_at=self._iso_datetime(row.updated_at),
         )
+
+    def _iso_datetime(self, value: Any) -> str | None:
+        return value.isoformat() if value else None
+
+    def _trace_int(self, source_trace_json: dict[str, Any] | None, *keys: str) -> int | None:
+        trace = source_trace_json if isinstance(source_trace_json, dict) else {}
+        for key in keys:
+            value = trace.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        return None
 
     def _geometry_json(self, geometry: LineString) -> dict[str, Any]:
         return json.loads(json.dumps(mapping(geometry)))

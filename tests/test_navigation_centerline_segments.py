@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
-from app.models import NavigationCenterlineSegment, NavigationChannelCenterline
+from app.models import NavigationCenterlineSegment, NavigationChannelCenterline, NavigationGraphVersion
 from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.models.base import Base
 from app.modules.navigation.schemas import (
@@ -16,6 +16,7 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentUpdateRequest,
 )
 from app.modules.navigation.service import NavigationCenterlineService
+from app.modules.navigation.services.graph_build_service import build_graph_from_centerlines
 from app.modules.navigation.services.centerline_segments import NavigationCenterlineSegmentService
 
 
@@ -129,6 +130,7 @@ async def test_generate_centerline_segments_from_boundary_rough_line(session_mak
     assert all(row.segment_no for row in rows)
     assert all(row.length_m and row.length_m > 0 for row in rows)
     assert all(row.bbox_min_lng is not None for row in rows)
+    assert all(row.source_trace_json["source_boundary_id"] == 1 for row in rows)
 
 
 @pytest.mark.asyncio
@@ -260,6 +262,13 @@ async def test_publish_confirmed_centerline_segments_creates_published_centerlin
         centerline = await session.get(NavigationChannelCenterline, response.centerline_id)
         stored_segments = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
         graph_ready = await NavigationCenterlineService(session).list_graph_ready_centerlines(channel_codes=["TEST-CHANNEL"])
+        graph_build = await build_graph_from_centerlines(
+            session=session,
+            version_code="TEST-SEGMENT-SOURCE-GRAPH",
+            scope_code="TEST",
+            channel_codes=["TEST-CHANNEL"],
+        )
+        graph_version = await session.get(NavigationGraphVersion, graph_build.graph_version_id)
 
     assert response.status_code == "PUBLISHED"
     assert response.centerline_id is not None
@@ -267,5 +276,8 @@ async def test_publish_confirmed_centerline_segments_creates_published_centerlin
     assert centerline.review_status_code == "PUBLISHED"
     assert centerline.is_current is True
     assert centerline.source_type_code == "CENTERLINE_SEGMENT_MERGE"
+    assert centerline.source_trace_json["source_boundary_id"] == 1
     assert [row.id for row in graph_ready] == [centerline.id]
+    assert graph_version is not None
+    assert graph_version.source_summary_json["source_boundary_ids"] == [1]
     assert all(row.segment_status_code == "PUBLISHED" for row in stored_segments)

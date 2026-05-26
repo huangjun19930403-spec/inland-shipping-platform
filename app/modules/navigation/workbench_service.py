@@ -822,6 +822,11 @@ class NavigationWorkbenchService:
                 confidence_score=centerline.confidence_score,
                 is_current=centerline.is_current,
                 geometry_json=centerline.geometry_json,
+                source_trace_json=centerline.source_trace_json,
+                source_boundary_id=self._trace_int(centerline.source_trace_json, "source_boundary_id", "based_on_boundary_id"),
+                based_on_boundary_id=self._trace_int(centerline.source_trace_json, "source_boundary_id", "based_on_boundary_id"),
+                created_at=self._iso_datetime(centerline.created_at),
+                updated_at=self._iso_datetime(centerline.updated_at),
             )
             for centerline, channel in rows
         ]
@@ -861,6 +866,10 @@ class NavigationWorkbenchService:
                 is_current=boundary.is_current,
                 geometry_json=boundary.geometry_json,
                 source_trace_json=boundary.source_trace_json,
+                previous_boundary_id=self._trace_int(boundary.source_trace_json, "previous_boundary_id"),
+                caused_downstream_stale=self._trace_bool(boundary.source_trace_json, "caused_downstream_stale"),
+                created_at=self._iso_datetime(boundary.created_at),
+                updated_at=self._iso_datetime(boundary.updated_at),
             )
             for boundary, channel in rows
         ]
@@ -969,6 +978,9 @@ class NavigationWorkbenchService:
         )
         for row in rows:
             row.is_current = False
+        current_boundary = await self._current_available_boundary(draft.channel_id)
+        source_boundary_id = int(current_boundary.id) if current_boundary is not None else None
+        previous_centerline_id = int(rows[0].id) if rows else None
         centerline = NavigationChannelCenterline(
             channel_id=draft.channel_id,
             centerline_code=f"MANUAL-CL-{draft.id}-{self._now().strftime('%Y%m%d%H%M%S')}",
@@ -980,12 +992,16 @@ class NavigationWorkbenchService:
             confidence_score=90,
             quality_code=draft.quality_code if draft.quality_code in {"READY", "READY_WITH_WARNING"} else "READY",
             review_status_code="PUBLISHED",
-            version_no=1,
+            version_no=(max((int(row.version_no or 1) for row in rows), default=0) + 1),
+            parent_centerline_id=previous_centerline_id,
             is_current=True,
             source_trace_json={
                 "navigation_geometry_draft_id": draft.id,
                 "published_by": published_by,
                 "published_at": self._now().isoformat(),
+                "source_boundary_id": source_boundary_id,
+                "based_on_boundary_id": source_boundary_id,
+                "previous_centerline_id": previous_centerline_id,
                 **(draft.source_trace_json or {}),
             },
             bbox_min_lng=draft.bbox_min_lng,
@@ -1014,6 +1030,18 @@ class NavigationWorkbenchService:
         )
         for row in rows:
             row.is_current = False
+        previous_boundary_id = int(rows[0].id) if rows else None
+        active_graph_edge_count = (await self._active_graph_edge_counts([draft.channel_id])).get(draft.channel_id, 0)
+        published_centerline_count = int(
+            await self.session.scalar(
+                select(func.count()).select_from(NavigationChannelCenterline).where(
+                    NavigationChannelCenterline.channel_id == draft.channel_id,
+                    NavigationChannelCenterline.is_current.is_(True),
+                    NavigationChannelCenterline.review_status_code == "PUBLISHED",
+                )
+            )
+            or 0
+        )
         bbox = self._bbox_from_model(draft)
         boundary = NavigationChannelBoundary(
             channel_id=draft.channel_id,
@@ -1038,6 +1066,17 @@ class NavigationWorkbenchService:
             coverage_policy_code="MANUAL_DRAW",
             geometry_coordinate_system_code="WGS84",
             boundary_coordinate_system_code="WGS84",
+            source_trace_json={
+                **(draft.source_trace_json or {}),
+                "navigation_geometry_draft_id": draft.id,
+                "previous_boundary_id": previous_boundary_id,
+                "caused_downstream_stale": True,
+                "downstream_centerline_count": published_centerline_count,
+                "downstream_active_graph_edge_count": active_graph_edge_count,
+                "published_by": published_by,
+                "published_at": self._now().isoformat(),
+                "no_approval_task_created": True,
+            },
             is_current=True,
             imported_at=self._now(),
         )
@@ -1658,6 +1697,23 @@ class NavigationWorkbenchService:
         keys = ("OBJECTID", "NAME", "REMARK", "Shape_Leng", "Shape_Area")
         return {key: value.get(key) for key in keys if key in value}
 
+    def _iso_datetime(self, value: datetime | None) -> str | None:
+        return value.isoformat() if value else None
+
+    def _trace_int(self, source_trace_json: dict[str, Any] | None, *keys: str) -> int | None:
+        trace = source_trace_json if isinstance(source_trace_json, dict) else {}
+        for key in keys:
+            value = trace.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        return None
+
+    def _trace_bool(self, source_trace_json: dict[str, Any] | None, key: str) -> bool:
+        trace = source_trace_json if isinstance(source_trace_json, dict) else {}
+        return bool(trace.get(key))
+
     def _graph_version_response(self, row: NavigationGraphVersion) -> NavigationGraphVersionListItemResponse:
         return NavigationGraphVersionListItemResponse(
             id=row.id,
@@ -1671,6 +1727,7 @@ class NavigationWorkbenchService:
             channel_count=row.channel_count,
             quality_score=row.quality_score,
             built_at=row.built_at.isoformat() if row.built_at else None,
+            source_summary_json=row.source_summary_json,
             validation_report_json=row.validation_report_json,
         )
 

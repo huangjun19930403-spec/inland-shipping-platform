@@ -1,15 +1,8 @@
-# 航道图生产本地端到端验收报告
+# 航道图生产主流程与地图交互纠偏验收报告
 
 验收时间：2026-05-26
-
-## 本地环境说明
-
-- Docker 服务：Redis、MySQL、PostgreSQL/PostGIS 均使用本地 Docker 容器。
-- 数据库类型：PostgreSQL/PostGIS 为航道图生产主库；MySQL 容器保留本地业务配置兼容；Redis 用于缓存和异步任务。
-- Alembic 状态：`012_navigation_centerline_segment (head)`。
-- 是否使用生产 seed：是，使用本地生产 seed 和真实配置。
-- 敏感配置保护：未修改 `.env`、`.env.*`、key/token/password、AI provider、模型配置、高德/Hifleet 配置。
-- Seed 保护：未执行全库重置，未清空用户、角色、权限、菜单、AI provider、model profile、runtime policy 或集成配置。
+验收环境：本地真实环境，Redis、MySQL、PostgreSQL/PostGIS Docker 容器已启动。
+验收方式：启动状态下使用后端 `uvicorn --reload` 与前端 Vite dev server，在真实浏览器中点击页面完成。
 
 ## 实际验收航道
 
@@ -17,104 +10,66 @@
 - channel_id：315
 - channel_code：NC-XIJIANG
 - 已归属水体数量：11
-- 水体候选数量：80
-- 生成边界候选数量：本次生成 3 类；验收时累计候选 7 个
-- 发布边界 ID：550
-- 生成中心线区段数量：1
-- 发布中心线 ID：3
-- Graph version ID：3
-- Graph version code：ACCEPTANCE-LOCAL-GRAPH-20260526040341
-- 路径请求 ID：5、6、7、8
+- 边界候选数量：9
+- 当前发布边界：ID 551，previous_boundary_id 550，caused_downstream_stale=true
+- 当前中心线状态：已过期
+- 当前 Graph 状态：已过期
+- 中心线区段数量：1
+- 已确认区段数量：1
+- 路径验证结果：result_id 6，request_id 10，READY_WITH_WARNING，1.4111 km，quality_score 98，graph_version_id 3
 
-## 验收结果
+## 本轮浏览器点击验收
 
-### 1. 航道水系规划
+1. 边界页生成候选：已点击“生成新的边界候选”，既有候选可继续载入修正。
+2. 载入候选为草稿：已点击“载入候选修正”，草稿点数 18954，预校验 ERROR 0 / WARNING 1。
+3. 定位按钮：已点击“定位候选边界”“定位当前草稿”，视野状态显示用户锁定。
+4. 保存草稿：已点击“保存草稿”，草稿状态变为已保存。
+5. 发布边界：已点击“发布新边界版本”并确认发布，新 current boundary 为 551。
+6. 下游失效提示：发布后边界页显示中心线状态“已过期”、Graph 状态“已过期”。
+7. 中心线页生成区段：已点击“重新生成中心线区段”并确认，生成基于边界 551 的区段。
+8. 区段定位：已点击“定位当前区段”“定位吸附点”。
+9. 补画当前区段：已点击“补画当前区段”，地图补点后保存。
+10. 保存/确认区段：误补画越界时被拦截；已重置为生成候选后点击“确认区段”，区段状态为已确认。
+11. 路径验证地图选点：已点击“地图选起点”“地图选终点”，地图点击写入经纬度；覆盖物点击透出 map-click 后可在 Graph/边界上选点。
+12. 生成路径：为贴合当前 Graph 端点，选点后校准到图边端点并点击“生成路径”，路径生成成功。
 
-- 页面可打开并选择“西江航运干线”。
-- 已归属水体显示 11 个，系统推荐水体显示 80 个。
-- 文案区分“已归属水体”和“系统推荐”，页面说明已归属水体用于下一步边界生成。
-- 地图图层使用中文名称，例如“已归属水体边界”“规划航道参考范围”。
+## 发现的问题和修复情况
 
-### 2. 边界生成
+1. 新边界发布后旧中心线/Graph 没有历史 `source_boundary_id` 时，页面仍显示未过期。
+   - 已修复：后端使用 current boundary 的 `caused_downstream_stale=true` 兜底判断 legacy 下游资产过期。
 
-- 顶部来源链显示“已归属水体 11 个 → 边界候选 9 个 → 当前发布边界 1 个”。候选数量包含历史验收生成记录。
-- 点击“生成边界候选”后生成：
-  - WATER_BODY_UNION_RAW
-  - WATER_BODY_UNION_CLEANED
-  - WATER_BODY_UNION_SIMPLIFIED
-- 候选卡片显示候选类型、来源水体数量、点数、面积、是否简化、用途说明。
-- 浏览器中实际点击候选“查看”，候选可被选中并定位。
-- API 验证候选载入草稿、预校验、保存和发布成功。
-- 边界修复操作验证通过：
-  - DELETE_PART：成功，点数 21842 -> 21195。
-  - KEEP_ONLY_PART：成功，点数 21842 -> 14。
-  - UNION_PATCH：成功。
-  - SUBTRACT_PATCH：成功。
-  - CLEAN_SMALL_PARTS：成功。
-  - SIMPLIFY：成功，点数 21842 -> 18954。
-- 发布前页面明确提示：发布后成为当前边界、后续需重新生成中心线区段和 Graph、本操作不会创建审批任务。
+2. 旧发布边界在新版本发布后被前端误计入候选边界数量。
+   - 已修复：前端候选列表按 `coverage_policy_code` / `boundary_quality_code` 区分候选与历史版本。
 
-### 3. 中心线分段生产
+3. 路径验证中点击边界、中心线、Graph 覆盖物时，地图选点没有写入表单。
+   - 已修复：`BaseAmap` 在 polygon、polyline、marker、circle marker 点击时同步触发 `map-click`。
 
-- 页面显示“基于当前边界生成中心线区段，逐段修复确认，不需要一次性画完整航道”。
-- 主操作为“生成中心线区段”“补画当前区段”“确认区段”“合并发布中心线”，未把“绘制完整中心线”作为主入口。
-- 本次生成 1 个区段，区段编号 001。
-- 浏览器中实际点击区段 001，右侧工具显示定位、补画、编辑顶点、端点吸附等操作。
-- API 验证区段更新、确认成功，区段状态为 CONFIRMED。
-- 合并发布中心线成功，返回 centerline_id = 3。
-- 发布响应提示需要重新构建并激活 Graph。
+4. 路径页定位到 Graph 后，地图选点按钮在左侧表单，滚动操作容易点偏。
+   - 已修复：路径页地图工具条增加“地图选起点”“地图选终点”。
 
-### 4. Graph 构建与激活
+## 测试结果
 
-- 基于发布中心线构建 Graph 成功。
-- Graph version ID：3。
-- node_count：2。
-- edge_count：1。
-- status_code：READY。
-- quality_score：97。
-- 构建结果包含 1 条 WARNING：`UNKNOWN_CONSTRAINT_DATA`，无 BLOCKING。
-- Graph 已激活为 active READY graph。
-
-### 5. 路径验证
-
-- 浏览器中实际填写起点/终点并点击“生成路径”，默认推荐路径成功。
-- API 验证四种策略均使用真实 Graph 成功生成：
-  - RECOMMENDED：request_id 5，SUCCESS，distance 1.4111 km。
-  - SHORTEST：request_id 6，SUCCESS，distance 1.4111 km。
-  - SAFEST：request_id 7，SUCCESS，distance 1.4111 km。
-  - LOCK_AVOIDING：request_id 8，SUCCESS，distance 1.4111 km。
-- 成本解释可显示，包含距离成本、质量惩罚、船闸惩罚、未知约束成本。
-- 失败解释机制未触发真实失败；Graph 约束缺失以 WARNING 显示 next review 信息。
-- 本次验收 Graph 只有 1 条 edge，因此备选路径返回 0 条，未出现可切换备选卡片。该结果来自真实 Graph，不使用 mock。
-
-## 发现问题
-
-### 已修复
-
-1. Graph 构建未识别分段合并发布中心线。
-   - 原因：Graph ready 中心线来源白名单漏掉 `CENTERLINE_SEGMENT_MERGE`。
-   - 修复：将 `CENTERLINE_SEGMENT_MERGE` 纳入 Graph ready source，并补充测试。
-
-2. PostgreSQL 路径生成空间校验报 `could not identify an equality operator for type json`。
-   - 原因：对包含 JSON 字段的 `NavigationWaterBody` ORM 实体直接 `.distinct()`。
-   - 修复：先 distinct 水体 ID，再按 ID 查询实体，避免 JSON 等值比较。
-
-3. 大边界候选定位时浏览器报 `Maximum call stack size exceeded`。
-   - 原因：前端 `fitAmapPoints()` 使用 `Math.min(...lngs)` 展开大量点。
-   - 修复：改为循环聚合 bbox，避免大数组展开。
-
-### 未修复 / 后续建议
-
-1. 本次验收航道生成的 Graph 只有 1 条 edge，无法验证备选路径切换 UI。后续应使用多分支、多边、多节点 Graph 数据补一条专门验收航道。
-2. 西江航运干线粗生成中心线区段只有 1 段，区段化工作台可用但没有体现多段前后连接场景。后续应选择或补充更长真实中心线验收数据。
-3. Graph 构建 WARNING `UNKNOWN_CONSTRAINT_DATA` 说明通航约束数据仍需补齐；当前路径可用于测算，但不是安全通航确认。
+- `.venv/bin/python -m compileall app scripts`：通过
+- navigation focused pytest：61 passed
+- full pytest：未通过，属于既有非 navigation 历史失败；navigation 相关测试均通过。
+  - 结果：320 passed，2 skipped，41 failed，26 errors
+  - 主要历史失败示例：`tests/test_freight_collection_rework.py` 中 `Region(audit_status=...)` 与模型字段不匹配；另有 freight、route track、vessel spatial 等既有失败。
+- `npm run type-check`：通过
+- `npm run build`：通过，保留既有 chunk size warning。
 
 ## 敏感配置保护确认
 
 - 是否修改 `.env`：否
+- 是否修改 `.env.*`：否
 - 是否修改 key/token：否
-- 是否重置用户/角色/AI provider 配置：否
-- 是否提交敏感文件：否
-- 是否执行全库重置：否
+- 是否修改 AI provider / 高德 key / hifleet key：否
+- 是否重置 seed：否
+- 是否重置用户/角色/权限/菜单/AI 配置/系统配置：否
 - 是否提交数据库备份：否
 - 是否提交 `scripts/seeds/loaders/production_freights.py`：否
+
+## 遗留问题
+
+1. 当前 active Graph 只有 1 条 edge，备选路径切换仍无法在该航道上验证。
+2. 路径验证真实点击中，第二个地图点曾因浏览器自动化坐标落点偏移而选到远处；页面能力已修复覆盖物点击透传，但人工验收仍建议直接在可见 Graph 端点附近点击。
+3. 当前 Graph 在新边界发布后已标记过期；生产上需要重新合并发布中心线并重建/激活 Graph。

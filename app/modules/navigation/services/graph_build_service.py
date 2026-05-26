@@ -231,14 +231,22 @@ def _source_summary(centerlines: list[CenterlineAsset]) -> dict[str, Any]:
     by_source: dict[str, int] = defaultdict(int)
     channel_ids: set[int] = set()
     centerline_ids: list[int] = []
+    source_boundary_ids: set[int] = set()
     for item in centerlines:
         by_source[item.row.source_type_code] += 1
         channel_ids.add(item.row.channel_id)
         centerline_ids.append(item.row.id)
+        trace = item.row.source_trace_json if isinstance(item.row.source_trace_json, dict) else {}
+        boundary_id = trace.get("source_boundary_id") or trace.get("based_on_boundary_id")
+        if isinstance(boundary_id, int):
+            source_boundary_ids.add(boundary_id)
+        elif isinstance(boundary_id, str) and boundary_id.isdigit():
+            source_boundary_ids.add(int(boundary_id))
     return {
         "centerline_count": len(centerlines),
         "centerline_ids": centerline_ids,
         "channel_ids": sorted(channel_ids),
+        "source_boundary_ids": sorted(source_boundary_ids),
         "source_type_counts": dict(sorted(by_source.items())),
     }
 

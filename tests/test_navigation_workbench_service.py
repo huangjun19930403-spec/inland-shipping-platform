@@ -139,6 +139,52 @@ async def test_boundary_publish_preserves_seed_history_and_switches_current(sess
                 is_current=True,
             )
         )
+        session.add(
+            NavigationChannelCenterline(
+                id=1,
+                channel_id=1,
+                centerline_code="LEGACY-CENTERLINE",
+                centerline_name="legacy centerline",
+                geometry_json=_line(),
+                source_type_code="MANUAL",
+                direction_code="BIDIRECTIONAL",
+                is_main_line=True,
+                confidence_score=90,
+                quality_code="READY",
+                review_status_code="PUBLISHED",
+                version_no=1,
+                is_current=True,
+            )
+        )
+        session.add(
+            NavigationGraphVersion(
+                id=1,
+                version_code="LEGACY-GRAPH",
+                version_name="legacy graph",
+                scope_code="TEST",
+                status_code="READY",
+                is_active=True,
+                node_count=2,
+                edge_count=1,
+                channel_count=1,
+            )
+        )
+        session.add(
+            NavigationGraphEdge(
+                id=1,
+                graph_version_id=1,
+                edge_code="LEGACY-E1",
+                from_node_id=1,
+                to_node_id=2,
+                channel_id=1,
+                geometry_json=_line(),
+                length_km=1,
+                direction_code="BIDIRECTIONAL",
+                routing_enabled=True,
+                quality_code="READY",
+                source_type_code="MANUAL",
+            )
+        )
         await session.commit()
         service = NavigationWorkbenchService(session)
 
@@ -153,6 +199,7 @@ async def test_boundary_publish_preserves_seed_history_and_switches_current(sess
             created_by=7,
         )
         published = await service.publish_geometry_draft(draft.id, published_by=8)
+        workspace = await NavigationProductionService(session).production_workspace(channel_id=1, step="boundary")
         boundaries = list((await session.execute(select(NavigationChannelBoundary).order_by(NavigationChannelBoundary.id))).scalars())
         drafts = list((await session.execute(select(NavigationGeometryDraft))).scalars())
 
@@ -162,6 +209,10 @@ async def test_boundary_publish_preserves_seed_history_and_switches_current(sess
     assert boundaries[0].is_current is False
     assert boundaries[1].coverage_policy_code == "MANUAL_DRAW"
     assert boundaries[1].is_current is True
+    assert boundaries[1].source_trace_json["previous_boundary_id"] == 1
+    assert boundaries[1].source_trace_json["caused_downstream_stale"] is True
+    assert workspace.downstream_stale["centerline_stale"] is True
+    assert workspace.downstream_stale["graph_stale"] is True
     assert drafts[0].status_code == "PUBLISHED"
 
 

@@ -266,6 +266,10 @@ class NavigationProductionWorkspaceResponse(BaseModel):
     boundaries: list[NavigationBoundaryListItemResponse] = Field(default_factory=list)
     centerlines: list[NavigationCenterlineListItemResponse] = Field(default_factory=list)
     drafts: list[NavigationGeometryDraftResponse] = Field(default_factory=list)
+    current_boundary: NavigationBoundaryListItemResponse | None = None
+    current_centerline: NavigationCenterlineListItemResponse | None = None
+    active_graph_version: dict[str, Any] | None = None
+    downstream_stale: dict[str, Any] = Field(default_factory=dict)
     available_actions: list[dict[str, Any]] = Field(default_factory=list)
     blocker_codes: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -575,6 +579,12 @@ class NavigationCenterlineListItemResponse(BaseModel):
     confidence_score: int
     is_current: bool
     geometry_json: dict[str, Any] | None = None
+    source_trace_json: dict[str, Any] | None = None
+    source_boundary_id: int | None = None
+    based_on_boundary_id: int | None = None
+    downstream_stale: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class NavigationCenterlineSegmentGenerateRequest(BaseModel):
@@ -620,6 +630,10 @@ class NavigationCenterlineSegmentResponse(BaseModel):
     issue_summary_json: dict[str, Any] | None = None
     validation_summary_json: dict[str, Any] | None = None
     source_trace_json: dict[str, Any] | None = None
+    source_boundary_id: int | None = None
+    based_on_boundary_id: int | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class NavigationCenterlineSegmentListResponse(BaseModel):
@@ -664,6 +678,11 @@ class NavigationBoundaryListItemResponse(BaseModel):
     is_current: bool
     geometry_json: dict[str, Any] | None = None
     source_trace_json: dict[str, Any] | None = None
+    previous_boundary_id: int | None = None
+    caused_downstream_stale: bool = False
+    downstream_stale: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class NavigationGraphVersionListItemResponse(BaseModel):
@@ -678,6 +697,7 @@ class NavigationGraphVersionListItemResponse(BaseModel):
     channel_count: int
     quality_score: int | None = None
     built_at: str | None = None
+    source_summary_json: dict[str, Any] | None = None
     validation_report_json: dict[str, Any] | None = None
 
 

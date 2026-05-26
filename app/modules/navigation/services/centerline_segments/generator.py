@@ -76,6 +76,8 @@ class NavigationCenterlineSegmentGeneratorMixin:
                 source_trace_json={
                     "source_type_code": source_type,
                     "source_centerline_id": centerline_id,
+                    "source_boundary_id": int(boundary.id),
+                    "based_on_boundary_id": int(boundary.id),
                     "segment_length_km": body.segment_length_km,
                     "generated_at": self._now().isoformat(),
                     "force": body.force,
