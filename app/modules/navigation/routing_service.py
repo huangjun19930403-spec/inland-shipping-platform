@@ -377,11 +377,11 @@ class NavigationRoutingEngineService:
                 prepared_graph.nx_graph,
                 prepared_graph.start_key,
                 prepared_graph.end_key,
-                heuristic=lambda a, b: self.searcher._heuristic_km(prepared_graph.nx_graph, a, b),  # noqa: SLF001
+                heuristic=lambda a, b: self.searcher.heuristic_km(prepared_graph.nx_graph, a, b),
                 weight="weight",
             )
         except nx.NetworkXNoPath as exc:
-            raise self.searcher._no_path_error(prepared_graph) from exc  # noqa: SLF001
+            raise self.searcher.no_path_error(prepared_graph) from exc
         except nx.NodeNotFound as exc:
             raise RoutingEngineError(
                 "NO_PATH_FOUND",

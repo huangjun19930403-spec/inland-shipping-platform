@@ -35,8 +35,8 @@ from app.modules.navigation.schemas import (
 )
 from app.modules.navigation.diagnostic_service import NavigationDiagnosticService
 from app.modules.navigation.map_layer_service import NavigationMapLayerService
+from app.modules.navigation.services.osm_import_service import import_osm_waterways
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
-from scripts.navigation.import_osm_waterways import import_osm_waterways
 
 
 REAL_WATER_SOURCE_CODE = "RIVER_SHAPEFILE_2026"

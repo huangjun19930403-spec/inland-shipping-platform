@@ -55,8 +55,11 @@ from app.modules.navigation.schemas import (
     NavigationWorkbenchChannelResponse,
     NavigationWorkbenchSummaryResponse,
 )
+from app.modules.navigation.services.geometry_draft_service import NavigationGeometryDraftService
+from app.modules.navigation.services.geometry_validation_service import NavigationGeometryValidationService
+from app.modules.navigation.services.graph_workbench_service import NavigationGraphWorkbenchService
+from app.modules.navigation.services.snap_reference_service import NavigationSnapReferenceService
 from app.modules.navigation.water_area_layers import water_area_layer_meta
-from scripts.navigation.build_graph_from_centerline import build_graph_from_centerlines
 
 
 DRAFT_GEOMETRY_TYPES = {
@@ -877,38 +880,17 @@ class NavigationWorkbenchService:
         channel_id: int | None = None,
         limit: int = 50,
     ) -> list[NavigationGeometryDraftResponse]:
-        stmt = select(NavigationGeometryDraft, NavigationChannel).outerjoin(
-            NavigationChannel, NavigationChannel.id == NavigationGeometryDraft.channel_id
+        return await NavigationGeometryDraftService(self.session, self).list_geometry_drafts(
+            status_code=status_code,
+            channel_id=channel_id,
+            limit=limit,
         )
-        if status_code:
-            stmt = stmt.where(NavigationGeometryDraft.status_code == status_code.upper())
-        else:
-            stmt = stmt.where(NavigationGeometryDraft.status_code.not_in(ARCHIVED_DRAFT_STATUSES))
-        if channel_id:
-            stmt = stmt.where(NavigationGeometryDraft.channel_id == channel_id)
-        rows = list(
-            (
-                await self.session.execute(
-                    stmt.order_by(NavigationGeometryDraft.id.desc()).limit(self._limit(limit, default=50, max_value=200))
-                )
-            ).all()
-        )
-        return [self._draft_response(draft, channel) for draft, channel in rows]
 
     async def validate_geometry_draft(
         self,
         body: NavigationGeometryDraftValidateRequest,
     ) -> NavigationGeometryDraftValidationResponse:
-        draft_type = body.draft_type_code.upper()
-        geometry = self._normalized_geometry(body.geometry_json)
-        self._validate_geometry_for_draft(draft_type, geometry, body.channel_id, require_channel=False)
-        if body.channel_id is not None:
-            await self._ensure_channel(body.channel_id)
-        return await self._validate_draft_geometry(
-            draft_type=draft_type,
-            channel_id=body.channel_id,
-            geometry=geometry,
-        )
+        return await NavigationGeometryValidationService(self.session, self).validate_geometry_draft(body)
 
     async def snap_references(
         self,
@@ -916,35 +898,7 @@ class NavigationWorkbenchService:
         *,
         limit: int = SNAP_REFERENCE_LIMIT,
     ) -> list[NavigationSnapReferencePointResponse]:
-        await self._ensure_channel(channel_id)
-        limit_value = self._limit(limit, default=SNAP_REFERENCE_LIMIT, max_value=SNAP_REFERENCE_LIMIT)
-        references: list[NavigationSnapReferencePointResponse] = []
-        centerlines = list(
-            (
-                await self.session.execute(
-                    select(NavigationChannelCenterline)
-                    .where(NavigationChannelCenterline.channel_id == channel_id)
-                    .order_by(NavigationChannelCenterline.is_current.desc(), NavigationChannelCenterline.id.desc())
-                    .limit(200)
-                )
-            ).scalars()
-        )
-        for centerline in centerlines:
-            references.extend(self._centerline_snap_points(centerline))
-            if len(references) >= limit_value:
-                return references[:limit_value]
-
-        context_bbox = await self._snap_context_bbox(channel_id)
-        if context_bbox is None:
-            return references[:limit_value]
-
-        remaining = limit_value - len(references)
-        if remaining > 0:
-            references.extend(await self._transport_node_snap_points(context_bbox, limit=remaining))
-        remaining = limit_value - len(references)
-        if remaining > 0:
-            references.extend(await self._constraint_point_snap_points(context_bbox, limit=remaining))
-        return references[:limit_value]
+        return await NavigationSnapReferenceService(self.session, self).snap_references(channel_id, limit=limit)
 
     async def create_geometry_draft(
         self,
@@ -952,75 +906,14 @@ class NavigationWorkbenchService:
         *,
         created_by: int | None,
     ) -> NavigationGeometryDraftResponse:
-        draft_type = body.draft_type_code.upper()
-        geometry = self._normalized_geometry(body.geometry_json)
-        geometry_type = self._validate_geometry_for_draft(draft_type, geometry, body.channel_id)
-        bbox = self._geometry_bbox(geometry)
-        if body.channel_id is not None:
-            await self._ensure_channel(body.channel_id)
-        validation = await self._validate_draft_geometry(
-            draft_type=draft_type,
-            channel_id=body.channel_id,
-            geometry=geometry,
-        )
-        draft = NavigationGeometryDraft(
-            draft_no=self._draft_no(),
-            draft_name=body.draft_name,
-            draft_type_code=draft_type,
-            geometry_type_code=geometry_type,
-            channel_id=body.channel_id,
-            target_type_code=body.target_type_code.upper() if body.target_type_code else None,
-            target_id=body.target_id,
-            geometry_json=geometry,
-            source_type_code=body.source_type_code.upper(),
-            status_code="DRAFT",
-            quality_code=validation.quality_code,
-            review_comment=self._validation_review_comment(validation),
-            source_trace_json=self._source_trace_with_validation_summary(body.source_trace_json, validation),
-            created_by=created_by,
-            **bbox,
-        )
-        self.session.add(draft)
-        await self.session.commit()
-        return await self._draft_response_by_id(draft.id)
+        return await NavigationGeometryDraftService(self.session, self).create_geometry_draft(body, created_by=created_by)
 
     async def update_geometry_draft(
         self,
         draft_id: int,
         body: NavigationGeometryDraftUpdateRequest,
     ) -> NavigationGeometryDraftResponse:
-        draft = await self._draft(draft_id)
-        if draft.status_code in FINAL_DRAFT_STATUSES | ARCHIVED_DRAFT_STATUSES:
-            raise ConflictError("已发布或已归档的草稿不能继续编辑")
-        if body.channel_id is not None:
-            await self._ensure_channel(body.channel_id)
-            draft.channel_id = body.channel_id
-        if body.draft_name is not None:
-            draft.draft_name = body.draft_name
-        if body.target_type_code is not None:
-            draft.target_type_code = body.target_type_code.upper()
-        if body.target_id is not None:
-            draft.target_id = body.target_id
-        if body.source_type_code is not None:
-            draft.source_type_code = body.source_type_code.upper()
-        if body.source_trace_json is not None:
-            draft.source_trace_json = body.source_trace_json
-        if body.geometry_json is not None:
-            geometry = self._normalized_geometry(body.geometry_json)
-            draft.geometry_type_code = self._validate_geometry_for_draft(draft.draft_type_code, geometry, draft.channel_id)
-            draft.geometry_json = geometry
-            for key, value in self._geometry_bbox(geometry).items():
-                setattr(draft, key, value)
-        validation = await self._validate_draft_geometry(
-            draft_type=draft.draft_type_code,
-            channel_id=draft.channel_id,
-            geometry=draft.geometry_json,
-        )
-        self._apply_validation_to_draft(draft, validation)
-        if draft.status_code == "PUBLISH_BLOCKED":
-            draft.status_code = "DRAFT"
-        await self.session.commit()
-        return await self._draft_response_by_id(draft.id)
+        return await NavigationGeometryDraftService(self.session, self).update_geometry_draft(draft_id, body)
 
     async def publish_geometry_draft(
         self,
@@ -1028,59 +921,13 @@ class NavigationWorkbenchService:
         *,
         published_by: int | None,
     ) -> NavigationGeometryDraftResponse:
-        draft = await self._draft(draft_id)
-        if draft.status_code not in {"DRAFT", "PUBLISH_BLOCKED"}:
-            raise ConflictError("只有 DRAFT 或 PUBLISH_BLOCKED 草稿可以发布")
-        try:
-            if draft.draft_type_code in {"CENTERLINE", "BOUNDARY"}:
-                validation = await self._validate_draft_geometry(
-                    draft_type=draft.draft_type_code,
-                    channel_id=draft.channel_id,
-                    geometry=draft.geometry_json,
-                )
-                self._apply_validation_to_draft(draft, validation)
-                if not validation.publishable:
-                    raise self._publish_validation_response(validation)
-            if draft.draft_type_code == "CENTERLINE":
-                target_id = await self._publish_centerline(draft, published_by=published_by)
-                draft.publish_target_type_code = "CENTERLINE"
-            elif draft.draft_type_code == "BOUNDARY":
-                target_id = await self._publish_boundary(draft, published_by=published_by)
-                draft.publish_target_type_code = "BOUNDARY"
-            elif draft.draft_type_code == "WATER_AREA":
-                target_id = await self._publish_water_area(draft)
-                draft.publish_target_type_code = "WATER_AREA"
-            else:
-                raise ValidationError(f"Unsupported draft_type_code: {draft.draft_type_code}")
-        except ValidationError as exc:
-            draft.status_code = "PUBLISH_BLOCKED"
-            draft.quality_code = "PUBLISH_BLOCKED"
-            draft.review_comment = exc.message[:512]
-            if isinstance(exc.detail, dict) and isinstance(exc.detail.get("validation"), dict):
-                draft.source_trace_json = {
-                    **(draft.source_trace_json or {}),
-                    "validation_summary": self._validation_summary_from_dict(exc.detail["validation"]),
-                }
-            await self.session.commit()
-            raise
-        draft.publish_target_id = target_id
-        draft.status_code = "PUBLISHED"
-        draft.quality_code = "READY"
-        draft.published_by = published_by
-        draft.published_at = self._now()
-        await self.session.commit()
-        return await self._draft_response_by_id(draft.id)
+        return await NavigationGeometryDraftService(self.session, self).publish_geometry_draft(
+            draft_id,
+            published_by=published_by,
+        )
 
     async def archive_geometry_draft(self, draft_id: int) -> NavigationGeometryDraftResponse:
-        draft = await self._draft(draft_id)
-        if draft.status_code == "PUBLISHED":
-            raise ConflictError("已发布草稿不能删除；请通过新版本发布完成替换")
-        if draft.status_code in ARCHIVED_DRAFT_STATUSES:
-            return await self._draft_response_by_id(draft.id)
-        draft.status_code = "ARCHIVED"
-        draft.quality_code = "ARCHIVED"
-        await self.session.commit()
-        return await self._draft_response_by_id(draft.id)
+        return await NavigationGeometryDraftService(self.session, self).archive_geometry_draft(draft_id)
 
     async def build_graph_version(
         self,
@@ -1088,65 +935,10 @@ class NavigationWorkbenchService:
         *,
         created_by: int | None,
     ) -> NavigationGraphBuildResponse:
-        scope_code = (body.scope_code or DEFAULT_REAL_GRAPH_SCOPE).upper()
-        version_code = body.version_code or f"{scope_code}-GRAPH-{self._now().strftime('%Y%m%d%H%M%S')}"
-        try:
-            summary = await build_graph_from_centerlines(
-                session=self.session,
-                version_code=version_code,
-                version_name=body.version_name,
-                scope_code=scope_code,
-                channel_codes=body.channel_codes,
-                activate=body.activate,
-            )
-        except ValueError as exc:
-            raise ConflictError(str(exc)) from exc
-        graph_version = await self.session.get(NavigationGraphVersion, summary.graph_version_id)
-        if graph_version is not None:
-            graph_version.created_by = created_by
-            await self.session.commit()
-        return NavigationGraphBuildResponse(
-            version_code=summary.version_code,
-            graph_version_id=summary.graph_version_id,
-            status_code=summary.status_code,
-            node_count=summary.node_count,
-            edge_count=summary.edge_count,
-            channel_count=summary.channel_count,
-            quality_score=summary.quality_score,
-            centerline_count=summary.centerline_count,
-            connector_edge_count=summary.connector_edge_count,
-            constraint_count=summary.constraint_count,
-            validation_report=summary.validation_report,
-        )
+        return await NavigationGraphWorkbenchService(self.session, self).build_graph_version(body, created_by=created_by)
 
     async def activate_graph_version(self, graph_version_id: int) -> NavigationGraphActivateResponse:
-        graph_version = await self.session.get(NavigationGraphVersion, graph_version_id)
-        if graph_version is None:
-            raise NotFoundError("NavigationGraphVersion", graph_version_id)
-        if graph_version.status_code != "READY":
-            raise ConflictError("只有 READY graph version 可以激活")
-        active_versions = list(
-            (
-                await self.session.execute(
-                    select(NavigationGraphVersion).where(
-                        NavigationGraphVersion.scope_code == graph_version.scope_code,
-                        NavigationGraphVersion.is_active.is_(True),
-                        NavigationGraphVersion.id != graph_version.id,
-                    )
-                )
-            ).scalars()
-        )
-        for row in active_versions:
-            row.is_active = False
-        graph_version.is_active = True
-        await self.session.commit()
-        return NavigationGraphActivateResponse(
-            graph_version_id=graph_version.id,
-            version_code=graph_version.version_code,
-            scope_code=graph_version.scope_code,
-            status_code=graph_version.status_code,
-            is_active=True,
-        )
+        return await NavigationGraphWorkbenchService(self.session, self).activate_graph_version(graph_version_id)
 
     async def _publish_centerline(self, draft: NavigationGeometryDraft, *, published_by: int | None) -> int:
         if draft.channel_id is None:
@@ -2138,22 +1930,10 @@ class NavigationWorkbenchService:
         )
 
     async def _validate_centerline_publish(self, draft: NavigationGeometryDraft) -> None:
-        validation = await self._validate_draft_geometry(
-            draft_type="CENTERLINE",
-            channel_id=draft.channel_id,
-            geometry=draft.geometry_json,
-        )
-        if not validation.publishable:
-            raise self._publish_validation_response(validation)
+        await NavigationGeometryValidationService(self.session, self).validate_centerline_publish(draft)
 
     async def _validate_boundary_publish(self, draft: NavigationGeometryDraft) -> None:
-        validation = await self._validate_draft_geometry(
-            draft_type="BOUNDARY",
-            channel_id=draft.channel_id,
-            geometry=draft.geometry_json,
-        )
-        if not validation.publishable:
-            raise self._publish_validation_response(validation)
+        await NavigationGeometryValidationService(self.session, self).validate_boundary_publish(draft)
 
     def _validation_issue(
         self,

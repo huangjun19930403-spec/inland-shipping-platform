@@ -53,12 +53,12 @@ class RouteAlternativesGenerator:
                 if len(results) >= count:
                     break
         except nx.NetworkXNoPath as exc:
-            raise self.search._no_path_error(prepared) from exc  # noqa: SLF001
+            raise self.search.no_path_error(prepared) from exc
         except nx.NodeNotFound as exc:
             raise RoutingEngineError("NO_PATH_FOUND", "Snapped endpoint is not present in loaded graph") from exc
 
         if not results:
-            raise self.search._no_path_error(prepared)  # noqa: SLF001
+            raise self.search.no_path_error(prepared)
         return results
 
 

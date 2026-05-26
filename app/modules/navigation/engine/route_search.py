@@ -58,13 +58,13 @@ class RouteSearch:
                     prepared.nx_graph,
                     prepared.start_key,
                     prepared.end_key,
-                    heuristic=lambda a, b: self._heuristic_km(prepared.nx_graph, a, b),
+                    heuristic=lambda a, b: self.heuristic_km(prepared.nx_graph, a, b),
                     weight="weight",
                 )
             else:
                 node_path = nx.dijkstra_path(prepared.nx_graph, prepared.start_key, prepared.end_key, weight="weight")
         except nx.NetworkXNoPath as exc:
-            raise self._no_path_error(prepared) from exc
+            raise self.no_path_error(prepared) from exc
         except nx.NodeNotFound as exc:
             raise RoutingEngineError(
                 "NO_PATH_FOUND",
@@ -375,14 +375,14 @@ class RouteSearch:
                 ),
             )
 
-    def _heuristic_km(self, nx_graph: nx.DiGraph, a_key: str, b_key: str) -> float:
+    def heuristic_km(self, nx_graph: nx.DiGraph, a_key: str, b_key: str) -> float:
         a = nx_graph.nodes.get(a_key, {})
         b = nx_graph.nodes.get(b_key, {})
         if a.get("lng") is None or a.get("lat") is None or b.get("lng") is None or b.get("lat") is None:
             return 0.0
         return point_distance_m(Point(float(a["lng"]), float(a["lat"])), Point(float(b["lng"]), float(b["lat"]))) / 1000.0 * 0.8
 
-    def _no_path_error(self, prepared: PreparedRouteGraph) -> RoutingEngineError:
+    def no_path_error(self, prepared: PreparedRouteGraph) -> RoutingEngineError:
         return RoutingEngineError(
             "GRAPH_DISCONNECTED",
             "No connected graph path between snapped endpoints",
