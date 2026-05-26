@@ -66,6 +66,23 @@
    - 路径验证页图层状态显示 `160/160+` 这类截断标记。
    - 截断 tag 改为明确文案：仅显示前 N 条，避免把当前视口渲染结果误解成完整 Graph。
 
+### 2026-05-26 路径验证 Graph 诊断增补
+
+本轮继续不录屏，聚焦路径验证页的生产诊断可见性。
+
+1. Graph 全量诊断
+   - `production-workspace` 新增 `graph_diagnostics`。
+   - 诊断包含：激活 Graph 版本、节点数、总边数、可路由边数、约束缺失边数、约束完整度、Graph 校验 issue 统计、来源边界 ID。
+   - 路径验证页新增“Graph 生产诊断”面板，显示激活版本、全量 Graph、当前视口图边、覆盖范围、约束数据。
+
+2. 截断与全量区分
+   - 路径验证页同时显示“全量 Graph 边数”和“当前视口加载图边数”。
+   - 当前视口图边被 `limit` 截断时，明确提示“当前地图不是全量 Graph”。
+
+3. 约束数据缺失提示
+   - 若 Graph 存在 `UNKNOWN_CONSTRAINT_DATA`，页面直接展示缺失边数和 warning。
+   - 路径仍可验证，但页面明确说明不能视为约束数据完整。
+
 ### 2026-05-26 完整流验收修复
 
 1. 地图载体
@@ -125,10 +142,13 @@
 ## 测试结果
 
 - `.venv/bin/python -m compileall app scripts`：通过
-- navigation focused pytest：82 passed
+- navigation focused pytest：83 passed
   - 覆盖：centerline segments、boundary candidates、boundary draft ops、workbench service、routing engine、map layers、diagnostic service。
+- 本轮增量测试：
+  - `tests/test_navigation_workbench_service.py`：25 passed
+  - `npm run type-check`：通过
 - full pytest：未通过
-  - 结果：327 passed，2 skipped，41 failed，26 errors
+  - 结果：328 passed，2 skipped，41 failed，26 errors
   - navigation 本轮新增/修改测试已通过。
   - 主要非本轮失败示例：freight collection 中 `Region(audit_status=...)` 与模型字段不匹配；另有 node contacts/photos、production remediation、quote/rate estimator、route track、vessel spatial 等既有失败。
 - `npm run type-check`：通过

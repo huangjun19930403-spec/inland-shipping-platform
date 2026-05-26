@@ -12,6 +12,8 @@ from app.models import (
     NavigationChannelWaterBodyMatch,
     NavigationGeometryDraft,
     NavigationGraphEdge,
+    NavigationGraphEdgeConstraint,
+    NavigationGraphNode,
     NavigationGraphVersion,
     NavigationWaterArea,
     NavigationWaterBody,
@@ -618,6 +620,124 @@ async def test_graph_build_without_published_centerline_fails_with_real_scope(se
     assert graph_version is not None
     assert graph_version.scope_code == "REAL-JS-YRD"
     assert graph_version.validation_report_json["issues"][0]["issue_code"] == "NO_PUBLISHED_CENTERLINE"
+
+
+@pytest.mark.asyncio
+async def test_production_workspace_returns_graph_diagnostics(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationGraphVersion(
+                id=1,
+                version_code="TEST-GRAPH-DIAG",
+                version_name="Graph diagnostics",
+                scope_code="TEST",
+                status_code="READY",
+                is_active=True,
+                node_count=2,
+                edge_count=2,
+                channel_count=1,
+                quality_score=91,
+                validation_report_json={
+                    "component_count": 1,
+                    "blocking_issue_count": 0,
+                    "warning_issue_count": 1,
+                    "issues": [
+                        {
+                            "issue_code": "UNKNOWN_CONSTRAINT_DATA",
+                            "severity_code": "WARNING",
+                            "message": "constraint data missing",
+                        }
+                    ],
+                },
+                source_summary_json={"source_boundary_ids": [7]},
+            )
+        )
+        session.add_all(
+            [
+                NavigationGraphNode(
+                    id=1,
+                    graph_version_id=1,
+                    node_code="N1",
+                    node_type_code="CENTERLINE_VERTEX",
+                    longitude=120.0,
+                    latitude=31.0,
+                    geometry_json={"type": "Point", "coordinates": [120.0, 31.0]},
+                    is_enabled=True,
+                    quality_code="READY",
+                    source_type_code="CENTERLINE_VERTEX",
+                ),
+                NavigationGraphNode(
+                    id=2,
+                    graph_version_id=1,
+                    node_code="N2",
+                    node_type_code="CENTERLINE_VERTEX",
+                    longitude=120.1,
+                    latitude=31.1,
+                    geometry_json={"type": "Point", "coordinates": [120.1, 31.1]},
+                    is_enabled=True,
+                    quality_code="READY",
+                    source_type_code="CENTERLINE_VERTEX",
+                ),
+            ]
+        )
+        session.add_all(
+            [
+                NavigationGraphEdge(
+                    id=1,
+                    graph_version_id=1,
+                    edge_code="E1",
+                    from_node_id=1,
+                    to_node_id=2,
+                    channel_id=1,
+                    geometry_json=_line(),
+                    length_km=1,
+                    direction_code="BIDIRECTIONAL",
+                    routing_enabled=True,
+                    quality_code="READY_WITH_WARNING",
+                    source_type_code="CENTERLINE_SEGMENT_MERGE",
+                    unknown_constraint_flag=True,
+                ),
+                NavigationGraphEdge(
+                    id=2,
+                    graph_version_id=1,
+                    edge_code="E2",
+                    from_node_id=2,
+                    to_node_id=1,
+                    channel_id=1,
+                    geometry_json=_line(),
+                    length_km=1,
+                    direction_code="BIDIRECTIONAL",
+                    routing_enabled=False,
+                    quality_code="READY",
+                    source_type_code="CENTERLINE_SEGMENT_MERGE",
+                    unknown_constraint_flag=False,
+                ),
+                NavigationGraphEdgeConstraint(
+                    id=1,
+                    edge_id=2,
+                    constraint_type_code="LOCK",
+                    constraint_name="测试船闸",
+                    severity_level="WARNING",
+                    is_blocking=False,
+                    is_enabled=True,
+                    data_completeness_code="COMPLETE",
+                ),
+            ]
+        )
+        await session.commit()
+
+        workspace = await NavigationProductionService(session).production_workspace(channel_id=1, step="route")
+
+    diagnostics = workspace.graph_diagnostics
+    assert diagnostics is not None
+    assert diagnostics["graph_version_id"] == 1
+    assert diagnostics["routing_edge_count"] == 1
+    assert diagnostics["unknown_constraint_edge_count"] == 1
+    assert diagnostics["constraint_edge_count"] == 1
+    assert diagnostics["constraint_completeness_ratio"] == 0.5
+    assert diagnostics["issue_counts"]["UNKNOWN_CONSTRAINT_DATA"] == 1
+    assert diagnostics["source_boundary_ids"] == [7]
 
 
 @pytest.mark.asyncio

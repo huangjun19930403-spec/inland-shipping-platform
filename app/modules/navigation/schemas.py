@@ -283,6 +283,7 @@ class NavigationProductionWorkspaceResponse(BaseModel):
     boundary_water_bbox_coverage_ratio: float | None = None
     centerline_boundary_bbox_coverage_ratio: float | None = None
     graph_boundary_bbox_coverage_ratio: float | None = None
+    graph_diagnostics: dict[str, Any] | None = None
     downstream_stale: dict[str, Any] = Field(default_factory=dict)
     available_actions: list[dict[str, Any]] = Field(default_factory=list)
     blocker_codes: list[str] = Field(default_factory=list)
