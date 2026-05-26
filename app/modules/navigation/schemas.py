@@ -577,6 +577,80 @@ class NavigationCenterlineListItemResponse(BaseModel):
     geometry_json: dict[str, Any] | None = None
 
 
+class NavigationCenterlineSegmentGenerateRequest(BaseModel):
+    force: bool = False
+    segment_length_km: float = Field(default=5.0, gt=0, le=100)
+
+
+class NavigationCenterlineSegmentGenerateResponse(BaseModel):
+    status_code: str
+    message: str
+    channel_id: int
+    segment_count: int = 0
+    need_repair_count: int = 0
+    confirmed_count: int = 0
+    segment_ids: list[int] = Field(default_factory=list)
+    blocker_codes: list[str] = Field(default_factory=list)
+    next_path: str | None = None
+
+
+class NavigationCenterlineSegmentResponse(BaseModel):
+    id: int
+    channel_id: int
+    centerline_id: int | None = None
+    segment_no: str
+    segment_name: str
+    segment_status_code: str
+    source_type_code: str
+    quality_code: str
+    length_m: float | None = None
+    start_lng: float | None = None
+    start_lat: float | None = None
+    end_lng: float | None = None
+    end_lat: float | None = None
+    bbox_min_lng: float | None = None
+    bbox_min_lat: float | None = None
+    bbox_max_lng: float | None = None
+    bbox_max_lat: float | None = None
+    previous_segment_id: int | None = None
+    next_segment_id: int | None = None
+    start_connected_flag: bool = False
+    end_connected_flag: bool = False
+    geometry_json: dict[str, Any] | None = None
+    issue_summary_json: dict[str, Any] | None = None
+    validation_summary_json: dict[str, Any] | None = None
+    source_trace_json: dict[str, Any] | None = None
+
+
+class NavigationCenterlineSegmentListResponse(BaseModel):
+    channel_id: int
+    total_count: int
+    need_repair_count: int
+    confirmed_count: int
+    publishable: bool
+    items: list[NavigationCenterlineSegmentResponse] = Field(default_factory=list)
+
+
+class NavigationCenterlineSegmentUpdateRequest(BaseModel):
+    geometry_json: dict[str, Any]
+    source_type_code: str = Field(default="MAP_EDIT", max_length=64)
+
+
+class NavigationCenterlineSegmentPublishRequest(BaseModel):
+    publish_name: str | None = Field(default=None, max_length=128)
+
+
+class NavigationCenterlineSegmentPublishResponse(BaseModel):
+    status_code: str
+    message: str
+    channel_id: int
+    centerline_id: int | None = None
+    segment_count: int = 0
+    quality_code: str | None = None
+    blocker_codes: list[str] = Field(default_factory=list)
+    next_path: str | None = None
+
+
 class NavigationBoundaryListItemResponse(BaseModel):
     id: int
     channel_id: int

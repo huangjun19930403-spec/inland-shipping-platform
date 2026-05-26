@@ -23,6 +23,13 @@ from app.modules.navigation.schemas import (
     NavigationDiagnosticsRunResponse,
     NavigationBoundaryDraftOperationRequest,
     NavigationBoundaryDraftOperationResponse,
+    NavigationCenterlineSegmentGenerateRequest,
+    NavigationCenterlineSegmentGenerateResponse,
+    NavigationCenterlineSegmentListResponse,
+    NavigationCenterlineSegmentPublishRequest,
+    NavigationCenterlineSegmentPublishResponse,
+    NavigationCenterlineSegmentResponse,
+    NavigationCenterlineSegmentUpdateRequest,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
     NavigationGeometryDraftUpdateRequest,
@@ -54,6 +61,7 @@ from app.modules.navigation.schemas import (
     NavigationWorkbenchSummaryResponse,
     NavigationProductionWorkspaceResponse,
 )
+from app.modules.navigation.services.centerline_segment_service import NavigationCenterlineSegmentService
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
 router = APIRouter()
@@ -180,6 +188,77 @@ async def generate_navigation_channel_centerline_candidates(
     return await NavigationProductionService(db).generate_centerline_candidates(
         channel_id=channel_id,
         body=body or NavigationCandidateGenerateRequest(),
+    )
+
+
+@router.post(
+    "/channels/{channel_id}/centerline-segments/generate",
+    response_model=NavigationCenterlineSegmentGenerateResponse,
+)
+async def generate_navigation_channel_centerline_segments(
+    channel_id: int,
+    body: NavigationCenterlineSegmentGenerateRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).generate_segments(
+        channel_id=channel_id,
+        body=body or NavigationCenterlineSegmentGenerateRequest(),
+    )
+
+
+@router.get(
+    "/channels/{channel_id}/centerline-segments",
+    response_model=NavigationCenterlineSegmentListResponse,
+)
+async def list_navigation_channel_centerline_segments(
+    channel_id: int,
+    status_code: str | None = None,
+    only_problem: bool = False,
+    limit: int = 300,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).list_segments(
+        channel_id=channel_id,
+        status_code=status_code,
+        only_problem=only_problem,
+        limit=limit,
+    )
+
+
+@router.put("/centerline-segments/{segment_id}", response_model=NavigationCenterlineSegmentResponse)
+async def update_navigation_centerline_segment(
+    segment_id: int,
+    body: NavigationCenterlineSegmentUpdateRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).update_segment(segment_id, body)
+
+
+@router.post("/centerline-segments/{segment_id}/confirm", response_model=NavigationCenterlineSegmentResponse)
+async def confirm_navigation_centerline_segment(
+    segment_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).confirm_segment(segment_id)
+
+
+@router.post(
+    "/channels/{channel_id}/centerline-segments/publish",
+    response_model=NavigationCenterlineSegmentPublishResponse,
+)
+async def publish_navigation_channel_centerline_segments(
+    channel_id: int,
+    body: NavigationCenterlineSegmentPublishRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).publish_segments(
+        channel_id=channel_id,
+        body=body or NavigationCenterlineSegmentPublishRequest(),
     )
 
 

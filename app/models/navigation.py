@@ -230,6 +230,46 @@ class NavigationChannelCenterline(Base, TimestampMixin):
     bbox_max_lat: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
 
 
+class NavigationCenterlineSegment(Base, TimestampMixin):
+    __tablename__ = "navigation_centerline_segment"
+    __table_args__ = (
+        Index("ix_navigation_centerline_segment_channel_no", "channel_id", "segment_no"),
+        Index("ix_navigation_centerline_segment_channel_status", "channel_id", "segment_status_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("navigation_channel.id"), nullable=False, index=True)
+    centerline_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_channel_centerline.id"), nullable=True, index=True
+    )
+    segment_no: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    segment_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    segment_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="CANDIDATE", index=True)
+    geometry_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_type_code: Mapped[str] = mapped_column(String(64), nullable=False, default="BOUNDARY_DERIVED_ROUGH", index=True)
+    quality_code: Mapped[str] = mapped_column(String(64), nullable=False, default="NEED_REPAIR", index=True)
+    length_m: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    start_lng: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True)
+    start_lat: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True)
+    end_lng: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True)
+    end_lat: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True)
+    bbox_min_lng: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    bbox_min_lat: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    bbox_max_lng: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    bbox_max_lat: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    previous_segment_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_centerline_segment.id"), nullable=True, index=True
+    )
+    next_segment_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_centerline_segment.id"), nullable=True, index=True
+    )
+    start_connected_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    end_connected_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    issue_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    validation_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_trace_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
 class NavigationGeometryDraft(Base, TimestampMixin):
     __tablename__ = "navigation_geometry_draft"
     __table_args__ = (
