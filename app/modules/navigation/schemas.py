@@ -285,6 +285,9 @@ class NavigationCandidateGenerateResponse(BaseModel):
     boundary_ids: list[int] = Field(default_factory=list)
     centerline_ids: list[int] = Field(default_factory=list)
     blocker_codes: list[str] = Field(default_factory=list)
+    matched_water_body_count: int = 0
+    candidate_types: list[str] = Field(default_factory=list)
+    source_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class NavigationChannelDiagnosticBoundaryResponse(BaseModel):
@@ -586,6 +589,7 @@ class NavigationBoundaryListItemResponse(BaseModel):
     coverage_policy_code: str
     is_current: bool
     geometry_json: dict[str, Any] | None = None
+    source_trace_json: dict[str, Any] | None = None
 
 
 class NavigationGraphVersionListItemResponse(BaseModel):
@@ -652,6 +656,19 @@ class NavigationGeometryDraftValidationResponse(BaseModel):
     ring_count: int = 0
     bbox: dict[str, float | None] = Field(default_factory=dict)
     issues: list[NavigationGeometryDraftValidationIssueResponse] = Field(default_factory=list)
+
+
+class NavigationBoundaryDraftOperationRequest(BaseModel):
+    operation_code: str = Field(max_length=64)
+    part_index: int | None = None
+    operation_geometry_json: dict[str, Any] | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class NavigationBoundaryDraftOperationResponse(BaseModel):
+    draft: NavigationGeometryDraftResponse
+    validation: NavigationGeometryDraftValidationResponse
+    message: str
 
 
 class NavigationSnapReferencePointResponse(BaseModel):

@@ -21,6 +21,8 @@ from app.modules.navigation.schemas import (
     NavigationChannelDiagnosticResponse,
     NavigationChannelWaterBodyMatchListResponse,
     NavigationDiagnosticsRunResponse,
+    NavigationBoundaryDraftOperationRequest,
+    NavigationBoundaryDraftOperationResponse,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
     NavigationGeometryDraftUpdateRequest,
@@ -460,6 +462,16 @@ async def publish_navigation_geometry_draft(
         draft_id,
         published_by=getattr(current_user, "id", None),
     )
+
+
+@router.post("/geometry-drafts/{draft_id}/boundary-ops", response_model=NavigationBoundaryDraftOperationResponse)
+async def apply_navigation_boundary_draft_operation(
+    draft_id: int,
+    body: NavigationBoundaryDraftOperationRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).apply_boundary_draft_operation(draft_id, body)
 
 
 @router.delete("/geometry-drafts/{draft_id}", response_model=NavigationGeometryDraftResponse)

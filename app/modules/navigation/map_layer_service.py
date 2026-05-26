@@ -23,6 +23,17 @@ from app.modules.navigation.coordinate_transform import GCJ02_AMAP, WGS84, bbox_
 from app.modules.navigation.schemas import NavigationMapLayerFeatureResponse, NavigationMapLayerResponse
 
 
+BOUNDARY_CANDIDATE_POLICIES = {
+    "RIVER_MATCH_CANDIDATE",
+    "WATER_BODY_UNION_RAW",
+    "WATER_BODY_UNION_CLEANED",
+    "WATER_BODY_UNION_SIMPLIFIED",
+    "CENTERLINE_BUFFER",
+    "AIS_INFERRED",
+    "MANUAL_DRAW",
+}
+
+
 class NavigationMapLayerService:
     def __init__(self, session: AsyncSession, *, default_limit: int = 200, max_limit: int = 500) -> None:
         self.session = session
@@ -323,7 +334,7 @@ class NavigationMapLayerService:
             clauses.append(
                 or_(
                     NavigationChannelBoundary.is_current.is_(True),
-                    NavigationChannelBoundary.coverage_policy_code == "RIVER_MATCH_CANDIDATE",
+                    NavigationChannelBoundary.coverage_policy_code.in_(BOUNDARY_CANDIDATE_POLICIES),
                 )
             )
         else:
@@ -358,6 +369,7 @@ class NavigationMapLayerService:
                     "boundary_quality_code": boundary.boundary_quality_code,
                     "connectivity_status_code": boundary.connectivity_status_code,
                     "repair_status_code": boundary.repair_status_code,
+                    "source_trace_json": boundary.source_trace_json or {},
                 },
             )
             for boundary, channel in rows

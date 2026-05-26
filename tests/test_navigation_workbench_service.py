@@ -1136,12 +1136,18 @@ async def test_production_boundary_candidate_generation_uses_water_body_without_
         boundaries = list((await session.execute(select(NavigationChannelBoundary).order_by(NavigationChannelBoundary.id))).scalars())
 
     assert response.status_code == "CREATED"
-    assert response.created_count == 1
-    assert len(boundaries) == 2
+    assert response.created_count == 3
+    assert response.matched_water_body_count == 1
+    assert len(boundaries) == 4
     assert boundaries[0].is_current is True
     assert boundaries[0].coverage_policy_code == "CHANNEL_CORRIDOR_ENVELOPE"
-    assert boundaries[1].is_current is False
-    assert boundaries[1].coverage_policy_code == "RIVER_MATCH_CANDIDATE"
+    candidate_policies = {row.coverage_policy_code for row in boundaries[1:]}
+    assert candidate_policies == {
+        "WATER_BODY_UNION_RAW",
+        "WATER_BODY_UNION_CLEANED",
+        "WATER_BODY_UNION_SIMPLIFIED",
+    }
+    assert all(row.is_current is False for row in boundaries[1:])
 
 
 @pytest.mark.asyncio

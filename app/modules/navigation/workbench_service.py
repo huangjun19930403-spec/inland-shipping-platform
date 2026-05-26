@@ -32,6 +32,8 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineListItemResponse,
     NavigationChannelWaterBodyMatchItemResponse,
     NavigationChannelWaterBodyMatchListResponse,
+    NavigationBoundaryDraftOperationRequest,
+    NavigationBoundaryDraftOperationResponse,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftResponse,
     NavigationGeometryDraftUpdateRequest,
@@ -55,6 +57,7 @@ from app.modules.navigation.schemas import (
     NavigationWorkbenchChannelResponse,
     NavigationWorkbenchSummaryResponse,
 )
+from app.modules.navigation.services.boundary_draft_ops_service import NavigationBoundaryDraftOpsService
 from app.modules.navigation.services.geometry_draft_service import NavigationGeometryDraftService
 from app.modules.navigation.services.geometry_validation_service import NavigationGeometryValidationService
 from app.modules.navigation.services.graph_workbench_service import NavigationGraphWorkbenchService
@@ -857,6 +860,7 @@ class NavigationWorkbenchService:
                 coverage_policy_code=boundary.coverage_policy_code,
                 is_current=boundary.is_current,
                 geometry_json=boundary.geometry_json,
+                source_trace_json=boundary.source_trace_json,
             )
             for boundary, channel in rows
         ]
@@ -925,6 +929,13 @@ class NavigationWorkbenchService:
             draft_id,
             published_by=published_by,
         )
+
+    async def apply_boundary_draft_operation(
+        self,
+        draft_id: int,
+        body: NavigationBoundaryDraftOperationRequest,
+    ) -> NavigationBoundaryDraftOperationResponse:
+        return await NavigationBoundaryDraftOpsService(self.session, self).apply_operation(draft_id, body)
 
     async def archive_geometry_draft(self, draft_id: int) -> NavigationGeometryDraftResponse:
         return await NavigationGeometryDraftService(self.session, self).archive_geometry_draft(draft_id)

@@ -119,6 +119,7 @@ class NavigationChannelBoundary(Base, TimestampMixin):
     coverage_policy_code: Mapped[str] = mapped_column(String(64), nullable=False, default="CHANNEL_CORRIDOR_ENVELOPE")
     geometry_coordinate_system_code: Mapped[str] = mapped_column(String(16), nullable=False, default="WGS84")
     boundary_coordinate_system_code: Mapped[str] = mapped_column(String(16), nullable=False, default="GCJ02")
+    source_trace_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     imported_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
 

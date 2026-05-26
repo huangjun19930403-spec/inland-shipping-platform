@@ -35,11 +35,21 @@ from app.modules.navigation.schemas import (
 )
 from app.modules.navigation.diagnostic_service import NavigationDiagnosticService
 from app.modules.navigation.map_layer_service import NavigationMapLayerService
+from app.modules.navigation.services.boundary_candidate_service import NavigationBoundaryCandidateService
 from app.modules.navigation.services.osm_import_service import import_osm_waterways
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
 
 REAL_WATER_SOURCE_CODE = "RIVER_SHAPEFILE_2026"
+BOUNDARY_CANDIDATE_POLICIES = {
+    "RIVER_MATCH_CANDIDATE",
+    "WATER_BODY_UNION_RAW",
+    "WATER_BODY_UNION_CLEANED",
+    "WATER_BODY_UNION_SIMPLIFIED",
+    "CENTERLINE_BUFFER",
+    "AIS_INFERRED",
+    "MANUAL_DRAW",
+}
 PUBLISHED_BOUNDARY_POLICIES = {"MANUAL_DRAW", "OFFICIAL_IMPORT"}
 STAGE_LABELS = {
     "NO_WATER_MATCH": "水体待归属",
@@ -204,9 +214,7 @@ class NavigationProductionService:
                     .where(
                         NavigationChannelBoundary.channel_id == channel_id,
                         NavigationChannelBoundary.is_current.is_(False),
-                        NavigationChannelBoundary.coverage_policy_code.in_(
-                            {"RIVER_MATCH_CANDIDATE", "CENTERLINE_BUFFER", "AIS_INFERRED", "MANUAL_DRAW"}
-                        ),
+                        NavigationChannelBoundary.coverage_policy_code.in_(BOUNDARY_CANDIDATE_POLICIES),
                     )
                     .order_by(NavigationChannelBoundary.id.desc())
                     .limit(max(1, min(limit, 300)))
@@ -226,6 +234,7 @@ class NavigationProductionService:
                 coverage_policy_code=boundary.coverage_policy_code,
                 is_current=boundary.is_current,
                 geometry_json=boundary.geometry_json,
+                source_trace_json=boundary.source_trace_json,
             )
             for boundary, channel in rows
         ]
@@ -236,88 +245,9 @@ class NavigationProductionService:
         channel_id: int,
         body: NavigationCandidateGenerateRequest,
     ) -> NavigationCandidateGenerateResponse:
-        channel = await self.session.get(NavigationChannel, channel_id)
-        if channel is None:
-            raise NotFoundError("NavigationChannel", channel_id)
-        existing = await self.boundary_candidates(channel_id, limit=300)
-        if existing and not body.force:
-            return NavigationCandidateGenerateResponse(
-                status_code="EXISTS",
-                message="该航道已有系统候选边界，请直接载入地图修正；如需重算请使用 force。",
-                created_count=0,
-                candidate_count=len(existing),
-                next_path=f"/navigation/production/boundaries?channel_id={channel_id}",
-                boundary_ids=[item.id for item in existing],
-            )
-        matched_bodies = list(
-            (
-                await self.session.execute(
-                    select(NavigationWaterBody, NavigationChannelWaterBodyMatch)
-                    .join(
-                        NavigationChannelWaterBodyMatch,
-                        NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id,
-                    )
-                    .where(
-                        NavigationChannelWaterBodyMatch.channel_id == channel_id,
-                        NavigationChannelWaterBodyMatch.is_current.is_(True),
-                        NavigationWaterBody.is_enabled.is_(True),
-                        NavigationWaterBody.body_role_code.in_({"PRIMARY_HIERARCHY", "RX_FILL_GAP", "STANDARD"}),
-                    )
-                    .order_by(NavigationChannelWaterBodyMatch.score.desc(), NavigationWaterBody.source_layer_order, NavigationWaterBody.id)
-                    .limit(80)
-                )
-            ).all()
-        )
-        geometry = self._candidate_boundary_geometry([body_row for body_row, _match in matched_bodies])
-        if geometry is None:
-            return NavigationCandidateGenerateResponse(
-                status_code="BLOCKED",
-                message="没有可用于生成候选边界的已确认规范水体，请先完成航道水系规划。",
-                blocker_codes=["NO_WATER_BODY_MATCH"],
-                next_path=f"/navigation/production/water-matches?channel_id={channel_id}",
-            )
-        bbox = self.workbench._geometry_bbox(geometry)
-        bbox_dict = {
-            "min_lng": bbox["bbox_min_lng"],
-            "min_lat": bbox["bbox_min_lat"],
-            "max_lng": bbox["bbox_max_lng"],
-            "max_lat": bbox["bbox_max_lat"],
-        }
-        boundary = NavigationChannelBoundary(
+        return await NavigationBoundaryCandidateService(self.session, self.workbench).generate_boundary_candidates(
             channel_id=channel_id,
-            geometry_json=geometry,
-            boundary_paths_low=self.workbench._polygon_paths(geometry),
-            boundary_paths_medium=self.workbench._polygon_paths(geometry),
-            boundary_paths_high=self.workbench._polygon_paths(geometry),
-            center_longitude=self.workbench._center_lng(bbox_dict),
-            center_latitude=self.workbench._center_lat(bbox_dict),
-            display_center_longitude=self.workbench._center_lng(bbox_dict),
-            display_center_latitude=self.workbench._center_lat(bbox_dict),
-            bbox_min_lng=bbox["bbox_min_lng"],
-            bbox_min_lat=bbox["bbox_min_lat"],
-            bbox_max_lng=bbox["bbox_max_lng"],
-            bbox_max_lat=bbox["bbox_max_lat"],
-            ring_count=self.workbench._ring_count(geometry),
-            point_count=self.workbench._point_count(geometry),
-            geometry_status_code="AVAILABLE",
-            boundary_quality_code="REVIEW",
-            connectivity_status_code="NEED_REVIEW",
-            repair_status_code="NONE",
-            coverage_policy_code="RIVER_MATCH_CANDIDATE",
-            geometry_coordinate_system_code="WGS84",
-            boundary_coordinate_system_code="WGS84",
-            is_current=False,
-            imported_at=self.workbench._now(),
-        )
-        self.session.add(boundary)
-        await self.session.commit()
-        return NavigationCandidateGenerateResponse(
-            status_code="CREATED",
-            message="已根据已确认规范水体生成系统候选边界，请在地图中修正后发布为最终确认边界。",
-            created_count=1,
-            candidate_count=len(existing) + 1,
-            boundary_ids=[int(boundary.id)],
-            next_path=f"/navigation/production/boundaries?channel_id={channel_id}",
+            body=body,
         )
 
     async def centerline_candidates(self, channel_id: int, limit: int = 120):
