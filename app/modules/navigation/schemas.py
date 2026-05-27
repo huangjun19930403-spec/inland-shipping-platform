@@ -734,6 +734,7 @@ class NavigationGraphVersionListItemResponse(BaseModel):
     built_at: str | None = None
     source_summary_json: dict[str, Any] | None = None
     validation_report_json: dict[str, Any] | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 class NavigationGeometryDraftResponse(BaseModel):
@@ -854,6 +855,7 @@ class NavigationGraphBuildResponse(BaseModel):
     connector_edge_count: int = 0
     constraint_count: int = 0
     validation_report: dict[str, Any] | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 class NavigationGraphActivateResponse(BaseModel):
@@ -862,3 +864,4 @@ class NavigationGraphActivateResponse(BaseModel):
     scope_code: str
     status_code: str
     is_active: bool
+    diagnostics: dict[str, Any] | None = None

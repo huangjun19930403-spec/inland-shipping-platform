@@ -13,6 +13,7 @@ from app.modules.navigation.schemas import (
     NavigationGraphBuildResponse,
 )
 from app.modules.navigation.services.graph_build_service import build_graph_from_centerlines
+from app.modules.navigation.services.graph_diagnostics_service import build_graph_diagnostics
 
 
 DEFAULT_REAL_GRAPH_SCOPE = "REAL-JS-YRD"
@@ -48,6 +49,7 @@ class NavigationGraphWorkbenchService:
         if graph_version is not None:
             graph_version.created_by = created_by
             await self.session.commit()
+        diagnostics = await build_graph_diagnostics(self.session, graph_version)
         return NavigationGraphBuildResponse(
             version_code=summary.version_code,
             graph_version_id=summary.graph_version_id,
@@ -60,14 +62,22 @@ class NavigationGraphWorkbenchService:
             connector_edge_count=summary.connector_edge_count,
             constraint_count=summary.constraint_count,
             validation_report=summary.validation_report,
+            diagnostics=diagnostics,
         )
 
     async def activate_graph_version(self, graph_version_id: int) -> NavigationGraphActivateResponse:
         graph_version = await self.session.get(NavigationGraphVersion, graph_version_id)
         if graph_version is None:
             raise NotFoundError("NavigationGraphVersion", graph_version_id)
+        diagnostics = await build_graph_diagnostics(self.session, graph_version)
         if graph_version.status_code != "READY":
-            raise ConflictError("只有 READY graph version 可以激活")
+            raise ConflictError("只有 READY graph version 可以激活", detail={"diagnostics": diagnostics})
+        blockers = list((diagnostics or {}).get("activation_blockers") or [])
+        if blockers:
+            raise ConflictError(
+                "Graph 诊断未通过，不能激活",
+                detail={"activation_blockers": blockers, "diagnostics": diagnostics},
+            )
         active_versions = list(
             (
                 await self.session.execute(
@@ -83,10 +93,12 @@ class NavigationGraphWorkbenchService:
             row.is_active = False
         graph_version.is_active = True
         await self.session.commit()
+        diagnostics = await build_graph_diagnostics(self.session, graph_version)
         return NavigationGraphActivateResponse(
             graph_version_id=graph_version.id,
             version_code=graph_version.version_code,
             scope_code=graph_version.scope_code,
             status_code=graph_version.status_code,
             is_active=True,
+            diagnostics=diagnostics,
         )

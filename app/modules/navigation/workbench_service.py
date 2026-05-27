@@ -61,6 +61,7 @@ from app.modules.navigation.services.boundary_draft_ops_service import Navigatio
 from app.modules.navigation.services.geometry_draft_service import NavigationGeometryDraftService
 from app.modules.navigation.services.geometry_validation_service import NavigationGeometryValidationService
 from app.modules.navigation.services.graph_workbench_service import NavigationGraphWorkbenchService
+from app.modules.navigation.services.graph_diagnostics_service import build_graph_diagnostics
 from app.modules.navigation.services.snap_reference_service import NavigationSnapReferenceService
 from app.modules.navigation.water_area_layers import water_area_layer_meta
 
@@ -914,7 +915,12 @@ class NavigationWorkbenchService:
                 )
             ).scalars()
         )
-        return [self._graph_version_response(row) for row in rows]
+        responses: list[NavigationGraphVersionListItemResponse] = []
+        for row in rows:
+            responses.append(
+                self._graph_version_response(row, diagnostics=await build_graph_diagnostics(self.session, row))
+            )
+        return responses
 
     async def list_geometry_drafts(
         self,
@@ -1744,7 +1750,12 @@ class NavigationWorkbenchService:
         trace = source_trace_json if isinstance(source_trace_json, dict) else {}
         return bool(trace.get(key))
 
-    def _graph_version_response(self, row: NavigationGraphVersion) -> NavigationGraphVersionListItemResponse:
+    def _graph_version_response(
+        self,
+        row: NavigationGraphVersion,
+        *,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> NavigationGraphVersionListItemResponse:
         return NavigationGraphVersionListItemResponse(
             id=row.id,
             version_code=row.version_code,
@@ -1759,6 +1770,7 @@ class NavigationWorkbenchService:
             built_at=row.built_at.isoformat() if row.built_at else None,
             source_summary_json=row.source_summary_json,
             validation_report_json=row.validation_report_json,
+            diagnostics=diagnostics,
         )
 
     def _graph_version_dict(self, row: NavigationGraphVersion | None) -> dict[str, Any] | None:

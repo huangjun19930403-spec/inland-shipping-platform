@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
+from app.core.exceptions import ConflictError
 from app.models import (
     NavigationChannelCenterline,
     NavigationChannelWaterBodyMatch,
@@ -115,6 +116,9 @@ async def test_geometry_draft_publish_centerline_and_manual_graph_build(session_
     assert centerline_count == 1
     assert build.status_code == "READY"
     assert build.edge_count >= 1
+    assert build.diagnostics is not None
+    assert build.diagnostics["can_activate"] is True
+    assert build.diagnostics["routing_edge_count"] >= 1
     assert graph_version is not None
     assert graph_version.is_active is False
 
@@ -738,6 +742,48 @@ async def test_production_workspace_returns_graph_diagnostics(session_maker) -> 
     assert diagnostics["constraint_completeness_ratio"] == 0.5
     assert diagnostics["issue_counts"]["UNKNOWN_CONSTRAINT_DATA"] == 1
     assert diagnostics["source_boundary_ids"] == [7]
+    assert diagnostics["can_activate"] is True
+    assert diagnostics["activation_warnings"] == ["UNKNOWN_CONSTRAINT_DATA", "HAS_WARNING_ISSUES"]
+
+    async with session_maker() as session:
+        versions = await NavigationWorkbenchService(session).list_graph_versions(limit=5)
+
+    assert versions[0].diagnostics is not None
+    assert versions[0].diagnostics["graph_version_id"] == 1
+    assert versions[0].diagnostics["routing_edge_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_graph_activation_blocks_stale_ready_version_without_routing_edges(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationGraphVersion(
+                id=1,
+                version_code="TEST-GRAPH-NO-ROUTING",
+                version_name="No routing graph",
+                scope_code="TEST",
+                status_code="READY",
+                is_active=False,
+                node_count=2,
+                edge_count=1,
+                channel_count=1,
+                quality_score=100,
+                validation_report_json={
+                    "component_count": 0,
+                    "blocking_issue_count": 0,
+                    "warning_issue_count": 0,
+                    "issues": [],
+                },
+            )
+        )
+        await session.commit()
+
+        with pytest.raises(ConflictError) as exc:
+            await NavigationWorkbenchService(session).activate_graph_version(1)
+
+    assert exc.value.detail["activation_blockers"] == ["NO_ROUTING_EDGE"]
+    assert exc.value.detail["diagnostics"]["can_activate"] is False
 
 
 @pytest.mark.asyncio

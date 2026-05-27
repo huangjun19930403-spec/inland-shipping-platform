@@ -12,8 +12,6 @@ from app.models import (
     NavigationChannelCenterline,
     NavigationChannelWaterBodyMatch,
     NavigationGeometryDraft,
-    NavigationGraphEdge,
-    NavigationGraphEdgeConstraint,
     NavigationGraphVersion,
     NavigationRouteResult,
     NavigationWaterArea,
@@ -37,6 +35,7 @@ from app.modules.navigation.schemas import (
 from app.modules.navigation.diagnostic_service import NavigationDiagnosticService
 from app.modules.navigation.map_layer_service import NavigationMapLayerService
 from app.modules.navigation.services.boundary_candidate_service import NavigationBoundaryCandidateService
+from app.modules.navigation.services.graph_diagnostics_service import build_graph_diagnostics
 from app.modules.navigation.services.osm_import_service import import_osm_waterways
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
@@ -203,7 +202,7 @@ class NavigationProductionService:
         channel_reference_bbox = matched_water_body_bbox or current_boundary_bbox
         centerline_bbox = self._geometry_bbox(current_centerline.geometry_json) if current_centerline else None
         graph_bbox = self._graph_bbox(active_graph_version) if active_graph_version else None
-        graph_diagnostics = await self._graph_diagnostics(active_graph_version)
+        graph_diagnostics = await build_graph_diagnostics(self.session, active_graph_version)
         return NavigationProductionWorkspaceResponse(
             channel=row,
             step_code=step_code,
@@ -500,86 +499,6 @@ class NavigationProductionService:
         inter_lng = max(0.0, min(expected["max_lng"], actual["max_lng"]) - max(expected["min_lng"], actual["min_lng"]))
         inter_lat = max(0.0, min(expected["max_lat"], actual["max_lat"]) - max(expected["min_lat"], actual["min_lat"]))
         return round((inter_lng * inter_lat) / expected_area, 4)
-
-    async def _graph_diagnostics(self, graph_version: NavigationGraphVersion | None) -> dict[str, Any] | None:
-        if graph_version is None:
-            return None
-        graph_version_id = int(graph_version.id)
-        routing_edge_count = int(
-            await self.session.scalar(
-                select(func.count())
-                .select_from(NavigationGraphEdge)
-                .where(
-                    NavigationGraphEdge.graph_version_id == graph_version_id,
-                    NavigationGraphEdge.routing_enabled.is_(True),
-                )
-            )
-            or 0
-        )
-        unknown_constraint_edge_count = int(
-            await self.session.scalar(
-                select(func.count())
-                .select_from(NavigationGraphEdge)
-                .where(
-                    NavigationGraphEdge.graph_version_id == graph_version_id,
-                    NavigationGraphEdge.unknown_constraint_flag.is_(True),
-                )
-            )
-            or 0
-        )
-        constraint_edge_count = int(
-            await self.session.scalar(
-                select(func.count(func.distinct(NavigationGraphEdgeConstraint.edge_id)))
-                .select_from(NavigationGraphEdgeConstraint)
-                .join(NavigationGraphEdge, NavigationGraphEdge.id == NavigationGraphEdgeConstraint.edge_id)
-                .where(NavigationGraphEdge.graph_version_id == graph_version_id)
-            )
-            or 0
-        )
-        report = graph_version.validation_report_json if isinstance(graph_version.validation_report_json, dict) else {}
-        issue_counts = self._issue_counts(report)
-        edge_count = int(graph_version.edge_count or 0)
-        known_constraint_edges = max(edge_count - unknown_constraint_edge_count, 0)
-        constraint_completeness_ratio = round(known_constraint_edges / edge_count, 4) if edge_count else None
-        return {
-            "graph_version_id": graph_version_id,
-            "version_code": graph_version.version_code,
-            "status_code": graph_version.status_code,
-            "is_active": bool(graph_version.is_active),
-            "quality_score": graph_version.quality_score,
-            "node_count": int(graph_version.node_count or 0),
-            "edge_count": edge_count,
-            "routing_edge_count": routing_edge_count,
-            "unknown_constraint_edge_count": unknown_constraint_edge_count,
-            "constraint_edge_count": constraint_edge_count,
-            "constraint_completeness_ratio": constraint_completeness_ratio,
-            "component_count": self._int_from_report(report, "component_count"),
-            "blocking_issue_count": self._int_from_report(report, "blocking_issue_count"),
-            "warning_issue_count": self._int_from_report(report, "warning_issue_count"),
-            "issue_counts": issue_counts,
-            "source_boundary_ids": (graph_version.source_summary_json or {}).get("source_boundary_ids")
-            if isinstance(graph_version.source_summary_json, dict)
-            else [],
-        }
-
-    def _issue_counts(self, report: dict[str, Any]) -> dict[str, int]:
-        issues: list[Any] = []
-        for key in ("issues", "build_issues"):
-            value = report.get(key)
-            if isinstance(value, list):
-                issues.extend(value)
-        counts: Counter[str] = Counter()
-        for item in issues:
-            if not isinstance(item, dict):
-                continue
-            code = item.get("issue_code") or item.get("issue_type_code") or item.get("code")
-            if code:
-                counts[str(code)] += 1
-        return dict(sorted(counts.items()))
-
-    def _int_from_report(self, report: dict[str, Any], key: str) -> int | None:
-        value = report.get(key)
-        return int(value) if isinstance(value, int) else None
 
     def _normalize_workspace_step(self, step: str) -> str:
         value = (step or "").strip().upper().replace("-", "_")
