@@ -60,8 +60,8 @@ from app.modules.navigation.schemas import (
 from app.modules.navigation.services.boundary_draft_ops_service import NavigationBoundaryDraftOpsService
 from app.modules.navigation.services.geometry_draft_service import NavigationGeometryDraftService
 from app.modules.navigation.services.geometry_validation_service import NavigationGeometryValidationService
+from app.modules.navigation.services.graph_diagnostics_service import build_graph_diagnostics, list_graph_issue_edges
 from app.modules.navigation.services.graph_workbench_service import NavigationGraphWorkbenchService
-from app.modules.navigation.services.graph_diagnostics_service import build_graph_diagnostics
 from app.modules.navigation.services.snap_reference_service import NavigationSnapReferenceService
 from app.modules.navigation.water_area_layers import water_area_layer_meta
 
@@ -921,6 +921,26 @@ class NavigationWorkbenchService:
                 self._graph_version_response(row, diagnostics=await build_graph_diagnostics(self.session, row))
             )
         return responses
+
+    async def list_graph_issue_edges(
+        self,
+        graph_version_id: int,
+        *,
+        issue_code: str | None = None,
+        channel_id: int | None = None,
+        page: int = 1,
+        page_size: int = 20,
+        include_geometry: bool = True,
+    ):
+        return await list_graph_issue_edges(
+            self.session,
+            graph_version_id=graph_version_id,
+            issue_code=issue_code,
+            channel_id=channel_id,
+            page=page,
+            page_size=page_size,
+            include_geometry=include_geometry,
+        )
 
     async def list_geometry_drafts(
         self,

@@ -747,10 +747,23 @@ async def test_production_workspace_returns_graph_diagnostics(session_maker) -> 
 
     async with session_maker() as session:
         versions = await NavigationWorkbenchService(session).list_graph_versions(limit=5)
+        issue_edges = await NavigationWorkbenchService(session).list_graph_issue_edges(
+            1,
+            issue_code="UNKNOWN_CONSTRAINT_DATA",
+            include_geometry=False,
+        )
+        all_issue_edges = await NavigationWorkbenchService(session).list_graph_issue_edges(1, include_geometry=True)
 
     assert versions[0].diagnostics is not None
     assert versions[0].diagnostics["graph_version_id"] == 1
     assert versions[0].diagnostics["routing_edge_count"] == 1
+    assert issue_edges.total == 1
+    assert issue_edges.items[0].id == 1
+    assert issue_edges.items[0].geometry_json is None
+    assert issue_edges.items[0].center["lng"] is not None
+    assert "UNKNOWN_CONSTRAINT_DATA" in issue_edges.items[0].issue_codes
+    assert all_issue_edges.total == 2
+    assert all_issue_edges.items[0].geometry_json is not None
 
 
 @pytest.mark.asyncio

@@ -203,3 +203,38 @@
 - 前端 `npm run build`：通过，保留既有 chunk size warning。
 - 浏览器检查：已在本地页面打开 `/navigation/production/graphs?channel_id=314`，确认页面显示当前长江干线 Graph 诊断：635 节点、634 边、623 可路由边、606 来源区段、边界覆盖 99%、634 条图边缺少完整约束数据。
 - 本轮未录制视频，按用户要求后续不再做视频录屏。
+
+### 2026-05-27 Graph 问题图边定位与修复入口
+
+本轮目标：让“约束数据缺失”不再只是统计数字，操作员可以从 Graph 构建页直接进入具体图边，定位并生成修复任务。
+
+完成内容：
+
+1. 后端新增 `GET /navigation/graph-versions/{id}/issue-edges`：
+   - 支持 `issue_code/channel_id/page/page_size/include_geometry`；
+   - 可筛选 `UNKNOWN_CONSTRAINT_DATA`、不可路由、低质量或带警告图边；
+   - 返回图边 ID、编码、长度、质量、问题类型、约束记录数、中心点、bbox、几何和已存在开放标注任务 ID。
+2. 前端 Graph 构建页新增问题图边抽屉：
+   - “查看缺约束图边”默认打开缺约束图边；
+   - “全部问题图边”用于查看不可路由和质量问题图边；
+   - 支持分页、刷新、复制中心点/bbox；
+   - 选中图边后左侧地图以橙色高亮该图边。
+3. 修复入口：
+   - 抽屉内可直接“生成标注任务”；
+   - 可跳转“打开标注任务”，后续在标注任务页补齐约束或回修中心线。
+
+真实浏览器检查：
+
+- 页面：`/navigation/production/graphs?channel_id=314`
+- 航道：长江干线
+- 操作：点击“查看缺约束图边”
+- 结果：抽屉显示真实问题图边列表，首批图边如 `REAL-CJ-V552-FULL-1779796708376-E-00001`，问题包含“带警告 / 约束缺失”，长度约 4.85 km，状态可路由，支持“定位 / 复制坐标”。
+
+验证结果：
+
+- `.venv/bin/python -m compileall app scripts`：通过。
+- Navigation focused pytest：84 passed。
+- Full pytest：未通过，`329 passed，2 skipped，41 failed，26 errors`；失败仍集中在 freight、route track、vessel spatial 等非 navigation 历史问题。
+- `npm run type-check`：通过。
+- `npm run build`：通过，保留既有 chunk size warning。
+- 本轮未修改敏感配置，未提交 `.env`、key/token、数据库备份或 `scripts/seeds/loaders/production_freights.py`。

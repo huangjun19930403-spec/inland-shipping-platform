@@ -865,3 +865,34 @@ class NavigationGraphActivateResponse(BaseModel):
     status_code: str
     is_active: bool
     diagnostics: dict[str, Any] | None = None
+
+
+class NavigationGraphIssueEdgeResponse(BaseModel):
+    id: int
+    graph_version_id: int
+    edge_code: str
+    channel_id: int | None = None
+    centerline_id: int | None = None
+    from_node_id: int
+    to_node_id: int
+    length_km: float
+    routing_enabled: bool
+    quality_code: str
+    unknown_constraint_flag: bool
+    issue_codes: list[str] = Field(default_factory=list)
+    constraint_count: int = 0
+    open_annotation_task_id: int | None = None
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+    center: dict[str, float | None] = Field(default_factory=dict)
+    geometry_json: dict[str, Any] | None = None
+    repair_hint: str | None = None
+
+
+class NavigationGraphIssueEdgeListResponse(BaseModel):
+    graph_version_id: int
+    version_code: str
+    issue_code: str | None = None
+    total: int
+    page: int
+    page_size: int
+    items: list[NavigationGraphIssueEdgeResponse] = Field(default_factory=list)

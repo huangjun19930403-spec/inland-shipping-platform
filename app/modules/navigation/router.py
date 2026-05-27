@@ -40,6 +40,7 @@ from app.modules.navigation.schemas import (
     NavigationGraphActivateResponse,
     NavigationGraphBuildRequest,
     NavigationGraphBuildResponse,
+    NavigationGraphIssueEdgeListResponse,
     NavigationGraphVersionListItemResponse,
     NavigationMapLayerResponse,
     NavigationOsmImportRequest,
@@ -551,6 +552,27 @@ async def list_navigation_graph_versions(
     db: AsyncSession = Depends(get_db),
 ):
     return await NavigationWorkbenchService(db).list_graph_versions(limit=limit)
+
+
+@router.get("/graph-versions/{graph_version_id}/issue-edges", response_model=NavigationGraphIssueEdgeListResponse)
+async def list_navigation_graph_issue_edges(
+    graph_version_id: int,
+    issue_code: str | None = None,
+    channel_id: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    include_geometry: bool = True,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).list_graph_issue_edges(
+        graph_version_id,
+        issue_code=issue_code,
+        channel_id=channel_id,
+        page=page,
+        page_size=page_size,
+        include_geometry=include_geometry,
+    )
 
 
 @router.get("/geometry-drafts", response_model=list[NavigationGeometryDraftResponse])
