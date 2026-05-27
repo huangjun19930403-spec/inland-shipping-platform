@@ -43,6 +43,8 @@ from app.modules.navigation.schemas import (
     NavigationGraphActivateResponse,
     NavigationGraphBuildRequest,
     NavigationGraphBuildResponse,
+    NavigationGraphEdgeConstraintRepairRequest,
+    NavigationGraphIssueEdgeResponse,
     NavigationGraphVersionListItemResponse,
     NavigationMapLayerResponse,
     NavigationSnapReferencePointResponse,
@@ -60,7 +62,11 @@ from app.modules.navigation.schemas import (
 from app.modules.navigation.services.boundary_draft_ops_service import NavigationBoundaryDraftOpsService
 from app.modules.navigation.services.geometry_draft_service import NavigationGeometryDraftService
 from app.modules.navigation.services.geometry_validation_service import NavigationGeometryValidationService
-from app.modules.navigation.services.graph_diagnostics_service import build_graph_diagnostics, list_graph_issue_edges
+from app.modules.navigation.services.graph_diagnostics_service import (
+    build_graph_diagnostics,
+    list_graph_issue_edges,
+    repair_graph_edge_constraint,
+)
 from app.modules.navigation.services.graph_workbench_service import NavigationGraphWorkbenchService
 from app.modules.navigation.services.snap_reference_service import NavigationSnapReferenceService
 from app.modules.navigation.water_area_layers import water_area_layer_meta
@@ -940,6 +946,21 @@ class NavigationWorkbenchService:
             page=page,
             page_size=page_size,
             include_geometry=include_geometry,
+        )
+
+    async def repair_graph_edge_constraint(
+        self,
+        edge_id: int,
+        body: NavigationGraphEdgeConstraintRepairRequest,
+        *,
+        repaired_by: int | None = None,
+    ) -> NavigationGraphIssueEdgeResponse:
+        return await repair_graph_edge_constraint(
+            self.session,
+            edge_id=edge_id,
+            body=body,
+            repaired_by=repaired_by,
+            include_geometry=True,
         )
 
     async def list_geometry_drafts(

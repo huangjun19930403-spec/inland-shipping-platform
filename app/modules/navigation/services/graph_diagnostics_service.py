@@ -1,18 +1,44 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shapely.geometry import shape
 
+from app.core.exceptions import NotFoundError, ValidationError
 from app.models import NavigationAnnotationTask, NavigationGraphEdge, NavigationGraphEdgeConstraint, NavigationGraphVersion
-from app.modules.navigation.schemas import NavigationGraphIssueEdgeListResponse, NavigationGraphIssueEdgeResponse
+from app.modules.navigation.schemas import (
+    NavigationGraphEdgeConstraintRepairRequest,
+    NavigationGraphIssueEdgeListResponse,
+    NavigationGraphIssueEdgeResponse,
+)
 
 
 EDGE_REVIEW_QUALITY_CODES = {"NEED_REVIEW", "LOW_CONFIDENCE", "SHORT_EDGE_REVIEW", "READY_WITH_WARNING"}
 OPEN_TASK_STATUSES = {"OPEN", "IN_PROGRESS", "NEED_REVIEW"}
+EDGE_CONSTRAINT_VALUE_FIELDS = (
+    "min_depth_m",
+    "min_width_m",
+    "max_allowed_draft_m",
+    "max_allowed_tonnage",
+    "max_air_draft_m",
+    "max_beam_m",
+    "max_length_m",
+    "lock_required",
+    "bridge_count",
+)
+EDGE_NUMERIC_CONSTRAINT_FIELDS = (
+    "min_depth_m",
+    "min_width_m",
+    "max_allowed_draft_m",
+    "max_allowed_tonnage",
+    "max_air_draft_m",
+    "max_beam_m",
+    "max_length_m",
+)
 
 
 def graph_issue_counts(report: dict[str, Any]) -> dict[str, int]:
@@ -153,8 +179,6 @@ async def list_graph_issue_edges(
 ) -> NavigationGraphIssueEdgeListResponse:
     graph_version = await session.get(NavigationGraphVersion, graph_version_id)
     if graph_version is None:
-        from app.core.exceptions import NotFoundError
-
         raise NotFoundError("NavigationGraphVersion", graph_version_id)
 
     page = max(1, int(page or 1))
@@ -199,6 +223,104 @@ async def list_graph_issue_edges(
     )
 
 
+async def repair_graph_edge_constraint(
+    session: AsyncSession,
+    *,
+    edge_id: int,
+    body: NavigationGraphEdgeConstraintRepairRequest,
+    repaired_by: int | None = None,
+    include_geometry: bool = True,
+) -> NavigationGraphIssueEdgeResponse:
+    edge = await session.get(NavigationGraphEdge, edge_id)
+    if edge is None:
+        raise NotFoundError("NavigationGraphEdge", edge_id)
+
+    provided_values = _provided_constraint_values(body)
+    if not provided_values and not body.rule_json:
+        raise ValidationError(
+            "至少补充一个通航约束字段",
+            code="GRAPH_EDGE_CONSTRAINT_EMPTY",
+            detail={"error_code": "GRAPH_EDGE_CONSTRAINT_EMPTY", "message": "至少补充一个通航约束字段"},
+        )
+
+    normalized_type = (body.constraint_type_code or "MANUAL_NAVIGATION_LIMIT").upper()
+    data_completeness = (body.data_completeness_code or "COMPLETE").upper()
+    now = datetime.now(UTC)
+
+    if body.apply_to_edge_fields:
+        for field in EDGE_NUMERIC_CONSTRAINT_FIELDS:
+            value = getattr(body, field)
+            if value is not None:
+                setattr(edge, field, value)
+        if body.lock_required is not None:
+            edge.lock_required = bool(body.lock_required)
+        if body.bridge_count is not None:
+            edge.bridge_count = int(body.bridge_count)
+
+    constraint = (
+        await session.execute(
+            select(NavigationGraphEdgeConstraint)
+            .where(
+                NavigationGraphEdgeConstraint.edge_id == int(edge.id),
+                NavigationGraphEdgeConstraint.constraint_type_code == normalized_type,
+            )
+            .order_by(NavigationGraphEdgeConstraint.id.desc())
+        )
+    ).scalars().first()
+
+    rule_payload: dict[str, Any] = dict(body.rule_json or {})
+    rule_payload["navigation_limits"] = provided_values
+    rule_payload["apply_to_edge_fields"] = bool(body.apply_to_edge_fields)
+
+    source_trace = {
+        "source": "MANUAL_GRAPH_EDGE_CONSTRAINT_REPAIR",
+        "repaired_at": now.isoformat(),
+        "repaired_by": repaired_by,
+        "graph_version_id": int(edge.graph_version_id),
+    }
+    if constraint is None:
+        constraint = NavigationGraphEdgeConstraint(
+            edge_id=int(edge.id),
+            constraint_type_code=normalized_type,
+        )
+        session.add(constraint)
+    else:
+        existing_trace = constraint.source_trace_json if isinstance(constraint.source_trace_json, dict) else {}
+        source_trace = {**existing_trace, **source_trace}
+
+    constraint.constraint_name = body.constraint_name or "人工补齐通航约束"
+    constraint.rule_json = rule_payload
+    constraint.severity_level = (body.severity_level or "WARNING").upper()
+    constraint.warning_message = body.warning_message
+    constraint.is_blocking = bool(body.is_blocking)
+    constraint.is_enabled = True
+    constraint.data_completeness_code = data_completeness
+    constraint.source_trace_json = source_trace
+
+    if data_completeness == "COMPLETE":
+        edge.unknown_constraint_flag = False
+        remaining_codes = _remove_edge_issue_code(edge, "UNKNOWN_CONSTRAINT_DATA")
+        if edge.quality_code == "READY_WITH_WARNING" and not remaining_codes and edge.routing_enabled:
+            edge.quality_code = "READY"
+
+    await session.flush()
+    await session.refresh(edge)
+    task_by_edge_id = await _open_task_ids_by_edge(
+        session,
+        graph_version_id=int(edge.graph_version_id),
+        edge_ids=[int(edge.id)],
+    )
+    constraint_count_by_edge_id = await _constraint_counts_by_edge(session, edge_ids=[int(edge.id)])
+    response = edge_issue_response(
+        edge,
+        include_geometry=include_geometry,
+        open_task_id=task_by_edge_id.get(int(edge.id)),
+        constraint_count=constraint_count_by_edge_id.get(int(edge.id), 0),
+    )
+    await session.commit()
+    return response
+
+
 def edge_issue_codes(edge: NavigationGraphEdge) -> list[str]:
     codes: list[str] = []
     if edge.unknown_constraint_flag:
@@ -238,6 +360,15 @@ def edge_issue_response(
         routing_enabled=bool(edge.routing_enabled),
         quality_code=edge.quality_code,
         unknown_constraint_flag=bool(edge.unknown_constraint_flag),
+        min_depth_m=_float_or_none(edge.min_depth_m),
+        min_width_m=_float_or_none(edge.min_width_m),
+        max_allowed_draft_m=_float_or_none(edge.max_allowed_draft_m),
+        max_allowed_tonnage=_float_or_none(edge.max_allowed_tonnage),
+        max_air_draft_m=_float_or_none(edge.max_air_draft_m),
+        max_beam_m=_float_or_none(edge.max_beam_m),
+        max_length_m=_float_or_none(edge.max_length_m),
+        lock_required=bool(edge.lock_required),
+        bridge_count=int(edge.bridge_count or 0),
         issue_codes=issue_codes,
         constraint_count=constraint_count,
         open_annotation_task_id=open_task_id,
@@ -288,6 +419,40 @@ async def _constraint_counts_by_edge(session: AsyncSession, *, edge_ids: list[in
         )
     )
     return {int(edge_id): int(count or 0) for edge_id, count in rows}
+
+
+def _provided_constraint_values(body: NavigationGraphEdgeConstraintRepairRequest) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for field in EDGE_CONSTRAINT_VALUE_FIELDS:
+        value = getattr(body, field)
+        if value is not None:
+            values[field] = value
+    return values
+
+
+def _remove_edge_issue_code(edge: NavigationGraphEdge, code: str) -> list[str]:
+    normalized = code.upper()
+    summary = edge.validation_summary_json if isinstance(edge.validation_summary_json, dict) else {}
+    updated = dict(summary)
+    raw_codes = updated.get("issue_codes")
+    if isinstance(raw_codes, list):
+        updated["issue_codes"] = [item for item in raw_codes if str(item).upper() != normalized]
+    raw_issues = updated.get("issues")
+    if isinstance(raw_issues, list):
+        updated["issues"] = [
+            item
+            for item in raw_issues
+            if not isinstance(item, dict)
+            or str(item.get("issue_code") or item.get("issue_type_code") or item.get("code") or "").upper() != normalized
+        ]
+    edge.validation_summary_json = updated
+    return [str(item).upper() for item in updated.get("issue_codes") or []]
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _geometry_bbox_and_center(geometry: dict[str, Any] | None) -> tuple[dict[str, float | None], dict[str, float | None]]:

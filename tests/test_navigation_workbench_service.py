@@ -24,6 +24,7 @@ from app.models.address import NavigationChannel, NavigationChannelBoundary, Nav
 from app.models.base import Base
 from app.modules.navigation.schemas import (
     NavigationCandidateGenerateRequest,
+    NavigationGraphEdgeConstraintRepairRequest,
     NavigationGeometryDraftCreateRequest,
     NavigationGeometryDraftValidateRequest,
     NavigationGraphBuildRequest,
@@ -764,6 +765,46 @@ async def test_production_workspace_returns_graph_diagnostics(session_maker) -> 
     assert "UNKNOWN_CONSTRAINT_DATA" in issue_edges.items[0].issue_codes
     assert all_issue_edges.total == 2
     assert all_issue_edges.items[0].geometry_json is not None
+
+    async with session_maker() as session:
+        service = NavigationWorkbenchService(session)
+        repaired = await service.repair_graph_edge_constraint(
+            1,
+            NavigationGraphEdgeConstraintRepairRequest(
+                min_depth_m=8.5,
+                min_width_m=180,
+                max_allowed_draft_m=6.2,
+                max_allowed_tonnage=5000,
+                bridge_count=0,
+                warning_message="人工补齐测试约束",
+            ),
+            repaired_by=9,
+        )
+        edge = await session.get(NavigationGraphEdge, 1)
+        constraints = list(
+            (
+                await session.execute(
+                    select(NavigationGraphEdgeConstraint).where(NavigationGraphEdgeConstraint.edge_id == 1)
+                )
+            ).scalars()
+        )
+        issue_edges_after_repair = await service.list_graph_issue_edges(
+            1,
+            issue_code="UNKNOWN_CONSTRAINT_DATA",
+            include_geometry=False,
+        )
+
+    assert repaired.unknown_constraint_flag is False
+    assert repaired.min_depth_m == 8.5
+    assert repaired.max_allowed_draft_m == 6.2
+    assert repaired.constraint_count == 1
+    assert edge is not None
+    assert edge.unknown_constraint_flag is False
+    assert float(edge.min_depth_m or 0) == 8.5
+    assert constraints[0].constraint_type_code == "MANUAL_NAVIGATION_LIMIT"
+    assert constraints[0].data_completeness_code == "COMPLETE"
+    assert constraints[0].source_trace_json["repaired_by"] == 9
+    assert issue_edges_after_repair.total == 0
 
 
 @pytest.mark.asyncio

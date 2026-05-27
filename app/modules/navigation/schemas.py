@@ -879,6 +879,15 @@ class NavigationGraphIssueEdgeResponse(BaseModel):
     routing_enabled: bool
     quality_code: str
     unknown_constraint_flag: bool
+    min_depth_m: float | None = None
+    min_width_m: float | None = None
+    max_allowed_draft_m: float | None = None
+    max_allowed_tonnage: float | None = None
+    max_air_draft_m: float | None = None
+    max_beam_m: float | None = None
+    max_length_m: float | None = None
+    lock_required: bool = False
+    bridge_count: int = 0
     issue_codes: list[str] = Field(default_factory=list)
     constraint_count: int = 0
     open_annotation_task_id: int | None = None
@@ -896,3 +905,23 @@ class NavigationGraphIssueEdgeListResponse(BaseModel):
     page: int
     page_size: int
     items: list[NavigationGraphIssueEdgeResponse] = Field(default_factory=list)
+
+
+class NavigationGraphEdgeConstraintRepairRequest(BaseModel):
+    constraint_type_code: str = Field(default="MANUAL_NAVIGATION_LIMIT", max_length=64)
+    constraint_name: str | None = Field(default="人工补齐通航约束", max_length=128)
+    min_depth_m: float | None = Field(default=None, gt=0)
+    min_width_m: float | None = Field(default=None, gt=0)
+    max_allowed_draft_m: float | None = Field(default=None, gt=0)
+    max_allowed_tonnage: float | None = Field(default=None, gt=0)
+    max_air_draft_m: float | None = Field(default=None, gt=0)
+    max_beam_m: float | None = Field(default=None, gt=0)
+    max_length_m: float | None = Field(default=None, gt=0)
+    lock_required: bool | None = None
+    bridge_count: int | None = Field(default=None, ge=0)
+    warning_message: str | None = Field(default=None, max_length=512)
+    severity_level: str = Field(default="WARNING", max_length=32)
+    is_blocking: bool = False
+    data_completeness_code: str = Field(default="COMPLETE", max_length=64)
+    rule_json: dict[str, Any] | None = None
+    apply_to_edge_fields: bool = True

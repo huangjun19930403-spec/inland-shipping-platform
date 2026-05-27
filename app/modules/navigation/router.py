@@ -40,6 +40,8 @@ from app.modules.navigation.schemas import (
     NavigationGraphActivateResponse,
     NavigationGraphBuildRequest,
     NavigationGraphBuildResponse,
+    NavigationGraphEdgeConstraintRepairRequest,
+    NavigationGraphIssueEdgeResponse,
     NavigationGraphIssueEdgeListResponse,
     NavigationGraphVersionListItemResponse,
     NavigationMapLayerResponse,
@@ -572,6 +574,20 @@ async def list_navigation_graph_issue_edges(
         page=page,
         page_size=page_size,
         include_geometry=include_geometry,
+    )
+
+
+@router.post("/graph-edges/{edge_id}/constraints/manual-repair", response_model=NavigationGraphIssueEdgeResponse)
+async def repair_navigation_graph_edge_constraint(
+    edge_id: int,
+    body: NavigationGraphEdgeConstraintRepairRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationWorkbenchService(db).repair_graph_edge_constraint(
+        edge_id,
+        body,
+        repaired_by=getattr(current_user, "id", None),
     )
 
 
