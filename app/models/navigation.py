@@ -270,6 +270,51 @@ class NavigationCenterlineSegment(Base, TimestampMixin):
     source_trace_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
+class NavigationCenterlinePointSet(Base, TimestampMixin):
+    __tablename__ = "navigation_centerline_point_set"
+    __table_args__ = (
+        Index("ix_navigation_centerline_point_set_channel_status", "channel_id", "status_code"),
+        Index("ix_navigation_centerline_point_set_boundary", "based_on_boundary_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("navigation_channel.id"), nullable=False, index=True)
+    based_on_boundary_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("navigation_channel_boundary.id"), nullable=False, index=True
+    )
+    point_set_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT", index=True)
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    length_m: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    bbox_min_lng: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    bbox_min_lat: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    bbox_max_lng: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    bbox_max_lat: Mapped[float | None] = mapped_column(Numeric(24, 15), nullable=True, index=True)
+    generated_geometry_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    validation_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_trace_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class NavigationCenterlineControlPoint(Base, TimestampMixin):
+    __tablename__ = "navigation_centerline_control_point"
+    __table_args__ = (
+        UniqueConstraint("point_set_id", "sequence_no", name="uk_navigation_centerline_control_point_seq"),
+        Index("ix_navigation_centerline_control_point_point_set", "point_set_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    point_set_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("navigation_centerline_point_set.id"), nullable=False, index=True
+    )
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    longitude: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    latitude: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    point_type_code: Mapped[str] = mapped_column(String(32), nullable=False, default="MANUAL", index=True)
+    point_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_trace_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
 class NavigationGeometryDraft(Base, TimestampMixin):
     __tablename__ = "navigation_geometry_draft"
     __table_args__ = (

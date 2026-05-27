@@ -625,10 +625,82 @@ class NavigationCenterlineListItemResponse(BaseModel):
     updated_at: str | None = None
 
 
+class NavigationCenterlineControlPointInput(BaseModel):
+    sequence_no: int | None = Field(default=None, ge=1)
+    longitude: float = Field(ge=-180, le=180)
+    latitude: float = Field(ge=-90, le=90)
+    point_type_code: str = Field(default="MANUAL", max_length=32)
+    point_name: str | None = Field(default=None, max_length=128)
+    source_trace_json: dict[str, Any] | None = None
+
+
+class NavigationCenterlineControlPointResponse(BaseModel):
+    id: int | None = None
+    point_set_id: int | None = None
+    sequence_no: int
+    longitude: float
+    latitude: float
+    point_type_code: str
+    point_name: str | None = None
+    source_trace_json: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class NavigationCenterlinePointSetCreateRequest(BaseModel):
+    point_set_name: str | None = Field(default=None, max_length=128)
+    source_type_code: str = Field(default="EMPTY", max_length=32)
+    max_import_points: int = Field(default=260, ge=2, le=1000)
+
+
+class NavigationCenterlinePointSetUpdatePointsRequest(BaseModel):
+    points: list[NavigationCenterlineControlPointInput] = Field(default_factory=list)
+
+
+class NavigationCenterlinePointSetResponse(BaseModel):
+    id: int
+    channel_id: int
+    based_on_boundary_id: int
+    point_set_name: str | None = None
+    version_no: int
+    status_code: str
+    point_count: int
+    length_m: float | None = None
+    bbox_min_lng: float | None = None
+    bbox_min_lat: float | None = None
+    bbox_max_lng: float | None = None
+    bbox_max_lat: float | None = None
+    generated_geometry_json: dict[str, Any] | None = None
+    validation_summary_json: dict[str, Any] | None = None
+    source_trace_json: dict[str, Any] | None = None
+    points: list[NavigationCenterlineControlPointResponse] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class NavigationCenterlinePointSetListResponse(BaseModel):
+    channel_id: int
+    total_count: int
+    items: list[NavigationCenterlinePointSetResponse] = Field(default_factory=list)
+
+
+class NavigationCenterlinePointSetPreviewResponse(BaseModel):
+    point_set_id: int
+    status_code: str
+    message: str
+    point_count: int
+    length_m: float | None = None
+    bbox: dict[str, float | None] = Field(default_factory=dict)
+    geometry_json: dict[str, Any] | None = None
+    validation_summary_json: dict[str, Any] | None = None
+    blocker_codes: list[str] = Field(default_factory=list)
+
+
 class NavigationCenterlineSegmentGenerateRequest(BaseModel):
     force: bool = False
     segment_length_km: float = Field(default=5.0, gt=0, le=100)
     source_mode: str = Field(default="CHANNEL_GUIDE_WITH_BOUNDARY_CLIP", max_length=32)
+    point_set_id: int | None = None
 
 
 class NavigationCenterlineSegmentGenerateResponse(BaseModel):

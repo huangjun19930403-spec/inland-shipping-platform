@@ -345,7 +345,7 @@ class NavigationCenterlineSegmentService(
         return first, second
 
     async def _rechain_active_segments(self, channel_id: int) -> None:
-        self._rechain_rows(await self._active_segments(channel_id, limit=1000))
+        self._rechain_rows(await self._active_segments(channel_id, limit=10000))
 
     def _rechain_rows(self, rows: list[NavigationCenterlineSegment]) -> None:
         for index, item in enumerate(rows):

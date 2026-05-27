@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
-from app.models import NavigationCenterlineSegment, NavigationChannelCenterline, NavigationGraphVersion
+from app.models import NavigationCenterlinePointSet, NavigationCenterlineSegment, NavigationChannelCenterline, NavigationGraphVersion
 from app.models.address import NavigationChannel, NavigationChannelBoundary, NavigationChannelSegment
 from app.models.base import Base
 from app.modules.navigation.schemas import (
@@ -15,8 +15,12 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentPublishRequest,
     NavigationCenterlineSegmentSplitRequest,
     NavigationCenterlineSegmentUpdateRequest,
+    NavigationCenterlineControlPointInput,
+    NavigationCenterlinePointSetCreateRequest,
+    NavigationCenterlinePointSetUpdatePointsRequest,
 )
 from app.modules.navigation.service import NavigationCenterlineService
+from app.modules.navigation.services.centerline_point_sets import NavigationCenterlinePointSetService
 from app.modules.navigation.services.graph_build_service import build_graph_from_centerlines
 from app.modules.navigation.services.centerline_segments import NavigationCenterlineSegmentService
 
@@ -198,6 +202,143 @@ async def test_default_generate_centerline_segments_uses_guide_boundary_clip(ses
     assert {row.source_type_code for row in rows} == {"CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"}
     assert all(row.source_trace_json["source_mode"] == "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP" for row in rows)
     assert all(row.source_trace_json["source_guide_segment_ids"] == [1] for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_centerline_point_set_create_update_preview(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        service = NavigationCenterlinePointSetService(session)
+        created = await service.create_set(1, NavigationCenterlinePointSetCreateRequest(point_set_name="人工点位"))
+        updated = await service.update_points(
+            created.id,
+            NavigationCenterlinePointSetUpdatePointsRequest(
+                points=[
+                    NavigationCenterlineControlPointInput(sequence_no=1, longitude=120.01, latitude=31.025),
+                    NavigationCenterlineControlPointInput(sequence_no=2, longitude=120.12, latitude=31.026),
+                    NavigationCenterlineControlPointInput(sequence_no=3, longitude=120.23, latitude=31.025),
+                ]
+            ),
+        )
+        preview = await service.preview(created.id)
+
+    assert created.status_code == "DRAFT"
+    assert updated.point_count == 3
+    assert updated.generated_geometry_json is not None
+    assert preview.status_code == "READY"
+    assert preview.point_count == 3
+    assert preview.length_m and preview.length_m > 10_000
+
+
+@pytest.mark.asyncio
+async def test_import_guide_as_centerline_point_set(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        await _seed_guide_segment(session)
+        created = await NavigationCenterlinePointSetService(session).create_set(
+            1,
+            NavigationCenterlinePointSetCreateRequest(source_type_code="IMPORT_GUIDE", max_import_points=5),
+        )
+
+    assert created.point_count >= 2
+    assert created.points[0].point_type_code == "IMPORTED_GUIDE"
+    assert created.generated_geometry_json is not None
+
+
+@pytest.mark.asyncio
+async def test_generate_centerline_segments_from_control_points(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        point_service = NavigationCenterlinePointSetService(session)
+        point_set = await point_service.create_set(1, NavigationCenterlinePointSetCreateRequest())
+        await point_service.update_points(
+            point_set.id,
+            NavigationCenterlinePointSetUpdatePointsRequest(
+                points=[
+                    NavigationCenterlineControlPointInput(sequence_no=1, longitude=120.01, latitude=31.025),
+                    NavigationCenterlineControlPointInput(sequence_no=2, longitude=120.12, latitude=31.026),
+                    NavigationCenterlineControlPointInput(sequence_no=3, longitude=120.23, latitude=31.025),
+                ]
+            ),
+        )
+        response = await NavigationCenterlineSegmentService(session).generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(
+                force=True,
+                segment_length_km=3.0,
+                source_mode="CONTROL_POINTS",
+                point_set_id=point_set.id,
+            ),
+        )
+        rows = list((await session.execute(select(NavigationCenterlineSegment))).scalars())
+        stored_point_set = await session.get(NavigationCenterlinePointSet, point_set.id)
+
+    assert response.status_code == "CREATED"
+    assert response.segment_count >= 2
+    assert stored_point_set is not None
+    assert stored_point_set.status_code == "CURRENT"
+    assert all(row.source_type_code == "CONTROL_POINTS_AUTOLINK" for row in rows)
+    assert all(row.source_trace_json["source_mode"] == "CONTROL_POINTS" for row in rows)
+    assert all(row.source_trace_json["source_point_set_id"] == point_set.id for row in rows)
+    assert all(row.source_trace_json["based_on_boundary_id"] == 1 for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_generate_centerline_segments_from_control_points_blocks_stale_boundary(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        await _seed_current_boundary(session)
+        point_service = NavigationCenterlinePointSetService(session)
+        point_set = await point_service.create_set(1, NavigationCenterlinePointSetCreateRequest())
+        await point_service.update_points(
+            point_set.id,
+            NavigationCenterlinePointSetUpdatePointsRequest(
+                points=[
+                    NavigationCenterlineControlPointInput(sequence_no=1, longitude=120.01, latitude=31.025),
+                    NavigationCenterlineControlPointInput(sequence_no=2, longitude=120.23, latitude=31.025),
+                ]
+            ),
+        )
+        old_boundary = await session.get(NavigationChannelBoundary, 1)
+        assert old_boundary is not None
+        old_boundary.is_current = False
+        new_geometry = _polygon(min_lng=120.00, min_lat=31.00, max_lng=120.30, max_lat=31.05)
+        session.add(
+            NavigationChannelBoundary(
+                id=2,
+                channel_id=1,
+                geometry_json=new_geometry,
+                boundary_paths_low=new_geometry["coordinates"],
+                boundary_paths_medium=new_geometry["coordinates"],
+                boundary_paths_high=new_geometry["coordinates"],
+                bbox_min_lng=120.00,
+                bbox_min_lat=31.00,
+                bbox_max_lng=120.30,
+                bbox_max_lat=31.05,
+                geometry_status_code="AVAILABLE",
+                boundary_quality_code="MANUAL_PUBLISHED",
+                connectivity_status_code="CONNECTED",
+                repair_status_code="NONE",
+                coverage_policy_code="MANUAL_DRAW",
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationCenterlineSegmentService(session).generate_segments(
+            1,
+            NavigationCenterlineSegmentGenerateRequest(
+                force=True,
+                source_mode="CONTROL_POINTS",
+                point_set_id=point_set.id,
+            ),
+        )
+
+    assert response.status_code == "BLOCKED"
+    assert "CENTERLINE_POINT_SET_BOUNDARY_STALE" in response.blocker_codes
 
 
 @pytest.mark.asyncio

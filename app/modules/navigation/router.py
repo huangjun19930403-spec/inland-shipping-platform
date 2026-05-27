@@ -24,6 +24,11 @@ from app.modules.navigation.schemas import (
     NavigationDiagnosticsRunResponse,
     NavigationBoundaryDraftOperationRequest,
     NavigationBoundaryDraftOperationResponse,
+    NavigationCenterlinePointSetCreateRequest,
+    NavigationCenterlinePointSetListResponse,
+    NavigationCenterlinePointSetPreviewResponse,
+    NavigationCenterlinePointSetResponse,
+    NavigationCenterlinePointSetUpdatePointsRequest,
     NavigationCenterlineSegmentGenerateRequest,
     NavigationCenterlineSegmentGenerateResponse,
     NavigationCenterlineSegmentListResponse,
@@ -66,6 +71,7 @@ from app.modules.navigation.schemas import (
     NavigationWorkbenchSummaryResponse,
     NavigationProductionWorkspaceResponse,
 )
+from app.modules.navigation.services.centerline_point_sets import NavigationCenterlinePointSetService
 from app.modules.navigation.services.centerline_segments import NavigationCenterlineSegmentService
 from app.modules.navigation.workbench_service import NavigationWorkbenchService
 
@@ -210,6 +216,72 @@ async def generate_navigation_channel_centerline_segments(
         channel_id=channel_id,
         body=body or NavigationCenterlineSegmentGenerateRequest(),
     )
+
+
+@router.get(
+    "/channels/{channel_id}/centerline-point-sets",
+    response_model=NavigationCenterlinePointSetListResponse,
+)
+async def list_navigation_channel_centerline_point_sets(
+    channel_id: int,
+    include_archived: bool = False,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlinePointSetService(db).list_sets(channel_id, include_archived=include_archived)
+
+
+@router.post(
+    "/channels/{channel_id}/centerline-point-sets",
+    response_model=NavigationCenterlinePointSetResponse,
+)
+async def create_navigation_channel_centerline_point_set(
+    channel_id: int,
+    body: NavigationCenterlinePointSetCreateRequest | None = None,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlinePointSetService(db).create_set(
+        channel_id,
+        body or NavigationCenterlinePointSetCreateRequest(),
+    )
+
+
+@router.put(
+    "/centerline-point-sets/{point_set_id}/points",
+    response_model=NavigationCenterlinePointSetResponse,
+)
+async def update_navigation_centerline_point_set_points(
+    point_set_id: int,
+    body: NavigationCenterlinePointSetUpdatePointsRequest,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlinePointSetService(db).update_points(point_set_id, body)
+
+
+@router.post(
+    "/centerline-point-sets/{point_set_id}/preview",
+    response_model=NavigationCenterlinePointSetPreviewResponse,
+)
+async def preview_navigation_centerline_point_set(
+    point_set_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlinePointSetService(db).preview(point_set_id)
+
+
+@router.post(
+    "/centerline-point-sets/{point_set_id}/archive",
+    response_model=NavigationCenterlinePointSetResponse,
+)
+async def archive_navigation_centerline_point_set(
+    point_set_id: int,
+    current_user=Depends(require_permission("ROUTE:WRITE")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlinePointSetService(db).archive(point_set_id)
 
 
 @router.get(

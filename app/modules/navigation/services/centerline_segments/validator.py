@@ -58,6 +58,23 @@ class NavigationCenterlineSegmentValidatorMixin:
                         "区段来自导向线与边界裁剪，覆盖率未达到 98%，请人工复核局部缺口。",
                     )
                 )
+        elif row.source_type_code == "CONTROL_POINTS_AUTOLINK":
+            trace = row.source_trace_json if isinstance(row.source_trace_json, dict) else {}
+            point_validation = trace.get("point_set_validation_summary") if isinstance(trace.get("point_set_validation_summary"), dict) else {}
+            point_issues = point_validation.get("issues") if isinstance(point_validation, dict) else []
+            has_boundary_review = any(
+                isinstance(item, dict) and item.get("issue_code") == "CENTERLINE_CONTROL_LINE_BOUNDARY_REVIEW"
+                for item in point_issues or []
+            )
+            if has_boundary_review:
+                issues.append(
+                    self._issue(
+                        "SEGMENT_BOUNDARY_REVIEW_FROM_CONTROL_POINTS",
+                        "WARNING",
+                        "区段来自点位自动连线，点位版本存在边界局部偏差复核提示。",
+                        "请按页检查区段走向，必要时拖拽点位或局部重画当前区段。",
+                    )
+                )
         else:
             boundary_geometry = self._cached_boundary_geometry(boundary)
             if not boundary_geometry.buffer(BOUNDARY_TOLERANCE_DEGREE).covers(line):

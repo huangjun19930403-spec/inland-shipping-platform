@@ -67,6 +67,13 @@ class NavigationCenterlineSegmentPublisherMixin:
         current_boundary = await self._current_boundary(channel_id)
         source_boundary_id = int(current_boundary.id) if current_boundary is not None else None
         previous_centerline_id = int(existing_current[0].id) if existing_current else None
+        source_point_set_ids = sorted(
+            {
+                int((row.source_trace_json or {}).get("source_point_set_id"))
+                for row in rows
+                if isinstance(row.source_trace_json, dict) and (row.source_trace_json or {}).get("source_point_set_id") is not None
+            }
+        )
 
         quality_code = "READY_WITH_WARNING" if any((row.issue_summary_json or {}).get("warning_count") for row in rows) else "READY"
         centerline = NavigationChannelCenterline(
@@ -89,6 +96,8 @@ class NavigationCenterlineSegmentPublisherMixin:
                 "segment_ids": [int(row.id) for row in rows],
                 "source_boundary_id": source_boundary_id,
                 "based_on_boundary_id": source_boundary_id,
+                "source_point_set_ids": source_point_set_ids,
+                "source_point_set_id": source_point_set_ids[0] if len(source_point_set_ids) == 1 else None,
                 "previous_centerline_id": previous_centerline_id,
                 "published_at": self._now().isoformat(),
                 "no_approval_task_created": True,

@@ -238,3 +238,55 @@
 - `npm run type-check`：通过。
 - `npm run build`：通过，保留既有 chunk size warning。
 - 本轮未修改敏感配置，未提交 `.env`、key/token、数据库备份或 `scripts/seeds/loaders/production_freights.py`。
+
+### 2026-05-27 中心线点位标记自动连线
+
+本轮目标：把中心线主流程从“自动生成/手画线段”调整为“标记全航道控制点 -> 系统按编号直连预览 -> 校验 -> 按里程自动切区段”。现有生产导向线只作为导入点位草稿来源，不能绕过点位版本直接成为发布结果。
+
+完成内容：
+
+1. 后端新增持久点位版本资产：
+   - `navigation_centerline_point_set`
+   - `navigation_centerline_control_point`
+   - 点位版本记录当前边界 ID、版本号、状态、点数、连线长度、bbox、自动连线 GeoJSON、校验摘要和来源追踪。
+2. 后端新增点位 API：
+   - `GET /navigation/channels/{id}/centerline-point-sets`
+   - `POST /navigation/channels/{id}/centerline-point-sets`
+   - `PUT /navigation/centerline-point-sets/{id}/points`
+   - `POST /navigation/centerline-point-sets/{id}/preview`
+   - `POST /navigation/centerline-point-sets/{id}/archive`
+3. 区段生成新增 `source_mode=CONTROL_POINTS`：
+   - 必须传 `point_set_id`；
+   - 按控制点顺序直接生成 LineString，不做平滑、不绕行、不改路径算法；
+   - 区段来源记录 `source_point_set_id`、点位 ID、点位 hash、`based_on_boundary_id`；
+   - 新区段完全创建和校验后才归档旧活动区段，避免接口失败时先打掉旧数据。
+4. 前端中心线页改为点位主流程：
+   - 顶部主按钮改为“创建点位草稿 / 导入导向线为点位 / 保存点位 / 预览自动连线 / 基于点位生成区段”；
+   - 新增中心线控制点面板，支持选择点位版本、地图打点、拖动点位、删除、插入、上移/下移、撤销、清空、归档隐藏；
+   - 地图显示编号控制点和紫色虚线自动连线预览；
+   - 保存、预览、分页、生成后遵守视野锁定，不自动漂移。
+5. 长干线边界局部 polygon 偏差处理：
+   - 点位连线 bbox 覆盖当前边界主轴但局部 polygon 不覆盖时，降级为复核 warning；
+   - 点位来源区段不再批量打 `SEGMENT_OUT_OF_BOUNDARY` error，而是显示 `SEGMENT_BOUNDARY_REVIEW_FROM_CONTROL_POINTS` warning，要求操作员逐段复核。
+
+真实浏览器检查：
+
+- 页面：`/navigation/production/centerlines?channel_id=314`
+- 航道：长江干线
+- 当前发布边界：ID 567
+- 当前点位版本：V2 / CURRENT
+- 点位数量：798
+- 自动连线长度：3025.24 km
+- 点位校验：0 阻断 / 1 警告
+- 操作：点击“基于点位重新生成”，确认弹窗后完成重新生成。
+- 结果：生成 606 个 `CONTROL_POINTS_AUTOLINK` 区段，均为待修复；问题统计为 606 个 `SEGMENT_BOUNDARY_REVIEW_FROM_CONTROL_POINTS` warning，另有 10 个急转弯复核 warning；不再出现旧逻辑的 315 个 `SEGMENT_OUT_OF_BOUNDARY` error。
+- 体验记录：首次进入时 5MB 工作台响应会先显示 0 段默认态，约 1 秒后加载为真实数据。后续应继续拆分工作台大响应，避免操作员误判为空数据。
+
+验证结果：
+
+- `.venv/bin/python -m compileall app scripts`：通过。
+- `tests/test_navigation_centerline_segments.py`：19 passed。
+- Navigation focused pytest：76 passed。
+- `npm run type-check`：通过。
+- `npm run build`：通过，保留既有 chunk size warning。
+- 本轮未重置 seed，未修改敏感配置，未提交 `.env`、key/token、数据库备份或 `scripts/seeds/loaders/production_freights.py`。

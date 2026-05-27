@@ -15,6 +15,7 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentGenerateRequest,
     NavigationCenterlineSegmentGenerateResponse,
 )
+from app.modules.navigation.services.centerline_point_sets import NavigationCenterlinePointSetService
 from app.modules.navigation.services.centerline_segments.types import SOURCE_CENTERLINE_TYPES
 
 
@@ -47,21 +48,40 @@ class NavigationCenterlineSegmentGeneratorMixin:
                 segment_ids=[int(item.id) for item in active_segments],
                 next_path=f"/navigation/production/centerlines?channel_id={channel_id}",
             )
-        for item in active_segments:
-            item.segment_status_code = "ARCHIVED"
-
         source_mode = (body.source_mode or "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP").upper()
         if source_mode == "BOUNDARY":
             source_mode = "BOUNDARY_ROUGH_LOCAL"
-        if source_mode not in {"CHANNEL_GUIDE_WITH_BOUNDARY_CLIP", "BOUNDARY_ROUGH_LOCAL", "CURRENT_CENTERLINE"}:
+        if source_mode not in {"CHANNEL_GUIDE_WITH_BOUNDARY_CLIP", "BOUNDARY_ROUGH_LOCAL", "CURRENT_CENTERLINE", "CONTROL_POINTS"}:
             return self._generation_blocked(
                 channel_id,
-                "中心线区段来源模式无效，请选择基于航道导向线、边界局部粗生成或从当前中心线切段。",
+                "中心线区段来源模式无效，请选择基于控制点、航道导向线、边界局部粗生成或从当前中心线切段。",
                 ["CENTERLINE_SOURCE_MODE_INVALID"],
             )
 
         source_meta: dict[str, Any] = {}
-        if source_mode == "CURRENT_CENTERLINE":
+        point_set_id: int | None = None
+        if source_mode == "CONTROL_POINTS":
+            if body.point_set_id is None:
+                return self._generation_blocked(
+                    channel_id,
+                    "基于控制点生成区段必须选择中心线点位版本。",
+                    ["CENTERLINE_POINT_SET_REQUIRED"],
+                )
+            point_service = NavigationCenterlinePointSetService(self.session)
+            line, point_set, _points, point_meta, message, blockers = await point_service.line_for_generation(
+                channel_id=channel_id,
+                point_set_id=int(body.point_set_id),
+                boundary=boundary,
+            )
+            if line is None or point_set is None:
+                return self._generation_blocked(channel_id, message, blockers)
+            lines = [line]
+            centerline_id = None
+            source_type = "CONTROL_POINTS_AUTOLINK"
+            algorithm = "CONTROL_POINT_AUTOLINK_V1"
+            point_set_id = int(point_set.id)
+            source_meta = point_meta
+        elif source_mode == "CURRENT_CENTERLINE":
             source = await self._source_lines(channel_id)
             if source is None:
                 return self._generation_blocked(
@@ -105,10 +125,10 @@ class NavigationCenterlineSegmentGeneratorMixin:
                 centerline_id=centerline_id,
                 segment_no=f"{index:03d}",
                 segment_name=f"{channel.channel_name}中心线区段 {index:03d}",
-                segment_status_code="NEED_REPAIR" if source_type in {"BOUNDARY_ROUGH_LOCAL", "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"} else "CANDIDATE",
+                segment_status_code="NEED_REPAIR" if source_type in {"BOUNDARY_ROUGH_LOCAL", "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP", "CONTROL_POINTS_AUTOLINK"} else "CANDIDATE",
                 geometry_json=self._geometry_json(line),
                 source_type_code=source_type,
-                quality_code="READY_WITH_WARNING" if source_type in {"BOUNDARY_ROUGH_LOCAL", "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"} else "READY",
+                quality_code="READY_WITH_WARNING" if source_type in {"BOUNDARY_ROUGH_LOCAL", "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP", "CONTROL_POINTS_AUTOLINK"} else "READY",
                 source_trace_json={
                     "source_mode": source_mode,
                     "source_type_code": source_type,
@@ -134,7 +154,15 @@ class NavigationCenterlineSegmentGeneratorMixin:
 
         for row in rows:
             validation = await self._validate_row(row)
-            self._apply_validation(row, validation, generated_from_boundary=source_type in {"BOUNDARY_ROUGH_LOCAL", "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"})
+            self._apply_validation(row, validation, generated_from_boundary=source_type in {"BOUNDARY_ROUGH_LOCAL", "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP", "CONTROL_POINTS_AUTOLINK"})
+        for item in active_segments:
+            item.segment_status_code = "ARCHIVED"
+            trace = dict(item.source_trace_json or {})
+            trace["archived_at"] = self._now().isoformat()
+            trace["archive_reason"] = "replaced_by_centerline_segment_generation"
+            item.source_trace_json = trace
+        if point_set_id is not None:
+            await NavigationCenterlinePointSetService(self.session).mark_current(point_set_id)
         await self.session.commit()
 
         created_rows = await self._active_segments(channel_id)
