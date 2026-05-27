@@ -24,6 +24,7 @@ from app.modules.navigation.schemas import (
     NavigationAnnotationTaskResolveRequest,
     NavigationAnnotationTaskResponse,
 )
+from app.modules.navigation.services.graph_diagnostics_service import repair_graph_edge_constraint
 
 
 OPEN_TASK_STATUSES = {"OPEN", "IN_PROGRESS", "NEED_REVIEW"}
@@ -273,18 +274,79 @@ class NavigationAnnotationTaskService:
         target_type = body.resolution_target_type_code.upper() if body.resolution_target_type_code else None
         if resolution_type in RESOLUTION_TARGET_REQUIRED_TYPES and (not target_type or body.resolution_target_id is None):
             raise ValidationError("resolution target is required for version-producing resolutions")
+        repaired_edge = None
+        if body.constraint_repair is not None:
+            repaired_edge = await self._repair_constraint_task(
+                task,
+                body,
+                reviewed_by=reviewed_by,
+            )
+            resolution_type = "CONSTRAINT_CREATED"
+            target_type = "GRAPH_EDGE"
         task.status_code = body.status_code.upper()
         task.resolution_type_code = resolution_type
         task.resolution_target_type_code = target_type
-        task.resolution_target_id = body.resolution_target_id
+        task.resolution_target_id = body.resolution_target_id or (repaired_edge.id if repaired_edge else None)
         task.reviewed_by = reviewed_by
         task.reviewed_at = datetime.now(UTC).replace(tzinfo=None)
         task.resolved_at = task.reviewed_at if task.status_code in {"RESOLVED", "CLOSED"} else None
+        resolution_payload: dict[str, Any] = {}
         if body.suggestion_json:
-            task.suggestion_json = {**(task.suggestion_json or {}), "manual_resolution": body.suggestion_json}
+            resolution_payload.update(body.suggestion_json)
+        if body.source_evidence_json:
+            resolution_payload["source_evidence_json"] = body.source_evidence_json
+        if repaired_edge is not None:
+            resolution_payload["constraint_repair_result"] = {
+                "edge_id": repaired_edge.id,
+                "edge_code": repaired_edge.edge_code,
+                "unknown_constraint_flag": repaired_edge.unknown_constraint_flag,
+                "constraint_count": repaired_edge.constraint_count,
+                "issue_codes": repaired_edge.issue_codes,
+            }
+        if resolution_payload:
+            task.suggestion_json = {**(task.suggestion_json or {}), "manual_resolution": resolution_payload}
         await self.session.commit()
         await self.session.refresh(task)
         return self._to_response(task)
+
+    async def _repair_constraint_task(
+        self,
+        task: NavigationAnnotationTask,
+        body: NavigationAnnotationTaskResolveRequest,
+        *,
+        reviewed_by: int | None,
+    ):
+        if task.task_type_code != "CONSTRAINT_DATA_REPAIR" or task.target_type_code != "GRAPH_EDGE" or task.target_id is None:
+            raise ValidationError(
+                "只有 GRAPH_EDGE 类型的约束数据补齐任务可以直接写入图边约束",
+                code="ANNOTATION_CONSTRAINT_REPAIR_TARGET_INVALID",
+                detail={
+                    "error_code": "ANNOTATION_CONSTRAINT_REPAIR_TARGET_INVALID",
+                    "message": "只有 GRAPH_EDGE 类型的约束数据补齐任务可以直接写入图边约束",
+                },
+            )
+        repair_body = body.constraint_repair
+        if repair_body is None:
+            raise ValidationError("constraint_repair is required")
+        source_evidence = dict(repair_body.source_evidence_json or {})
+        if body.source_evidence_json:
+            source_evidence.update(body.source_evidence_json)
+        source_evidence.update(
+            {
+                "annotation_task_id": int(task.id),
+                "annotation_task_no": task.task_no,
+                "issue_summary": task.issue_summary,
+            }
+        )
+        repair_body = repair_body.model_copy(update={"source_evidence_json": source_evidence})
+        return await repair_graph_edge_constraint(
+            self.session,
+            edge_id=int(task.target_id),
+            body=repair_body,
+            repaired_by=reviewed_by,
+            include_geometry=True,
+            commit=False,
+        )
 
     async def _get_or_create_task(
         self,

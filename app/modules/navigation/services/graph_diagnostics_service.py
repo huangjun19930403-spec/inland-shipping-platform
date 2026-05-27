@@ -230,6 +230,7 @@ async def repair_graph_edge_constraint(
     body: NavigationGraphEdgeConstraintRepairRequest,
     repaired_by: int | None = None,
     include_geometry: bool = True,
+    commit: bool = True,
 ) -> NavigationGraphIssueEdgeResponse:
     edge = await session.get(NavigationGraphEdge, edge_id)
     if edge is None:
@@ -271,6 +272,8 @@ async def repair_graph_edge_constraint(
     rule_payload: dict[str, Any] = dict(body.rule_json or {})
     rule_payload["navigation_limits"] = provided_values
     rule_payload["apply_to_edge_fields"] = bool(body.apply_to_edge_fields)
+    if body.source_evidence_json:
+        rule_payload["source_evidence_json"] = body.source_evidence_json
 
     source_trace = {
         "source": "MANUAL_GRAPH_EDGE_CONSTRAINT_REPAIR",
@@ -278,6 +281,8 @@ async def repair_graph_edge_constraint(
         "repaired_by": repaired_by,
         "graph_version_id": int(edge.graph_version_id),
     }
+    if body.source_evidence_json:
+        source_trace["source_evidence_json"] = body.source_evidence_json
     if constraint is None:
         constraint = NavigationGraphEdgeConstraint(
             edge_id=int(edge.id),
@@ -317,7 +322,8 @@ async def repair_graph_edge_constraint(
         open_task_id=task_by_edge_id.get(int(edge.id)),
         constraint_count=constraint_count_by_edge_id.get(int(edge.id), 0),
     )
-    await session.commit()
+    if commit:
+        await session.commit()
     return response
 
 

@@ -165,11 +165,34 @@ class NavigationAnnotationSuggestionResponse(BaseModel):
     suggestion_json: dict[str, Any]
 
 
+class NavigationGraphEdgeConstraintRepairRequest(BaseModel):
+    constraint_type_code: str = Field(default="MANUAL_NAVIGATION_LIMIT", max_length=64)
+    constraint_name: str | None = Field(default="人工补齐通航约束", max_length=128)
+    min_depth_m: float | None = Field(default=None, gt=0)
+    min_width_m: float | None = Field(default=None, gt=0)
+    max_allowed_draft_m: float | None = Field(default=None, gt=0)
+    max_allowed_tonnage: float | None = Field(default=None, gt=0)
+    max_air_draft_m: float | None = Field(default=None, gt=0)
+    max_beam_m: float | None = Field(default=None, gt=0)
+    max_length_m: float | None = Field(default=None, gt=0)
+    lock_required: bool | None = None
+    bridge_count: int | None = Field(default=None, ge=0)
+    warning_message: str | None = Field(default=None, max_length=512)
+    severity_level: str = Field(default="WARNING", max_length=32)
+    is_blocking: bool = False
+    data_completeness_code: str = Field(default="COMPLETE", max_length=64)
+    rule_json: dict[str, Any] | None = None
+    source_evidence_json: dict[str, Any] | None = None
+    apply_to_edge_fields: bool = True
+
+
 class NavigationAnnotationTaskResolveRequest(BaseModel):
     resolution_type_code: str = Field(max_length=64)
     resolution_target_type_code: str | None = Field(default=None, max_length=64)
     resolution_target_id: int | None = None
     suggestion_json: dict[str, Any] | None = None
+    constraint_repair: NavigationGraphEdgeConstraintRepairRequest | None = None
+    source_evidence_json: dict[str, Any] | None = None
     status_code: str = Field(default="RESOLVED", max_length=64)
 
 
@@ -905,23 +928,3 @@ class NavigationGraphIssueEdgeListResponse(BaseModel):
     page: int
     page_size: int
     items: list[NavigationGraphIssueEdgeResponse] = Field(default_factory=list)
-
-
-class NavigationGraphEdgeConstraintRepairRequest(BaseModel):
-    constraint_type_code: str = Field(default="MANUAL_NAVIGATION_LIMIT", max_length=64)
-    constraint_name: str | None = Field(default="人工补齐通航约束", max_length=128)
-    min_depth_m: float | None = Field(default=None, gt=0)
-    min_width_m: float | None = Field(default=None, gt=0)
-    max_allowed_draft_m: float | None = Field(default=None, gt=0)
-    max_allowed_tonnage: float | None = Field(default=None, gt=0)
-    max_air_draft_m: float | None = Field(default=None, gt=0)
-    max_beam_m: float | None = Field(default=None, gt=0)
-    max_length_m: float | None = Field(default=None, gt=0)
-    lock_required: bool | None = None
-    bridge_count: int | None = Field(default=None, ge=0)
-    warning_message: str | None = Field(default=None, max_length=512)
-    severity_level: str = Field(default="WARNING", max_length=32)
-    is_blocking: bool = False
-    data_completeness_code: str = Field(default="COMPLETE", max_length=64)
-    rule_json: dict[str, Any] | None = None
-    apply_to_edge_fields: bool = True

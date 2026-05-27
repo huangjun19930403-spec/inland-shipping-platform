@@ -14,6 +14,7 @@ from app.models import (
     NavigationAnnotationTask,
     NavigationChannelCenterline,
     NavigationGraphEdge,
+    NavigationGraphEdgeConstraint,
     NavigationGraphNode,
     NavigationGraphVersion,
     NavigationRouteQualityIssue,
@@ -23,7 +24,7 @@ from app.models import (
 from app.models.address import NavigationChannel
 from app.models.base import Base
 from app.modules.navigation.annotation_service import NavigationAnnotationTaskService
-from app.modules.navigation.schemas import NavigationAnnotationTaskResolveRequest
+from app.modules.navigation.schemas import NavigationAnnotationTaskResolveRequest, NavigationGraphEdgeConstraintRepairRequest
 
 
 @compiles(BigInteger, "sqlite")
@@ -290,3 +291,63 @@ async def test_suggestion_and_resolve_record_traceable_target_without_publishing
     assert resolved.resolution_target_id == 100
     assert edge is not None
     assert edge.quality_code == "LOW_CONFIDENCE"
+
+
+@pytest.mark.asyncio
+async def test_resolve_constraint_annotation_repairs_graph_edge_and_records_evidence(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_graph(session)
+        service = NavigationAnnotationTaskService(session)
+        created = await service.create_from_graph_version(1, created_by=3)
+        rows = list((await session.execute(select(NavigationAnnotationTask).order_by(NavigationAnnotationTask.id))).scalars())
+        task = next(row for row in rows if row.task_type_code == "CONSTRAINT_DATA_REPAIR")
+
+        resolved = await service.resolve_task(
+            task.id,
+            NavigationAnnotationTaskResolveRequest(
+                resolution_type_code="MANUAL_CONFIRMED",
+                status_code="RESOLVED",
+                constraint_repair=NavigationGraphEdgeConstraintRepairRequest(
+                    min_depth_m=7.2,
+                    min_width_m=160,
+                    max_allowed_draft_m=5.8,
+                    max_allowed_tonnage=3000,
+                    warning_message="资料来自人工核验",
+                ),
+                source_evidence_json={
+                    "source_name": "测试航道通航资料",
+                    "source_ref": "ANN-EDGE-EVIDENCE",
+                    "operator_note": "已核验该图边约束",
+                },
+            ),
+            reviewed_by=5,
+        )
+        edge = await session.get(NavigationGraphEdge, 1)
+        constraints = list(
+            (
+                await session.execute(
+                    select(NavigationGraphEdgeConstraint).where(NavigationGraphEdgeConstraint.edge_id == 1)
+                )
+            ).scalars()
+        )
+        open_tasks = await service.list_tasks(
+            status_code="OPEN",
+            task_type_code="CONSTRAINT_DATA_REPAIR",
+            channel_id=1,
+        )
+
+    assert created.created_count >= 1
+    assert resolved.status_code == "RESOLVED"
+    assert resolved.resolution_type_code == "CONSTRAINT_CREATED"
+    assert resolved.resolution_target_type_code == "GRAPH_EDGE"
+    assert resolved.resolution_target_id == 1
+    assert resolved.suggestion_json["manual_resolution"]["source_evidence_json"]["source_ref"] == "ANN-EDGE-EVIDENCE"
+    assert resolved.suggestion_json["manual_resolution"]["constraint_repair_result"]["unknown_constraint_flag"] is False
+    assert edge is not None
+    assert edge.unknown_constraint_flag is False
+    assert float(edge.max_allowed_draft_m or 0) == 5.8
+    assert len(constraints) == 1
+    assert constraints[0].data_completeness_code == "COMPLETE"
+    assert constraints[0].source_trace_json["source_evidence_json"]["annotation_task_id"] == task.id
+    assert constraints[0].source_trace_json["source_evidence_json"]["source_ref"] == "ANN-EDGE-EVIDENCE"
+    assert open_tasks.total == 0
