@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -20,6 +20,7 @@ from app.models import (
     NavigationWaterBody,
     NavigationWaterBodyFeatureLink,
 )
+from app.models.address import NavigationChannel
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +34,46 @@ class BackfillReport:
     eligible_pair_count: int = 0
     existing_match_count: int = 0
     created_match_count: int = 0
+    direct_name_candidate_count: int = 0
+    direct_name_created_count: int = 0
     skipped_non_production_body_count: int = 0
+
+
+def _norm(value: str | None) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    for token in (" ", "\t", "\n", "—", "-", "_", "（", "）", "(", ")", "/", "·"):
+        text = text.replace(token, "")
+    return text
+
+
+def _channel_terms(channel: NavigationChannel) -> set[str]:
+    terms: set[str] = set()
+    for value in (
+        channel.channel_name,
+        channel.official_name,
+        channel.display_name,
+        *(channel.alias_names or []),
+    ):
+        normalized = _norm(value)
+        if normalized:
+            terms.add(normalized)
+    return terms
+
+
+def _water_body_terms(water_body: NavigationWaterBody) -> set[str]:
+    terms: set[str] = set()
+    for value in (
+        water_body.normalized_water_name,
+        water_body.water_body_name,
+        water_body.display_name,
+        water_body.production_name,
+    ):
+        normalized = _norm(value)
+        if normalized:
+            terms.add(normalized)
+    return terms
 
 
 async def backfill_channel_water_body_matches(
@@ -119,6 +159,81 @@ async def backfill_channel_water_body_matches(
                 )
             )
             report.created_match_count += 1
+            existing.add((channel_id, water_body_id))
+
+        direct_terms_by_channel: dict[int, set[str]] = {}
+        channels_by_term: dict[str, list[NavigationChannel]] = defaultdict(list)
+        channels = list(
+            (
+                await session.execute(
+                    select(NavigationChannel).where(NavigationChannel.is_enabled.is_(True))
+                )
+            ).scalars()
+        )
+        for channel in channels:
+            terms = _channel_terms(channel)
+            if not terms:
+                continue
+            direct_terms_by_channel[int(channel.id)] = terms
+            for term in terms:
+                channels_by_term[term].append(channel)
+
+        all_terms = sorted(channels_by_term)
+        if all_terms:
+            water_bodies = list(
+                (
+                    await session.execute(
+                        select(NavigationWaterBody).where(
+                            NavigationWaterBody.is_enabled.is_(True),
+                            NavigationWaterBody.body_role_code.in_(PRODUCTION_BODY_ROLES),
+                            or_(
+                                NavigationWaterBody.normalized_water_name.in_(all_terms),
+                                NavigationWaterBody.water_body_name.in_(all_terms),
+                                NavigationWaterBody.display_name.in_(all_terms),
+                                NavigationWaterBody.production_name.in_(all_terms),
+                            ),
+                        )
+                    )
+                ).scalars()
+            )
+        else:
+            water_bodies = []
+
+        for water_body in water_bodies:
+            body_terms = _water_body_terms(water_body)
+            if not body_terms:
+                continue
+            matched_channels: dict[int, tuple[NavigationChannel, str]] = {}
+            for term in body_terms:
+                for channel in channels_by_term.get(term, []):
+                    matched_channels.setdefault(int(channel.id), (channel, term))
+            for channel_id, (channel, matched_term) in matched_channels.items():
+                key = (channel_id, int(water_body.id))
+                report.direct_name_candidate_count += 1
+                if key in existing:
+                    continue
+                session.add(
+                    NavigationChannelWaterBodyMatch(
+                        channel_id=channel_id,
+                        water_body_id=int(water_body.id),
+                        match_batch_code="DIRECT-NAME",
+                        match_type_code="DIRECT_EXACT_NAME",
+                        matched_term=matched_term,
+                        score=100,
+                        confidence_code="HIGH_CONFIDENCE",
+                        issue_codes=[],
+                        is_current=True,
+                        source_water_area_ids_json=water_body.source_water_area_ids_json or [],
+                        source_trace_json={
+                            "source": "backfill_channel_water_body_matches",
+                            "match_rule": "direct_exact_channel_water_body_name",
+                            "channel_code": channel.channel_code,
+                            "water_body_code": water_body.water_body_code,
+                        },
+                    )
+                )
+                report.direct_name_created_count += 1
+                existing.add(key)
 
         if owns_session:
             await session.commit()

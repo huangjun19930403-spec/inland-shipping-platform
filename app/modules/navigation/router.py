@@ -107,10 +107,17 @@ async def get_navigation_channel_pipeline(
 async def get_navigation_channel_production_workspace(
     channel_id: int,
     step: str = "boundary",
+    include_centerline_segments: bool = False,
+    map_layer_limit: int | None = None,
     current_user=Depends(require_permission("ROUTE:READ")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await NavigationProductionService(db).production_workspace(channel_id, step=step)
+    return await NavigationProductionService(db).production_workspace(
+        channel_id,
+        step=step,
+        include_centerline_segments=include_centerline_segments,
+        map_layer_limit=map_layer_limit,
+    )
 
 
 @router.get("/channels/{channel_id}/diagnostics", response_model=NavigationChannelDiagnosticResponse)
@@ -296,7 +303,7 @@ async def list_navigation_channel_centerline_segments(
     limit: int | None = None,
     page: int = 1,
     page_size: int = 50,
-    include_geometry: bool = True,
+    include_geometry: bool = False,
     current_user=Depends(require_permission("ROUTE:READ")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -310,6 +317,15 @@ async def list_navigation_channel_centerline_segments(
         page_size=page_size,
         include_geometry=include_geometry,
     )
+
+
+@router.get("/centerline-segments/{segment_id}", response_model=NavigationCenterlineSegmentResponse)
+async def get_navigation_centerline_segment(
+    segment_id: int,
+    current_user=Depends(require_permission("ROUTE:READ")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationCenterlineSegmentService(db).get_segment(segment_id)
 
 
 @router.put("/centerline-segments/{segment_id}", response_model=NavigationCenterlineSegmentResponse)

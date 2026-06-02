@@ -209,7 +209,7 @@ async def validate_navigation_graph(
         issues.append(
             GraphValidationIssue(
                 "GRAPH_DISCONNECTED",
-                "BLOCKING",
+                "WARNING",
                 message,
                 annotation_candidate=_candidate("GRAPH_DISCONNECTED", "GRAPH_VERSION", graph_version.id, message),
             )

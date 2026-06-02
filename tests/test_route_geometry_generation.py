@@ -16,6 +16,7 @@ from app.integrations.config_keys import (
     HIFLEET_TIMEOUT_SECONDS,
 )
 from app.integrations.hifleet.client import HifleetRouteClient
+from app.integrations.hifleet.session_manager import HifleetSessionManager
 from app.integrations.http.route_geometry_types import RouteGeometryQuery
 from app.modules.route.service import (
     _line_string_points,
@@ -232,6 +233,12 @@ def test_route_provider_timeout_and_network_errors_use_clear_messages_and_fallba
     assert _safe_error_message(network) == "外部轨迹服务网络连接失败"
     assert _should_use_fallback_track(timeout) is True
     assert _should_use_fallback_track(network) is True
+
+
+def test_hifleet_concurrency_limit_message_is_duplicate_login_error() -> None:
+    manager = HifleetSessionManager()
+
+    assert manager.is_duplicate_login_error({"flag": "0", "msg": "帐号同时使用人数已达到上限"})
 
 
 def test_route_track_status_from_selected_segment_counts() -> None:

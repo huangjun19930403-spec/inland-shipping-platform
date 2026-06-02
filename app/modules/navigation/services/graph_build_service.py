@@ -17,6 +17,7 @@ from pyproj import Geod
 from shapely.geometry import LineString, MultiLineString, Point, mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import substring
+from shapely.strtree import STRtree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -158,6 +159,10 @@ def _line_length_km(line: LineString) -> float:
     return abs(float(GEOD.line_length(lons, lats))) / 1000.0
 
 
+def _round_float(value: float | None, digits: int) -> float | None:
+    return None if value is None else round(float(value), digits)
+
+
 def _nearest_point_on_line(line: LineString, point: Point) -> Point:
     return line.interpolate(line.project(point))
 
@@ -279,6 +284,39 @@ def _bbox_with_margin(bbox: dict[str, float], margin_degree: float) -> dict[str,
     }
 
 
+def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
+    return not (left[2] < right[0] or right[2] < left[0] or left[3] < right[1] or right[3] < left[1])
+
+
+def _append_cross_channel_crossing_issues(centerlines: list[CenterlineAsset], issues: list[GraphBuildIssue]) -> None:
+    if len(centerlines) <= 1:
+        return
+    geometries = [asset.geometry for asset in centerlines]
+    tree = STRtree(geometries)
+    for left_index, left in enumerate(centerlines):
+        for right_index_raw in tree.query(left.geometry):
+            right_index = int(right_index_raw)
+            if right_index <= left_index:
+                continue
+            right = centerlines[right_index]
+            if left.row.channel_id == right.row.channel_id:
+                continue
+            if not _bounds_intersect(left.geometry.bounds, right.geometry.bounds):
+                continue
+            intersection = left.geometry.intersection(right.geometry)
+            if intersection.is_empty:
+                continue
+            issues.append(
+                GraphBuildIssue(
+                    "CROSSING_NOT_NAVIGABLE",
+                    "WARNING",
+                    "Centerlines intersect across different channels and were not connected",
+                    centerline_id=left.row.id,
+                    channel_id=left.row.channel_id,
+                )
+            )
+
+
 async def _load_centerline_assets(
     session: AsyncSession,
     *,
@@ -357,7 +395,7 @@ def _segment_allows_boundary_passthrough(row: NavigationCenterlineSegment) -> bo
     trace = row.source_trace_json if isinstance(row.source_trace_json, dict) else {}
     return (
         row.source_type_code == "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"
-        and trace.get("boundary_clip_mode") == "GUIDE_PASSTHROUGH_BBOX_READY"
+        and trace.get("boundary_clip_mode") in {"GUIDE_PASSTHROUGH_BBOX_READY", "SEED_BOUNDARY_GUIDE_PASSTHROUGH"}
         and float(trace.get("bbox_coverage_ratio") or 0) >= 0.9
     )
 
@@ -613,29 +651,27 @@ async def build_graph_from_centerlines(
         split_points[asset.asset_id].append(SplitPointSpec(point=Point(coords[0]), is_endpoint=True))
         split_points[asset.asset_id].append(SplitPointSpec(point=Point(coords[-1]), is_endpoint=True))
 
-    for index, left in enumerate(centerlines):
-        for right in centerlines[index + 1 :]:
-            intersection = left.geometry.intersection(right.geometry)
-            if intersection.is_empty:
-                continue
-            if left.row.channel_id != right.row.channel_id:
-                issues.append(
-                    GraphBuildIssue(
-                        "CROSSING_NOT_NAVIGABLE",
-                        "WARNING",
-                        "Centerlines intersect across different channels and were not connected",
-                        centerline_id=left.row.id,
-                        channel_id=left.row.channel_id,
+    _append_cross_channel_crossing_issues(centerlines, issues)
+
+    centerlines_by_channel: dict[int, list[CenterlineAsset]] = defaultdict(list)
+    for asset in centerlines:
+        centerlines_by_channel[int(asset.row.channel_id)].append(asset)
+
+    for channel_assets in centerlines_by_channel.values():
+        for index, left in enumerate(channel_assets):
+            for right in channel_assets[index + 1 :]:
+                if not _bounds_intersect(left.geometry.bounds, right.geometry.bounds):
+                    continue
+                intersection = left.geometry.intersection(right.geometry)
+                if intersection.is_empty:
+                    continue
+                for point in _intersection_points(intersection):
+                    split_points[left.asset_id].append(
+                        SplitPointSpec(point=point, node_type_code="CHANNEL_JUNCTION", source_type_code="CENTERLINE_INTERSECTION")
                     )
-                )
-                continue
-            for point in _intersection_points(intersection):
-                split_points[left.asset_id].append(
-                    SplitPointSpec(point=point, node_type_code="CHANNEL_JUNCTION", source_type_code="CENTERLINE_INTERSECTION")
-                )
-                split_points[right.asset_id].append(
-                    SplitPointSpec(point=point, node_type_code="CHANNEL_JUNCTION", source_type_code="CENTERLINE_INTERSECTION")
-                )
+                    split_points[right.asset_id].append(
+                        SplitPointSpec(point=point, node_type_code="CHANNEL_JUNCTION", source_type_code="CENTERLINE_INTERSECTION")
+                    )
 
     node_sequence = 0
     edge_sequence = 0
@@ -681,7 +717,7 @@ async def build_graph_from_centerlines(
             is_enabled=True,
             quality_code="READY",
             source_type_code=source_type_code,
-            snap_distance_m=snap_distance_m,
+            snap_distance_m=_round_float(snap_distance_m, 3),
             snap_confidence=snap_confidence,
         )
         session.add(node)
@@ -817,6 +853,7 @@ async def build_graph_from_centerlines(
         nonlocal edge_sequence
         edge_sequence += 1
         edge_code = f"{clean_version_code[:72]}-E-{edge_sequence:05d}"
+        length_km = _round_float(_line_length_km(geometry), 4) or 0.0
         edge = NavigationGraphEdge(
             graph_version_id=graph_version.id,
             edge_code=edge_code,
@@ -825,12 +862,12 @@ async def build_graph_from_centerlines(
             channel_id=channel_id,
             centerline_id=centerline_id,
             geometry_json=mapping(geometry),
-            length_km=_line_length_km(geometry),
+            length_km=length_km,
             direction_code=direction_code,
             technical_grade_code=technical_grade_code,
             lock_required=lock_required,
             bridge_count=bridge_count,
-            base_cost=_line_length_km(geometry),
+            base_cost=length_km,
             routing_enabled=routing_enabled,
             quality_code=quality_code,
             source_type_code=source_type_code,

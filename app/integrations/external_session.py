@@ -98,7 +98,11 @@ class ExternalCookieSessionManager:
         logout_on_shutdown: bool = True,
     ) -> None:
         self.provider = provider
-        self.redis_url = (redis_url or settings.EXTERNAL_SESSION_REDIS_URL or settings.CELERY_BROKER_URL or "").strip()
+        self.redis_url = (
+            (settings.EXTERNAL_SESSION_REDIS_URL or settings.CELERY_BROKER_URL or "")
+            if redis_url is None
+            else redis_url
+        ).strip()
         self._redis_client = redis_client
         self._redis_created = False
         self.process_id = process_id or _PROCESS_ID

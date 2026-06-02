@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 from shapely.geometry import LineString, Point
 
 from app.core.exceptions import NotFoundError
@@ -43,7 +44,7 @@ class NavigationCenterlineSegmentService(
         include_geometry: bool = True,
     ) -> NavigationCenterlineSegmentListResponse:
         await self._ensure_channel(channel_id)
-        all_rows = await self._active_segments(channel_id, limit=10000)
+        all_rows = await self._active_segments(channel_id, limit=10000, include_geometry=include_geometry)
         rows = list(all_rows)
         if status_code:
             status = status_code.upper()
@@ -67,9 +68,7 @@ class NavigationCenterlineSegmentService(
         start = (page - 1) * page_size
         page_rows = rows[start : start + page_size]
         confirmed_count = self._operator_confirmed_count(all_rows)
-        items = [self._response(item) for item in page_rows]
-        if not include_geometry:
-            items = [item.model_copy(update={"geometry_json": None}) for item in items]
+        items = [self._response(item, include_geometry=include_geometry) for item in page_rows]
         return NavigationCenterlineSegmentListResponse(
             channel_id=channel_id,
             total_count=len(rows),
@@ -81,6 +80,10 @@ class NavigationCenterlineSegmentService(
             issue_stats=self._issue_stats(all_rows),
             items=items,
         )
+
+    async def get_segment(self, segment_id: int) -> NavigationCenterlineSegmentResponse:
+        row = await self._segment(segment_id)
+        return self._response(row)
 
     async def update_segment(
         self,
@@ -274,18 +277,50 @@ class NavigationCenterlineSegmentService(
             )
         ).scalar_one_or_none()
 
-    async def _active_segments(self, channel_id: int, *, limit: int = 1000) -> list[NavigationCenterlineSegment]:
+    async def _active_segments(self, channel_id: int, *, limit: int = 1000, include_geometry: bool = True) -> list[NavigationCenterlineSegment]:
+        stmt = (
+            select(NavigationCenterlineSegment)
+            .where(
+                NavigationCenterlineSegment.channel_id == channel_id,
+                NavigationCenterlineSegment.segment_status_code.in_(ACTIVE_SEGMENT_STATUSES),
+            )
+            .order_by(NavigationCenterlineSegment.segment_no, NavigationCenterlineSegment.id)
+            .limit(self._limit(limit, 1000, 10000))
+        )
+        if not include_geometry:
+            stmt = stmt.options(
+                load_only(
+                    NavigationCenterlineSegment.id,
+                    NavigationCenterlineSegment.channel_id,
+                    NavigationCenterlineSegment.centerline_id,
+                    NavigationCenterlineSegment.segment_no,
+                    NavigationCenterlineSegment.segment_name,
+                    NavigationCenterlineSegment.segment_status_code,
+                    NavigationCenterlineSegment.source_type_code,
+                    NavigationCenterlineSegment.quality_code,
+                    NavigationCenterlineSegment.length_m,
+                    NavigationCenterlineSegment.start_lng,
+                    NavigationCenterlineSegment.start_lat,
+                    NavigationCenterlineSegment.end_lng,
+                    NavigationCenterlineSegment.end_lat,
+                    NavigationCenterlineSegment.bbox_min_lng,
+                    NavigationCenterlineSegment.bbox_min_lat,
+                    NavigationCenterlineSegment.bbox_max_lng,
+                    NavigationCenterlineSegment.bbox_max_lat,
+                    NavigationCenterlineSegment.previous_segment_id,
+                    NavigationCenterlineSegment.next_segment_id,
+                    NavigationCenterlineSegment.start_connected_flag,
+                    NavigationCenterlineSegment.end_connected_flag,
+                    NavigationCenterlineSegment.issue_summary_json,
+                    NavigationCenterlineSegment.validation_summary_json,
+                    NavigationCenterlineSegment.source_trace_json,
+                    NavigationCenterlineSegment.created_at,
+                    NavigationCenterlineSegment.updated_at,
+                )
+            )
         return list(
             (
-                await self.session.execute(
-                    select(NavigationCenterlineSegment)
-                    .where(
-                        NavigationCenterlineSegment.channel_id == channel_id,
-                        NavigationCenterlineSegment.segment_status_code.in_(ACTIVE_SEGMENT_STATUSES),
-                    )
-                    .order_by(NavigationCenterlineSegment.segment_no, NavigationCenterlineSegment.id)
-                    .limit(self._limit(limit, 1000, 10000))
-                )
+                await self.session.execute(stmt)
             ).scalars()
         )
 

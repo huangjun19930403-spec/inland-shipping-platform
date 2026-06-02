@@ -1,0 +1,254 @@
+{
+  "round_no": 3,
+  "input_feature_count": 92480,
+  "cleaned_water_area_count": 92414,
+  "water_body_count": null,
+  "channel_match_count": null,
+  "boundary_count": 1,
+  "centerline_count": 14,
+  "centerline_segment_count": 14,
+  "graph_node_count": 41,
+  "graph_edge_count": 79,
+  "disabled_edge_count": 0,
+  "connected_component_count": 2,
+  "largest_component_node_count": 26,
+  "largest_component_edge_count": null,
+  "transport_node_count": 1181,
+  "snapped_transport_node_count": 9,
+  "unsnapped_transport_node_count": 1172,
+  "route_validation_total": 0,
+  "route_validation_success": 0,
+  "route_validation_failed": 0,
+  "es_validation_status": "SKIPPED",
+  "qwen_review_status": "SKIPPED",
+  "repaired_issue_count": 798,
+  "remaining_issue_count": 3,
+  "quality_score_before": 80,
+  "quality_score_after": 88,
+  "final_quality_code": "READY_WITH_WARNING",
+  "production_seed_allowed": true,
+  "blocking_issues": [],
+  "warning_issues": [
+    "BOUNDARY_DERIVED_CENTERLINE_REQUIRES_OPERATOR_REVIEW"
+  ],
+  "manual_review_tasks": 3,
+  "source_layers": [
+    {
+      "layer_name": "rx",
+      "source_file_name": "rx.shp",
+      "feature_count": 48192,
+      "valid_count": 47733,
+      "repaired_count": 426,
+      "invalid_count": 33,
+      "low_value_count": 54,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiLineString": 33,
+        "MultiPolygon": 246,
+        "Polygon": 47913
+      },
+      "bbox": {
+        "min_lng": 73.67559984006061,
+        "min_lat": 16.05359997036237,
+        "max_lng": 135.1059998404204,
+        "max_lat": 53.55919998009506
+      }
+    },
+    {
+      "layer_name": "rx8",
+      "source_file_name": "rx8.shp",
+      "feature_count": 4857,
+      "valid_count": 4791,
+      "repaired_count": 65,
+      "invalid_count": 1,
+      "low_value_count": 0,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiLineString": 1,
+        "MultiPolygon": 27,
+        "Polygon": 4829
+      },
+      "bbox": {
+        "min_lng": 73.90159991990043,
+        "min_lat": 18.234199979645382,
+        "max_lng": 134.99520011958987,
+        "max_lat": 49.17560004010983
+      }
+    },
+    {
+      "layer_name": "一级水系",
+      "source_file_name": "一级水系.shp",
+      "feature_count": 234,
+      "valid_count": 200,
+      "repaired_count": 34,
+      "invalid_count": 0,
+      "low_value_count": 0,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiPolygon": 13,
+        "Polygon": 221
+      },
+      "bbox": {
+        "min_lng": 75.94620012003958,
+        "min_lat": 21.563600040109804,
+        "max_lng": 135.06519995991027,
+        "max_lat": 53.55919998009506
+      }
+    },
+    {
+      "layer_name": "二级水系",
+      "source_file_name": "二级水系.shp",
+      "feature_count": 285,
+      "valid_count": 257,
+      "repaired_count": 28,
+      "invalid_count": 0,
+      "low_value_count": 0,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiPolygon": 18,
+        "Polygon": 267
+      },
+      "bbox": {
+        "min_lng": 75.0434000403796,
+        "min_lat": 22.53780000036977,
+        "max_lng": 135.1059998404204,
+        "max_lat": 50.72239998027493
+      }
+    },
+    {
+      "layer_name": "三级水系",
+      "source_file_name": "三级水系.shp",
+      "feature_count": 608,
+      "valid_count": 566,
+      "repaired_count": 42,
+      "invalid_count": 0,
+      "low_value_count": 0,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiPolygon": 19,
+        "Polygon": 589
+      },
+      "bbox": {
+        "min_lng": 75.50020007966998,
+        "min_lat": 22.214199960359906,
+        "max_lng": 134.15780016004942,
+        "max_lat": 53.45859995982033
+      }
+    },
+    {
+      "layer_name": "四级水系",
+      "source_file_name": "四级水系.shp",
+      "feature_count": 1407,
+      "valid_count": 1357,
+      "repaired_count": 50,
+      "invalid_count": 0,
+      "low_value_count": 0,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiPolygon": 20,
+        "Polygon": 1387
+      },
+      "bbox": {
+        "min_lng": 74.40419987962082,
+        "min_lat": 18.750799979735348,
+        "max_lng": 134.71740000001,
+        "max_lat": 49.40399996982279
+      }
+    },
+    {
+      "layer_name": "五级水系",
+      "source_file_name": "五级水系.shp",
+      "feature_count": 4541,
+      "valid_count": 4473,
+      "repaired_count": 66,
+      "invalid_count": 2,
+      "low_value_count": 1,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiLineString": 2,
+        "MultiPolygon": 24,
+        "Polygon": 4515
+      },
+      "bbox": {
+        "min_lng": 74.96120015995945,
+        "min_lat": 18.22779999027739,
+        "max_lng": 134.75279987971078,
+        "max_lat": 49.942999980364846
+      }
+    },
+    {
+      "layer_name": "六级水系",
+      "source_file_name": "六级水系.shp",
+      "feature_count": 5175,
+      "valid_count": 5151,
+      "repaired_count": 19,
+      "invalid_count": 5,
+      "low_value_count": 0,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiLineString": 5,
+        "MultiPolygon": 25,
+        "Polygon": 5145
+      },
+      "bbox": {
+        "min_lng": 73.67559984006061,
+        "min_lat": 18.388199969553,
+        "max_lng": 133.42820004019973,
+        "max_lat": 50.30839998027494
+      }
+    },
+    {
+      "layer_name": "七级水系",
+      "source_file_name": "七级水系.shp",
+      "feature_count": 27181,
+      "valid_count": 27088,
+      "repaired_count": 68,
+      "invalid_count": 25,
+      "low_value_count": 3,
+      "crs_code": "EPSG:4326",
+      "crs_missing": false,
+      "geometry_type_counts": {
+        "MultiLineString": 25,
+        "MultiPolygon": 43,
+        "Polygon": 27113
+      },
+      "bbox": {
+        "min_lng": 74.40419987962082,
+        "min_lat": 18.340599959820338,
+        "max_lng": 134.81880012012948,
+        "max_lat": 53.49539996973289
+      }
+    }
+  ],
+  "es_report": {
+    "status": "SKIPPED"
+  },
+  "qwen_report": {
+    "status": "SKIPPED"
+  },
+  "self_feedback": {
+    "enabled": true,
+    "max_feedback_rounds": 3,
+    "executed_rounds": 2,
+    "rounds": [
+      {
+        "round_no": 1,
+        "action": "generate_detect_validate",
+        "quality_score": 80
+      },
+      {
+        "round_no": 2,
+        "action": "repair_connectors_and_disable_bad_edges",
+        "quality_score": 88
+      }
+    ]
+  }
+}

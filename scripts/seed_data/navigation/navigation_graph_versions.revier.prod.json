@@ -1,0 +1,52 @@
+[
+  {
+    "version_code": "NAV_GRAPH_REVIER_PROD_V1",
+    "version_name": "revier 生产预制航道图 V1",
+    "scope_code": "REVIER_PRODUCTION",
+    "source_summary_json": {
+      "source": "revier.zip",
+      "centerline_count": 21,
+      "centerline_segment_count": 21,
+      "transport_connector_policy": "transport nodes within 5000m"
+    },
+    "node_count": 112,
+    "edge_count": 238,
+    "channel_count": 1,
+    "quality_score": 88,
+    "status_code": "READY",
+    "is_active": true,
+    "built_at": "2026-06-02T04:24:54+00:00",
+    "build_scope_bbox_json": {
+      "min_lng": 118.2250605,
+      "min_lat": 32.269101,
+      "max_lng": 119.50421,
+      "max_lat": 34.0089434
+    },
+    "build_config_json": {
+      "source": "navigation_revier_production_pipeline",
+      "max_transport_snap_m": 5000.0,
+      "graph_version_code": "NAV_GRAPH_REVIER_PROD_V1"
+    },
+    "validation_report_json": {
+      "status_code": "READY",
+      "quality_code": "READY_WITH_WARNING",
+      "build_report": {
+        "transport_node_count": 1181,
+        "snapped_transport_node_count": 39,
+        "unsnapped_transport_node_count": 1142,
+        "graph_node_count": 112,
+        "graph_edge_count": 238,
+        "disabled_edge_count": 0,
+        "component_connector_edge_count": 147,
+        "build_scope_bbox": {
+          "min_lng": 118.2250605,
+          "min_lat": 32.269101,
+          "max_lng": 119.50421,
+          "max_lat": 34.0089434
+        },
+        "connected_component_count": 1,
+        "largest_component_node_count": 112
+      }
+    }
+  }
+]

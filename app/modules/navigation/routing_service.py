@@ -12,6 +12,7 @@ from shapely.geometry import shape
 from app.core.exceptions import ValidationError
 from app.models import (
     NavigationChannelWaterBodyMatch,
+    NavigationGraphEdge,
     NavigationRouteQualityIssue,
     NavigationRouteRequest,
     NavigationRouteResult,
@@ -220,7 +221,7 @@ class NavigationRoutingEngineService:
             validation_issues = [
                 *self.validator.validate_geometry(assembled.geometry_json),
                 *self.post_processor.validate(assembled.geometry_json, origin_snap=origin_snap, destination_snap=destination_snap),
-                *(await self._validate_spatial_context(assembled.geometry_json, assembled.channel_ids)),
+                *(await self._validate_spatial_context(assembled.geometry_json, assembled.channel_ids, assembled.edge_ids)),
             ]
             quality = self.scorer.score(
                 origin_snap=origin_snap,
@@ -228,10 +229,11 @@ class NavigationRoutingEngineService:
                 search_result=search_result,
                 validation_issues=validation_issues,
             )
+            result_issues = [*quality.issues, *search_result.issues]
             duration_detail = self._duration_detail(assembled.distance_km, assembled.passed_lock_count)
             explain = self.explainer.explain_success(
                 search_result=search_result,
-                issues=quality.issues,
+                issues=result_issues,
                 alternative_rank=index,
                 alternative_count=len(search_results),
             )
@@ -254,7 +256,7 @@ class NavigationRoutingEngineService:
                     "engine": "NAVIGATION_ROUTING_ENGINE",
                     "origin_snap": origin_snap.as_dict(),
                     "destination_snap": destination_snap.as_dict(),
-                    "issue_count": len(quality.issues),
+                    "issue_count": len(result_issues),
                     "search_cost": search_result.total_cost,
                     "graph_load_bbox": loaded_graph.load_bbox,
                     "graph_load_margin_degree": loaded_graph.load_margin_degree,
@@ -281,8 +283,8 @@ class NavigationRoutingEngineService:
                 main_result_row = result_row
             elif main_result_row is not None:
                 result_row.reference_result_id = main_result_row.id
-            await self._insert_issues(result_row.id, quality.issues)
-            persisted.append((result_row, quality.issues, explain))
+            await self._insert_issues(result_row.id, result_issues)
+            persisted.append((result_row, result_issues, explain))
 
         if main_result_row is None:
             raise RoutingEngineError("NO_PATH_FOUND", "Path search did not return a primary result")
@@ -581,7 +583,7 @@ class NavigationRoutingEngineService:
         timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         return f"NRR-{timestamp}-{uuid.uuid4().hex[:8].upper()}"
 
-    async def _validate_spatial_context(self, geometry_json: dict, channel_ids: list[int]) -> list[RouteIssue]:
+    async def _validate_spatial_context(self, geometry_json: dict, channel_ids: list[int], edge_ids: list[int]) -> list[RouteIssue]:
         if not channel_ids:
             return self.validator.validate_spatial_context(
                 geometry_json,
@@ -631,8 +633,60 @@ class NavigationRoutingEngineService:
         )
         water_geometries = [shape(row.geometry_wgs84_json) for row in water_rows if row.geometry_wgs84_json]
         boundary_geometries = [shape(row.geometry_json) for row in boundary_rows if row.geometry_json]
-        return self.validator.validate_spatial_context(
+        water_geometries.extend(
+            shape(row.geometry_json)
+            for row in boundary_rows
+            if row.geometry_json and str(row.coverage_policy_code or "").startswith("REVIER_WATER_BODY_UNION")
+        )
+        issues = self.validator.validate_spatial_context(
             geometry_json,
             water_geometries=water_geometries,
             boundary_geometries=boundary_geometries,
         )
+        if await self._route_allows_boundary_review(edge_ids):
+            issues = [
+                RouteIssue(
+                    "PATH_CHANNEL_BOUNDARY_WARNING",
+                    "WARNING",
+                    issue.message.replace(
+                        "Route channel-boundary coverage is too low",
+                        "Route channel-boundary coverage requires seed boundary review",
+                    ),
+                    suggestion="Seed-derived guide is outside the published boundary in places; review boundary and centerline alignment before safety use.",
+                )
+                if issue.issue_type_code == "PATH_OUT_OF_CHANNEL_BOUNDARY"
+                else issue
+                for issue in issues
+            ]
+        return issues
+
+    async def _route_allows_boundary_review(self, edge_ids: list[int]) -> bool:
+        if not edge_ids:
+            return False
+        rows = list(
+            (
+                await self.session.execute(
+                    select(NavigationGraphEdge.source_type_code, NavigationGraphEdge.validation_summary_json).where(
+                        NavigationGraphEdge.id.in_(edge_ids)
+                    )
+                )
+            ).all()
+        )
+        if not rows:
+            return False
+        review_codes = {
+            "GUIDE_PASSTHROUGH_BOUNDARY_REVIEW",
+            "BOUNDARY_DERIVED_NEEDS_OPERATOR_REVIEW",
+            "REVIER_DERIVED_NEEDS_OPERATOR_REVIEW",
+            "REVIER_BRIDGE_WATER_AREA_NEEDS_REVIEW",
+            "REVIER_COMPONENT_CONNECTOR_NEEDS_REVIEW",
+        }
+        review_edge_seen = False
+        for source_type_code, summary in rows:
+            if source_type_code == "TRANSPORT_NODE_CONNECTOR":
+                continue
+            issue_codes = summary.get("issue_codes") if isinstance(summary, dict) else None
+            if not review_codes.intersection(issue_codes or []):
+                return False
+            review_edge_seen = True
+        return review_edge_seen

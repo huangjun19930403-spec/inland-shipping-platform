@@ -31,10 +31,19 @@ def _quality_code(score: int, issues: list[RouteIssue]) -> str:
         return "READY_WITH_WARNING"
     if score >= 60:
         return "NEED_REVIEW"
-    return "FAILED"
+    return "NEED_REVIEW"
 
 
 class QualityScorer:
+    def _validation_penalty(self, issue: RouteIssue) -> int:
+        if issue.severity_code == "ERROR":
+            return 45
+        if issue.severity_code == "WARNING":
+            if issue.issue_type_code.startswith("UNKNOWN_"):
+                return 3
+            return 5
+        return 0
+
     def score(
         self,
         *,
@@ -44,7 +53,15 @@ class QualityScorer:
         validation_issues: list[RouteIssue],
     ) -> QualityResult:
         score = 100
-        issues: list[RouteIssue] = [*search_result.issues, *validation_issues]
+        issues: list[RouteIssue] = [*validation_issues]
+
+        validation_penalty = 0
+        for issue in validation_issues:
+            if validation_penalty >= 80:
+                break
+            penalty = self._validation_penalty(issue)
+            score -= penalty
+            validation_penalty += penalty
 
         for snap in (origin_snap, destination_snap):
             penalty, issue = _snap_penalty(snap)

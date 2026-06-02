@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
-from decimal import Decimal
+from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ TMS_FREIGHT_FILE = (
     / "freight"
     / "tms_freights.json"
 )
+MONEY_SCALE = Decimal("0.01")
 
 
 def _load_json(path: Path) -> list[dict[str, Any]]:
@@ -34,13 +35,16 @@ def _load_json(path: Path) -> list[dict[str, Any]]:
 def _decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
-    return Decimal(str(value))
+    return Decimal(str(value)).quantize(MONEY_SCALE, rounding=ROUND_HALF_UP)
 
 
 def _datetime(value: Any) -> datetime | None:
     if not value:
         return None
-    return datetime.fromisoformat(str(value))
+    parsed = datetime.fromisoformat(str(value))
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 async def seed_production_freights() -> None:

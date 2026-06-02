@@ -121,6 +121,9 @@ class NavigationMapLayerResponse(BaseModel):
     quality_issues: list[NavigationMapLayerFeatureResponse] = Field(default_factory=list)
     truncated_layers: list[str] = Field(default_factory=list)
     layer_counts: dict[str, int] = Field(default_factory=dict)
+    layer_returned_counts: dict[str, int] = Field(default_factory=dict)
+    layer_total_counts: dict[str, int] = Field(default_factory=dict)
+    layer_truncated: dict[str, bool] = Field(default_factory=dict)
     layer_limits: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
 

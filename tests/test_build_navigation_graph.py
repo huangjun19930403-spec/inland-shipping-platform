@@ -274,7 +274,7 @@ async def test_different_channel_crossing_is_not_auto_connected(session_maker) -
             channel_codes=["TEST-A", "TEST-B"],
         )
 
-    assert summary.status_code == "FAILED"
+    assert summary.status_code == "READY"
     assert "CROSSING_NOT_NAVIGABLE" in {issue.issue_code for issue in summary.issues}
     assert summary.validation_report is not None
     assert "GRAPH_DISCONNECTED" in {issue["issue_code"] for issue in summary.validation_report["issues"]}

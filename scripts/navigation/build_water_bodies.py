@@ -13,6 +13,7 @@ import hashlib
 import json
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -32,6 +33,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = PROJECT_ROOT / "data_audit" / "navigation_water_body_build_report.json"
 REAL_WATER_SOURCE_CODE = "RIVER_SHAPEFILE_2026"
 RX_OVERLAP_DUPLICATE_THRESHOLD = 0.80
+AREA_KM2_SCALE = Decimal("0.0001")
+OVERLAP_RATIO_SCALE = Decimal("0.000001")
 
 
 @dataclass(slots=True)
@@ -104,6 +107,12 @@ def _body_code(*parts: Any) -> str:
     raw = "|".join(str(part or "") for part in parts)
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
     return f"NWB-{digest}"
+
+
+def _scaled_decimal(value: float | int | Decimal | None, scale: Decimal) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value)).quantize(scale, rounding=ROUND_HALF_UP)
 
 
 def _layer_summary(rows: list[NavigationWaterArea]) -> dict[str, Any]:
@@ -195,7 +204,7 @@ def _body_payload(
         "center_lat": center_lat,
         "display_center_lng": display_center_lng,
         "display_center_lat": display_center_lat,
-        "area_km2": area_total or None,
+        "area_km2": _scaled_decimal(area_total, AREA_KM2_SCALE) if area_total else None,
         "feature_count": len(rows),
         "enabled_feature_count": enabled_count,
         "repaired_feature_count": repaired_count,
@@ -238,7 +247,7 @@ async def _create_body(
                 link_role_code=link_role_code,
                 source_layer_name=row.source_layer_name,
                 source_layer_code=row.source_layer_code,
-                overlap_ratio=(overlap_by_area_id or {}).get(int(row.id)),
+                overlap_ratio=_scaled_decimal((overlap_by_area_id or {}).get(int(row.id)), OVERLAP_RATIO_SCALE),
                 is_primary=is_primary,
                 source_trace_json={
                     "source_code": row.source_code,
@@ -264,7 +273,7 @@ async def _link_duplicate(
             link_role_code="RX_DUPLICATE",
             source_layer_name=row.source_layer_name,
             source_layer_code=row.source_layer_code,
-            overlap_ratio=overlap_ratio,
+            overlap_ratio=_scaled_decimal(overlap_ratio, OVERLAP_RATIO_SCALE),
             is_primary=False,
             source_trace_json={
                 "source_code": row.source_code,
@@ -358,12 +367,13 @@ async def build_navigation_water_bodies(
         rows = list(
             (
                 await session.execute(
-                    select(NavigationWaterArea)
-                    .where(NavigationWaterArea.source_code == source_code)
-                    .order_by(NavigationWaterArea.source_layer_order, NavigationWaterArea.id)
+                    select(NavigationWaterArea).where(NavigationWaterArea.source_code == source_code)
                 )
             ).scalars()
         )
+        # MySQL sorts full selected rows for ORDER BY; these rows carry large
+        # geometry JSON payloads, so keep DB work to filtering and sort locally.
+        rows.sort(key=lambda row: (row.source_layer_order or 999, int(row.id or 0)))
         stats = BuildStats(raw_feature_count=len(rows))
 
         hierarchy_groups: dict[tuple[Any, ...], list[NavigationWaterArea]] = defaultdict(list)

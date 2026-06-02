@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from shapely.geometry import LineString, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
+from shapely.validation import make_valid
 
 from app.modules.navigation.engine.types import RouteIssue
 
@@ -111,17 +112,33 @@ class PathValidator:
 
 
 def _safe_union(geometries: Iterable[BaseGeometry]) -> BaseGeometry | None:
-    cleaned = [geometry for geometry in geometries if geometry and not geometry.is_empty]
+    cleaned = [_valid_geometry(geometry) for geometry in geometries if geometry and not geometry.is_empty]
+    cleaned = [geometry for geometry in cleaned if geometry and not geometry.is_empty]
     if not cleaned:
         return None
     if len(cleaned) == 1:
         return cleaned[0]
-    return unary_union(cleaned)
+    try:
+        return unary_union(cleaned)
+    except Exception:  # noqa: BLE001
+        return make_valid(unary_union([_valid_geometry(geometry) for geometry in cleaned]))
 
 
 def _line_coverage_ratio(line: LineString, coverage_geometry: BaseGeometry) -> float:
     try:
         covered = line.intersection(coverage_geometry)
     except Exception:  # noqa: BLE001
-        return 0.0
+        try:
+            covered = line.intersection(_valid_geometry(coverage_geometry))
+        except Exception:  # noqa: BLE001
+            return 0.0
     return max(0.0, min(1.0, covered.length / line.length if line.length else 0.0))
+
+
+def _valid_geometry(geometry: BaseGeometry) -> BaseGeometry:
+    if geometry.is_valid:
+        return geometry
+    try:
+        return make_valid(geometry)
+    except Exception:  # noqa: BLE001
+        return geometry.buffer(0)

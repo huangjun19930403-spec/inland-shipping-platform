@@ -18,7 +18,7 @@ from app.modules.navigation.services.centerline_segments.types import GEOD
 
 
 class NavigationCenterlineSegmentGeometryMixin:
-    def _response(self, row: NavigationCenterlineSegment) -> NavigationCenterlineSegmentResponse:
+    def _response(self, row: NavigationCenterlineSegment, *, include_geometry: bool = True) -> NavigationCenterlineSegmentResponse:
         return NavigationCenterlineSegmentResponse(
             id=int(row.id),
             channel_id=int(row.channel_id),
@@ -41,7 +41,7 @@ class NavigationCenterlineSegmentGeometryMixin:
             next_segment_id=int(row.next_segment_id) if row.next_segment_id is not None else None,
             start_connected_flag=bool(row.start_connected_flag),
             end_connected_flag=bool(row.end_connected_flag),
-            geometry_json=row.geometry_json,
+            geometry_json=row.geometry_json if include_geometry else None,
             issue_summary_json=row.issue_summary_json,
             validation_summary_json=row.validation_summary_json,
             source_trace_json=row.source_trace_json,

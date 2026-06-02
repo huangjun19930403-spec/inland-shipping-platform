@@ -17,6 +17,10 @@ from scripts.seeds.loaders.commodity_standards import seed_commodity_standards
 from scripts.seeds.loaders.commodity_taxonomy import seed_commodity_taxonomy
 from scripts.seeds.loaders.navigation_channels import seed_navigation_channels
 from scripts.seeds.loaders.navigation_constraints import seed_navigation_constraints
+from scripts.seeds.loaders.navigation_revier_production import (
+    delete_existing_revier_graph_payload,
+    seed_navigation_revier_production,
+)
 from scripts.seeds.loaders.navigation_water_areas import seed_navigation_water_areas
 from scripts.seeds.loaders.production_freights import seed_production_freights
 from scripts.seeds.loaders.production_vessels import seed_production_vessels
@@ -37,10 +41,17 @@ async def _seed_analysis_definitions() -> None:
         await session.commit()
 
 
+async def _reset_navigation_revier_production_payload() -> None:
+    async with AsyncSessionLocal() as session:
+        await delete_existing_revier_graph_payload(session)
+        await session.commit()
+
+
 PRODUCTION_SEED_STEPS: tuple[tuple[str, SeedStep], ...] = (
     ("builtin_dicts", seed_builtin_dicts),
     ("code_sequences", seed_code_sequences),
     ("admin_regions", seed_admin_regions),
+    ("navigation_revier_production_reset", _reset_navigation_revier_production_payload),
     ("navigation_channels", seed_navigation_channels),
     ("navigation_water_areas", seed_navigation_water_areas),
     ("navigation_water_bodies", build_navigation_water_bodies),
@@ -50,6 +61,7 @@ PRODUCTION_SEED_STEPS: tuple[tuple[str, SeedStep], ...] = (
     ("commodity_standards", seed_commodity_standards),
     ("business_regions", seed_business_regions),
     ("transport_nodes", seed_transport_nodes),
+    ("navigation_revier_production", seed_navigation_revier_production),
     ("production_vessels", seed_production_vessels),
     ("production_freights", seed_production_freights),
     ("analysis_definitions", _seed_analysis_definitions),

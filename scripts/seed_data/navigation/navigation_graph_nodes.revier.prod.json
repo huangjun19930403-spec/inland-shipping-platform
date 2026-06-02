@@ -1,0 +1,2354 @@
+[
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-002-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.8816635,
+    "latitude": 33.3400611,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.8816635,
+        33.3400611
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-002-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.89719022227406,
+    "latitude": 33.37531565943543,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.89719022227406,
+        33.37531565943543
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-002-0003",
+    "node_name": "京杭运河 3",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.91326739014991,
+    "latitude": 33.41607414378967,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.91326739014991,
+        33.41607414378967
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-002-0004",
+    "node_name": "京杭运河 4",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.97031366550583,
+    "latitude": 33.518480908901445,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.97031366550583,
+        33.518480908901445
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-002-0005",
+    "node_name": "京杭运河 5",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.926,
+    "latitude": 33.5926,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.926,
+        33.5926
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010487",
+    "node_name": "江苏天海建材（淮安）有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.89188,
+    "latitude": 33.43002,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.89188,
+        33.43002
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010487",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 2519.743,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202509050010550",
+    "node_name": "淮安码头镇",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.96277,
+    "latitude": 33.51459,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.96277,
+        33.51459
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202509050010550",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 823.056,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202511070010660",
+    "node_name": "江苏谷得化肥有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.86517,
+    "latitude": 33.31249,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.86517,
+        33.31249
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202511070010660",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 3421.864,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202512200010856",
+    "node_name": "江苏九牛水泥有限责任公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.85705,
+    "latitude": 33.31647,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.85705,
+        33.31647
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202512200010856",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 3478.18,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202512230010871",
+    "node_name": "江苏瑞洪盐业有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.88117,
+    "latitude": 33.37476,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.88117,
+        33.37476
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202512230010871",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 1492.049,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508250010070",
+    "node_name": "高良润船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.84757,
+    "latitude": 33.31543,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.84757,
+        33.31543
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508250010070",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 4187.988,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 119.4654986,
+    "latitude": 32.278631,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.4654986,
+        32.278631
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.46509444318792,
+    "latitude": 32.27976480126039,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.46509444318792,
+        32.27976480126039
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0003",
+    "node_name": "京杭运河 3",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.46475465340903,
+    "latitude": 32.28071803047258,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.46475465340903,
+        32.28071803047258
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0004",
+    "node_name": "京杭运河 4",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.46441819920233,
+    "latitude": 32.28166191441709,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.46441819920233,
+        32.28166191441709
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0005",
+    "node_name": "京杭运河 5",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.46453922908478,
+    "latitude": 32.32436896440803,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.46453922908478,
+        32.32436896440803
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0006",
+    "node_name": "京杭运河 6",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.46824911278829,
+    "latitude": 32.347593884260064,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.46824911278829,
+        32.347593884260064
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0007",
+    "node_name": "京杭运河 7",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.49690020993586,
+    "latitude": 32.5281879461051,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.49690020993586,
+        32.5281879461051
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0008",
+    "node_name": "京杭运河 8",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.49981469065037,
+    "latitude": 32.539293688177814,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.49981469065037,
+        32.539293688177814
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0009",
+    "node_name": "京杭运河 9",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.43421450923357,
+    "latitude": 32.755472020862165,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.43421450923357,
+        32.755472020862165
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0010",
+    "node_name": "京杭运河 10",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.42052925318299,
+    "latitude": 32.83744200025723,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.42052925318299,
+        32.83744200025723
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-003-0011",
+    "node_name": "京杭运河 11",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 119.4108001,
+    "latitude": 33.0,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.4108001,
+        33.0
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010275",
+    "node_name": "江苏省扬州港务集团有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.442842,
+    "latitude": 32.272907,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.442842,
+        32.272907
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010275",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 2238.707,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010276",
+    "node_name": "江苏国信扬州发电有限责任公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.424215,
+    "latitude": 32.271986,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.424215,
+        32.271986
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010276",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 3936.521,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-JYZ202509260010007",
+    "node_name": "扬州加油站",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.4478,
+    "latitude": 32.2736,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.4478,
+        32.2736
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "JYZ202509260010007",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 1766.889,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MD202601070010005",
+    "node_name": "施桥镇锚地",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.46795,
+    "latitude": 32.34764,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.46795,
+        32.34764
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MD202601070010005",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 28.618,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010280",
+    "node_name": "扬州亚东水泥有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.415914,
+    "latitude": 32.269101,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.415914,
+        32.269101
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010280",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 4777.14,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010437",
+    "node_name": "扬州第二发电有限责任公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.41721,
+    "latitude": 32.27213,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.41721,
+        32.27213
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010437",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 4571.277,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202512230010877",
+    "node_name": "高邮市扬州秦邮特材有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.42774,
+    "latitude": 32.83964,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.42774,
+        32.83964
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202512230010877",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 717.753,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508090010044",
+    "node_name": "盐邵船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.50421,
+    "latitude": 32.54013,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.50421,
+        32.54013
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508090010044",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 423.162,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508090010045",
+    "node_name": "邵伯船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.4966,
+    "latitude": 32.5282,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.4966,
+        32.5282
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508090010045",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 28.236,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508090010049",
+    "node_name": "施桥船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.46525,
+    "latitude": 32.3242,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.46525,
+        32.3242
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508090010049",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 69.499,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508250010074",
+    "node_name": "远东船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.44191,
+    "latitude": 32.75718,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.44191,
+        32.75718
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508250010074",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 745.6,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-004-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 119.4106,
+    "latitude": 33.0,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.4106,
+        33.0
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-004-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.40320540516852,
+    "latitude": 33.0499372775465,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.40320540516852,
+        33.0499372775465
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-004-0003",
+    "node_name": "京杭运河 3",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.31102767172955,
+    "latitude": 33.22010839229285,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.31102767172955,
+        33.22010839229285
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-004-0004",
+    "node_name": "京杭运河 4",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.17756693445213,
+    "latitude": 33.42525162170373,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.17756693445213,
+        33.42525162170373
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-004-0005",
+    "node_name": "京杭运河 5",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.14864834552888,
+    "latitude": 33.463832125394106,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.14864834552888,
+        33.463832125394106
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-004-0006",
+    "node_name": "京杭运河 6",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.14277485759611,
+    "latitude": 33.475179264461744,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.14277485759611,
+        33.475179264461744
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-004-0007",
+    "node_name": "京杭运河 7",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 119.1432644,
+    "latitude": 33.4754025,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.1432644,
+        33.4754025
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202509160010563",
+    "node_name": "淮安市苏港国际港务有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.17944,
+    "latitude": 33.42648,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.17944,
+        33.42648
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202509160010563",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 221.149,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508250010068",
+    "node_name": "淮安东船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.14334,
+    "latitude": 33.47394,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.14334,
+        33.47394
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508250010068",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 147.147,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508250010069",
+    "node_name": "淮安船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.1493,
+    "latitude": 33.4644,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.1493,
+        33.4644
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508250010069",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 87.389,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508090010042",
+    "node_name": "宝应船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.31571,
+    "latitude": 33.22214,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.31571,
+        33.22214
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508090010042",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 491.211,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508250010072",
+    "node_name": "南运西船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.39643,
+    "latitude": 33.04854,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.39643,
+        33.04854
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508250010072",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 651.529,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-006-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.5000001,
+    "latitude": 33.8106,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.5000001,
+        33.8106
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-006-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.5881582029438,
+    "latitude": 33.747209652705365,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.5881582029438,
+        33.747209652705365
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-006-0003",
+    "node_name": "京杭运河 3",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.70025520037493,
+    "latitude": 33.695949798450734,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.70025520037493,
+        33.695949798450734
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-006-0004",
+    "node_name": "京杭运河 4",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.7081254,
+    "latitude": 33.6917,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.7081254,
+        33.6917
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010380",
+    "node_name": "泗阳港城西作业区",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.5907,
+    "latitude": 33.74787,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.5907,
+        33.74787
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010380",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 246.642,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508090010050",
+    "node_name": "泗阳船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.704328,
+    "latitude": 33.697907,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.704328,
+        33.697907
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508090010050",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 435.552,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.9324596,
+    "latitude": 33.577824,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.9324596,
+        33.577824
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.94314541897276,
+    "latitude": 33.57626821465468,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.94314541897276,
+        33.57626821465468
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0003",
+    "node_name": "京杭运河 3",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.95386425509952,
+    "latitude": 33.5740706558359,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.95386425509952,
+        33.5740706558359
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0004",
+    "node_name": "京杭运河 4",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.9706616802004,
+    "latitude": 33.57000852614927,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.9706616802004,
+        33.57000852614927
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0005",
+    "node_name": "京杭运河 5",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.98912097695661,
+    "latitude": 33.569331082399266,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.98912097695661,
+        33.569331082399266
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0006",
+    "node_name": "京杭运河 6",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.98940282073872,
+    "latitude": 33.56932222785671,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.98940282073872,
+        33.56932222785671
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0007",
+    "node_name": "京杭运河 7",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.10522367004435,
+    "latitude": 33.52537940751592,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.10522367004435,
+        33.52537940751592
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0008",
+    "node_name": "京杭运河 8",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.11441422207618,
+    "latitude": 33.5110268866348,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.11441422207618,
+        33.5110268866348
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0009",
+    "node_name": "京杭运河 9",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 119.12868684756262,
+    "latitude": 33.480145130326825,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.12868684756262,
+        33.480145130326825
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-007-0010",
+    "node_name": "京杭运河 10",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 119.1361405,
+    "latitude": 33.4748519,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.1361405,
+        33.4748519
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-FWQ202509110010002",
+    "node_name": "肖庄服务区",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.1161,
+    "latitude": 33.51194,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.1161,
+        33.51194
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "FWQ202509110010002",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 186.517,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202509050010548",
+    "node_name": "淮钢集团公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.98959,
+    "latitude": 33.57528,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.98959,
+        33.57528
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202509050010548",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 661.033,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202509050010549",
+    "node_name": "江苏井神盐化股份有限公司（第一分公司）",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.10672,
+    "latitude": 33.52642,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.10672,
+        33.52642
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202509050010549",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 180.671,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202512120010706",
+    "node_name": "淮安枢纽项目部",
+    "node_type_code": "TERMINAL",
+    "longitude": 119.12467,
+    "latitude": 33.4757,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        119.12467,
+        33.4757
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202512120010706",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 618.435,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202603260011007",
+    "node_name": "淮安新港",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.9709,
+    "latitude": 33.57562,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.9709,
+        33.57562
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202603260011007",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 622.788,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202603260011009",
+    "node_name": "淮安淮钢码头",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.9893,
+    "latitude": 33.57503,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.9893,
+        33.57503
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202603260011009",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 632.312,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508090010055",
+    "node_name": "淮阴区杨庄船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.94303,
+    "latitude": 33.58367,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.94303,
+        33.58367
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508090010055",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 821.038,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202511240010089",
+    "node_name": "淮阴船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.95403,
+    "latitude": 33.57448,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.95403,
+        33.57448
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202511240010089",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 47.939,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-008-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.3896,
+    "latitude": 33.7888,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.3896,
+        33.7888
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-008-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.34825652955527,
+    "latitude": 33.81151932209482,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.34825652955527,
+        33.81151932209482
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-008-0003",
+    "node_name": "京杭运河 3",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.3076907264978,
+    "latitude": 33.88222331106217,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.3076907264978,
+        33.88222331106217
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-008-0004",
+    "node_name": "京杭运河 4",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.30292991123882,
+    "latitude": 33.886748395940344,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.30292991123882,
+        33.886748395940344
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-008-0005",
+    "node_name": "京杭运河 5",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2823999,
+    "latitude": 33.9074,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2823999,
+        33.9074
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202509020010546",
+    "node_name": "洋北镇宿迁电厂",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.36852,
+    "latitude": 33.84142,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.36852,
+        33.84142
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202509020010546",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 3810.293,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202511030010646",
+    "node_name": "五得利集团宿迁面粉有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.3134,
+    "latitude": 33.88823,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.3134,
+        33.88823
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202511030010646",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 850.211,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202512200010858",
+    "node_name": "宿迁润发码头",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.31774,
+    "latitude": 33.90233,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.31774,
+        33.90233
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202512200010858",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 2205.392,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-010-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.4238818,
+    "latitude": 33.8327182,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.4238818,
+        33.8327182
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-010-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "SNAP_CONNECTOR",
+    "longitude": 118.4401328303816,
+    "latitude": 33.825418334214575,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.4401328303816,
+        33.825418334214575
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-010-0003",
+    "node_name": "京杭运河 3",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.5000001,
+    "latitude": 33.8106,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.5000001,
+        33.8106
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010008",
+    "node_name": "汤始建华建材(宿迁)有限公司",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.38816,
+    "latitude": 33.83888,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.38816,
+        33.83888
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010008",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 3376.386,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508250010063",
+    "node_name": "刘老涧船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.4388,
+    "latitude": 33.8238,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.4388,
+        33.8238
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508250010063",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 217.821,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-011-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.436,
+    "latitude": 33.7928,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.436,
+        33.7928
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-011-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.4667998,
+    "latitude": 33.7634,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.4667998,
+        33.7634
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-012-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.7622,
+    "latitude": 33.5712,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.7622,
+        33.5712
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-012-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.7521999,
+    "latitude": 33.5904,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.7521999,
+        33.5904
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-013-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.8687803,
+    "latitude": 33.5680365,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.8687803,
+        33.5680365
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-013-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.8612855,
+    "latitude": 33.5737635,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.8612855,
+        33.5737635
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-014-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.6590741,
+    "latitude": 33.7449689,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.6590741,
+        33.7449689
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-014-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.6707257,
+    "latitude": 33.7477158,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.6707257,
+        33.7477158
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-015-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.983273,
+    "latitude": 33.583338,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.983273,
+        33.583338
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-015-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.994727,
+    "latitude": 33.5834567,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.994727,
+        33.5834567
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-MT202508090010446",
+    "node_name": "华能电厂（淮安淮阴）",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.963323,
+    "latitude": 33.59385,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.963323,
+        33.59385
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "MT202508090010446",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 2188.378,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-016-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.3008905,
+    "latitude": 33.9294603,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.3008905,
+        33.9294603
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-016-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.3030088,
+    "latitude": 33.9389396,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.3030088,
+        33.9389396
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-017-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2456,
+    "latitude": 34.0,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2456,
+        34.0
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-017-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2606001,
+    "latitude": 33.9932,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2606001,
+        33.9932
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-TN-ZK202508250010062",
+    "node_name": "宿迁船闸",
+    "node_type_code": "TERMINAL",
+    "longitude": 118.28791,
+    "latitude": 33.98778,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.28791,
+        33.98778
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": "ZK202508250010062",
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "TRANSPORT_NODE",
+    "snap_distance_m": 2593.932,
+    "snap_confidence": 95
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-018-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2852246,
+    "latitude": 33.9552566,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2852246,
+        33.9552566
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-018-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2875753,
+    "latitude": 33.9641434,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2875753,
+        33.9641434
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-019-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2250605,
+    "latitude": 33.9994151,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2250605,
+        33.9994151
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-019-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2345395,
+    "latitude": 33.9983172,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2345395,
+        33.9983172
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-020-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2567001,
+    "latitude": 34.0,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2567001,
+        34.0
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-020-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2519699,
+    "latitude": 34.0089434,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2519699,
+        34.0089434
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-021-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2468001,
+    "latitude": 34.0006,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2468001,
+        34.0006
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-021-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.2467,
+    "latitude": 34.006,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.2467,
+        34.006
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-022-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.4639729,
+    "latitude": 33.804634,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.4639729,
+        33.804634
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-022-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.4628249,
+    "latitude": 33.8099661,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.4628249,
+        33.8099661
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-023-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.7835998,
+    "latitude": 33.5714,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.7835998,
+        33.5714
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-023-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.7892,
+    "latitude": 33.568,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.7892,
+        33.568
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-024-0001",
+    "node_name": "京杭运河 1",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.6730251,
+    "latitude": 33.7508616,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.6730251,
+        33.7508616
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  },
+  {
+    "node_code": "NAV_GRAPH_REVIER_PROD_V1-N-REVCL-NC-GRAND-CANAL-024-0002",
+    "node_name": "京杭运河 2",
+    "node_type_code": "CENTERLINE_VERTEX",
+    "longitude": 118.6769747,
+    "latitude": 33.7504768,
+    "geometry_json": {
+      "type": "Point",
+      "coordinates": [
+        118.6769747,
+        33.7504768
+      ]
+    },
+    "channel_code": "NC-GRAND-CANAL",
+    "related_transport_node_code": null,
+    "is_enabled": true,
+    "quality_code": "READY",
+    "source_type_code": "REVIER_WATER_AREA_CENTERLINE",
+    "snap_distance_m": null,
+    "snap_confidence": null
+  }
+]

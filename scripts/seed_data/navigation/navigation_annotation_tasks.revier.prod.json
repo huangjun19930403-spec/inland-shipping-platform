@@ -1,0 +1,92 @@
+[
+  {
+    "task_no": "REV-CL-INVALID-NC-GRAND-CANAL-001",
+    "task_type_code": "CENTERLINE_REPAIR",
+    "target_type_code": "NAVIGATION_CHANNEL",
+    "target_code": "NC-GRAND-CANAL",
+    "priority_code": "HIGH",
+    "status_code": "OPEN",
+    "issue_summary": "revier 生产 pipeline 生成的组件中心线未通过边界内、点数、折返等质量校验，已拒绝进入路径图。",
+    "suggestion_json": {
+      "issue_code": "CENTERLINE_VALIDATION_FAILED",
+      "validation": {
+        "status_code": "FAILED",
+        "quality_code": "FAILED",
+        "issue_codes": [
+          "CENTERLINE_FOLDBACK_DETECTED"
+        ],
+        "blocking_issue_codes": [
+          "CENTERLINE_FOLDBACK_DETECTED"
+        ],
+        "point_count": 46,
+        "length_m": 35632.37,
+        "endpoint_distance_m": 29106.4,
+        "directness_ratio": 0.816853,
+        "outside_sample_count": 0,
+        "outside_ratio": 0.0,
+        "foldback_count": 1,
+        "benchmark_policy": "no straight-line fallback; line must stay inside curated channel boundary"
+      }
+    }
+  },
+  {
+    "task_no": "REV-CL-INVALID-NC-GRAND-CANAL-005",
+    "task_type_code": "CENTERLINE_REPAIR",
+    "target_type_code": "NAVIGATION_CHANNEL",
+    "target_code": "NC-GRAND-CANAL",
+    "priority_code": "HIGH",
+    "status_code": "OPEN",
+    "issue_summary": "revier 生产 pipeline 生成的组件中心线未通过边界内、点数、折返等质量校验，已拒绝进入路径图。",
+    "suggestion_json": {
+      "issue_code": "CENTERLINE_VALIDATION_FAILED",
+      "validation": {
+        "status_code": "FAILED",
+        "quality_code": "FAILED",
+        "issue_codes": [
+          "CENTERLINE_OUTSIDE_BOUNDARY"
+        ],
+        "blocking_issue_codes": [
+          "CENTERLINE_OUTSIDE_BOUNDARY"
+        ],
+        "point_count": 59,
+        "length_m": 68323.87,
+        "endpoint_distance_m": 53483.48,
+        "directness_ratio": 0.782794,
+        "outside_sample_count": 9,
+        "outside_ratio": 0.076271,
+        "foldback_count": 0,
+        "benchmark_policy": "no straight-line fallback; line must stay inside curated channel boundary"
+      }
+    }
+  },
+  {
+    "task_no": "REV-CL-INVALID-NC-GRAND-CANAL-009",
+    "task_type_code": "CENTERLINE_REPAIR",
+    "target_type_code": "NAVIGATION_CHANNEL",
+    "target_code": "NC-GRAND-CANAL",
+    "priority_code": "HIGH",
+    "status_code": "OPEN",
+    "issue_summary": "revier 生产 pipeline 生成的组件中心线未通过边界内、点数、折返等质量校验，已拒绝进入路径图。",
+    "suggestion_json": {
+      "issue_code": "CENTERLINE_VALIDATION_FAILED",
+      "validation": {
+        "status_code": "FAILED",
+        "quality_code": "FAILED",
+        "issue_codes": [
+          "CENTERLINE_OUTSIDE_BOUNDARY"
+        ],
+        "blocking_issue_codes": [
+          "CENTERLINE_OUTSIDE_BOUNDARY"
+        ],
+        "point_count": 160,
+        "length_m": 6980.7,
+        "endpoint_distance_m": 5452.56,
+        "directness_ratio": 0.781091,
+        "outside_sample_count": 4,
+        "outside_ratio": 0.025,
+        "foldback_count": 0,
+        "benchmark_policy": "no straight-line fallback; line must stay inside curated channel boundary"
+      }
+    }
+  }
+]

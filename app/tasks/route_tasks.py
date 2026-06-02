@@ -66,15 +66,19 @@ async def _generate_route_track_version(
         return result
 
 
-def _run_tracked(celery_task_id: str | None, task_run_id: int | None, coro):
-    run_coro_sync(_track_task_start(task_run_id, celery_task_id))
+async def _run_tracked_async(celery_task_id: str | None, task_run_id: int | None, coro):
+    await _track_task_start(task_run_id, celery_task_id)
     try:
-        result = run_coro_sync(coro)
+        result = await coro
     except BaseException as exc:
-        run_coro_sync(_track_task_failure(task_run_id, exc))
+        await _track_task_failure(task_run_id, exc)
         raise
-    run_coro_sync(_track_task_success(task_run_id, result))
+    await _track_task_success(task_run_id, result)
     return result
+
+
+def _run_tracked(celery_task_id: str | None, task_run_id: int | None, coro):
+    return run_coro_sync(_run_tracked_async(celery_task_id, task_run_id, coro))
 
 
 _ROUTE_TASK_OPTIONS = {

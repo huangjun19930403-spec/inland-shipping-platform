@@ -1,7 +1,9 @@
 {
-  "legacy_match_count": 106,
-  "eligible_pair_count": 59,
+  "legacy_match_count": 0,
+  "eligible_pair_count": 0,
   "existing_match_count": 0,
-  "created_match_count": 59,
+  "created_match_count": 0,
+  "direct_name_candidate_count": 90,
+  "direct_name_created_count": 90,
   "skipped_non_production_body_count": 0
 }

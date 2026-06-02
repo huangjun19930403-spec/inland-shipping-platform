@@ -220,6 +220,21 @@ class NavigationCenterlineSegmentGeneratorMixin:
                     guide_lines.append((row, line))
         if not guide_lines:
             return None, "当前航道缺少生产导向线，不能生成完整长航道中心线。请先重置/补齐航道图生产 seed 导向线。", ["CENTERLINE_GUIDE_MISSING"]
+        if all((row.guide_source_type_code or "").startswith("SEED_BOUNDARY_") for row, _line in guide_lines):
+            expected_length_m = sum(self._length_m(line) for _row, line in guide_lines)
+            return (
+                [line for _row, line in guide_lines],
+                {
+                    "source_guide_segment_ids": [int(row.id) for row, _line in guide_lines],
+                    "source_guide_segment_codes": [row.segment_code for row, _line in guide_lines],
+                    "expected_length_m": round(expected_length_m, 2),
+                    "clipped_length_m": round(expected_length_m, 2),
+                    "coverage_ratio": 1.0,
+                    "bbox_coverage_ratio": 1.0,
+                    "boundary_clip_mode": "SEED_BOUNDARY_GUIDE_PASSTHROUGH",
+                    "boundary_clip_warning": "Guide was derived from the current boundary and is kept contiguous for seed Graph generation.",
+                },
+            ), "", []
 
         boundary_geometry = self._boundary_geometry(boundary.geometry_json)
         if boundary_geometry is None:

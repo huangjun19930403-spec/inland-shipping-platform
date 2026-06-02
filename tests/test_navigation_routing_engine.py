@@ -20,6 +20,8 @@ from app.models import (
 from app.models.base import Base
 from app.modules.navigation.routing_service import NavigationRoutingEngineService
 from app.modules.navigation.engine.path_validator import PathValidator
+from app.modules.navigation.engine.quality_scoring import QualityScorer
+from app.modules.navigation.engine.types import RouteIssue, SearchResult, SnapResult
 from app.modules.navigation.schemas import NavigationEndpointRequest, NavigationRouteGenerateRequest, VesselProfileRequest
 
 
@@ -83,6 +85,8 @@ def _edge(
     bridge_count: int = 0,
     quality_code: str = "READY",
     confidence_score: int = 95,
+    source_type_code: str = "MANUAL",
+    validation_summary_json: dict | None = None,
 ) -> NavigationGraphEdge:
     return NavigationGraphEdge(
         id=id,
@@ -101,9 +105,10 @@ def _edge(
         base_cost=length_km,
         routing_enabled=True,
         quality_code=quality_code,
-        source_type_code="MANUAL",
+        source_type_code=source_type_code,
         confidence_score=confidence_score,
         unknown_constraint_flag=unknown_constraint_flag,
+        validation_summary_json=validation_summary_json or {},
     )
 
 
@@ -391,6 +396,117 @@ def test_path_validator_fails_when_route_leaves_matched_water_body() -> None:
     )
 
     assert "PATH_OUT_OF_WATER" in {issue.issue_type_code for issue in issues}
+
+
+def test_quality_scorer_penalizes_validation_errors() -> None:
+    snap = SnapResult(
+        role="origin",
+        snap_type="NODE",
+        snap_distance_m=0,
+        snap_confidence=100,
+        snap_point=(120.0, 31.0),
+    )
+
+    result = QualityScorer().score(
+        origin_snap=snap,
+        destination_snap=SnapResult(
+            role="destination",
+            snap_type="NODE",
+            snap_distance_m=0,
+            snap_confidence=100,
+            snap_point=(120.1, 31.0),
+        ),
+        search_result=SearchResult(node_path=[], segments=[], total_cost=0),
+        validation_issues=[
+            RouteIssue(
+                "PATH_OUT_OF_WATER",
+                "ERROR",
+                "Route water-area coverage is too low",
+            )
+        ],
+    )
+
+    assert result.quality_code == "FAILED"
+    assert result.quality_score < 75
+
+
+def test_quality_scorer_keeps_warning_only_routes_reviewable() -> None:
+    snap = SnapResult(
+        role="origin",
+        snap_type="NODE",
+        snap_distance_m=900,
+        snap_confidence=70,
+        snap_point=(120.0, 31.0),
+    )
+    result = QualityScorer().score(
+        origin_snap=snap,
+        destination_snap=SnapResult(
+            role="destination",
+            snap_type="NODE",
+            snap_distance_m=900,
+            snap_confidence=70,
+            snap_point=(120.1, 31.0),
+        ),
+        search_result=SearchResult(node_path=[], segments=[], total_cost=0),
+        validation_issues=[
+            RouteIssue(f"REVIEW_WARNING_{index}", "WARNING", "Route requires production review")
+            for index in range(12)
+        ],
+    )
+
+    assert result.quality_score < 60
+    assert result.quality_code == "NEED_REVIEW"
+
+
+@pytest.mark.asyncio
+async def test_route_allows_boundary_review_for_boundary_derived_edges_and_connectors(session_maker) -> None:
+    async with session_maker() as session:
+        session.add(
+            NavigationGraphVersion(
+                id=1,
+                version_code="TEST-BOUNDARY-REVIEW",
+                version_name="Test boundary review",
+                scope_code="TEST",
+                node_count=3,
+                edge_count=2,
+                channel_count=1,
+                quality_score=88,
+                status_code="READY",
+                is_active=True,
+            )
+        )
+        session.add_all(
+            [
+                _node(id=1, graph_version_id=1, lng=120.0, lat=31.0, code="TN"),
+                _node(id=2, graph_version_id=1, lng=120.01, lat=31.0, code="SNAP"),
+                _node(id=3, graph_version_id=1, lng=120.1, lat=31.0, code="NEXT"),
+                _edge(
+                    id=1,
+                    graph_version_id=1,
+                    from_node_id=1,
+                    to_node_id=2,
+                    code="C-TN",
+                    geometry=_line((120.0, 31.0), (120.01, 31.0)),
+                    source_type_code="TRANSPORT_NODE_CONNECTOR",
+                ),
+                _edge(
+                    id=2,
+                    graph_version_id=1,
+                    from_node_id=2,
+                    to_node_id=3,
+                    code="E-BOUNDARY-DERIVED",
+                    geometry=_line((120.01, 31.0), (120.1, 31.0)),
+                    source_type_code="BOUNDARY_DERIVED_CENTERLINE",
+                    validation_summary_json={"issue_codes": ["BOUNDARY_DERIVED_NEEDS_OPERATOR_REVIEW"]},
+                ),
+            ]
+        )
+        await session.commit()
+
+        service = NavigationRoutingEngineService(session)
+
+        assert await service._route_allows_boundary_review([1, 2]) is True
+        assert await service._route_allows_boundary_review([1]) is False
 
 
 @pytest.mark.asyncio

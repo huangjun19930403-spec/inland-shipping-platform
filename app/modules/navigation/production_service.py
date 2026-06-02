@@ -149,7 +149,14 @@ class NavigationProductionService:
             warnings=self._warnings_for(row),
         )
 
-    async def production_workspace(self, channel_id: int, *, step: str) -> NavigationProductionWorkspaceResponse:
+    async def production_workspace(
+        self,
+        channel_id: int,
+        *,
+        step: str,
+        include_centerline_segments: bool = False,
+        map_layer_limit: int | None = None,
+    ) -> NavigationProductionWorkspaceResponse:
         channel = await self.session.get(NavigationChannel, channel_id)
         if channel is None:
             raise NotFoundError("NavigationChannel", channel_id)
@@ -169,9 +176,9 @@ class NavigationProductionService:
             include_water_area=include_water,
             include_boundary=include_boundary,
             include_centerline=include_centerline,
-            include_centerline_segments=step_code == "CENTERLINE",
+            include_centerline_segments=include_centerline_segments and step_code == "CENTERLINE",
             include_graph_edge=include_graph,
-            limit=260,
+            limit=map_layer_limit or 260,
         )
         water_matches = None
         water_candidates = None

@@ -44,6 +44,16 @@
       "loader": "scripts.seeds.loaders.navigation_constraints.seed_navigation_constraints"
     },
     {
+      "resource": "navigation_revier_production_centerlines",
+      "path": "scripts/seed_data/navigation/navigation_channel_centerlines.revier.prod.json",
+      "loader": "scripts.seeds.loaders.navigation_revier_production.seed_navigation_revier_production"
+    },
+    {
+      "resource": "navigation_revier_production_graph",
+      "path": "scripts/seed_data/navigation/navigation_graph_versions.revier.prod.json",
+      "loader": "scripts.seeds.loaders.navigation_revier_production.seed_navigation_revier_production"
+    },
+    {
       "resource": "commodity_categories",
       "path": "scripts/seed_data/commodity/commodity_categories.json",
       "loader": "scripts.seeds.loaders.commodity_taxonomy.seed_commodity_taxonomy"

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -33,6 +34,12 @@ BOUNDARY_CANDIDATE_POLICIES = {
     "AIS_INFERRED",
     "MANUAL_DRAW",
 }
+
+
+@dataclass
+class _LayerBatch:
+    items: list[NavigationMapLayerFeatureResponse]
+    total_count: int
 
 
 class NavigationMapLayerService:
@@ -98,7 +105,7 @@ class NavigationMapLayerService:
             return NavigationMapLayerResponse(
                 route_results=self._display_features(route_results),
                 quality_issues=self._display_features(quality_issues),
-                layer_counts=self._layer_counts(
+                layer_counts=(returned_counts := self._layer_counts(
                     water_areas=[],
                     channel_boundaries=[],
                     centerlines=[],
@@ -106,7 +113,10 @@ class NavigationMapLayerService:
                     graph_edges=[],
                     route_results=route_results,
                     quality_issues=quality_issues,
-                ),
+                )),
+                layer_returned_counts=returned_counts,
+                layer_total_counts=returned_counts,
+                layer_truncated={layer_code: False for layer_code in returned_counts},
                 layer_limits=layer_limits,
                 warnings=warnings,
             )
@@ -116,34 +126,58 @@ class NavigationMapLayerService:
         centerlines: list[NavigationMapLayerFeatureResponse] = []
         centerline_segments: list[NavigationMapLayerFeatureResponse] = []
         graph_edges: list[NavigationMapLayerFeatureResponse] = []
+        layer_total_counts: dict[str, int] = {}
 
         if include_water_area:
-            water_areas = await self._water_area_layers(
+            batch = await self._water_area_layers(
                 bbox,
                 layer_limit,
                 truncated_layers,
                 channel_id=channel_id,
                 water_area_ids=selected_water_area_ids,
             )
+            water_areas = batch.items
+            layer_total_counts["WATER_AREA"] = batch.total_count
         if include_boundary:
-            channel_boundaries = await self._boundary_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
+            batch = await self._boundary_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
+            channel_boundaries = batch.items
+            layer_total_counts["CHANNEL_BOUNDARY"] = batch.total_count
         if include_centerline:
-            centerlines = await self._centerline_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
+            batch = await self._centerline_layers(bbox, layer_limit, truncated_layers, channel_id=channel_id)
+            centerlines = batch.items
+            layer_total_counts["CENTERLINE"] = batch.total_count
         if include_centerline_segments:
-            centerline_segments = await self._centerline_segment_layers(
+            batch = await self._centerline_segment_layers(
                 bbox,
                 layer_limit,
                 truncated_layers,
                 channel_id=channel_id,
             )
+            centerline_segments = batch.items
+            layer_total_counts["CENTERLINE_SEGMENT"] = batch.total_count
         if include_graph_edge:
-            graph_edges = await self._graph_edge_layers(
+            batch = await self._graph_edge_layers(
                 bbox,
                 layer_limit,
                 truncated_layers,
                 warnings,
                 channel_id=channel_id,
             )
+            graph_edges = batch.items
+            layer_total_counts["GRAPH_EDGE"] = batch.total_count
+
+        returned_counts = self._layer_counts(
+            water_areas=water_areas,
+            channel_boundaries=channel_boundaries,
+            centerlines=centerlines,
+            centerline_segments=centerline_segments,
+            graph_edges=graph_edges,
+            route_results=route_results,
+            quality_issues=quality_issues,
+        )
+        for layer_code, returned_count in returned_counts.items():
+            layer_total_counts.setdefault(layer_code, returned_count)
+        layer_truncated = {layer_code: layer_code in set(truncated_layers) for layer_code in returned_counts}
 
         return NavigationMapLayerResponse(
             bbox=bbox_to_gcj02(bbox),
@@ -157,15 +191,10 @@ class NavigationMapLayerService:
             route_results=self._display_features(route_results),
             quality_issues=self._display_features(quality_issues),
             truncated_layers=truncated_layers,
-            layer_counts=self._layer_counts(
-                water_areas=water_areas,
-                channel_boundaries=channel_boundaries,
-                centerlines=centerlines,
-                centerline_segments=centerline_segments,
-                graph_edges=graph_edges,
-                route_results=route_results,
-                quality_issues=quality_issues,
-            ),
+            layer_counts=returned_counts,
+            layer_returned_counts=returned_counts,
+            layer_total_counts=layer_total_counts,
+            layer_truncated=layer_truncated,
             layer_limits=layer_limits,
             warnings=warnings,
         )
@@ -208,6 +237,17 @@ class NavigationMapLayerService:
             "ROUTE_RESULT": len(route_results),
             "QUALITY_ISSUE": len(quality_issues),
         }
+
+    async def _count_for_stmt(self, stmt) -> int:
+        total = await self.session.scalar(select(func.count()).select_from(stmt.order_by(None).limit(None).offset(None).subquery()))
+        return int(total or 0)
+
+    async def _total_if_truncated(self, stmt, rows: list[Any], limit: int, layer_code: str, truncated_layers: list[str]) -> tuple[list[Any], int]:
+        if len(rows) <= limit:
+            return rows, len(rows)
+        if layer_code not in truncated_layers:
+            truncated_layers.append(layer_code)
+        return rows[:limit], await self._count_for_stmt(stmt)
 
     def _display_features(self, items: list[NavigationMapLayerFeatureResponse]) -> list[NavigationMapLayerFeatureResponse]:
         output: list[NavigationMapLayerFeatureResponse] = []
@@ -267,132 +307,123 @@ class NavigationMapLayerService:
         *,
         channel_id: int | None,
         water_area_ids: list[int] | None = None,
-    ) -> list[NavigationMapLayerFeatureResponse]:
+    ) -> _LayerBatch:
         if water_area_ids:
-            rows = list(
-                (
-                    await self.session.execute(
-                        select(NavigationWaterArea)
-                        .where(
-                            NavigationWaterArea.id.in_(water_area_ids),
-                        )
-                        .order_by(NavigationWaterArea.id)
-                        .limit(limit + 1)
-                    )
-                ).scalars()
+            stmt = (
+                select(NavigationWaterArea)
+                .where(
+                    NavigationWaterArea.id.in_(water_area_ids),
+                )
+                .order_by(NavigationWaterArea.id)
             )
-            if len(rows) > limit:
-                truncated_layers.append("WATER_AREA")
-                rows = rows[:limit]
-            return [
+            rows = list((await self.session.execute(stmt.limit(limit + 1))).scalars())
+            rows, total_count = await self._total_if_truncated(stmt, rows, limit, "WATER_AREA", truncated_layers)
+            return _LayerBatch(
+                items=[
+                    NavigationMapLayerFeatureResponse(
+                        id=row.id,
+                        layer_type_code="SELECTED_WATER_AREA",
+                        name=row.water_name,
+                        geometry_json=self._water_area_geometry(row),
+                        properties={
+                            "source_code": row.source_code,
+                            "source_layer_name": row.source_layer_name,
+                            "source_layer_display_name": row.source_layer_display_name,
+                            "source_layer_role_code": row.source_layer_role_code,
+                            "source_object_id": row.source_object_id,
+                            "water_type_code": row.water_type_code,
+                            "water_level": row.water_level,
+                            "geometry_status_code": row.geometry_status_code,
+                            "geometry_display_mode": "BBOX_FALLBACK" if row.geometry_status_code == "INVALID" else "GEOMETRY",
+                            "area_km2": float(row.area_km2) if row.area_km2 is not None else None,
+                        },
+                    )
+                    for row in rows
+                ],
+                total_count=total_count,
+            )
+
+        if channel_id is not None:
+            stmt = (
+                select(NavigationWaterArea, NavigationWaterBody, NavigationChannelWaterBodyMatch)
+                .join(NavigationWaterBodyFeatureLink, NavigationWaterBodyFeatureLink.water_area_id == NavigationWaterArea.id)
+                .join(NavigationWaterBody, NavigationWaterBody.id == NavigationWaterBodyFeatureLink.water_body_id)
+                .join(
+                    NavigationChannelWaterBodyMatch,
+                    NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id,
+                )
+                .where(
+                    NavigationWaterArea.is_enabled.is_(True),
+                    NavigationWaterBody.is_enabled.is_(True),
+                    NavigationChannelWaterBodyMatch.channel_id == channel_id,
+                    NavigationChannelWaterBodyMatch.is_current.is_(True),
+                )
+                .order_by(NavigationChannelWaterBodyMatch.score.desc(), NavigationWaterBody.source_layer_order, NavigationWaterArea.id)
+            )
+            rows = list((await self.session.execute(stmt.limit(limit + 1))).all())
+            rows, total_count = await self._total_if_truncated(stmt, rows, limit, "WATER_AREA", truncated_layers)
+            return _LayerBatch(
+                items=[
+                    NavigationMapLayerFeatureResponse(
+                        id=row.id,
+                        layer_type_code="MATCHED_WATER_AREA",
+                        name=body.production_name or body.display_name or body.water_body_name or row.water_name,
+                        geometry_json=self._water_area_geometry(row),
+                        properties={
+                            "water_body_id": body.id,
+                            "water_body_code": body.water_body_code,
+                            "body_role_code": body.body_role_code,
+                            "water_body_name": body.water_body_name,
+                            "production_name": body.production_name,
+                            "source_code": row.source_code,
+                            "source_layer_name": row.source_layer_name,
+                            "source_layer_display_name": row.source_layer_display_name,
+                            "water_type_code": row.water_type_code,
+                            "water_level": row.water_level,
+                            "geometry_status_code": row.geometry_status_code,
+                            "match_id": match.id,
+                            "match_batch_code": match.match_batch_code,
+                            "match_type_code": match.match_type_code,
+                            "matched_term": match.matched_term,
+                            "score": match.score,
+                            "confidence_code": match.confidence_code,
+                            "issue_codes": match.issue_codes or [],
+                        },
+                    )
+                    for row, body, match in rows
+                ],
+                total_count=total_count,
+            )
+
+        stmt = (
+            select(NavigationWaterArea)
+            .where(
+                NavigationWaterArea.is_enabled.is_(True),
+                *self._bbox_intersects(NavigationWaterArea, bbox),
+            )
+            .order_by(NavigationWaterArea.id)
+        )
+        rows = list((await self.session.execute(stmt.limit(limit + 1))).scalars())
+        rows, total_count = await self._total_if_truncated(stmt, rows, limit, "WATER_AREA", truncated_layers)
+        return _LayerBatch(
+            items=[
                 NavigationMapLayerFeatureResponse(
                     id=row.id,
-                    layer_type_code="SELECTED_WATER_AREA",
+                    layer_type_code="WATER_AREA",
                     name=row.water_name,
                     geometry_json=self._water_area_geometry(row),
                     properties={
                         "source_code": row.source_code,
                         "source_layer_name": row.source_layer_name,
-                        "source_layer_display_name": row.source_layer_display_name,
-                        "source_layer_role_code": row.source_layer_role_code,
-                        "source_object_id": row.source_object_id,
                         "water_type_code": row.water_type_code,
                         "water_level": row.water_level,
                         "geometry_status_code": row.geometry_status_code,
-                        "geometry_display_mode": "BBOX_FALLBACK" if row.geometry_status_code == "INVALID" else "GEOMETRY",
-                        "area_km2": float(row.area_km2) if row.area_km2 is not None else None,
                     },
                 )
                 for row in rows
-            ]
-
-        if channel_id is not None:
-            rows = list(
-                (
-                    await self.session.execute(
-                        select(NavigationWaterArea, NavigationWaterBody, NavigationChannelWaterBodyMatch)
-                        .join(NavigationWaterBodyFeatureLink, NavigationWaterBodyFeatureLink.water_area_id == NavigationWaterArea.id)
-                        .join(NavigationWaterBody, NavigationWaterBody.id == NavigationWaterBodyFeatureLink.water_body_id)
-                        .join(
-                            NavigationChannelWaterBodyMatch,
-                            NavigationChannelWaterBodyMatch.water_body_id == NavigationWaterBody.id,
-                        )
-                        .where(
-                            NavigationWaterArea.is_enabled.is_(True),
-                            NavigationWaterBody.is_enabled.is_(True),
-                            NavigationChannelWaterBodyMatch.channel_id == channel_id,
-                            NavigationChannelWaterBodyMatch.is_current.is_(True),
-                        )
-                        .order_by(NavigationChannelWaterBodyMatch.score.desc(), NavigationWaterBody.source_layer_order, NavigationWaterArea.id)
-                        .limit(limit + 1)
-                    )
-                ).all()
-            )
-            if len(rows) > limit:
-                truncated_layers.append("WATER_AREA")
-                rows = rows[:limit]
-            return [
-                NavigationMapLayerFeatureResponse(
-                    id=row.id,
-                    layer_type_code="MATCHED_WATER_AREA",
-                    name=body.production_name or body.display_name or body.water_body_name or row.water_name,
-                    geometry_json=self._water_area_geometry(row),
-                    properties={
-                        "water_body_id": body.id,
-                        "water_body_code": body.water_body_code,
-                        "body_role_code": body.body_role_code,
-                        "water_body_name": body.water_body_name,
-                        "production_name": body.production_name,
-                        "source_code": row.source_code,
-                        "source_layer_name": row.source_layer_name,
-                        "source_layer_display_name": row.source_layer_display_name,
-                        "water_type_code": row.water_type_code,
-                        "water_level": row.water_level,
-                        "geometry_status_code": row.geometry_status_code,
-                        "match_id": match.id,
-                        "match_batch_code": match.match_batch_code,
-                        "match_type_code": match.match_type_code,
-                        "matched_term": match.matched_term,
-                        "score": match.score,
-                        "confidence_code": match.confidence_code,
-                        "issue_codes": match.issue_codes or [],
-                    },
-                )
-                for row, body, match in rows
-            ]
-
-        rows = list(
-            (
-                await self.session.execute(
-                    select(NavigationWaterArea)
-                    .where(
-                        NavigationWaterArea.is_enabled.is_(True),
-                        *self._bbox_intersects(NavigationWaterArea, bbox),
-                    )
-                    .order_by(NavigationWaterArea.id)
-                    .limit(limit + 1)
-                )
-            ).scalars()
+            ],
+            total_count=total_count,
         )
-        if len(rows) > limit:
-            truncated_layers.append("WATER_AREA")
-            rows = rows[:limit]
-        return [
-            NavigationMapLayerFeatureResponse(
-                id=row.id,
-                layer_type_code="WATER_AREA",
-                name=row.water_name,
-                geometry_json=self._water_area_geometry(row),
-                properties={
-                    "source_code": row.source_code,
-                    "source_layer_name": row.source_layer_name,
-                    "water_type_code": row.water_type_code,
-                    "water_level": row.water_level,
-                    "geometry_status_code": row.geometry_status_code,
-                },
-            )
-            for row in rows
-        ]
 
     async def _boundary_layers(
         self,
@@ -401,7 +432,7 @@ class NavigationMapLayerService:
         truncated_layers: list[str],
         *,
         channel_id: int | None,
-    ) -> list[NavigationMapLayerFeatureResponse]:
+    ) -> _LayerBatch:
         clauses = [
             NavigationChannel.is_enabled.is_(True),
             NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
@@ -417,41 +448,38 @@ class NavigationMapLayerService:
             )
         else:
             clauses.append(NavigationChannelBoundary.is_current.is_(True))
-        rows = list(
-            (
-                await self.session.execute(
-                    select(NavigationChannelBoundary, NavigationChannel)
-                    .join(NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id)
-                    .where(*clauses)
-                    .order_by(NavigationChannelBoundary.is_current.desc(), NavigationChannel.display_priority.desc(), NavigationChannelBoundary.id)
-                    .limit(limit + 1)
-                )
-            ).all()
+        stmt = (
+            select(NavigationChannelBoundary, NavigationChannel)
+            .join(NavigationChannel, NavigationChannel.id == NavigationChannelBoundary.channel_id)
+            .where(*clauses)
+            .order_by(NavigationChannelBoundary.is_current.desc(), NavigationChannel.display_priority.desc(), NavigationChannelBoundary.id)
         )
-        if len(rows) > limit:
-            truncated_layers.append("CHANNEL_BOUNDARY")
-            rows = rows[:limit]
-        return [
-            NavigationMapLayerFeatureResponse(
-                id=boundary.id,
-                layer_type_code="CHANNEL_BOUNDARY",
-                name=channel.channel_name,
-                geometry_json=self._boundary_geometry(boundary),
-                properties={
-                    "channel_id": channel.id,
-                    "channel_code": channel.channel_code,
-                    "planning_level_code": channel.planning_level_code,
-                    "boundary_role_code": "CURRENT" if boundary.is_current else "CANDIDATE",
-                    "is_current": boundary.is_current,
-                    "coverage_policy_code": boundary.coverage_policy_code,
-                    "boundary_quality_code": boundary.boundary_quality_code,
-                    "connectivity_status_code": boundary.connectivity_status_code,
-                    "repair_status_code": boundary.repair_status_code,
-                    "source_trace_json": boundary.source_trace_json or {},
-                },
-            )
-            for boundary, channel in rows
-        ]
+        rows = list((await self.session.execute(stmt.limit(limit + 1))).all())
+        rows, total_count = await self._total_if_truncated(stmt, rows, limit, "CHANNEL_BOUNDARY", truncated_layers)
+        return _LayerBatch(
+            items=[
+                NavigationMapLayerFeatureResponse(
+                    id=boundary.id,
+                    layer_type_code="CHANNEL_BOUNDARY",
+                    name=channel.channel_name,
+                    geometry_json=self._boundary_geometry(boundary),
+                    properties={
+                        "channel_id": channel.id,
+                        "channel_code": channel.channel_code,
+                        "planning_level_code": channel.planning_level_code,
+                        "boundary_role_code": "CURRENT" if boundary.is_current else "CANDIDATE",
+                        "is_current": boundary.is_current,
+                        "coverage_policy_code": boundary.coverage_policy_code,
+                        "boundary_quality_code": boundary.boundary_quality_code,
+                        "connectivity_status_code": boundary.connectivity_status_code,
+                        "repair_status_code": boundary.repair_status_code,
+                        "source_trace_json": boundary.source_trace_json or {},
+                    },
+                )
+                for boundary, channel in rows
+            ],
+            total_count=total_count,
+        )
 
     async def _centerline_layers(
         self,
@@ -460,7 +488,7 @@ class NavigationMapLayerService:
         truncated_layers: list[str],
         *,
         channel_id: int | None,
-    ) -> list[NavigationMapLayerFeatureResponse]:
+    ) -> _LayerBatch:
         clauses = [
             NavigationChannel.is_enabled.is_(True),
             NavigationChannelCenterline.is_current.is_(True),
@@ -468,38 +496,35 @@ class NavigationMapLayerService:
         ]
         if channel_id is not None:
             clauses.append(NavigationChannelCenterline.channel_id == channel_id)
-        rows = list(
-            (
-                await self.session.execute(
-                    select(NavigationChannelCenterline, NavigationChannel)
-                    .join(NavigationChannel, NavigationChannel.id == NavigationChannelCenterline.channel_id)
-                    .where(*clauses)
-                    .order_by(NavigationChannelCenterline.id)
-                    .limit(limit + 1)
-                )
-            ).all()
+        stmt = (
+            select(NavigationChannelCenterline, NavigationChannel)
+            .join(NavigationChannel, NavigationChannel.id == NavigationChannelCenterline.channel_id)
+            .where(*clauses)
+            .order_by(NavigationChannelCenterline.id)
         )
-        if len(rows) > limit:
-            truncated_layers.append("CENTERLINE")
-            rows = rows[:limit]
-        return [
-            NavigationMapLayerFeatureResponse(
-                id=centerline.id,
-                layer_type_code="CENTERLINE",
-                name=centerline.centerline_name or channel.channel_name,
-                geometry_json=centerline.geometry_json,
-                properties={
-                    "channel_id": channel.id,
-                    "channel_code": channel.channel_code,
-                    "centerline_code": centerline.centerline_code,
-                    "source_type_code": centerline.source_type_code,
-                    "quality_code": centerline.quality_code,
-                    "review_status_code": centerline.review_status_code,
-                    "confidence_score": centerline.confidence_score,
-                },
-            )
-            for centerline, channel in rows
-        ]
+        rows = list((await self.session.execute(stmt.limit(limit + 1))).all())
+        rows, total_count = await self._total_if_truncated(stmt, rows, limit, "CENTERLINE", truncated_layers)
+        return _LayerBatch(
+            items=[
+                NavigationMapLayerFeatureResponse(
+                    id=centerline.id,
+                    layer_type_code="CENTERLINE",
+                    name=centerline.centerline_name or channel.channel_name,
+                    geometry_json=centerline.geometry_json,
+                    properties={
+                        "channel_id": channel.id,
+                        "channel_code": channel.channel_code,
+                        "centerline_code": centerline.centerline_code,
+                        "source_type_code": centerline.source_type_code,
+                        "quality_code": centerline.quality_code,
+                        "review_status_code": centerline.review_status_code,
+                        "confidence_score": centerline.confidence_score,
+                    },
+                )
+                for centerline, channel in rows
+            ],
+            total_count=total_count,
+        )
 
     async def _centerline_segment_layers(
         self,
@@ -508,7 +533,7 @@ class NavigationMapLayerService:
         truncated_layers: list[str],
         *,
         channel_id: int | None,
-    ) -> list[NavigationMapLayerFeatureResponse]:
+    ) -> _LayerBatch:
         clauses = [
             NavigationChannel.is_enabled.is_(True),
             NavigationCenterlineSegment.segment_status_code.in_(("NEED_REPAIR", "CANDIDATE", "CONFIRMED", "PUBLISH_BLOCKED", "PUBLISHED")),
@@ -516,38 +541,35 @@ class NavigationMapLayerService:
         ]
         if channel_id is not None:
             clauses.append(NavigationCenterlineSegment.channel_id == channel_id)
-        rows = list(
-            (
-                await self.session.execute(
-                    select(NavigationCenterlineSegment, NavigationChannel)
-                    .join(NavigationChannel, NavigationChannel.id == NavigationCenterlineSegment.channel_id)
-                    .where(*clauses)
-                    .order_by(NavigationCenterlineSegment.channel_id, NavigationCenterlineSegment.segment_no, NavigationCenterlineSegment.id)
-                    .limit(limit + 1)
-                )
-            ).all()
+        stmt = (
+            select(NavigationCenterlineSegment, NavigationChannel)
+            .join(NavigationChannel, NavigationChannel.id == NavigationCenterlineSegment.channel_id)
+            .where(*clauses)
+            .order_by(NavigationCenterlineSegment.channel_id, NavigationCenterlineSegment.segment_no, NavigationCenterlineSegment.id)
         )
-        if len(rows) > limit:
-            truncated_layers.append("CENTERLINE_SEGMENT")
-            rows = rows[:limit]
-        return [
-            NavigationMapLayerFeatureResponse(
-                id=segment.id,
-                layer_type_code="CENTERLINE_SEGMENT",
-                name=segment.segment_name,
-                geometry_json=segment.geometry_json,
-                properties={
-                    "channel_id": channel.id,
-                    "channel_code": channel.channel_code,
-                    "segment_no": segment.segment_no,
-                    "segment_status_code": segment.segment_status_code,
-                    "source_type_code": segment.source_type_code,
-                    "quality_code": segment.quality_code,
-                    "length_m": float(segment.length_m) if segment.length_m is not None else None,
-                },
-            )
-            for segment, channel in rows
-        ]
+        rows = list((await self.session.execute(stmt.limit(limit + 1))).all())
+        rows, total_count = await self._total_if_truncated(stmt, rows, limit, "CENTERLINE_SEGMENT", truncated_layers)
+        return _LayerBatch(
+            items=[
+                NavigationMapLayerFeatureResponse(
+                    id=segment.id,
+                    layer_type_code="CENTERLINE_SEGMENT",
+                    name=segment.segment_name,
+                    geometry_json=segment.geometry_json,
+                    properties={
+                        "channel_id": channel.id,
+                        "channel_code": channel.channel_code,
+                        "segment_no": segment.segment_no,
+                        "segment_status_code": segment.segment_status_code,
+                        "source_type_code": segment.source_type_code,
+                        "quality_code": segment.quality_code,
+                        "length_m": float(segment.length_m) if segment.length_m is not None else None,
+                    },
+                )
+                for segment, channel in rows
+            ],
+            total_count=total_count,
+        )
 
     async def _graph_edge_layers(
         self,
@@ -557,7 +579,7 @@ class NavigationMapLayerService:
         warnings: list[str],
         *,
         channel_id: int | None,
-    ) -> list[NavigationMapLayerFeatureResponse]:
+    ) -> _LayerBatch:
         active_graph_exists = bool(
             await self.session.scalar(
                 select(NavigationGraphVersion.id)
@@ -572,7 +594,7 @@ class NavigationMapLayerService:
         )
         if not active_graph_exists:
             warnings.append("NO_ACTIVE_READY_GRAPH_VERSION")
-            return []
+            return _LayerBatch(items=[], total_count=0)
         from_node = aliased(NavigationGraphNode)
         to_node = aliased(NavigationGraphNode)
         clauses = [
@@ -603,44 +625,41 @@ class NavigationMapLayerService:
             )
             if active_graph_version_id is None:
                 warnings.append("NO_ACTIVE_READY_GRAPH_FOR_CHANNEL")
-                return []
+                return _LayerBatch(items=[], total_count=0)
             clauses.append(NavigationGraphEdge.graph_version_id == active_graph_version_id)
             clauses.append(NavigationGraphEdge.channel_id == channel_id)
-        rows = list(
-            (
-                await self.session.execute(
-                    select(NavigationGraphEdge, from_node, to_node)
-                    .join(NavigationGraphVersion, NavigationGraphVersion.id == NavigationGraphEdge.graph_version_id)
-                    .join(from_node, from_node.id == NavigationGraphEdge.from_node_id)
-                    .join(to_node, to_node.id == NavigationGraphEdge.to_node_id)
-                    .where(*clauses)
-                    .order_by(NavigationGraphEdge.graph_version_id.desc(), NavigationGraphEdge.id)
-                    .limit(limit + 1)
-                )
-            ).all()
+        stmt = (
+            select(NavigationGraphEdge, from_node, to_node)
+            .join(NavigationGraphVersion, NavigationGraphVersion.id == NavigationGraphEdge.graph_version_id)
+            .join(from_node, from_node.id == NavigationGraphEdge.from_node_id)
+            .join(to_node, to_node.id == NavigationGraphEdge.to_node_id)
+            .where(*clauses)
+            .order_by(NavigationGraphEdge.graph_version_id.desc(), NavigationGraphEdge.id)
         )
-        if len(rows) > limit:
-            truncated_layers.append("GRAPH_EDGE")
-            rows = rows[:limit]
-        return [
-            NavigationMapLayerFeatureResponse(
-                id=edge.id,
-                layer_type_code="GRAPH_EDGE",
-                name=edge.edge_code,
-                geometry_json=edge.geometry_json,
-                properties={
-                    "graph_version_id": edge.graph_version_id,
-                    "from_node_id": edge.from_node_id,
-                    "to_node_id": edge.to_node_id,
-                    "channel_id": edge.channel_id,
-                    "length_km": float(edge.length_km) if edge.length_km is not None else None,
-                    "quality_code": edge.quality_code,
-                    "source_type_code": edge.source_type_code,
-                    "unknown_constraint_flag": edge.unknown_constraint_flag,
-                },
-            )
-            for edge, _from_node, _to_node in rows
-        ]
+        rows = list((await self.session.execute(stmt.limit(limit + 1))).all())
+        rows, total_count = await self._total_if_truncated(stmt, rows, limit, "GRAPH_EDGE", truncated_layers)
+        return _LayerBatch(
+            items=[
+                NavigationMapLayerFeatureResponse(
+                    id=edge.id,
+                    layer_type_code="GRAPH_EDGE",
+                    name=edge.edge_code,
+                    geometry_json=edge.geometry_json,
+                    properties={
+                        "graph_version_id": edge.graph_version_id,
+                        "from_node_id": edge.from_node_id,
+                        "to_node_id": edge.to_node_id,
+                        "channel_id": edge.channel_id,
+                        "length_km": float(edge.length_km) if edge.length_km is not None else None,
+                        "quality_code": edge.quality_code,
+                        "source_type_code": edge.source_type_code,
+                        "unknown_constraint_flag": edge.unknown_constraint_flag,
+                    },
+                )
+                for edge, _from_node, _to_node in rows
+            ],
+            total_count=total_count,
+        )
 
     def _node_in_bbox(self, node, bbox: dict[str, float]):
         return (
