@@ -114,7 +114,7 @@ class NavigationChannelResponse(BaseModel):
     review_required: bool = False
     segment_count: int = 0
     source_summary: str | None = None
-    source_audit_summary: dict[str, int] = Field(default_factory=dict)
+    source_audit_summary: dict[str, Any] = Field(default_factory=dict)
     source_version: str
     is_enabled: bool
     has_boundary: bool = False

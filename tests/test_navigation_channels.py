@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 from main import app
+from app.modules.address.navigation_channel_service import _to_channel_response
 from app.modules.vessel.shared.aggregate import VesselDomainService as VesselService
 from app.modules.vessel.shared.base import (
     CURRENT_CHANNEL_SOURCE_NEAR_BOUNDARY,
@@ -79,6 +82,27 @@ def test_navigation_channel_seed_is_final_business_seed() -> None:
     assert by_code["NC-HEYU-LINE"]["segments"][1]["segment_name"] == "巢湖通道"
     assert by_code["NC-YANGTZE"]["boundary"]["connectivity_status_code"] in {"CONNECTED", "REPAIRED", "PARTIAL"}
     assert any(audit["decision_code"] == "EXCLUDED_TOP_LEVEL_NATURAL_WATER_AREA" for audit in audits)
+
+
+def test_navigation_channel_response_preserves_structured_source_audit_summary() -> None:
+    channel_data = dict(load_navigation_channel_seed()["records"][0]["channel"])
+    channel_data.update(
+        id=1,
+        source_audit_summary={
+            "adopted_source_count": 1,
+            "technical_grade_auto_derivation": {
+                "source": "self_heal_navigation_seed",
+                "updated_at": "2026-06-11T08:02:43.530890+00:00",
+            },
+            "waybill_observed_constraints_source_policy_code": "OBSERVED_WAYBILL_CONSTRAINT_NOT_OFFICIAL_GRADE",
+        },
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    response = _to_channel_response(SimpleNamespace(**channel_data), None)
+
+    assert response.source_audit_summary == channel_data["source_audit_summary"]
 
 
 def test_channel_match_prefers_planning_level_and_near_boundary_fallback() -> None:
