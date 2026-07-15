@@ -26,8 +26,13 @@ from app.modules.vessel.shared.base import (
     CURRENT_CITY_SOURCE_UNKNOWN,
     LOW_CONFIDENCE_SCORE_THRESHOLD,
     REQUIRED_VESSEL_CERTIFICATE_TYPES,
+    UNKNOWN_CHANNEL_CODE,
+    UNKNOWN_CHANNEL_NAME,
     UNKNOWN_CITY_NAME,
+    _CITY_SITUATION_SNAPSHOTS,
     _CityBoundary,
+    _CitySituationSnapshot,
+    _NavigationChannelBoundary,
     _boundary_paths_for_precision,
     _build_city_boundary_grid,
     _ensure_relation_writable,
@@ -46,6 +51,7 @@ from app.modules.vessel.schemas import (
     VesselPositionNavigationChannelSituationResponse,
     VesselPositionNavigationChannelSituationSummary,
     VesselPositionNavigationChannelVesselsResponse,
+    VesselPositionMonitorItemResponse,
     VesselPositionMonitorQuery,
 )
 
@@ -1074,6 +1080,73 @@ async def test_vessel_channel_situation_uses_response_cache_before_live_query() 
 
 
 @pytest.mark.asyncio
+async def test_vessel_channel_force_refresh_reuses_current_snapshot_cache() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    generated_at = datetime.now()
+    cached_response = VesselPositionNavigationChannelSituationResponse(
+        source_status="AVAILABLE",
+        source_status_name="可用",
+        generated_at=generated_at,
+        cache_status="MISS",
+        cache_generated_at=generated_at,
+        snapshot_backend="redis",
+        summary=VesselPositionNavigationChannelSituationSummary(
+            matched_profile_count=3,
+            scanned_profile_count=3,
+            queried_mmsi_count=3,
+            matched_position_count=3,
+            unpositioned_count=0,
+            positioned_count=3,
+            stale_position_count=0,
+            contactable_position_count=3,
+            certificate_risk_count=0,
+            channel_count=2,
+            query_snapshot_id="AIS-PRODUCTION-CURRENT",
+            snapshot_status_code="READY",
+            snapshot_expires_at=generated_at + timedelta(hours=1),
+            is_partial=False,
+        ),
+        channels=[],
+    )
+
+    async def cache_backend() -> str:
+        events.append("backend")
+        return "redis"
+
+    async def cached(_cache_key: str):
+        events.append("cache-read")
+        return cached_response, "redis"
+
+    async def latest_snapshot():
+        events.append("snapshot-read")
+        return SimpleNamespace(
+            snapshot_id="AIS-PRODUCTION-CURRENT",
+            matched_position_count=3,
+            expires_at=generated_at + timedelta(hours=1),
+        )
+
+    async def live_limits():
+        raise AssertionError("current snapshot cache should avoid duplicate channel aggregation")
+
+    service._city_cache_backend = cache_backend  # type: ignore[method-assign]
+    service._get_channel_situation_response_cache = cached  # type: ignore[method-assign]
+    service._latest_persisted_ais_snapshot = latest_snapshot  # type: ignore[method-assign]
+    service._ais_runtime_limits = live_limits  # type: ignore[method-assign]
+    query = VesselPositionNavigationChannelSituationQuery(
+        reported_within_minutes=1440,
+        include_boundary=False,
+    )
+    object.__setattr__(query, "force_refresh", True)
+
+    result = await service.position_channel_situation(query)
+
+    assert result.cache_status == "HIT"
+    assert result.summary.query_snapshot_id == "AIS-PRODUCTION-CURRENT"
+    assert events == ["backend", "cache-read", "snapshot-read"]
+
+
+@pytest.mark.asyncio
 async def test_vessel_channel_situation_stores_response_cache_on_miss() -> None:
     service = VesselService.__new__(VesselService)
     events: list[str] = []
@@ -1195,7 +1268,12 @@ async def test_vessel_channel_situation_force_refresh_skips_response_cache() -> 
     service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
     service._position_monitor_profiles = profiles  # type: ignore[method-assign]
 
-    query = VesselPositionNavigationChannelSituationQuery(reported_within_minutes=1440, include_boundary=False, include_empty_channels=False)
+    query = VesselPositionNavigationChannelSituationQuery(
+        keyword="filtered",
+        reported_within_minutes=1440,
+        include_boundary=False,
+        include_empty_channels=False,
+    )
     object.__setattr__(query, "force_refresh", True)
     result = await service.position_channel_situation(query)
 
@@ -2101,7 +2179,61 @@ def test_vessel_city_boundary_paths_are_simplified_for_situation_payload() -> No
     assert paths[0][0] == paths[0][-1]
 
 
-def test_vessel_city_situation_marks_boundary_coverage() -> None:
+def test_vessel_channel_boundary_paths_fall_back_to_geometry() -> None:
+    service = object.__new__(VesselService)
+    ring = [
+        (120.0, 31.0),
+        (120.5, 31.0),
+        (120.5, 31.5),
+        (120.0, 31.5),
+        (120.0, 31.0),
+    ]
+    boundary = _NavigationChannelBoundary(
+        code="NC-YANGTZE",
+        name="长江干线",
+        parent_channel_code=None,
+        channel_type_code="MAIN_LINE",
+        planning_level_code="NATIONAL_CORE",
+        ais_scope_code="INCLUDED",
+        center_longitude=Decimal("120.25"),
+        center_latitude=Decimal("31.25"),
+        display_center_longitude=Decimal("120.25"),
+        display_center_latitude=Decimal("31.25"),
+        boundary_quality_code="HIGH_CONFIDENCE",
+        connectivity_status_code="CONNECTED",
+        repair_status_code="NONE",
+        geometry_coordinate_system_code="WGS84",
+        boundary_coordinate_system_code="WGS84",
+        shape_area_degree=Decimal("0.25"),
+        display_priority=1,
+        bbox=(120.0, 31.0, 120.5, 31.5),
+        bbox_area=0.25,
+        polygons=[[ring]],
+        boundary_paths_by_precision={"low": []},
+    )
+
+    paths = service._channel_boundary_paths_for_precision(boundary, "low")
+    item = service._channel_situation_response_item(
+        boundary,
+        [],
+        {},
+        {},
+        datetime.now(),
+        1440,
+        False,
+        None,
+        None,
+        None,
+    )
+
+    assert paths == [ring]
+    assert item.has_boundary is True
+    assert item.boundary_paths is None
+    assert item.boundary_precision is None
+    assert item.boundary_status_code == "AVAILABLE"
+
+
+def test_vessel_city_situation_marks_boundary_coverage_without_embedding_paths() -> None:
     service = object.__new__(VesselService)
     generated_at = datetime.now()
 
@@ -2140,14 +2272,15 @@ def test_vessel_city_situation_marks_boundary_coverage() -> None:
         1,
         False,
         None,
-        {"320500": [[(120.0, 31.0), (120.2, 31.0), (120.2, 31.2), (120.0, 31.2), (120.0, 31.0)]]},
-        "low",
+        {},
+        None,
+        {"320500"},
     )
     by_name = {city.city_name: city for city in cities}
 
     assert by_name["有边界市"].has_boundary is True
-    assert by_name["有边界市"].boundary_precision == "low"
-    assert by_name["有边界市"].boundary_paths
+    assert by_name["有边界市"].boundary_precision is None
+    assert by_name["有边界市"].boundary_paths is None
     assert by_name["缺边界市"].has_boundary is False
     assert by_name["缺边界市"].boundary_paths is None
     assert by_name[UNKNOWN_CITY_NAME].has_boundary is False
@@ -2261,6 +2394,144 @@ async def test_vessel_channel_vessels_uses_drilldown_cache_before_snapshot() -> 
     assert result.total == 1
     assert result.snapshot_hit is True
     assert events == ["cache-read"]
+
+
+@pytest.mark.asyncio
+async def test_vessel_situation_snapshot_accepts_persisted_snapshot_id() -> None:
+    service = VesselService.__new__(VesselService)
+    snapshot_id = "AIS-PRODUCTION-CURRENT"
+    generated_at = datetime(2026, 7, 15, 4, 0, 0)
+    item = VesselPositionMonitorItemResponse.model_construct(
+        id=1,
+        current_channel_code="NC-YANGTZE",
+    )
+
+    async def memory_backend() -> str:
+        return "memory"
+
+    service._city_cache_backend = memory_backend  # type: ignore[method-assign]
+    _CITY_SITUATION_SNAPSHOTS.pop(snapshot_id, None)
+    try:
+        stored_id = await service._store_city_situation_snapshot(
+            [item],
+            generated_at=generated_at,
+            partial=False,
+            error_message=None,
+            snapshot_id=snapshot_id,
+        )
+
+        assert stored_id == snapshot_id
+        assert _CITY_SITUATION_SNAPSHOTS[snapshot_id].items[0].current_channel_code == "NC-YANGTZE"
+    finally:
+        _CITY_SITUATION_SNAPSHOTS.pop(snapshot_id, None)
+
+
+@pytest.mark.asyncio
+async def test_vessel_channel_vessels_reuses_precomputed_channel_assignment() -> None:
+    service = VesselService.__new__(VesselService)
+    generated_at = datetime(2026, 7, 15, 4, 0, 0)
+    matching = VesselPositionMonitorItemResponse.model_construct(
+        id=1,
+        current_channel_code="NC-YANGTZE",
+        current_channel_name="长江干线",
+        current_channel_source="CHANNEL_BOUNDARY",
+        channel_match_distance_m=Decimal("0"),
+        position_time=generated_at,
+    )
+    other = VesselPositionMonitorItemResponse.model_construct(
+        id=2,
+        current_channel_code=UNKNOWN_CHANNEL_CODE,
+        current_channel_name=UNKNOWN_CHANNEL_NAME,
+        current_channel_source="CHANNEL_BOUNDARY",
+        channel_match_distance_m=Decimal("0"),
+        position_time=generated_at,
+    )
+    snapshot = _CitySituationSnapshot(
+        snapshot_id="AIS-PRODUCTION-CURRENT",
+        expires_at=generated_at + timedelta(hours=1),
+        items=[matching, other],
+        partial=False,
+        error_message=None,
+        generated_at=generated_at,
+    )
+
+    async def no_cache(_cache_key):
+        return None
+
+    async def get_snapshot(_snapshot_id):
+        return snapshot
+
+    async def boundaries():
+        return []
+
+    async def no_risk(_ids):
+        return {}
+
+    async def store_cache(*_args, **_kwargs) -> None:
+        return None
+
+    def fail_spatial_match(*_args, **_kwargs):
+        raise AssertionError("precomputed channel assignments must skip spatial matching")
+
+    service._get_channel_vessels_response_cache = no_cache  # type: ignore[method-assign]
+    service._get_city_situation_snapshot = get_snapshot  # type: ignore[method-assign]
+    service._channel_boundaries = boundaries  # type: ignore[method-assign]
+    service._compliance_risk_by_profile = no_risk  # type: ignore[method-assign]
+    service._summary_risk_level_by_profile = no_risk  # type: ignore[method-assign]
+    service._store_channel_vessels_response_cache = store_cache  # type: ignore[method-assign]
+    service._channel_match_for_position = fail_spatial_match  # type: ignore[method-assign]
+
+    result = await service.position_channel_vessels(
+        SimpleNamespace(
+            query_snapshot_id=snapshot.snapshot_id,
+            channel_code="NC-YANGTZE",
+            channel_name=None,
+            channel_type_codes=None,
+            planning_level_codes=None,
+            risk_level=None,
+            certificate_risk_available=None,
+            page=1,
+            page_size=20,
+            reported_within_minutes=1440,
+        )
+    )
+
+    assert result.total == 1
+    assert result.items[0].current_channel_code == "NC-YANGTZE"
+    assert result.items[0].current_channel_name == "长江干线"
+
+    unknown_result = await service.position_channel_vessels(
+        SimpleNamespace(
+            query_snapshot_id=snapshot.snapshot_id,
+            channel_code=UNKNOWN_CHANNEL_CODE,
+            channel_name=None,
+            channel_type_codes=None,
+            planning_level_codes=None,
+            risk_level=None,
+            certificate_risk_available=None,
+            page=1,
+            page_size=20,
+            reported_within_minutes=1440,
+        )
+    )
+
+    assert unknown_result.total == 1
+    assert unknown_result.items[0].current_channel_code == UNKNOWN_CHANNEL_CODE
+
+
+def test_vessel_celery_coroutine_discards_prior_async_pool(monkeypatch) -> None:
+    events: list[bool] = []
+    fake_engine = SimpleNamespace(
+        sync_engine=SimpleNamespace(
+            dispose=lambda *, close: events.append(close),
+        )
+    )
+    monkeypatch.setattr(vessel_position_tasks, "engine", fake_engine)
+
+    result = vessel_position_tasks._run_coro_sync(asyncio.sleep(0, result="ok"))
+
+    assert result == "ok"
+    assert events == [False]
 
 
 def test_vessel_city_resolution_uses_grid_candidates_when_available() -> None:

@@ -610,7 +610,7 @@ class VesselAisPublicMethodsMixin:
         channel_type_codes = self._channel_query_code_set(query, "channel_type_codes")
         planning_level_codes = self._channel_query_code_set(query, "planning_level_codes")
         can_use_persisted_snapshot = not self._has_position_profile_filters(query)
-        if not force_refresh:
+        if not force_refresh or can_use_persisted_snapshot:
             cached = await self._get_channel_situation_response_cache(cache_key)
             if cached is not None:
                 cached_response, cache_backend = cached
@@ -619,9 +619,15 @@ class VesselAisPublicMethodsMixin:
                     cached_snapshot_id = getattr(cached_response.summary, "query_snapshot_id", None)
                     cached_positioned = int(getattr(cached_response.summary, "positioned_count", 0) or 0)
                     latest_positioned = int(getattr(latest_snapshot, "matched_position_count", 0) or 0) if latest_snapshot else 0
+                    latest_expired = bool(
+                        latest_snapshot
+                        and getattr(latest_snapshot, "expires_at", None)
+                        and latest_snapshot.expires_at <= generated_at
+                    )
                     if latest_snapshot is not None and (
                         cached_snapshot_id != latest_snapshot.snapshot_id
                         or (latest_positioned > 0 and cached_positioned == 0)
+                        or (force_refresh and latest_expired)
                     ):
                         logger.info(
                             "ignore stale AIS channel situation cache: cached_snapshot=%s latest_snapshot=%s cached_positioned=%s latest_positioned=%s",
@@ -1053,28 +1059,52 @@ class VesselAisPublicMethodsMixin:
             item for item in snapshot.items
             if not self._is_stale_position(item, snapshot.generated_at, query.reported_within_minutes or 1440)
         ]
+        has_precomputed_channel_assignments = any(item.current_channel_code for item in items)
+        if has_precomputed_channel_assignments and query.channel_code:
+            expected_code = query.channel_code.strip()
+            items = [
+                item for item in items
+                if (
+                    item.current_channel_code in (None, "", UNKNOWN_CHANNEL_CODE)
+                    if expected_code == UNKNOWN_CHANNEL_CODE
+                    else item.current_channel_code == expected_code
+                )
+            ]
+        elif has_precomputed_channel_assignments and query.channel_name:
+            expected_name = query.channel_name.strip()
+            items = [
+                item for item in items
+                if (
+                    item.current_channel_code in (None, "", UNKNOWN_CHANNEL_CODE)
+                    if expected_name == UNKNOWN_CHANNEL_NAME
+                    else item.current_channel_name == expected_name
+                )
+            ]
         risk_by_profile = await self._compliance_risk_by_profile([item.id for item in items])
         summary_risk_by_profile = await self._summary_risk_level_by_profile([item.id for item in items])
         items = self._filter_channel_situation_items_by_risk(items, query, risk_by_profile, summary_risk_by_profile)
         matched_items: list[tuple[VesselPositionMonitorItemResponse, _ResolvedNavigationChannel | None]] = []
-        for item in items:
-            match = self._channel_match_for_position(
-                item,
-                channel_code=query.channel_code,
-                channel_name=query.channel_name,
-                boundaries=filtered_boundaries,
-            )
-            if match is not False:
-                matched_items.append((item, match))
+        if has_precomputed_channel_assignments and (query.channel_code or query.channel_name):
+            matched_items = [(item, None) for item in items]
+        else:
+            for item in items:
+                match = self._channel_match_for_position(
+                    item,
+                    channel_code=query.channel_code,
+                    channel_name=query.channel_name,
+                    boundaries=filtered_boundaries,
+                )
+                if match is not False:
+                    matched_items.append((item, match))
         enriched = [
             item.model_copy(
                 update={
-                    "risk_level": summary_risk_by_profile.get(item.id),
+                    "risk_level": summary_risk_by_profile.get(item.id) or item.risk_level,
                     "certificate_risk_available": bool(risk_by_profile.get(item.id, {}).get("has_certificate_risk")),
-                    "current_channel_code": match.channel_code if match else None,
-                    "current_channel_name": match.channel_name if match else None,
-                    "current_channel_source": match.current_channel_source if match else None,
-                    "channel_match_distance_m": match.match_distance_m if match else None,
+                    "current_channel_code": match.channel_code if match else item.current_channel_code,
+                    "current_channel_name": match.channel_name if match else item.current_channel_name,
+                    "current_channel_source": match.current_channel_source if match else item.current_channel_source,
+                    "channel_match_distance_m": match.match_distance_m if match else item.channel_match_distance_m,
                 }
             )
             for item, match in matched_items
@@ -1114,7 +1144,7 @@ class VesselAisPublicMethodsMixin:
         for boundary in boundaries:
             if requested_codes and boundary.code not in requested_codes:
                 continue
-            paths = (boundary.boundary_paths_by_precision or {}).get(precision) or []
+            paths = self._channel_boundary_paths_for_precision(boundary, precision)
             items.append(
                 VesselAisNavigationChannelBoundaryItemResponse(
                     channel_code=boundary.code,

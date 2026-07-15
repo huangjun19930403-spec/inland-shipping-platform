@@ -271,9 +271,13 @@ class VesselAisSnapshotReaderMixin:
             return None
         items = await self._position_items_from_persisted_snapshot(snapshot, generated_at=generated_at)
         reported_within_minutes = query.reported_within_minutes or 1440
-        boundaries = await self._city_boundaries() if query.include_boundary else []
+        boundaries = await self._city_boundaries()
         boundary_codes = {boundary.code for boundary in boundaries}
-        boundary_paths_by_code = self._city_boundary_paths_by_code(boundaries, query.boundary_precision) if boundaries else {}
+        boundary_paths_by_code = (
+            self._city_boundary_paths_by_code(boundaries, query.boundary_precision)
+            if query.include_boundary
+            else {}
+        )
         cities = self._city_situation_items(
             items,
             {},

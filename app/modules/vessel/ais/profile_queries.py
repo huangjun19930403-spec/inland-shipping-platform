@@ -202,6 +202,13 @@ class VesselAisProfileQueryMixin:
             unscanned_profile_count=unscanned_profile_count,
         )
         await self._clear_ais_situation_response_caches()
+        await self._store_city_situation_snapshot(
+            merged.items,
+            generated_at=generated_at,
+            partial=merged.partial,
+            error_message=merged.error_message,
+            snapshot_id=snapshot_id,
+        )
         self._last_full_ais_position_items = merged.items
         self._last_full_ais_position_generated_at = generated_at
         return {

@@ -11,7 +11,7 @@ from typing import Any
 from celery.signals import worker_ready
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.modules.vessel.schemas import (
     VesselPositionCitySituationQuery,
     VesselPositionCityVesselsQuery,
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def _run_coro_sync(coro):
+    engine.sync_engine.dispose(close=False)
     try:
         asyncio.get_running_loop()
     except RuntimeError:

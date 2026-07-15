@@ -160,10 +160,20 @@ class VesselAisBoundaryMixin:
     ) -> dict[str, list[list[tuple[float, float]]]]:
         result: dict[str, list[list[tuple[float, float]]]] = {}
         for boundary in boundaries:
-            paths = (boundary.boundary_paths_by_precision or {}).get(precision) or []
+            paths = self._channel_boundary_paths_for_precision(boundary, precision)
             if paths:
                 result[boundary.code] = paths
         return result
+
+    def _channel_boundary_paths_for_precision(
+        self,
+        boundary: _NavigationChannelBoundary,
+        precision: str,
+    ) -> list[list[tuple[float, float]]]:
+        return (
+            (boundary.boundary_paths_by_precision or {}).get(precision)
+            or _boundary_paths_for_precision(boundary.polygons, precision)
+        )
 
     def _channel_boundary_version_id(self) -> int | None:
         loaded_at = _CHANNEL_BOUNDARY_CACHE.get("loaded_at")
@@ -426,6 +436,7 @@ class VesselAisBoundaryMixin:
         generated_at: datetime,
         partial: bool,
         error_message: str | None,
+        snapshot_id: str | None = None,
     ) -> str:
         now = datetime.utcnow()
         ttl_seconds = _city_snapshot_ttl()
@@ -435,7 +446,7 @@ class VesselAisBoundaryMixin:
         while len(_CITY_SITUATION_SNAPSHOTS) >= CITY_SITUATION_SNAPSHOT_MAX_SIZE:
             oldest_key = min(_CITY_SITUATION_SNAPSHOTS, key=lambda key: _CITY_SITUATION_SNAPSHOTS[key].expires_at)
             _CITY_SITUATION_SNAPSHOTS.pop(oldest_key, None)
-        snapshot_id = uuid.uuid4().hex
+        snapshot_id = snapshot_id or uuid.uuid4().hex
         shared_required = _city_shared_cache_required()
         snapshot = _CitySituationSnapshot(
             snapshot_id=snapshot_id,

@@ -248,6 +248,10 @@ class VesselAisResponseBuilderMixin:
         heat_longitude = (sum(longitudes, Decimal("0")) / Decimal(len(longitudes))).quantize(Decimal("0.000001")) if longitudes else None
         heat_latitude = (sum(latitudes, Decimal("0")) / Decimal(len(latitudes))).quantize(Decimal("0.000001")) if latitudes else None
         serialized_paths = _serialize_boundary_paths(paths)
+        has_boundary = bool(
+            boundary.polygons
+            or any((boundary.boundary_paths_by_precision or {}).values())
+        )
         return VesselPositionNavigationChannelSituationItemResponse(
             channel_code=boundary.code,
             channel_name=boundary.name,
@@ -265,7 +269,7 @@ class VesselAisResponseBuilderMixin:
             heat_center_longitude=heat_longitude or boundary.display_center_longitude or boundary.center_longitude,
             heat_center_latitude=heat_latitude or boundary.display_center_latitude or boundary.center_latitude,
             boundary_paths=serialized_paths,
-            has_boundary=bool(paths),
+            has_boundary=has_boundary,
             boundary_precision=boundary_precision if serialized_paths else None,
             boundary_quality_code=boundary.boundary_quality_code,
             boundary_quality_name=_channel_boundary_quality_name(boundary.boundary_quality_code),
@@ -283,7 +287,7 @@ class VesselAisResponseBuilderMixin:
             certificate_risk_count=sum(1 for item in fresh_items if risk_by_profile.get(item.id, {}).get("has_certificate_risk")),
             high_risk_count=sum(1 for item in fresh_items if summary_risk_by_profile.get(item.id) == "HIGH"),
             freshness_distribution=self._position_freshness_distribution(system_items),
-            boundary_status_code="AVAILABLE" if paths else "MISSING",
+            boundary_status_code="AVAILABLE" if has_boundary else "MISSING",
             latest_position_time=max([item.position_time for item in system_items if item.position_time], default=None),
             mmsi_count=len(system_items),
             matched_position_count=len(system_items),
