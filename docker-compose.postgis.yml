@@ -1,3 +1,5 @@
+name: inland-shipping-platform
+
 services:
   navigation-postgis:
     image: postgis/postgis:16-3.5
@@ -46,6 +48,152 @@ services:
       timeout: 5s
       retries: 30
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      RUN_MIGRATIONS_ON_START: ${RUN_MIGRATIONS_ON_START:-true}
+      RUN_SEED_ON_START: "false"
+      UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL:-info}
+      DATABASE_URL: postgresql+asyncpg://inland:inland_local_dev@navigation-postgis:5432/inland_shipping
+      MYSQL_DATABASE_URL: mysql+asyncmy://inland:inland_local_dev@navigation-mysql:3306/inland_shipping?charset=utf8mb4
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      EXTERNAL_SESSION_REDIS_URL: redis://redis:6379/2
+      VESSEL_CITY_SITUATION_CACHE_BACKEND: redis
+      ANALYSIS_FLOW_ROUTE_CACHE_BACKEND: redis
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+    depends_on:
+      navigation-postgis:
+        condition: service_healthy
+      navigation-mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  analysis-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      RUN_MIGRATIONS_ON_START: "false"
+      RUN_SEED_ON_START: "false"
+      DATABASE_URL: postgresql+asyncpg://inland:inland_local_dev@navigation-postgis:5432/inland_shipping
+      MYSQL_DATABASE_URL: mysql+asyncmy://inland:inland_local_dev@navigation-mysql:3306/inland_shipping?charset=utf8mb4
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      EXTERNAL_SESSION_REDIS_URL: redis://redis:6379/2
+      VESSEL_CITY_SITUATION_CACHE_BACKEND: redis
+      ANALYSIS_FLOW_ROUTE_CACHE_BACKEND: redis
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasks.celery_app:celery_app",
+        "worker",
+        "-Q",
+        "analysis,freight_ai,vessel_ai",
+        "--loglevel=info",
+      ]
+    restart: unless-stopped
+    depends_on:
+      navigation-postgis:
+        condition: service_healthy
+      navigation-mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  analysis-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      RUN_MIGRATIONS_ON_START: "false"
+      RUN_SEED_ON_START: "false"
+      DATABASE_URL: postgresql+asyncpg://inland:inland_local_dev@navigation-postgis:5432/inland_shipping
+      MYSQL_DATABASE_URL: mysql+asyncmy://inland:inland_local_dev@navigation-mysql:3306/inland_shipping?charset=utf8mb4
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      EXTERNAL_SESSION_REDIS_URL: redis://redis:6379/2
+      VESSEL_CITY_SITUATION_CACHE_BACKEND: redis
+      ANALYSIS_FLOW_ROUTE_CACHE_BACKEND: redis
+    command:
+      [
+        "celery",
+        "-A",
+        "app.tasks.celery_app:celery_app",
+        "beat",
+        "--loglevel=info",
+      ]
+    restart: unless-stopped
+    depends_on:
+      navigation-postgis:
+        condition: service_healthy
+      navigation-mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ../frontend:/app
+      - frontend_node_modules:/app/node_modules
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    command:
+      [
+        "sh",
+        "-c",
+        "test -d node_modules/vite || npm ci && npm run dev -- --host 0.0.0.0",
+      ]
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   navigation_postgis_data:
   navigation_mysql_data:
+  frontend_node_modules:
