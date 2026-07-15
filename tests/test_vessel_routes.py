@@ -6,6 +6,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import func, select
+from sqlalchemy.dialects import postgresql
 
 from main import app
 from app.core.exceptions import AppException, ConflictError, ValidationError
@@ -334,6 +336,118 @@ def test_vessel_round3_asset_summary_routes_and_schema_exist() -> None:
     assert "risk_evidence_summary" in item_props
     assert "dispatchable_status_code" not in item_props
     assert "operation_pool_status_code" not in item_props
+
+
+def test_vessel_asset_query_summary_aggregates_summary_columns_for_postgres() -> None:
+    from app.modules.vessel.asset.service import VesselAssetService
+
+    service = VesselAssetService(SimpleNamespace())
+    stmt = service._profile_list_stmt(SimpleNamespace(), include_summary=True)
+    subquery = service._asset_query_summary_subquery(stmt)
+    sql = str(
+        select(subquery.c.summary_status_code, func.count(subquery.c.profile_id))
+        .select_from(subquery)
+        .group_by(subquery.c.summary_status_code)
+        .compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    ).lower()
+
+    assert "max(vessel_profile_summary.id)" in sql
+    assert "max(vessel_profile_summary.source_updated_at)" in sql
+    assert "vessel_profile_summary.id as summary_id" not in sql
+    assert "group by vessel_profile.id" in sql
+
+
+@pytest.mark.asyncio
+async def test_vessel_ais_runtime_limits_cap_es_batch_size() -> None:
+    service = VesselAisService.__new__(VesselAisService)
+
+    class RuntimeConfig:
+        async def get_int(self, key, default=0, *, profile_code=None):  # noqa: ANN001
+            values = {
+                "VESSEL_AIS_PROFILE_LIMIT": 2000,
+                "VESSEL_AIS_ES_BATCH_SIZE": 500,
+                "VESSEL_AIS_ES_MAX_CONCURRENCY": 4,
+                "VESSEL_AIS_UNMATCHED_SCAN_LIMIT": 1000,
+            }
+            return values.get(key, default)
+
+    service.runtime_config = RuntimeConfig()
+
+    limits = await service._ais_runtime_limits()
+
+    assert limits["es_batch_size"] == 100
+
+
+@pytest.mark.asyncio
+async def test_vessel_city_situation_ignores_failed_empty_realtime_snapshot() -> None:
+    service = VesselAisService.__new__(VesselAisService)
+    snapshot = SimpleNamespace(
+        snapshot_id="AIS-PRODUCTION-CURRENT",
+        matched_position_count=0,
+        failed_batch_count=3,
+    )
+
+    async def latest_snapshot(*args, **kwargs):
+        return snapshot
+
+    async def realtime_host() -> str:
+        return "local.zchytc.store"
+
+    async def position_items(*args, **kwargs):
+        raise AssertionError("failed empty snapshot should not be read as city situation data")
+
+    service._latest_persisted_ais_snapshot = latest_snapshot  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._position_items_from_persisted_snapshot = position_items  # type: ignore[method-assign]
+
+    result = await service._city_situation_from_latest_snapshot(
+        VesselPositionCitySituationQuery(reported_within_minutes=1440, include_boundary=False),
+        generated_at=datetime(2026, 6, 26, 5, 0, 0),
+        cache_backend="memory",
+        message="已返回最近一次入库 AIS 城市快照",
+        total_profile_count=0,
+        scanned_profile_count=0,
+        unscanned_profile_count=0,
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_vessel_channel_situation_ignores_failed_empty_realtime_snapshot() -> None:
+    service = VesselAisService.__new__(VesselAisService)
+    snapshot = SimpleNamespace(
+        snapshot_id="AIS-PRODUCTION-CURRENT",
+        matched_position_count=0,
+        failed_batch_count=3,
+    )
+
+    async def latest_snapshot(*args, **kwargs):
+        return snapshot
+
+    async def realtime_host() -> str:
+        return "local.zchytc.store"
+
+    async def position_items(*args, **kwargs):
+        raise AssertionError("failed empty snapshot should not be read as channel situation data")
+
+    service._latest_persisted_ais_snapshot = latest_snapshot  # type: ignore[method-assign]
+    service._realtime_es_host = realtime_host  # type: ignore[method-assign]
+    service._position_items_from_persisted_snapshot = position_items  # type: ignore[method-assign]
+
+    result = await service._channel_situation_from_latest_snapshot(
+        VesselPositionNavigationChannelSituationQuery(reported_within_minutes=1440, include_boundary=False),
+        generated_at=datetime(2026, 6, 26, 5, 0, 0),
+        cache_backend="memory",
+        message="已返回最近一次入库 AIS 航道快照",
+        total_profile_count=0,
+        scanned_profile_count=0,
+        unscanned_profile_count=0,
+        channel_type_codes=set(),
+        planning_level_codes=set(),
+    )
+
+    assert result is None
 
 
 def test_vessel_round4_profile_card_contract_is_evidence_first() -> None:

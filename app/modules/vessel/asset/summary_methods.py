@@ -237,16 +237,7 @@ class VesselAssetSummaryMixin:
 
     async def _asset_query_summary(self, stmt: Any) -> dict[str, Any]:
         generated_at = datetime.utcnow()
-        subquery = (
-            stmt.with_only_columns(
-                VesselProfile.id.label("profile_id"),
-                VesselProfileSummary.id.label("summary_id"),
-                self._summary_effective_status_expr().label("summary_status_code"),
-                VesselProfileSummary.source_updated_at.label("source_updated_at"),
-            )
-            .group_by(VesselProfile.id)
-            .subquery()
-        )
+        subquery = self._asset_query_summary_subquery(stmt)
         total = int((await self.db.scalar(select(func.count()).select_from(subquery))) or 0)
         status_rows = (
             await self.db.execute(
@@ -283,6 +274,22 @@ class VesselAssetSummaryMixin:
             "source_updated_at": await self.db.scalar(select(func.max(subquery.c.source_updated_at)).select_from(subquery)),
             "uncertainty_reasons": uncertainty_reasons,
         }
+
+    def _asset_query_summary_subquery(self, stmt: Any) -> Any:
+        effective_status = self._summary_effective_status_expr()
+        return (
+            stmt.with_only_columns(
+                VesselProfile.id.label("profile_id"),
+                func.max(VesselProfileSummary.id).label("summary_id"),
+                case(
+                    (func.max(VesselProfileSummary.id).is_(None), "MISSING"),
+                    else_=func.max(effective_status),
+                ).label("summary_status_code"),
+                func.max(VesselProfileSummary.source_updated_at).label("source_updated_at"),
+            )
+            .group_by(VesselProfile.id)
+            .subquery()
+        )
 
     async def _upsert_vessel_summary(self, profile: VesselProfile) -> VesselProfileSummary:
         now = datetime.utcnow()

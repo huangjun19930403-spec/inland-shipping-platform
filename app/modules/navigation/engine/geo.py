@@ -7,6 +7,7 @@ from shapely.geometry import LineString, Point
 from shapely.ops import substring
 
 GEOD = Geod(ellps="WGS84")
+MERGE_COORDINATE_MIN_DISTANCE_M = 5.0
 
 
 def point_distance_m(a: Point, b: Point) -> float:
@@ -42,15 +43,26 @@ def reverse_line(line: LineString) -> LineString:
 
 
 def merge_coordinates(lines: Iterable[LineString]) -> list[list[float]]:
-    merged: list[list[float]] = []
+    raw: list[list[float]] = []
     for line in lines:
         coords = [[float(lng), float(lat)] for lng, lat, *_ in line.coords]
         if not coords:
             continue
-        if merged and merged[-1] == coords[0]:
-            merged.extend(coords[1:])
+        if raw and raw[-1] == coords[0]:
+            raw.extend(coords[1:])
         else:
-            merged.extend(coords)
+            raw.extend(coords)
+    merged: list[list[float]] = []
+    for index, coord in enumerate(raw):
+        if not merged:
+            merged.append(coord)
+            continue
+        distance_m = point_distance_m(Point(merged[-1]), Point(coord))
+        if distance_m < MERGE_COORDINATE_MIN_DISTANCE_M:
+            if index == len(raw) - 1:
+                merged[-1] = coord
+            continue
+        merged.append(coord)
     return merged
 
 

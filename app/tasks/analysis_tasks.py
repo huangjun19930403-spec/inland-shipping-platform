@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from threading import Thread
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -18,6 +16,7 @@ from app.modules.analysis.job_catalog import ANALYSIS_JOB_SPEC_BY_CODE
 from app.modules.analysis.service import AnalysisDashboardService
 from app.modules.analysis.statistics import AnalysisStatisticsService
 from app.tasks.celery_app import celery_app
+from app.tasks.utils import run_coro_sync
 
 logger = logging.getLogger(__name__)
 
@@ -38,30 +37,6 @@ def _status_name(status_code: str) -> str:
         "PARTIAL_SUCCESS": "部分成功",
         "FAILED": "失败",
     }.get(status_code, status_code)
-
-
-def _run_coro_sync(coro):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    result: dict[str, Any] | None = None
-    error: BaseException | None = None
-
-    def runner() -> None:
-        nonlocal result, error
-        try:
-            result = asyncio.run(coro)
-        except BaseException as exc:  # pragma: no cover - defensive bridge for eager mode
-            error = exc
-
-    thread = Thread(target=runner, daemon=True)
-    thread.start()
-    thread.join()
-    if error is not None:
-        raise error
-    return result
 
 
 async def _run_analysis_job(
@@ -183,7 +158,7 @@ def run_analysis_job(
     force_rebuild: bool = True,
     options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return _run_coro_sync(_run_analysis_job(job_code, date_from, date_to, force_rebuild, options))
+    return run_coro_sync(_run_analysis_job(job_code, date_from, date_to, force_rebuild, options))
 
 
 async def _precompute_flow_route_cache(
@@ -213,7 +188,7 @@ def precompute_flow_route_cache_task(
     limit: int | None = None,
     force_refresh: bool = False,
 ) -> dict[str, Any]:
-    return _run_coro_sync(_precompute_flow_route_cache(date_from, date_to, flow_types, limit, force_refresh))
+    return run_coro_sync(_precompute_flow_route_cache(date_from, date_to, flow_types, limit, force_refresh))
 
 
 @worker_ready.connect

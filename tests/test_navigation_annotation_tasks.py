@@ -12,6 +12,7 @@ import app.models  # noqa: F401
 from app.api.v1 import api_router
 from app.models import (
     NavigationAnnotationTask,
+    NavigationChannelBoundary,
     NavigationChannelCenterline,
     NavigationGraphEdge,
     NavigationGraphEdgeConstraint,
@@ -187,11 +188,251 @@ async def _seed_route_issue(session: AsyncSession) -> None:
     await session.commit()
 
 
+async def _seed_boundary_route_issue(session: AsyncSession) -> None:
+    await _seed_graph(session)
+    session.add(
+        NavigationRouteRequest(
+            id=2,
+            request_no="ANN-BOUNDARY-REQ",
+            origin_lng=120.0,
+            origin_lat=31.0,
+            destination_lng=120.1,
+            destination_lat=31.0,
+            routing_preference_code="RECOMMENDED",
+            graph_version_id=1,
+            status_code="FAILED",
+        )
+    )
+    route_line = _line((120.0, 31.0), (120.05, 31.01), (120.1, 31.0))
+    session.add(
+        NavigationRouteResult(
+            id=2,
+            request_id=2,
+            result_no=1,
+            result_type_code="RECOMMENDED",
+            status_code="FAILED",
+            geometry_json=route_line,
+            edge_ids=[1],
+            channel_ids=[1],
+            quality_score=0,
+            quality_code="FAILED",
+            provider_code="NAVIGATION_ENGINE",
+        )
+    )
+    session.add(
+        NavigationRouteQualityIssue(
+            id=2,
+            route_result_id=2,
+            issue_type_code="PATH_OUT_OF_CHANNEL_BOUNDARY",
+            severity_code="ERROR",
+            geometry_json=route_line,
+            message="Route channel-boundary coverage is too low: 40.0%",
+        )
+    )
+    await session.commit()
+
+
+async def _seed_duplicate_boundary_route_issue(session: AsyncSession) -> None:
+    route_line = _line((120.0, 31.0), (120.05, 31.01), (120.1, 31.0))
+    session.add(
+        NavigationRouteRequest(
+            id=3,
+            request_no="ANN-BOUNDARY-REQ-2",
+            origin_lng=120.0,
+            origin_lat=31.0,
+            destination_lng=120.1,
+            destination_lat=31.0,
+            routing_preference_code="RECOMMENDED",
+            graph_version_id=1,
+            status_code="FAILED",
+        )
+    )
+    session.add(
+        NavigationRouteResult(
+            id=3,
+            request_id=3,
+            result_no=1,
+            result_type_code="RECOMMENDED",
+            status_code="FAILED",
+            geometry_json=route_line,
+            edge_ids=[1],
+            channel_ids=[1],
+            quality_score=0,
+            quality_code="FAILED",
+            provider_code="NAVIGATION_ENGINE",
+        )
+    )
+    session.add(
+        NavigationRouteQualityIssue(
+            id=3,
+            route_result_id=3,
+            issue_type_code="PATH_OUT_OF_CHANNEL_BOUNDARY",
+            severity_code="ERROR",
+            geometry_json=route_line,
+            message="Route channel-boundary coverage is too low: 40.0%",
+        )
+    )
+    await session.commit()
+
+
+async def _seed_non_repair_route_warning(session: AsyncSession) -> None:
+    await _seed_graph(session)
+    route_line = _line((120.0, 31.0), (120.00001, 31.0), (120.1, 31.0))
+    session.add(
+        NavigationRouteRequest(
+            id=4,
+            request_no="ANN-WARNING-REQ",
+            origin_lng=120.0,
+            origin_lat=31.0,
+            destination_lng=120.1,
+            destination_lat=31.0,
+            routing_preference_code="RECOMMENDED",
+            graph_version_id=1,
+            status_code="SUCCESS",
+        )
+    )
+    session.add(
+        NavigationRouteResult(
+            id=4,
+            request_id=4,
+            result_no=1,
+            result_type_code="RECOMMENDED",
+            status_code="READY_WITH_WARNING",
+            geometry_json=route_line,
+            edge_ids=[1],
+            channel_ids=[1],
+            quality_score=80,
+            quality_code="READY_WITH_WARNING",
+            provider_code="NAVIGATION_ENGINE",
+        )
+    )
+    session.add(
+        NavigationRouteQualityIssue(
+            id=4,
+            route_result_id=4,
+            issue_type_code="ROUTE_TOO_SHORT_SEGMENT",
+            severity_code="WARNING",
+            geometry_json={"type": "Point", "coordinates": [120.00001, 31.0]},
+            message="Route contains a segment shorter than 5m",
+        )
+    )
+    await session.commit()
+
+
+async def _seed_boundary_trust_route_issue(session: AsyncSession) -> None:
+    await _seed_graph(session)
+    route_line = _line((120.0, 31.0), (120.04, 31.01), (120.1, 31.0))
+    session.add(
+        NavigationRouteRequest(
+            id=7,
+            request_no="ANN-BOUNDARY-TRUST-REQ",
+            origin_lng=120.0,
+            origin_lat=31.0,
+            destination_lng=120.1,
+            destination_lat=31.0,
+            routing_preference_code="RECOMMENDED",
+            graph_version_id=1,
+            status_code="SUCCESS",
+        )
+    )
+    session.add(
+        NavigationRouteResult(
+            id=7,
+            request_id=7,
+            result_no=1,
+            result_type_code="RECOMMENDED",
+            status_code="SUCCESS",
+            geometry_json=route_line,
+            edge_ids=[],
+            channel_ids=[1],
+            quality_score=85,
+            quality_code="READY_WITH_WARNING",
+            provider_code="NAVIGATION_ENGINE",
+        )
+    )
+    session.add(
+        NavigationRouteQualityIssue(
+            id=7,
+            route_result_id=7,
+            issue_type_code="CHANNEL_BOUNDARY_TRUST_NEEDS_REVIEW",
+            severity_code="WARNING",
+            geometry_json=None,
+            message="当前路径经过的航道边界完整性未达高置信标准。",
+        )
+    )
+    await session.commit()
+
+
+async def _seed_duplicate_origin_snap_route_issues(session: AsyncSession) -> None:
+    await _seed_graph(session)
+    rows = [
+        (
+            5,
+            "ANN-SNAP-REQ-1",
+            120.0,
+            31.0,
+            120.1,
+            31.0,
+            "Origin endpoint is too far from graph: 80000.0m",
+        ),
+        (
+            6,
+            "ANN-SNAP-REQ-2",
+            120.0,
+            31.0,
+            120.2,
+            31.0,
+            "Origin endpoint is too far from graph: 80000.0m",
+        ),
+    ]
+    for route_id, request_no, origin_lng, origin_lat, dest_lng, dest_lat, message in rows:
+        session.add(
+            NavigationRouteRequest(
+                id=route_id,
+                request_no=request_no,
+                origin_lng=origin_lng,
+                origin_lat=origin_lat,
+                destination_lng=dest_lng,
+                destination_lat=dest_lat,
+                routing_preference_code="RECOMMENDED",
+                graph_version_id=1,
+                status_code="FAILED",
+            )
+        )
+        session.add(
+            NavigationRouteResult(
+                id=route_id,
+                request_id=route_id,
+                result_no=1,
+                result_type_code="RECOMMENDED",
+                status_code="FAILED",
+                geometry_json=None,
+                edge_ids=[],
+                channel_ids=[],
+                quality_score=0,
+                quality_code="FAILED",
+                provider_code="NAVIGATION_ENGINE",
+            )
+        )
+        session.add(
+            NavigationRouteQualityIssue(
+                id=route_id,
+                route_result_id=route_id,
+                issue_type_code="ORIGIN_TOO_FAR_FROM_GRAPH",
+                severity_code="ERROR",
+                geometry_json=None,
+                message=message,
+            )
+        )
+    await session.commit()
+
+
 def test_navigation_annotation_task_api_is_registered() -> None:
     paths = {getattr(route, "path", None) for route in api_router.routes}
 
     assert "/navigation/annotation-tasks" in paths
     assert "/navigation/annotation-tasks/from-route-result/{route_result_id}" in paths
+    assert "/navigation/annotation-tasks/from-boundary-integrity" in paths
     assert "/navigation/annotation-tasks/{task_id}/resolve" in paths
 
 
@@ -216,6 +457,118 @@ async def test_create_tasks_from_route_quality_issue_links_issue_and_is_idempote
     assert task.channel_id == 1
     assert task.graph_version_id == 1
     assert task.suggestion_json["publish_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_route_out_of_boundary_creates_seed_boundary_expansion_task(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_boundary_route_issue(session)
+
+        response = await NavigationAnnotationTaskService(session).create_from_route_result(2, created_by=7)
+        issue = await session.get(NavigationRouteQualityIssue, 2)
+        task = await session.get(NavigationAnnotationTask, response.task_ids[0])
+
+    assert response.created_count == 1
+    assert issue is not None
+    assert issue.related_annotation_task_id == response.task_ids[0]
+    assert task is not None
+    assert task.task_type_code == "SEED_BOUNDARY_REPAIR"
+    assert task.channel_id == 1
+    assert task.priority_code == "HIGH"
+    assert task.suggestion_json["candidate_operation_code"] == "UNION_PATCH"
+    assert task.suggestion_json["candidate_boundary_patch_geometry_json"]["type"] == "Polygon"
+    assert task.suggestion_json["publish_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_route_snap_issue_creates_seed_access_repair_suggestion(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_duplicate_origin_snap_route_issues(session)
+
+        response = await NavigationAnnotationTaskService(session).create_from_route_result(5, created_by=7)
+        issue = await session.get(NavigationRouteQualityIssue, 5)
+        task = await session.get(NavigationAnnotationTask, response.task_ids[0])
+
+    assert response.created_count == 1
+    assert issue is not None
+    assert issue.related_annotation_task_id == response.task_ids[0]
+    assert task is not None
+    assert task.task_type_code == "SNAP_REPAIR"
+    assert task.priority_code == "HIGH"
+    assert task.geometry_json == {"type": "Point", "coordinates": [120.0, 31.0]}
+    assert task.suggestion_json["repair_strategy_code"] == "ENDPOINT_SNAP_AND_SEED_ACCESS_REPAIR"
+    assert task.suggestion_json["candidate_operation_code"] == "CREATE_ACCESS_CENTERLINE_AND_REBUILD_GRAPH"
+    assert task.suggestion_json["publish_allowed"] is False
+    assert any("不要通过放大吸附阈值" in item for item in task.suggestion_json["guardrails"])
+
+
+@pytest.mark.asyncio
+async def test_duplicate_route_boundary_issue_reuses_open_repair_task(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_boundary_route_issue(session)
+        await _seed_duplicate_boundary_route_issue(session)
+        service = NavigationAnnotationTaskService(session)
+
+        first = await service.create_from_route_result(2, created_by=7)
+        second = await service.create_from_route_result(3, created_by=7)
+        duplicate_issue = await session.get(NavigationRouteQualityIssue, 3)
+
+    assert first.created_count == 1
+    assert second.created_count == 0
+    assert second.existing_count == 1
+    assert duplicate_issue is not None
+    assert duplicate_issue.related_annotation_task_id == first.task_ids[0]
+
+
+@pytest.mark.asyncio
+async def test_route_warning_without_repair_code_does_not_create_task(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_non_repair_route_warning(session)
+
+        response = await NavigationAnnotationTaskService(session).create_from_route_result(4, created_by=7)
+
+    assert response.created_count == 0
+    assert response.existing_count == 0
+    assert response.task_ids == []
+
+
+@pytest.mark.asyncio
+async def test_boundary_trust_route_issue_creates_seed_boundary_task(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_boundary_trust_route_issue(session)
+
+        response = await NavigationAnnotationTaskService(session).create_from_route_result(7, created_by=7)
+        issue = await session.get(NavigationRouteQualityIssue, 7)
+        task = await session.get(NavigationAnnotationTask, response.task_ids[0])
+
+    assert response.created_count == 1
+    assert issue is not None
+    assert issue.related_annotation_task_id == response.task_ids[0]
+    assert task is not None
+    assert task.task_type_code == "SEED_BOUNDARY_REPAIR"
+    assert task.channel_id == 1
+    assert task.priority_code == "HIGH"
+    assert task.suggestion_json["publish_allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_duplicate_origin_snap_issue_reuses_endpoint_repair_task(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_duplicate_origin_snap_route_issues(session)
+        service = NavigationAnnotationTaskService(session)
+
+        first = await service.create_from_route_result(5, created_by=7)
+        second = await service.create_from_route_result(6, created_by=7)
+        task = await session.get(NavigationAnnotationTask, first.task_ids[0])
+        duplicate_issue = await session.get(NavigationRouteQualityIssue, 6)
+
+    assert first.created_count == 1
+    assert second.created_count == 0
+    assert second.existing_count == 1
+    assert duplicate_issue is not None
+    assert duplicate_issue.related_annotation_task_id == first.task_ids[0]
+    assert task is not None
+    assert task.geometry_json == {"type": "Point", "coordinates": [120.0, 31.0]}
 
 
 @pytest.mark.asyncio
@@ -262,6 +615,61 @@ async def test_low_confidence_centerline_generates_repair_task(session_maker) ->
     assert task.target_type_code == "CENTERLINE"
     assert task.target_id == 1
     assert "中心线版本" in " ".join(task.suggestion_json["next_actions"])
+
+
+@pytest.mark.asyncio
+async def test_boundary_integrity_audit_generates_boundary_repair_task(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        session.add(
+            NavigationChannelBoundary(
+                id=1,
+                channel_id=1,
+                geometry_json={
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [120.0, 31.0],
+                        [120.1, 31.0],
+                        [120.1, 31.1],
+                        [120.0, 31.1],
+                        [120.0, 31.0],
+                    ]],
+                },
+                ring_count=1,
+                point_count=5,
+                geometry_status_code="AVAILABLE",
+                boundary_quality_code="REVIEW",
+                connectivity_status_code="UNKNOWN",
+                repair_status_code="REVIEW_REQUIRED",
+                coverage_policy_code="CHANNEL_CORRIDOR_ENVELOPE",
+                source_trace_json={
+                    "boundary_integrity_audit": {
+                        "trust_code": "NEEDS_REVIEW",
+                        "issue_codes": [
+                            "SOURCE_GEOMETRY_FRAGMENTED",
+                            "BOUNDARY_NOT_INDEPENDENTLY_BASEMAP_VERIFIED",
+                            "NAVIGATION_TECHNICAL_GRADE_UNKNOWN",
+                        ],
+                        "component_count": 3,
+                    }
+                },
+                is_current=True,
+            )
+        )
+        await session.commit()
+
+        response = await NavigationAnnotationTaskService(session).create_from_boundary_integrity(created_by=9)
+        task = await session.get(NavigationAnnotationTask, response.task_ids[0])
+
+    assert response.created_count == 1
+    assert response.source_type_code == "BOUNDARY_INTEGRITY"
+    assert task is not None
+    assert task.task_type_code == "SEED_BOUNDARY_REPAIR"
+    assert task.target_type_code == "CHANNEL_BOUNDARY"
+    assert task.target_id == 1
+    assert task.suggestion_json["repair_strategy_code"] == "REAL_WATERWAY_BOUNDARY_REPAIR"
+    assert "SOURCE_GEOMETRY_FRAGMENTED" in task.suggestion_json["issue_codes"]
+    assert task.suggestion_json["publish_allowed"] is False
 
 
 @pytest.mark.asyncio

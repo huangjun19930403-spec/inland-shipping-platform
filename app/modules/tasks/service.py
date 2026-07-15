@@ -64,7 +64,9 @@ class AsyncTaskRunService:
         if idempotency_key:
             active = await self.repo.get_active_by_idempotency_key(idempotency_key)
             if active is not None:
-                if await self.mark_stale_if_expired(active, stale_seconds=stale_seconds):
+                if await self.mark_failed_if_celery_failed(active):
+                    active = None
+                elif await self.mark_stale_if_expired(active, stale_seconds=stale_seconds):
                     active = None
                 else:
                     return active
@@ -111,6 +113,37 @@ class AsyncTaskRunService:
                 "stage_message": f"任务超过 {stale_seconds} 秒未更新心跳，已标记为可重新提交",
                 "finished_at": datetime.utcnow(),
                 "error_message": f"任务超过 {stale_seconds} 秒未更新心跳",
+                "progress_percent": 100,
+            },
+        )
+        await self.db.commit()
+        return True
+
+    async def mark_failed_if_celery_failed(self, row: AsyncTaskRun) -> bool:
+        if row.status_code not in ACTIVE_STATUSES or not row.celery_task_id:
+            return False
+        try:
+            from celery.result import AsyncResult
+
+            from app.tasks.celery_app import celery_app
+
+            result = AsyncResult(row.celery_task_id, app=celery_app)
+            if result.state != "FAILURE":
+                return False
+            message = str(result.info)[:4000]
+        except Exception:
+            return False
+        now = datetime.utcnow()
+        await self.repo.update(
+            row.id,
+            {
+                "status_code": "FAILED",
+                "stage_code": "FAILED",
+                "stage_name": "处理失败",
+                "stage_message": message,
+                "finished_at": now,
+                "heartbeat_at": now,
+                "error_message": message,
                 "progress_percent": 100,
             },
         )

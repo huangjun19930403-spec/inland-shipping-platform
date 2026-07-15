@@ -45,6 +45,8 @@ from app.models.navigation import (
     NavigationGraphEdgeConstraint,
     NavigationGraphNode,
     NavigationGraphVersion,
+    NavigationHifleetRouteCache,
+    NavigationRouteTrajectoryCache,
     NavigationRouteQualityIssue,
     NavigationRouteRequest,
     NavigationRouteResult,

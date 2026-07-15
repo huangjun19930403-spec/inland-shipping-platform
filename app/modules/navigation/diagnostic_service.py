@@ -42,7 +42,15 @@ DEFAULT_ALIAS_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "
 DEFAULT_SCOPE_CONFIG = PROJECT_ROOT / "scripts" / "seed_data" / "navigation" / "navigation_real_scope.json"
 REAL_WATER_SOURCE_CODE = "RIVER_SHAPEFILE_2026"
 SEED_OVERLAP_SUSPECT_THRESHOLD = 0.35
-PUBLISHED_BOUNDARY_POLICIES = {"MANUAL_DRAW", "OFFICIAL_IMPORT"}
+PUBLISHED_BOUNDARY_POLICIES = {"MANUAL_DRAW", "OFFICIAL_IMPORT", "AUTO_WATER_BODY_UNION", "AUTO_BOUNDARY_MERGE"}
+PUBLISHED_BOUNDARY_QUALITY_CODES = {
+    "MANUAL_PUBLISHED",
+    "OFFICIAL_PUBLISHED",
+    "AUTO_PUBLISHED",
+    "READY",
+    "READY_WITH_WARNING",
+    "HIGH_CONFIDENCE",
+}
 LAYER_PRIORITY = {
     "一级水系": 1,
     "二级水系": 2,
@@ -331,10 +339,8 @@ class NavigationDiagnosticService:
                         NavigationChannelBoundary.channel_id == channel.id,
                         NavigationChannelBoundary.is_current.is_(True),
                         NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
-                        or_(
-                            NavigationChannelBoundary.coverage_policy_code.in_(PUBLISHED_BOUNDARY_POLICIES),
-                            NavigationChannelBoundary.boundary_quality_code == "MANUAL_PUBLISHED",
-                        ),
+                        NavigationChannelBoundary.coverage_policy_code.in_(PUBLISHED_BOUNDARY_POLICIES),
+                        NavigationChannelBoundary.boundary_quality_code.in_(PUBLISHED_BOUNDARY_QUALITY_CODES),
                     )
                 )
                 or 0

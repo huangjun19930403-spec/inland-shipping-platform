@@ -124,7 +124,7 @@ async def _seed_graph(session: AsyncSession) -> None:
             from_node_id=1,
             to_node_id=2,
             channel_id=88,
-            geometry_json=_line((120.0, 31.0), (120.1, 31.0)),
+            geometry_json=_line((120.0, 31.0), (120.05, 31.01), (120.1, 31.0)),
             length_km=11.1,
             direction_code="BIDIRECTIONAL",
             lock_required=False,

@@ -115,15 +115,19 @@ async def _clean_freight_normalization(task_id: int, requested_by: int | None = 
             raise
 
 
-def _run_tracked(celery_task_id: str | None, task_run_id: int | None, stage_name: str, coro):
-    run_coro_sync(_track_task_start(task_run_id, celery_task_id, stage_name))
+async def _run_tracked_async(celery_task_id: str | None, task_run_id: int | None, stage_name: str, coro):
+    await _track_task_start(task_run_id, celery_task_id, stage_name)
     try:
-        result = run_coro_sync(coro)
+        result = await coro
     except BaseException as exc:
-        run_coro_sync(_track_task_failure(task_run_id, exc))
+        await _track_task_failure(task_run_id, exc)
         raise
-    run_coro_sync(_track_task_success(task_run_id, result))
+    await _track_task_success(task_run_id, result)
     return result
+
+
+def _run_tracked(celery_task_id: str | None, task_run_id: int | None, stage_name: str, coro):
+    return run_coro_sync(_run_tracked_async(celery_task_id, task_run_id, stage_name, coro))
 
 
 _FREIGHT_TASK_OPTIONS = {

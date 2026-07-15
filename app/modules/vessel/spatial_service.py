@@ -18,6 +18,7 @@ from app.integrations.config_keys import (
     ES_HISTORY_CONFIG_PROFILE,
     ES_HISTORY_INDEX_PREFIX,
     ES_HOST,
+    ES_R_HOST,
     VESSEL_SPATIAL_DIRECTION_TOLERANCE_DEG,
     VESSEL_SPATIAL_HISTORY_MAX_POINTS,
     VESSEL_SPATIAL_MIN_COVERAGE_RATE,
@@ -113,6 +114,27 @@ class _HistorySearchResult:
     failed_batches: list[dict[str, Any]]
     source_status_code: str
     source_indices: list[str]
+
+
+def _nested_value(source: dict[str, Any], path: str) -> Any:
+    current: Any = source
+    for part in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
+
+
+def _first_history_value(source: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        value = _nested_value(source, key) if "." in key else source.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _epoch_millis(value: datetime) -> int:
+    return int(value.timestamp() * 1000)
 
 
 def _utcnow() -> datetime:
@@ -680,6 +702,8 @@ class VesselSpatialAnalysisService:
             return _HistorySearchResult({}, False, None, [], "EMPTY", [])
         host = await self.runtime_config.get_value(ES_HOST, settings.ES_HOST or "", profile_code=ES_HISTORY_CONFIG_PROFILE)
         if not (host or "").strip():
+            host = await self.runtime_config.get_value(ES_R_HOST, settings.ES_R_HOST or "", profile_code=ES_HISTORY_CONFIG_PROFILE)
+        if not (host or "").strip():
             return _HistorySearchResult(
                 {},
                 False,
@@ -689,20 +713,49 @@ class VesselSpatialAnalysisService:
                 [],
             )
         index_prefix = await self.runtime_config.get_value(ES_HISTORY_INDEX_PREFIX, settings.ES_HISTORY_INDEX_PREFIX or "", profile_code=ES_HISTORY_CONFIG_PROFILE)
-        index = f"{index_prefix or settings.ES_HISTORY_INDEX_PREFIX}*"
+        index_name = (index_prefix or settings.ES_HISTORY_INDEX_PREFIX or "").strip()
+        index = index_name if "*" in index_name or not index_name.endswith(("_", "-")) else f"{index_name}*"
         max_points = await self.runtime_config.get_int(VESSEL_SPATIAL_HISTORY_MAX_POINTS, settings.VESSEL_SPATIAL_HISTORY_MAX_POINTS, profile_code=ES_HISTORY_CONFIG_PROFILE)
         body = {
             "size": max(1, int(max_points)),
             "query": {
                 "bool": {
                     "filter": [
-                        {"terms": {"mmsi.keyword": unique_values}},
-                        {"range": {"position_time": {"gte": start_at.isoformat(), "lte": end_at.isoformat()}}},
+                        {
+                            "bool": {
+                                "should": [
+                                    {"terms": {"shipMmsi": unique_values}},
+                                    {"terms": {"mmsi.keyword": unique_values}},
+                                    {"terms": {"mmsi": unique_values}},
+                                    {"terms": {"MMSI": unique_values}},
+                                ],
+                                "minimum_should_match": 1,
+                            }
+                        },
+                        {
+                            "bool": {
+                                "should": [
+                                    {"range": {"posTime": {"gte": _epoch_millis(start_at), "lte": _epoch_millis(end_at)}}},
+                                    {"range": {"position_time": {"gte": start_at.isoformat(), "lte": end_at.isoformat()}}},
+                                    {"range": {"time": {"gte": start_at.isoformat(), "lte": end_at.isoformat()}}},
+                                    {"range": {"@timestamp": {"gte": start_at.isoformat(), "lte": end_at.isoformat()}}},
+                                ],
+                                "minimum_should_match": 1,
+                            }
+                        },
                     ]
                 }
             },
-            "_source": ["mmsi", "MMSI", "lon", "lng", "longitude", "lat", "latitude", "position_time", "time", "@timestamp", "source_index", "speed", "speed_kn", "course", "cog", "heading"],
-            "sort": [{"position_time": {"order": "asc"}}, {"@timestamp": {"order": "asc"}}],
+            "_source": [
+                "shipMmsi", "mmsi", "MMSI", "location", "lon", "lng", "longitude", "lat", "latitude",
+                "posTime", "position_time", "time", "@timestamp", "source_index", "speed", "speed_kn",
+                "course", "cog", "heading", "head",
+            ],
+            "sort": [
+                {"posTime": {"order": "asc", "unmapped_type": "date", "missing": "_last"}},
+                {"position_time": {"order": "asc", "unmapped_type": "date", "missing": "_last"}},
+                {"@timestamp": {"order": "asc", "unmapped_type": "date", "missing": "_last"}},
+            ],
         }
         try:
             payload = await self.history_client.search(index, body)
@@ -713,10 +766,10 @@ class VesselSpatialAnalysisService:
         source_indices: set[str] = set()
         for hit in hits:
             source = hit.get("_source") or {}
-            mmsi = str(first_value(source, ["mmsi", "MMSI"]) or "").strip()
-            lon = to_float(first_value(source, ["longitude", "lon", "lng"]))
-            lat = to_float(first_value(source, ["latitude", "lat"]))
-            point_time = parse_datetime(first_value(source, ["position_time", "time", "@timestamp"]))
+            mmsi = str(_first_history_value(source, ["shipMmsi", "mmsi", "MMSI"]) or "").strip()
+            lon = to_float(_first_history_value(source, ["longitude", "lon", "lng", "location.lon"]))
+            lat = to_float(_first_history_value(source, ["latitude", "lat", "location.lat"]))
+            point_time = parse_datetime(_first_history_value(source, ["posTime", "position_time", "time", "@timestamp"]))
             if not mmsi or lon is None or lat is None or not valid_lon_lat(lon, lat):
                 continue
             source_index = hit.get("_index") or source.get("source_index")
@@ -728,11 +781,31 @@ class VesselSpatialAnalysisService:
                 "latitude": lat,
                 "position_time": point_time,
                 "source_index": source_index,
-                "speed_kn": to_float(first_value(source, ["speed_kn", "speed"])),
-                "course_deg": to_float(first_value(source, ["course", "cog"])),
-                "heading_deg": to_float(first_value(source, ["heading"])),
+                "speed_kn": to_float(_first_history_value(source, ["speed_kn", "speed"])),
+                "course_deg": to_float(_first_history_value(source, ["course", "cog"])),
+                "heading_deg": to_float(_first_history_value(source, ["heading", "head"])),
             })
-        return _HistorySearchResult(dict(points_by_mmsi), False, None, [], "AVAILABLE", sorted(source_indices))
+        historical_points = {
+            mmsi: points
+            for mmsi, points in points_by_mmsi.items()
+            if len({point["position_time"] for point in points if point.get("position_time")}) >= 2
+        }
+        if points_by_mmsi and not historical_points:
+            return _HistorySearchResult(
+                {},
+                True,
+                "统一 ES 当前仅提供最新船位，历史轨迹样本不足",
+                [{
+                    "batch_index": "history",
+                    "mmsi_count": len(unique_values),
+                    "sample_mmsi": unique_values[:5],
+                    "error_code": "HISTORICAL_AIS_INSUFFICIENT",
+                    "error_message": "统一 ES 当前仅提供最新船位，历史轨迹样本不足",
+                }],
+                "PARTIAL",
+                sorted(source_indices),
+            )
+        return _HistorySearchResult(dict(historical_points), False, None, [], "AVAILABLE" if historical_points else "EMPTY", sorted(source_indices))
 
     async def _persist_spatial_snapshot(
         self,

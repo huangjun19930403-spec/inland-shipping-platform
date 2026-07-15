@@ -75,15 +75,32 @@ class VesselAssetListMixin(VesselAssetSummaryMixin):
     async def _page_profiles(self, stmt: Any, query: Any, order_by: list[Any]) -> tuple[int, list[VesselProfile]]:
         total_subquery = stmt.with_only_columns(VesselProfile.id).group_by(VesselProfile.id).subquery()
         total = int((await self.db.execute(select(func.count()).select_from(total_subquery))).scalar_one())
+        group_by_columns = self._asset_group_by_columns(order_by)
         rows = (
             await self.db.execute(
-                stmt.group_by(VesselProfile.id)
+                stmt.group_by(*group_by_columns)
                 .order_by(*order_by)
                 .offset((query.page - 1) * query.page_size)
                 .limit(query.page_size)
             )
         ).scalars().all()
         return total, list(rows)
+
+    @staticmethod
+    def _asset_group_by_columns(order_by: list[Any]) -> list[Any]:
+        columns: list[Any] = [VesselProfile.id]
+        for expr in order_by:
+            columns.append(VesselAssetListMixin._unwrap_order_expression(expr))
+        return columns
+
+    @staticmethod
+    def _unwrap_order_expression(expr: Any) -> Any:
+        current = expr
+        while True:
+            element = getattr(current, "element", None)
+            if element is None or element is current:
+                return current
+            current = element
 
     def _profile_list_stmt(self, query: Any, *, include_summary: bool = False):
         owner_join = [VesselOwnerPeriod.vessel_profile_id == VesselProfile.id, VesselOwnerPeriod.is_current.is_(True)]
@@ -202,9 +219,18 @@ class VesselAssetListMixin(VesselAssetSummaryMixin):
             "quality_score_desc": [VesselProfileSummary.data_quality_score.desc().nullslast()],
             "refreshed_at_desc": [VesselProfileSummary.refreshed_at.desc().nullslast()],
             "ais_time_desc": [VesselProfileSummary.latest_position_time.desc().nullslast()],
+            "quality_issue_count_desc": [VesselProfileSummary.quality_issue_count.desc().nullslast()],
         }
-        return sort_orders.get(getattr(query, "sort", None), default_order) + (
-            [] if getattr(query, "sort", None) not in sort_orders else [VesselProfile.updated_at.desc(), VesselProfile.id.desc()]
+        sort_aliases = {
+            "quality_score:asc": "quality_score_asc",
+            "quality_score:desc": "quality_score_desc",
+            "refreshed_at:desc": "refreshed_at_desc",
+            "ais_time:desc": "ais_time_desc",
+            "quality_issue_count:desc": "quality_issue_count_desc",
+        }
+        sort_key = sort_aliases.get(getattr(query, "sort", None), getattr(query, "sort", None))
+        return sort_orders.get(sort_key, default_order) + (
+            [] if sort_key not in sort_orders else [VesselProfile.updated_at.desc(), VesselProfile.id.desc()]
         )
 
     async def _build_asset_items(self, profiles: list[VesselProfile]) -> list[VesselAssetListItemResponse]:

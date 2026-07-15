@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Callable
 
+from celery.result import AsyncResult
 from sqlalchemy import func, select
 
 from app.core.exceptions import NotFoundError, ValidationError
@@ -16,6 +17,7 @@ from app.modules.analysis.schemas import (
     AnalysisTaskTriggerRequest,
     PageResponse,
 )
+from app.tasks.celery_app import celery_app
 
 
 def _job_to_response(entity: AnalysisJobRun) -> AnalysisJobRunResponse:
@@ -77,6 +79,36 @@ def _status_name(status_code: str) -> str:
 
 
 class AnalysisJobViewMixin:
+    async def _mark_failed_if_celery_failed(self, row: AnalysisJobRun) -> bool:
+        if row.status_code not in {"QUEUED", "RUNNING"} or not row.celery_task_id:
+            return False
+        try:
+            result = AsyncResult(row.celery_task_id, app=celery_app)
+            if result.state != "FAILURE":
+                return False
+            message = str(result.info)[:4000]
+        except Exception:
+            return False
+
+        now = datetime.utcnow()
+        row.status_code = "FAILED"
+        row.status_name = _status_name("FAILED")
+        row.finished_at = now
+        baseline = row.started_at or row.queued_at or row.created_at
+        row.duration_ms = int((now - baseline).total_seconds() * 1000) if baseline else None
+        row.error_message = message
+
+        definition = await self.db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == row.job_code))
+        if definition is not None:
+            definition.last_run_id = row.id
+            definition.last_status_code = row.status_code
+            definition.last_finished_at = now
+            definition.last_result_summary_json = {"error": message}
+            definition.updated_at = now
+        await self.db.commit()
+        await self.db.refresh(row)
+        return True
+
     async def _page(self, stmt: Any, *, page: int, page_size: int, order_by: tuple[Any, ...], item_mapper: Callable[[Any], Any]) -> PageResponse:
         total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
         rows = (await self.db.execute(stmt.order_by(*order_by).offset((page - 1) * page_size).limit(page_size))).scalars().all()
@@ -100,18 +132,23 @@ class AnalysisJobViewMixin:
             stmt = stmt.where(AnalysisJobRun.stat_date_to >= date_from)
         if date_to:
             stmt = stmt.where(AnalysisJobRun.stat_date_from <= date_to)
-        return await self._page(
-            stmt,
-            page=page,
-            page_size=page_size,
-            order_by=(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc()),
-            item_mapper=_job_to_response,
-        )
+        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
+        rows = (
+            await self.db.execute(
+                stmt.order_by(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+        for row in rows:
+            await self._mark_failed_if_celery_failed(row)
+        return PageResponse(total=total, page=page, page_size=page_size, items=[_job_to_response(row) for row in rows])
 
     async def get_job_detail(self, job_run_id: int) -> AnalysisJobRunDetailResponse:
         row = await self.db.scalar(select(AnalysisJobRun).where(AnalysisJobRun.id == job_run_id))
         if row is None:
             raise NotFoundError("AnalysisJobRun", job_run_id)
+        await self._mark_failed_if_celery_failed(row)
         return AnalysisJobRunDetailResponse(
             **_job_to_response(row).model_dump(),
             parameters_json=row.parameters_json,
@@ -150,6 +187,8 @@ class AnalysisJobViewMixin:
                 .limit(20)
             )
         ).scalars().all()
+        for item in runs:
+            await self._mark_failed_if_celery_failed(item)
         return AnalysisTaskDetailResponse(**_task_to_response(row).model_dump(), recent_runs=[_job_to_response(item) for item in runs])
 
     async def list_task_runs(
@@ -168,13 +207,17 @@ class AnalysisJobViewMixin:
             stmt = stmt.where(AnalysisJobRun.stat_date_to >= date_from)
         if date_to:
             stmt = stmt.where(AnalysisJobRun.stat_date_from <= date_to)
-        return await self._page(
-            stmt,
-            page=page,
-            page_size=page_size,
-            order_by=(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc()),
-            item_mapper=_job_to_response,
-        )
+        total = int((await self.db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one())
+        rows = (
+            await self.db.execute(
+                stmt.order_by(AnalysisJobRun.created_at.desc(), AnalysisJobRun.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+        for row in rows:
+            await self._mark_failed_if_celery_failed(row)
+        return PageResponse(total=total, page=page, page_size=page_size, items=[_job_to_response(row) for row in rows])
 
     async def trigger_task(self, job_code: str, payload: AnalysisTaskTriggerRequest, triggered_by: str | None) -> AnalysisJobRunResponse:
         definition = await self.db.scalar(select(AnalysisJobDefinition).where(AnalysisJobDefinition.job_code == job_code))

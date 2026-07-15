@@ -522,6 +522,112 @@ class NavigationRouteResult(Base, TimestampMixin):
     )
 
 
+class NavigationHifleetRouteCache(Base, TimestampMixin):
+    __tablename__ = "navigation_hifleet_route_cache"
+    __table_args__ = (
+        UniqueConstraint("route_key", name="uk_navigation_hifleet_route_cache_key"),
+        Index("ix_navigation_hifleet_route_cache_pair", "normalized_pair_key"),
+        Index("ix_navigation_hifleet_route_cache_origin", "origin_ref_type_code", "origin_ref_id"),
+        Index("ix_navigation_hifleet_route_cache_destination", "destination_ref_type_code", "destination_ref_id"),
+        Index("ix_navigation_hifleet_route_cache_status", "status_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    route_key: Mapped[str] = mapped_column(String(192), nullable=False, index=True)
+    normalized_pair_key: Mapped[str] = mapped_column(String(192), nullable=False, index=True)
+    provider_code: Mapped[str] = mapped_column(String(64), nullable=False, default="HIFLEET", index=True)
+    transport_mode_code: Mapped[str] = mapped_column(String(64), nullable=False, default="WATER", index=True)
+    origin_ref_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    origin_ref_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    origin_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    origin_lng: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    origin_lat: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    destination_ref_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    destination_ref_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    destination_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    destination_lng: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    destination_lat: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    geometry_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    geometry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    distance_km: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    estimated_duration_hour: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    provider_trace_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="READY", index=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    raw_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class NavigationRouteTrajectoryCache(Base, TimestampMixin):
+    __tablename__ = "navigation_route_trajectory_cache"
+    __table_args__ = (
+        UniqueConstraint("route_key", name="uk_navigation_route_trajectory_cache_key"),
+        Index("ix_navigation_route_trajectory_cache_pair", "normalized_pair_key"),
+        Index("ix_navigation_route_trajectory_cache_origin", "origin_ref_type_code", "origin_ref_id"),
+        Index("ix_navigation_route_trajectory_cache_destination", "destination_ref_type_code", "destination_ref_id"),
+        Index("ix_navigation_route_trajectory_cache_status", "cache_status_code"),
+        Index("ix_navigation_route_trajectory_cache_provider", "provider_code", "source_type_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    route_key: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    normalized_pair_key: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    transport_mode_code: Mapped[str] = mapped_column(String(64), nullable=False, default="WATER", index=True)
+    planning_mode_code: Mapped[str] = mapped_column(String(64), nullable=False, default="RECOMMENDED", index=True)
+    graph_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    graph_context_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    vessel_profile_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    origin_ref_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    origin_ref_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    origin_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    origin_lng: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    origin_lat: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    destination_ref_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    destination_ref_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    destination_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    destination_lng: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    destination_lat: Mapped[float] = mapped_column(Numeric(24, 15), nullable=False)
+    provider_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_type_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    engine_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    cache_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="FAILED", index=True)
+    status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="FAILED", index=True)
+    quality_code: Mapped[str] = mapped_column(String(64), nullable=False, default="FAILED", index=True)
+    quality_score: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    geometry_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    geometry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    distance_km: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    estimated_duration_hour: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_segment_km: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    edge_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    channel_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    passed_node_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    passed_lock_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    passed_bridge_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    issue_summary_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    validation_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    own_algorithm_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    hifleet_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    hifleet_cache_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    original_route_request_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_route_request.id"), nullable=True, index=True
+    )
+    original_route_result_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("navigation_route_result.id"), nullable=True, index=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    raw_request_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    raw_response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class NavigationAnnotationTask(Base, TimestampMixin):
     __tablename__ = "navigation_annotation_task"
     __table_args__ = (

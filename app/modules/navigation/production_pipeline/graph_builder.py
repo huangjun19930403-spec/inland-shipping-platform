@@ -9,6 +9,7 @@ from typing import Any
 
 from shapely.geometry import LineString, Point, mapping
 
+from app.modules.navigation.production_pipeline.boundary_quality_audit import vessel_limit_profile
 from app.modules.navigation.production_pipeline.centerline_builder import (
     clean_line_coords,
     derive_boundary_centerline,
@@ -34,6 +35,9 @@ class CenterlineAsset:
     line: LineString
     channel_name: str | None
     channel_type_code: str | None
+    technical_grade_code: str | None = None
+    vessel_limit_profile: dict[str, Any] = field(default_factory=dict)
+    boundary_trust_code: str | None = None
     quality_code: str = "READY_WITH_WARNING"
     confidence_score: int = 88
     review_issue_codes: list[str] = field(
@@ -157,11 +161,26 @@ def build_centerline_seed_rows(
                 continue
             component_water_area = _component_water_area_summary(line, boundary)
             is_direct_water_area = _component_is_direct_water_area(component_water_area)
+            boundary_audit = _boundary_integrity_audit(boundary)
+            boundary_issue_codes = list(boundary_audit.get("issue_codes") or [])
+            vessel_profile = vessel_limit_profile(
+                current_grade_code=channel.get("technical_grade_current_code"),
+                planned_grade_code=channel.get("technical_grade_planned_code"),
+            )
             review_issue_codes = ["REVIER_DERIVED_NEEDS_OPERATOR_REVIEW", "GUIDE_PASSTHROUGH_BOUNDARY_REVIEW"]
             if not is_direct_water_area:
                 review_issue_codes.append("REVIER_BRIDGE_WATER_AREA_NEEDS_REVIEW")
+            for issue_code in boundary_issue_codes:
+                if issue_code not in review_issue_codes:
+                    review_issue_codes.append(issue_code)
+            for issue_code in vessel_profile.get("issue_codes") or []:
+                if issue_code not in review_issue_codes:
+                    review_issue_codes.append(issue_code)
             quality_code = "READY_WITH_WARNING" if is_direct_water_area else "LOW_CONFIDENCE"
             confidence_score = 88 if is_direct_water_area else 72
+            if boundary_audit.get("trust_code") in {"FAILED", "NEEDS_REVIEW"}:
+                quality_code = "LOW_CONFIDENCE"
+                confidence_score = min(confidence_score, 60)
             centerline_code = f"REVCL-{_clean_code(channel_code, 64)}-{component_index:03d}"
             line_fields = line_seed_fields(line)
             algorithm_code = "REVIER_BANK_PAIR_CENTERLINE_V2"
@@ -184,6 +203,9 @@ def build_centerline_seed_rows(
                     "source_boundary_channel_code": channel_code,
                     "component_index": component_index,
                     "component_water_area": component_water_area,
+                    "boundary_integrity_audit": boundary_audit,
+                    "water_system": boundary_audit.get("water_system"),
+                    "vessel_limit_profile": vessel_profile,
                     "manual_publish_gate": "production_seed",
                     "validation": validation,
                     "hifleet_benchmark_policy": "same water-route guardrails: no straight fallback, enough points, anchored path, provider/edge trace required",
@@ -224,6 +246,8 @@ def build_centerline_seed_rows(
                     "centerline_code": centerline_code,
                     "algorithm": algorithm_code,
                     "component_water_area": component_water_area,
+                    "boundary_integrity_audit": boundary_audit,
+                    "vessel_limit_profile": vessel_profile,
                 },
             }
             centerlines.append(centerline)
@@ -235,12 +259,21 @@ def build_centerline_seed_rows(
                     line=line,
                     channel_name=channel.get("channel_name"),
                     channel_type_code=channel.get("channel_type_code"),
+                    technical_grade_code=vessel_profile.get("technical_grade_code"),
+                    vessel_limit_profile=vessel_profile,
+                    boundary_trust_code=boundary_audit.get("trust_code"),
                     quality_code=quality_code,
                     confidence_score=confidence_score,
                     review_issue_codes=review_issue_codes,
                 )
             )
     return centerlines, segments, assets, annotation_tasks
+
+
+def _boundary_integrity_audit(boundary: dict[str, Any]) -> dict[str, Any]:
+    source_trace = boundary.get("source_trace_json") if isinstance(boundary.get("source_trace_json"), dict) else {}
+    audit = source_trace.get("boundary_integrity_audit") if isinstance(source_trace, dict) else None
+    return dict(audit) if isinstance(audit, dict) else {}
 
 
 def _component_water_area_summary(line: LineString, boundary: dict[str, Any]) -> dict[str, Any] | None:
@@ -293,6 +326,39 @@ def _nearest_centerline(point: Point, assets: list[CenterlineAsset]) -> tuple[Ce
         if best is None or distance_m < best[2]:
             best = (asset, snap_point, distance_m, ratio)
     return best
+
+
+def asset_limit_profile(source_type_code: str, centerline_code: str | None, assets: list[CenterlineAsset]) -> dict[str, Any]:
+    if source_type_code == "TRANSPORT_NODE_CONNECTOR":
+        return {
+            "technical_grade_code": None,
+            "unknown_constraint_flag": True,
+            "constraint_data_completeness_code": "CONNECTOR_UNKNOWN",
+            "source_code": "TRANSPORT_NODE_CONNECTOR",
+            "issue_codes": ["TRANSPORT_CONNECTOR_NAVIGATION_CONSTRAINT_UNKNOWN"],
+            "note": "运输节点接入段需要现场/作业区水域资料复核。",
+        }
+    if centerline_code:
+        for asset in assets:
+            if asset.centerline_code == centerline_code:
+                return dict(asset.vessel_limit_profile or {})
+    return {
+        "technical_grade_code": None,
+        "unknown_constraint_flag": True,
+        "constraint_data_completeness_code": "UNKNOWN",
+        "source_code": "CENTERLINE_ASSET_MISSING",
+        "issue_codes": ["NAVIGATION_TECHNICAL_GRADE_UNKNOWN"],
+        "note": "图边没有可追溯的中心线技术等级。",
+    }
+
+
+def _asset_boundary_trust(centerline_code: str | None, assets: list[CenterlineAsset]) -> str | None:
+    if not centerline_code:
+        return None
+    for asset in assets:
+        if asset.centerline_code == centerline_code:
+            return asset.boundary_trust_code
+    return None
 
 
 def _component_summary(node_codes: list[str], edge_rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -400,6 +466,7 @@ def build_graph_seed_rows(
         routing_enabled: bool = True,
         validation_summary_json: dict[str, Any] | None = None,
     ) -> None:
+        vessel_profile = asset_limit_profile(source_type_code, centerline_code, assets)
         edges.append(
             {
                 "edge_code": edge_code,
@@ -410,14 +477,25 @@ def build_graph_seed_rows(
                 "geometry_json": mapping(line),
                 "length_km": round(line_length_m(line) / 1000.0, 4),
                 "direction_code": "BIDIRECTIONAL",
-                "technical_grade_code": None,
+                "technical_grade_code": vessel_profile.get("technical_grade_code"),
+                "min_depth_m": vessel_profile.get("min_depth_m"),
+                "min_width_m": vessel_profile.get("min_width_m"),
+                "max_allowed_draft_m": vessel_profile.get("max_allowed_draft_m"),
+                "max_allowed_tonnage": vessel_profile.get("max_allowed_tonnage"),
+                "max_air_draft_m": vessel_profile.get("max_air_draft_m"),
+                "max_beam_m": vessel_profile.get("max_beam_m"),
+                "max_length_m": vessel_profile.get("max_length_m"),
                 "routing_enabled": routing_enabled,
                 "quality_code": quality_code,
                 "source_type_code": source_type_code,
                 "confidence_score": confidence_score,
                 "version_no": 1,
-                "unknown_constraint_flag": False,
-                "validation_summary_json": validation_summary_json or {},
+                "unknown_constraint_flag": bool(vessel_profile.get("unknown_constraint_flag")),
+                "validation_summary_json": {
+                    **(validation_summary_json or {}),
+                    "vessel_limit_profile": vessel_profile,
+                    "boundary_trust_code": _asset_boundary_trust(centerline_code, assets),
+                },
             }
         )
 
@@ -711,6 +789,7 @@ def build_revier_graph_seed(
             "status_code": "READY" if graph_edges else "FAILED",
             "quality_code": "READY_WITH_WARNING" if graph_edges else "FAILED",
             "build_report": graph_report,
+            "boundary_integrity_summary": _boundary_integrity_summary(boundary_rows),
         },
     }
     all_tasks = [*boundary_annotation_tasks, *centerline_tasks]
@@ -725,6 +804,7 @@ def build_revier_graph_seed(
         annotation_tasks=all_tasks,
         report={
             **graph_report,
+            "boundary_integrity_summary": _boundary_integrity_summary(boundary_rows),
             "boundary_count": len(boundary_rows),
             "centerline_count": len(centerlines),
             "centerline_segment_count": len(segments),
@@ -734,6 +814,28 @@ def build_revier_graph_seed(
     )
     _write_graph_seed_files(seed_dir, build)
     return build
+
+
+def _boundary_integrity_summary(boundary_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    audits: list[dict[str, Any]] = []
+    for row in boundary_rows:
+        source_trace = row.get("source_trace_json") if isinstance(row.get("source_trace_json"), dict) else {}
+        audit = source_trace.get("boundary_integrity_audit") if isinstance(source_trace, dict) else None
+        if isinstance(audit, dict):
+            audits.append(audit)
+    return {
+        "audited_boundary_count": len(audits),
+        "ready_count": sum(1 for audit in audits if audit.get("trust_code") in {"READY", "READY_WITH_WARNING"}),
+        "needs_review_count": sum(1 for audit in audits if audit.get("trust_code") == "NEEDS_REVIEW"),
+        "failed_count": sum(1 for audit in audits if audit.get("trust_code") == "FAILED"),
+        "fragmented_source_count": sum(1 for audit in audits if "SOURCE_GEOMETRY_FRAGMENTED" in (audit.get("issue_codes") or [])),
+        "technical_grade_unknown_count": sum(
+            1 for audit in audits if "NAVIGATION_TECHNICAL_GRADE_UNKNOWN" in (audit.get("issue_codes") or [])
+        ),
+        "basemap_not_verified_count": sum(
+            1 for audit in audits if "BOUNDARY_NOT_INDEPENDENTLY_BASEMAP_VERIFIED" in (audit.get("issue_codes") or [])
+        ),
+    }
 
 
 def _write_graph_seed_files(seed_dir: Path, build: GraphSeedBuild) -> None:

@@ -230,7 +230,7 @@ class FreightCandidate(Base, TimestampMixin):
     ai_review_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="PASS", index=True)
     manual_overrides_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     availability_status_code: Mapped[str] = mapped_column(String(64), nullable=False, default="UNKNOWN", index=True)
-    manual_review_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    manual_review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_warning_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     confirmed_freight_id: Mapped[int | None] = mapped_column(
@@ -249,7 +249,7 @@ class FreightCandidateManualFeedback(Base):
     action_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     before_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     after_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    feedback_remark: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    feedback_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     operator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     operated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

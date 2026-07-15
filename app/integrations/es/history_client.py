@@ -15,6 +15,12 @@ from app.integrations.config_keys import (
     ES_HOST,
     ES_PASSWORD,
     ES_PORT,
+    ES_R_HOST,
+    ES_R_INDEX,
+    ES_R_PASSWORD,
+    ES_R_PORT,
+    ES_R_SCHEME,
+    ES_R_USER,
     ES_SCHEME,
     ES_TIMEOUT_SECONDS,
     ES_USER,
@@ -52,8 +58,15 @@ class HistoryEsClient:
                 settings.ES_HISTORY_INDEX_PREFIX or "",
                 profile_code=ES_HISTORY_CONFIG_PROFILE,
             )
-            return (value or "").strip()
-        return (settings.ES_HISTORY_INDEX_PREFIX or "").strip()
+            if (value or "").strip():
+                return (value or "").strip()
+            fallback = await self._runtime_config.get_value(
+                ES_R_INDEX,
+                settings.ES_R_INDEX or "",
+                profile_code=ES_HISTORY_CONFIG_PROFILE,
+            )
+            return (fallback or "").strip()
+        return (settings.ES_HISTORY_INDEX_PREFIX or settings.ES_R_INDEX or "").strip()
 
     async def _scheme(self) -> str:
         if self._runtime_config is not None:
@@ -62,8 +75,15 @@ class HistoryEsClient:
                 settings.ES_SCHEME or "http",
                 profile_code=ES_HISTORY_CONFIG_PROFILE,
             )
-            return (value or "http").strip() or "http"
-        return (settings.ES_SCHEME or "http").strip() or "http"
+            if (value or "").strip():
+                return (value or "http").strip() or "http"
+            fallback = await self._runtime_config.get_value(
+                ES_R_SCHEME,
+                settings.ES_R_SCHEME or "http",
+                profile_code=ES_HISTORY_CONFIG_PROFILE,
+            )
+            return (fallback or "http").strip() or "http"
+        return (settings.ES_SCHEME or settings.ES_R_SCHEME or "http").strip() or "http"
 
     async def _host(self) -> str:
         if self._runtime_config is not None:
@@ -72,8 +92,15 @@ class HistoryEsClient:
                 settings.ES_HOST or "",
                 profile_code=ES_HISTORY_CONFIG_PROFILE,
             )
-            return (value or "").strip()
-        return (settings.ES_HOST or "").strip()
+            if (value or "").strip():
+                return (value or "").strip()
+            fallback = await self._runtime_config.get_value(
+                ES_R_HOST,
+                settings.ES_R_HOST or "",
+                profile_code=ES_HISTORY_CONFIG_PROFILE,
+            )
+            return (fallback or "").strip()
+        return (settings.ES_HOST or settings.ES_R_HOST or "").strip()
 
     async def _port(self) -> int:
         default_port = int(settings.ES_PORT or 80)
@@ -83,8 +110,15 @@ class HistoryEsClient:
                 default_port,
                 profile_code=ES_HISTORY_CONFIG_PROFILE,
             )
-            return int(value)
-        return int(settings.ES_PORT or 80)
+            if int(value or 0) > 0:
+                return int(value)
+            fallback = await self._runtime_config.get_int(
+                ES_R_PORT,
+                int(settings.ES_R_PORT or default_port),
+                profile_code=ES_HISTORY_CONFIG_PROFILE,
+            )
+            return int(fallback)
+        return int(settings.ES_PORT or settings.ES_R_PORT or 80)
 
     async def _user(self) -> str:
         if self._runtime_config is not None:
@@ -93,8 +127,15 @@ class HistoryEsClient:
                 settings.ES_USER or "",
                 profile_code=ES_HISTORY_CONFIG_PROFILE,
             )
-            return (value or "").strip()
-        return (settings.ES_USER or "").strip()
+            if (value or "").strip():
+                return (value or "").strip()
+            fallback = await self._runtime_config.get_value(
+                ES_R_USER,
+                settings.ES_R_USER or "",
+                profile_code=ES_HISTORY_CONFIG_PROFILE,
+            )
+            return (fallback or "").strip()
+        return (settings.ES_USER or settings.ES_R_USER or "").strip()
 
     async def _password(self) -> str:
         if self._runtime_config is not None:
@@ -103,8 +144,15 @@ class HistoryEsClient:
                 settings.ES_PASSWORD or "",
                 profile_code=ES_HISTORY_CONFIG_PROFILE,
             )
-            return value or ""
-        return settings.ES_PASSWORD or ""
+            if value:
+                return value
+            fallback = await self._runtime_config.get_value(
+                ES_R_PASSWORD,
+                settings.ES_R_PASSWORD or "",
+                profile_code=ES_HISTORY_CONFIG_PROFILE,
+            )
+            return fallback or ""
+        return settings.ES_PASSWORD or settings.ES_R_PASSWORD or ""
 
     async def _timeout(self) -> float:
         default_timeout = float(settings.ES_HISTORY_TIMEOUT_SECONDS or settings.ES_TIMEOUT_SECONDS or 30.0)

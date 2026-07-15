@@ -1198,7 +1198,12 @@ class NavigationWorkbenchService:
                     NavigationGraphVersion.scope_code.not_like("MVP%"),
                     NavigationGraphVersion.edge_count > 0,
                 )
-                .order_by(NavigationGraphVersion.id.desc())
+                .order_by(
+                    NavigationGraphVersion.channel_count.desc(),
+                    NavigationGraphVersion.edge_count.desc(),
+                    NavigationGraphVersion.node_count.desc(),
+                    NavigationGraphVersion.id.desc(),
+                )
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -1206,15 +1211,14 @@ class NavigationWorkbenchService:
     async def _active_graph_edge_counts(self, channel_ids: list[int]) -> dict[int, int]:
         if not channel_ids:
             return {}
+        active_graph = await self._active_graph_version()
+        if active_graph is None:
+            return {}
         return await self._counts_by_channel(
             NavigationGraphEdge.channel_id,
             select(NavigationGraphEdge.channel_id, func.count())
-            .join(NavigationGraphVersion, NavigationGraphVersion.id == NavigationGraphEdge.graph_version_id)
             .where(
-                NavigationGraphVersion.is_active.is_(True),
-                NavigationGraphVersion.status_code == "READY",
-                NavigationGraphVersion.scope_code.not_like("MVP%"),
-                NavigationGraphVersion.edge_count > 0,
+                NavigationGraphEdge.graph_version_id == int(active_graph.id),
                 NavigationGraphEdge.channel_id.in_(channel_ids),
                 NavigationGraphEdge.routing_enabled.is_(True),
             ),
@@ -2592,7 +2596,7 @@ class NavigationWorkbenchService:
 
         def walk(item: Any) -> None:
             nonlocal raw_count
-            if not isinstance(item, list):
+            if not isinstance(item, (list, tuple)):
                 return
             if len(item) >= 2 and all(isinstance(item[index], (int, float)) for index in (0, 1)):
                 raw_count += 1
@@ -2607,13 +2611,13 @@ class NavigationWorkbenchService:
         geometry_type = geometry.get("type")
         coordinates = geometry.get("coordinates")
         polygons = [coordinates] if geometry_type == "Polygon" else coordinates if geometry_type == "MultiPolygon" else []
-        if not isinstance(polygons, list) or not polygons:
+        if not isinstance(polygons, (list, tuple)) or not polygons:
             return False
         for polygon in polygons:
-            if not isinstance(polygon, list) or not polygon:
+            if not isinstance(polygon, (list, tuple)) or not polygon:
                 return False
             for ring in polygon:
-                if not isinstance(ring, list) or len(ring) < 4:
+                if not isinstance(ring, (list, tuple)) or len(ring) < 4:
                     return False
                 if ring[0] != ring[-1]:
                     return False
@@ -2668,7 +2672,7 @@ class NavigationWorkbenchService:
         pairs: list[tuple[float, float]] = []
 
         def walk(item: Any) -> None:
-            if not isinstance(item, list):
+            if not isinstance(item, (list, tuple)):
                 return
             if len(item) >= 2 and all(isinstance(item[index], (int, float)) for index in (0, 1)):
                 lng = float(item[0])

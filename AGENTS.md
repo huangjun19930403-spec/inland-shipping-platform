@@ -103,3 +103,31 @@ rg "NO_APPROVED_CENTERLINE|UNKNOWN_CONSTRAINT_DATA|ROUTE_WATER_FALLBACK_MODE|REF
 - 跑了什么测试或检查。
 - 是否越界。
 - 是否提前做了后续轮次。
+
+<!-- BEGIN CODEX BACKEND SKILLS PACK -->
+## Codex backend change controls
+
+These rules apply to all work in this repository.
+
+### Required workflow
+
+- For every backend code change, use the `backend-minimal-change` skill.
+- For defects, configuration failures, Elasticsearch, Docker, Celery, or runtime issues, use `debug-before-edit` before changing code.
+- When an endpoint is consumed by the existing frontend, use `api-contract-guard`.
+- For database configuration, migrations, or Docker database writes, use `safe-database-config`.
+- Before claiming completion, use `verify-before-done` and provide fresh command evidence.
+
+### Permanent constraints
+
+- Make the smallest coherent change that satisfies the request.
+- Search for and reuse existing implementations before creating files or abstractions.
+- Do not refactor unrelated code or rewrite working modules to a preferred architecture.
+- Preserve existing routes, request parameters, response schemas, and frontend compatibility.
+- Do not modify the frontend repository unless the user explicitly requests it.
+- Preserve uncommitted user changes.
+- Never run `git reset --hard`, `git clean -fd`, delete Docker volumes, recreate the database, or clear business data.
+- Do not put credentials in source code, committed files, test fixtures, documentation, or logs.
+- More than 8 modified files or 300 added production lines is a scope warning, not permission to continue. Reassess reuse and explain why the budget must be exceeded.
+- Add regression tests only for behavior changed by the task; do not build broad new test infrastructure for a local fix.
+- Do not claim success without testing the changed behavior and checking the final Git diff.
+<!-- END CODEX BACKEND SKILLS PACK -->

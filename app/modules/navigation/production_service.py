@@ -50,7 +50,15 @@ BOUNDARY_CANDIDATE_POLICIES = {
     "AIS_INFERRED",
     "MANUAL_DRAW",
 }
-PUBLISHED_BOUNDARY_POLICIES = {"MANUAL_DRAW", "OFFICIAL_IMPORT"}
+PUBLISHED_BOUNDARY_POLICIES = {"MANUAL_DRAW", "OFFICIAL_IMPORT", "AUTO_WATER_BODY_UNION", "AUTO_BOUNDARY_MERGE"}
+PUBLISHED_BOUNDARY_QUALITY_CODES = {
+    "MANUAL_PUBLISHED",
+    "OFFICIAL_PUBLISHED",
+    "AUTO_PUBLISHED",
+    "READY",
+    "READY_WITH_WARNING",
+    "HIGH_CONFIDENCE",
+}
 STAGE_LABELS = {
     "NO_WATER_MATCH": "水体待归属",
     "WATER_MATCH_READY": "边界待生成",
@@ -602,10 +610,8 @@ class NavigationProductionService:
                 NavigationChannelBoundary.channel_id.in_(channel_ids),
                 NavigationChannelBoundary.is_current.is_(True),
                 NavigationChannelBoundary.geometry_status_code == "AVAILABLE",
-                or_(
-                    NavigationChannelBoundary.coverage_policy_code.in_(PUBLISHED_BOUNDARY_POLICIES),
-                    NavigationChannelBoundary.boundary_quality_code == "MANUAL_PUBLISHED",
-                ),
+                NavigationChannelBoundary.coverage_policy_code.in_(PUBLISHED_BOUNDARY_POLICIES),
+                NavigationChannelBoundary.boundary_quality_code.in_(PUBLISHED_BOUNDARY_QUALITY_CODES),
             ),
         )
         candidate_boundary_counts = await self.workbench._counts_by_channel(
@@ -699,7 +705,12 @@ class NavigationProductionService:
                     NavigationGraphVersion.scope_code.not_like("MVP%"),
                     NavigationGraphVersion.edge_count > 0,
                 )
-                .order_by(NavigationGraphVersion.id.desc())
+                .order_by(
+                    NavigationGraphVersion.channel_count.desc(),
+                    NavigationGraphVersion.edge_count.desc(),
+                    NavigationGraphVersion.node_count.desc(),
+                    NavigationGraphVersion.id.desc(),
+                )
             )
         ).scalars().first()
 

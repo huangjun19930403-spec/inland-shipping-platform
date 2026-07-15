@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     NavigationChannelCenterline,
+    NavigationChannelWaterBodyMatch,
     NavigationCenterlineSegment,
     NavigationGraphEdge,
     NavigationGraphEdgeConstraint,
@@ -30,11 +31,13 @@ from app.models import (
     NavigationGraphVersion,
 )
 from app.models.address import (
+    NavigationChannel,
     NavigationChannelBoundary,
     NavigationConstraintPoint,
     NavigationConstraintProfile,
     TransportNode,
 )
+from app.modules.navigation.production_pipeline.boundary_quality_audit import vessel_limit_profile
 from app.modules.navigation.service import NavigationCenterlineService
 from app.modules.navigation.services.graph_validation_service import validate_navigation_graph
 
@@ -135,6 +138,17 @@ class ConnectorSpec:
     quality_code: str
     routing_enabled: bool
     snap_distance_m: float
+    issue_codes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class CrossChannelConnectorSpec:
+    left: CenterlineAsset
+    right: CenterlineAsset
+    left_point: Point
+    right_point: Point
+    distance_m: float
+    source_type_code: str
 
 
 def _clean_code(value: str, max_len: int = 64) -> str:
@@ -284,37 +298,234 @@ def _bbox_with_margin(bbox: dict[str, float], margin_degree: float) -> dict[str,
     }
 
 
+def _bounds_tuple_with_margin(bounds: tuple[float, float, float, float], margin_degree: float) -> tuple[float, float, float, float]:
+    return (bounds[0] - margin_degree, bounds[1] - margin_degree, bounds[2] + margin_degree, bounds[3] + margin_degree)
+
+
 def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
     return not (left[2] < right[0] or right[2] < left[0] or left[3] < right[1] or right[3] < left[1])
 
 
-def _append_cross_channel_crossing_issues(centerlines: list[CenterlineAsset], issues: list[GraphBuildIssue]) -> None:
+def _append_cross_channel_junctions(
+    centerlines: list[CenterlineAsset],
+    boundaries: dict[int, BaseGeometry],
+    water_body_ids_by_channel: dict[int, set[int]],
+    split_points: dict[int, list[SplitPointSpec]],
+    issues: list[GraphBuildIssue],
+    config: GraphBuildConfig,
+) -> list[CrossChannelConnectorSpec]:
     if len(centerlines) <= 1:
-        return
+        return []
+    connector_specs: list[CrossChannelConnectorSpec] = []
     geometries = [asset.geometry for asset in centerlines]
     tree = STRtree(geometries)
+    endpoint_margin_degree = max(config.endpoint_review_snap_m / 90_000.0, config.boundary_tolerance_degree)
     for left_index, left in enumerate(centerlines):
-        for right_index_raw in tree.query(left.geometry):
+        for right_index_raw in tree.query(left.geometry.buffer(endpoint_margin_degree)):
             right_index = int(right_index_raw)
             if right_index <= left_index:
                 continue
             right = centerlines[right_index]
             if left.row.channel_id == right.row.channel_id:
                 continue
-            if not _bounds_intersect(left.geometry.bounds, right.geometry.bounds):
+            if not _bounds_intersect(_bounds_tuple_with_margin(left.geometry.bounds, endpoint_margin_degree), right.geometry.bounds):
                 continue
             intersection = left.geometry.intersection(right.geometry)
-            if intersection.is_empty:
+            if not intersection.is_empty:
+                points = _intersection_points(intersection)
+                navigable_points = [
+                    (point, source_type_code)
+                    for point in points
+                    if (
+                        source_type_code := _cross_channel_intersection_source_type(
+                            point=point,
+                            left=left,
+                            right=right,
+                            boundaries=boundaries,
+                            water_body_ids_by_channel=water_body_ids_by_channel,
+                            config=config,
+                        )
+                    )
+                ]
+                if navigable_points:
+                    for point, source_type_code in navigable_points:
+                        split_points[left.asset_id].append(
+                            SplitPointSpec(
+                                point=point,
+                                node_type_code="CHANNEL_JUNCTION",
+                                source_type_code=source_type_code,
+                            )
+                        )
+                        split_points[right.asset_id].append(
+                            SplitPointSpec(
+                                point=point,
+                                node_type_code="CHANNEL_JUNCTION",
+                                source_type_code=source_type_code,
+                            )
+                        )
+                    continue
+                issues.append(
+                    GraphBuildIssue(
+                        "CROSSING_NOT_NAVIGABLE",
+                        "WARNING",
+                        "Centerlines intersect across different channels and were not connected",
+                        centerline_id=left.row.id,
+                        channel_id=left.row.channel_id,
+                    )
+                )
                 continue
-            issues.append(
-                GraphBuildIssue(
-                    "CROSSING_NOT_NAVIGABLE",
-                    "WARNING",
-                    "Centerlines intersect across different channels and were not connected",
-                    centerline_id=left.row.id,
-                    channel_id=left.row.channel_id,
+            connector = _near_cross_channel_confluence_connector(
+                left=left,
+                right=right,
+                boundaries=boundaries,
+                config=config,
+            )
+            if connector is None:
+                continue
+            split_points[left.asset_id].append(
+                SplitPointSpec(
+                    point=connector.left_point,
+                    node_type_code="CHANNEL_JUNCTION",
+                    source_type_code=connector.source_type_code,
                 )
             )
+            split_points[right.asset_id].append(
+                SplitPointSpec(
+                    point=connector.right_point,
+                    node_type_code="CHANNEL_JUNCTION",
+                    source_type_code=connector.source_type_code,
+                )
+            )
+            connector_specs.append(connector)
+    return connector_specs
+
+
+def _near_cross_channel_confluence_connector(
+    *,
+    left: CenterlineAsset,
+    right: CenterlineAsset,
+    boundaries: dict[int, BaseGeometry],
+    config: GraphBuildConfig,
+) -> CrossChannelConnectorSpec | None:
+    left_boundary = boundaries.get(int(left.row.channel_id))
+    right_boundary = boundaries.get(int(right.row.channel_id))
+    if left_boundary is None or right_boundary is None:
+        return None
+    candidates: list[tuple[float, Point, Point]] = []
+    for point in _line_endpoints(left.geometry):
+        right_point = _nearest_point_on_line(right.geometry, point)
+        candidates.append((_point_distance_m(point, right_point), point, right_point))
+    for point in _line_endpoints(right.geometry):
+        left_point = _nearest_point_on_line(left.geometry, point)
+        candidates.append((_point_distance_m(left_point, point), left_point, point))
+    if not candidates:
+        return None
+    distance_m, left_point, right_point = min(candidates, key=lambda item: item[0])
+    if distance_m > config.endpoint_review_snap_m:
+        return None
+    tolerance = config.boundary_tolerance_degree
+    connector = LineString([(left_point.x, left_point.y), (right_point.x, right_point.y)])
+    if not left_boundary.buffer(tolerance).covers(left_point):
+        return None
+    if not right_boundary.buffer(tolerance).covers(right_point):
+        return None
+    if not left_boundary.union(right_boundary).buffer(tolerance).covers(connector):
+        return None
+    return CrossChannelConnectorSpec(
+        left=left,
+        right=right,
+        left_point=left_point,
+        right_point=right_point,
+        distance_m=distance_m,
+        source_type_code="CROSS_CHANNEL_BOUNDARY_CONFLUENCE_CONNECTOR",
+    )
+
+
+def _line_endpoints(line: LineString) -> list[Point]:
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return []
+    return [Point(coords[0]), Point(coords[-1])]
+
+
+def _cross_channel_intersection_source_type(
+    *,
+    point: Point,
+    left: CenterlineAsset,
+    right: CenterlineAsset,
+    boundaries: dict[int, BaseGeometry],
+    water_body_ids_by_channel: dict[int, set[int]],
+    config: GraphBuildConfig,
+) -> str | None:
+    left_channel_id = int(left.row.channel_id)
+    right_channel_id = int(right.row.channel_id)
+    left_boundary = boundaries.get(left_channel_id)
+    right_boundary = boundaries.get(right_channel_id)
+    if left_boundary is None or right_boundary is None:
+        return None
+    tolerance = config.boundary_tolerance_degree
+    if not (left_boundary.buffer(tolerance).covers(point) and right_boundary.buffer(tolerance).covers(point)):
+        return None
+
+    shared_water_body_ids = water_body_ids_by_channel.get(left_channel_id, set()).intersection(
+        water_body_ids_by_channel.get(right_channel_id, set())
+    )
+    if shared_water_body_ids:
+        return "CROSS_CHANNEL_WATER_JUNCTION"
+
+    left_endpoint_near = _point_near_centerline_endpoint(point, left.geometry, config.endpoint_review_snap_m)
+    right_endpoint_near = _point_near_centerline_endpoint(point, right.geometry, config.endpoint_review_snap_m)
+    if left_endpoint_near or right_endpoint_near:
+        return "CROSS_CHANNEL_BOUNDARY_CONFLUENCE"
+    return None
+
+
+def _point_near_centerline_endpoint(point: Point, line: LineString, max_distance_m: float) -> bool:
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return False
+    return min(_point_distance_m(point, Point(coords[0])), _point_distance_m(point, Point(coords[-1]))) <= max_distance_m
+
+
+def _cross_channel_intersection_is_navigable(
+    *,
+    point: Point,
+    left: CenterlineAsset,
+    right: CenterlineAsset,
+    boundaries: dict[int, BaseGeometry],
+    water_body_ids_by_channel: dict[int, set[int]],
+    config: GraphBuildConfig,
+) -> bool:
+    return (
+        _cross_channel_intersection_source_type(
+            point=point,
+            left=left,
+            right=right,
+            boundaries=boundaries,
+            water_body_ids_by_channel=water_body_ids_by_channel,
+            config=config,
+        )
+        is not None
+    )
+
+
+async def _load_channel_water_body_ids(session: AsyncSession, channel_ids: set[int]) -> dict[int, set[int]]:
+    if not channel_ids:
+        return {}
+    rows = list(
+        (
+            await session.execute(
+                select(NavigationChannelWaterBodyMatch).where(
+                    NavigationChannelWaterBodyMatch.channel_id.in_(channel_ids),
+                    NavigationChannelWaterBodyMatch.is_current.is_(True),
+                )
+            )
+        ).scalars()
+    )
+    output: dict[int, set[int]] = defaultdict(set)
+    for row in rows:
+        output[int(row.channel_id)].add(int(row.water_body_id))
+    return output
 
 
 async def _load_centerline_assets(
@@ -413,6 +624,21 @@ async def _load_boundaries(session: AsyncSession, channel_ids: set[int]) -> dict
         )
     ).scalars()
     return {row.channel_id: shape(row.geometry_json) for row in rows if row.geometry_json}
+
+
+async def _load_channel_vessel_profiles(session: AsyncSession, channel_ids: set[int]) -> dict[int, dict[str, Any]]:
+    if not channel_ids:
+        return {}
+    rows = (
+        await session.execute(select(NavigationChannel).where(NavigationChannel.id.in_(channel_ids)))
+    ).scalars()
+    return {
+        int(row.id): vessel_limit_profile(
+            current_grade_code=row.technical_grade_current_code,
+            planned_grade_code=row.technical_grade_planned_code,
+        )
+        for row in rows
+    }
 
 
 async def _load_transport_nodes(session: AsyncSession, bbox: dict[str, float]) -> list[TransportNode]:
@@ -568,6 +794,22 @@ def _edge_quality_for_segment(
     return quality, routing_enabled, issues
 
 
+def _transport_connector_quality(
+    *,
+    geometry: LineString,
+    boundary: BaseGeometry | None,
+    distance_m: float,
+    config: GraphBuildConfig,
+) -> tuple[str, bool, list[str]]:
+    if distance_m <= config.transport_auto_snap_m:
+        return "READY", True, []
+    issue_codes = ["SNAP_CONNECTOR_NEED_REVIEW"]
+    if boundary is not None:
+        if boundary.covers(geometry) or boundary.buffer(config.boundary_tolerance_degree).covers(geometry):
+            return "READY_WITH_WARNING", True, ["SNAP_CONNECTOR_BOUNDARY_VERIFIED"]
+    return "NEED_REVIEW", False, issue_codes
+
+
 async def build_graph_from_centerlines(
     *,
     session: AsyncSession,
@@ -639,6 +881,7 @@ async def build_graph_from_centerlines(
 
     channel_ids = {item.row.channel_id for item in centerlines}
     boundaries = await _load_boundaries(session, channel_ids)
+    channel_vessel_profiles = await _load_channel_vessel_profiles(session, channel_ids)
     expanded_bbox = _bbox_with_margin(bbox, config.bbox_margin_degree) if bbox else None
     transport_nodes = await _load_transport_nodes(session, expanded_bbox) if expanded_bbox else []
     constraint_points = await _load_constraint_points(session, expanded_bbox) if expanded_bbox else []
@@ -651,7 +894,15 @@ async def build_graph_from_centerlines(
         split_points[asset.asset_id].append(SplitPointSpec(point=Point(coords[0]), is_endpoint=True))
         split_points[asset.asset_id].append(SplitPointSpec(point=Point(coords[-1]), is_endpoint=True))
 
-    _append_cross_channel_crossing_issues(centerlines, issues)
+    water_body_ids_by_channel = await _load_channel_water_body_ids(session, channel_ids)
+    cross_channel_connector_specs = _append_cross_channel_junctions(
+        centerlines,
+        boundaries,
+        water_body_ids_by_channel,
+        split_points,
+        issues,
+        config,
+    )
 
     centerlines_by_channel: dict[int, list[CenterlineAsset]] = defaultdict(list)
     for asset in centerlines:
@@ -692,15 +943,31 @@ async def build_graph_from_centerlines(
         nonlocal node_sequence
         if related_transport_node_id is not None:
             key = ("transport", related_transport_node_id)
+            alias_keys: list[tuple[Any, ...]] = []
         elif related_constraint_point_id is not None:
             key = ("constraint", related_constraint_point_id)
+            alias_keys = []
+        elif node_type_code == "CHANNEL_JUNCTION":
+            normalized_point_key = _point_key(point)
+            key = ("junction", normalized_point_key)
+            alias_keys = [("channel-point", channel_id, normalized_point_key)]
         else:
-            key = ("channel-point", channel_id, _point_key(point))
+            normalized_point_key = _point_key(point)
+            key = ("channel-point", channel_id, normalized_point_key)
+            alias_keys = [("junction", normalized_point_key)]
         existing_node = node_registry.get(key)
+        if existing_node is None:
+            for alias_key in alias_keys:
+                existing_node = node_registry.get(alias_key)
+                if existing_node is not None:
+                    node_registry[key] = existing_node
+                    break
         if existing_node is not None:
             if NODE_TYPE_PRIORITY.get(node_type_code, 0) > NODE_TYPE_PRIORITY.get(existing_node.node_type_code, 0):
                 existing_node.node_type_code = node_type_code
                 existing_node.source_type_code = source_type_code
+            for alias_key in alias_keys:
+                node_registry.setdefault(alias_key, existing_node)
             return existing_node
         node_sequence += 1
         node = NavigationGraphNode(
@@ -770,16 +1037,24 @@ async def build_graph_from_centerlines(
             snap_distance_m=distance_m,
             snap_confidence=snap_confidence,
         )
+        connector_geometry = LineString([(node_point.x, node_point.y), (split_point.x, split_point.y)])
+        connector_quality, connector_enabled, connector_issue_codes = _transport_connector_quality(
+            geometry=connector_geometry,
+            boundary=boundaries.get(centerline.row.channel_id),
+            distance_m=distance_m,
+            config=config,
+        )
         connector_specs.append(
             ConnectorSpec(
                 from_node=transport_graph_node,
                 to_node=centerline_graph_node,
                 channel_id=centerline.row.channel_id,
-                geometry=LineString([(node_point.x, node_point.y), (split_point.x, split_point.y)]),
+                geometry=connector_geometry,
                 source_type_code="SNAP_CONNECTOR",
-                quality_code="READY" if distance_m <= config.transport_auto_snap_m else "NEED_REVIEW",
-                routing_enabled=distance_m <= config.transport_auto_snap_m,
+                quality_code=connector_quality,
+                routing_enabled=connector_enabled,
                 snap_distance_m=distance_m,
+                issue_codes=connector_issue_codes,
             )
         )
 
@@ -830,6 +1105,30 @@ async def build_graph_from_centerlines(
             )
             centerline_nodes[(asset.asset_id, _point_key(point.point))] = node
 
+    for connector in cross_channel_connector_specs:
+        left_node = centerline_nodes.get((connector.left.asset_id, _point_key(connector.left_point)))
+        right_node = centerline_nodes.get((connector.right.asset_id, _point_key(connector.right_point)))
+        if left_node is None or right_node is None or left_node is right_node:
+            continue
+        connector_specs.append(
+            ConnectorSpec(
+                from_node=left_node,
+                to_node=right_node,
+                channel_id=None,
+                geometry=LineString(
+                    [
+                        (connector.left_point.x, connector.left_point.y),
+                        (connector.right_point.x, connector.right_point.y),
+                    ]
+                ),
+                source_type_code=connector.source_type_code,
+                quality_code="READY_WITH_WARNING",
+                routing_enabled=True,
+                snap_distance_m=connector.distance_m,
+                issue_codes=["CROSS_CHANNEL_CONFLUENCE_CONNECTOR"],
+            )
+        )
+
     await session.flush()
     edge_constraint_pairs: list[tuple[NavigationGraphEdge, NavigationGraphNode]] = []
 
@@ -854,6 +1153,10 @@ async def build_graph_from_centerlines(
         edge_sequence += 1
         edge_code = f"{clean_version_code[:72]}-E-{edge_sequence:05d}"
         length_km = _round_float(_line_length_km(geometry), 4) or 0.0
+        vessel_profile = channel_vessel_profiles.get(int(channel_id)) if channel_id is not None else None
+        validation_payload = dict(validation_summary)
+        if vessel_profile is not None:
+            validation_payload.setdefault("vessel_limit_profile", vessel_profile)
         edge = NavigationGraphEdge(
             graph_version_id=graph_version.id,
             edge_code=edge_code,
@@ -864,7 +1167,10 @@ async def build_graph_from_centerlines(
             geometry_json=mapping(geometry),
             length_km=length_km,
             direction_code=direction_code,
-            technical_grade_code=technical_grade_code,
+            technical_grade_code=technical_grade_code or (vessel_profile or {}).get("technical_grade_code"),
+            min_width_m=(vessel_profile or {}).get("min_width_m"),
+            max_allowed_draft_m=(vessel_profile or {}).get("max_allowed_draft_m"),
+            max_allowed_tonnage=(vessel_profile or {}).get("max_allowed_tonnage"),
             lock_required=lock_required,
             bridge_count=bridge_count,
             base_cost=length_km,
@@ -873,8 +1179,8 @@ async def build_graph_from_centerlines(
             source_type_code=source_type_code,
             confidence_score=confidence_score,
             version_no=1,
-            unknown_constraint_flag=True,
-            validation_summary_json=validation_summary,
+            unknown_constraint_flag=bool((vessel_profile or {}).get("unknown_constraint_flag", True)),
+            validation_summary_json=validation_payload,
         )
         session.add(edge)
         return edge
@@ -935,9 +1241,8 @@ async def build_graph_from_centerlines(
                     edge_constraint_pairs.append((edge, node))
 
     for connector in connector_specs:
-        issue_codes: list[str] = []
-        if connector.quality_code == "NEED_REVIEW":
-            issue_codes.append("SNAP_CONNECTOR_NEED_REVIEW")
+        issue_codes = list(connector.issue_codes)
+        if "SNAP_CONNECTOR_NEED_REVIEW" in issue_codes:
             issues.append(
                 GraphBuildIssue(
                     "SNAP_CONNECTOR_NEED_REVIEW",

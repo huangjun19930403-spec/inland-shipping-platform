@@ -28,6 +28,13 @@ class VesselAisSnapshotReaderMixin:
             stmt = stmt.where(VesselAisSnapshot.snapshot_id == snapshot_id)
         return await self.db.scalar(stmt.order_by(VesselAisSnapshot.generated_at.desc()).limit(1))
 
+    async def _snapshot_should_be_recomputed_from_realtime(self, snapshot: VesselAisSnapshot) -> bool:
+        if int(snapshot.matched_position_count or 0) > 0:
+            return False
+        if int(snapshot.failed_batch_count or 0) <= 0:
+            return False
+        return bool(await self._realtime_es_host())
+
     async def _position_items_from_persisted_snapshot(
         self,
         snapshot: VesselAisSnapshot,
@@ -255,6 +262,13 @@ class VesselAisSnapshotReaderMixin:
         snapshot = await self._latest_persisted_ais_snapshot()
         if snapshot is None:
             return None
+        if await self._snapshot_should_be_recomputed_from_realtime(snapshot):
+            logger.info(
+                "ignore failed empty AIS city snapshot and recompute from realtime ES: snapshot_id=%s failed_batch_count=%s",
+                snapshot.snapshot_id,
+                snapshot.failed_batch_count,
+            )
+            return None
         items = await self._position_items_from_persisted_snapshot(snapshot, generated_at=generated_at)
         reported_within_minutes = query.reported_within_minutes or 1440
         boundaries = await self._city_boundaries() if query.include_boundary else []
@@ -448,6 +462,13 @@ class VesselAisSnapshotReaderMixin:
     ) -> VesselPositionNavigationChannelSituationResponse | None:
         snapshot = await self._latest_persisted_ais_snapshot()
         if snapshot is None:
+            return None
+        if await self._snapshot_should_be_recomputed_from_realtime(snapshot):
+            logger.info(
+                "ignore failed empty AIS channel snapshot and recompute from realtime ES: snapshot_id=%s failed_batch_count=%s",
+                snapshot.snapshot_id,
+                snapshot.failed_batch_count,
+            )
             return None
         items = await self._position_items_from_persisted_snapshot(snapshot, generated_at=generated_at)
         risk_by_profile = await self._compliance_risk_by_profile([item.id for item in items])

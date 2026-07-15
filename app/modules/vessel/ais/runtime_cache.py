@@ -41,7 +41,7 @@ class VesselAisRuntimeCacheMixin:
         )
         return {
             "profile_limit": _safe_int(profile_limit, 2000, minimum=1, maximum=20000),
-            "es_batch_size": _safe_int(batch_size, 500, minimum=1, maximum=500),
+            "es_batch_size": _safe_int(batch_size, 100, minimum=1, maximum=100),
             "es_max_concurrency": _safe_int(max_concurrency, 4, minimum=1, maximum=16),
             "unmatched_scan_limit": _safe_int(unmatched_scan_limit, 1000, minimum=1, maximum=10000),
         }

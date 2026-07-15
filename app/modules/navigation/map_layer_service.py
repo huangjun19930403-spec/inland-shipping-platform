@@ -467,12 +467,18 @@ class NavigationMapLayerService:
                         "channel_id": channel.id,
                         "channel_code": channel.channel_code,
                         "planning_level_code": channel.planning_level_code,
+                        "technical_grade_current_code": channel.technical_grade_current_code,
+                        "technical_grade_planned_code": channel.technical_grade_planned_code,
                         "boundary_role_code": "CURRENT" if boundary.is_current else "CANDIDATE",
                         "is_current": boundary.is_current,
                         "coverage_policy_code": boundary.coverage_policy_code,
                         "boundary_quality_code": boundary.boundary_quality_code,
                         "connectivity_status_code": boundary.connectivity_status_code,
                         "repair_status_code": boundary.repair_status_code,
+                        "boundary_integrity_trust_code": _boundary_integrity_trust(boundary.source_trace_json),
+                        "boundary_integrity_issue_codes": _boundary_integrity_issues(boundary.source_trace_json),
+                        "water_system": _boundary_integrity_water_system(boundary.source_trace_json),
+                        "vessel_limit_profile": _boundary_integrity_vessel_profile(boundary.source_trace_json),
                         "source_trace_json": boundary.source_trace_json or {},
                     },
                 )
@@ -714,6 +720,13 @@ class NavigationMapLayerService:
                 "status_code": result.status_code,
                 "quality_code": result.quality_code,
                 "quality_score": result.quality_score,
+                "provider_code": result.provider_code,
+                "engine_code": result.engine_code,
+                "source_type_code": (result.quality_summary_json or {}).get("source_type_code")
+                or result.engine_code
+                or result.provider_code,
+                "cache_hit": (result.quality_summary_json or {}).get("cache_hit"),
+                "hifleet_cache_id": (result.quality_summary_json or {}).get("hifleet_cache_id"),
                 "distance_km": float(result.distance_km) if result.distance_km is not None else None,
                 "edge_ids": result.edge_ids or [],
                 "channel_ids": result.channel_ids or [],
@@ -937,3 +950,29 @@ class NavigationMapLayerService:
             return
         if -180 <= lng <= 180 and -90 <= lat <= 90:
             output.append((lng, lat))
+
+
+def _boundary_integrity_audit(source_trace_json: Any) -> dict[str, Any]:
+    if not isinstance(source_trace_json, dict):
+        return {}
+    audit = source_trace_json.get("boundary_integrity_audit")
+    return dict(audit) if isinstance(audit, dict) else {}
+
+
+def _boundary_integrity_trust(source_trace_json: Any) -> str | None:
+    return _boundary_integrity_audit(source_trace_json).get("trust_code")
+
+
+def _boundary_integrity_issues(source_trace_json: Any) -> list[str]:
+    issues = _boundary_integrity_audit(source_trace_json).get("issue_codes")
+    return list(issues) if isinstance(issues, list) else []
+
+
+def _boundary_integrity_water_system(source_trace_json: Any) -> dict[str, Any] | None:
+    water_system = _boundary_integrity_audit(source_trace_json).get("water_system")
+    return dict(water_system) if isinstance(water_system, dict) else None
+
+
+def _boundary_integrity_vessel_profile(source_trace_json: Any) -> dict[str, Any] | None:
+    profile = _boundary_integrity_audit(source_trace_json).get("vessel_limit_profile")
+    return dict(profile) if isinstance(profile, dict) else None

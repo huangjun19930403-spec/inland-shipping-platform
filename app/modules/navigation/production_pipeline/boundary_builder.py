@@ -11,6 +11,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, unary_union
 from shapely.validation import make_valid
 
+from app.modules.navigation.production_pipeline.boundary_quality_audit import audit_boundary_integrity
 from app.modules.navigation.production_pipeline.centerline_builder import point_distance_m
 
 BRIDGE_WATER_TYPES = {
@@ -281,6 +282,7 @@ def _boundary_row_from_water_rows(channel: dict[str, Any], rows: list[dict[str, 
             "source_layer_name": row.get("source_layer_name"),
             "source_object_id": row.get("source_object_id"),
             "water_name": row.get("water_name") or row.get("normalized_water_name"),
+            "water_level": row.get("water_level"),
             "water_type_code": row.get("water_type_code"),
             "source_layer_role_code": row.get("source_layer_role_code"),
             "area_km2": row.get("area_km2"),
@@ -290,7 +292,7 @@ def _boundary_row_from_water_rows(channel: dict[str, Any], rows: list[dict[str, 
         for row in sorted(rows, key=lambda item: (item.get("source_layer_order") or 999, str(item.get("source_object_id") or "")))[:120]
     ]
     direct_count = sum(1 for row in rows if _norm(row.get("water_name") or row.get("normalized_water_name")) in _channel_terms(channel))
-    return {
+    boundary_row = {
         "channel_code": channel["channel_code"],
         "geometry_json": geometry_json,
         "boundary_paths_low": _polygon_paths(geometry_json),
@@ -327,6 +329,16 @@ def _boundary_row_from_water_rows(channel: dict[str, Any], rows: list[dict[str, 
         "is_current": True,
         "imported_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    audit = audit_boundary_integrity(
+        channel=channel,
+        boundary=boundary_row,
+        require_centerline=False,
+    )
+    boundary_row["source_trace_json"]["boundary_integrity_audit"] = audit
+    if audit["trust_code"] in {"FAILED", "NEEDS_REVIEW"}:
+        boundary_row["boundary_quality_code"] = "REVIEW"
+        boundary_row["repair_status_code"] = "REVIEW_REQUIRED"
+    return boundary_row
 
 
 def _safe_polygonal(geometry_json: Any) -> BaseGeometry | None:

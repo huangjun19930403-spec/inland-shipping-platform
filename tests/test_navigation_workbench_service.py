@@ -364,6 +364,26 @@ async def test_validate_centerline_ready(session_maker) -> None:
 
 
 @pytest.mark.asyncio
+async def test_validate_centerline_accepts_tuple_coordinates_from_mapping(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_channel(session)
+        geometry = {
+            "type": "LineString",
+            "coordinates": ((120.0, 31.0), (120.12, 31.06), (120.22, 31.1)),
+        }
+
+        response = await NavigationWorkbenchService(session).validate_geometry_draft(
+            NavigationGeometryDraftValidateRequest(draft_type_code="CENTERLINE", channel_id=1, geometry_json=geometry)
+        )
+
+    issue_codes = [issue.issue_code for issue in response.issues]
+    assert "CENTERLINE_GEOMETRY_INVALID" not in issue_codes
+    assert "CENTERLINE_COORDINATE_INVALID" not in issue_codes
+    assert response.point_count == 3
+    assert response.length_m is not None and response.length_m > 0
+
+
+@pytest.mark.asyncio
 async def test_validate_centerline_too_short(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)
@@ -993,7 +1013,7 @@ async def test_workbench_summary_active_graph_version_uses_production_ready_filt
 
 
 @pytest.mark.asyncio
-async def test_workbench_active_graph_counts_include_all_active_ready_scopes(session_maker) -> None:
+async def test_workbench_active_graph_counts_use_default_active_graph_only(session_maker) -> None:
     async with session_maker() as session:
         await _seed_channel(session)
         session.add_all(
@@ -1005,9 +1025,9 @@ async def test_workbench_active_graph_counts_include_all_active_ready_scopes(ses
                     scope_code="REAL-ONE",
                     status_code="READY",
                     is_active=True,
-                    node_count=2,
-                    edge_count=1,
-                    channel_count=1,
+                    node_count=4,
+                    edge_count=2,
+                    channel_count=2,
                     quality_score=90,
                 ),
                 NavigationGraphVersion(
@@ -1042,7 +1062,7 @@ async def test_workbench_active_graph_counts_include_all_active_ready_scopes(ses
                     edge_code="E2",
                     from_node_id=3,
                     to_node_id=4,
-                    channel_id=999,
+                    channel_id=1,
                     geometry_json=_line(),
                     length_km=1,
                     direction_code="BIDIRECTIONAL",

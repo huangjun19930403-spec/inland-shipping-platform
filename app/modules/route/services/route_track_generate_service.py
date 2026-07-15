@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.modules.navigation.routing_service import NavigationRoutingEngineService
 from app.modules.navigation.schemas import NavigationEndpointRequest, NavigationRouteGenerateRequest
+from app.modules.navigation.services.hifleet_route_cache_service import HifleetRouteCacheService
 from app.modules.route.services.common import *  # noqa: F403
 
 
@@ -260,7 +261,6 @@ class RouteTrackGenerateServiceMixin:
                 dest_lat=dest_lat,
                 segment=segment,
             )
-        client = self._geometry_client_for_segment(segment.transport_mode_code, provider_code)
         query = RouteGeometryQuery(
             origin_lon=origin_lon,
             origin_lat=origin_lat,
@@ -269,8 +269,20 @@ class RouteTrackGenerateServiceMixin:
             transport_mode=segment.transport_mode_code,
             segment_type="ROUTE_PLAN_SEGMENT",
         )
+        client = self._geometry_client_for_segment(segment.transport_mode_code, provider_code)
         try:
-            result = await client.generate(query)
+            if provider == "HIFLEET":
+                result = await HifleetRouteCacheService(
+                    self.db,
+                    runtime_config=self.runtime_config,
+                    route_client=client,
+                ).get_or_generate(
+                    query,
+                    **self._hifleet_cache_endpoint_refs(start_point, prefix="origin"),
+                    **self._hifleet_cache_endpoint_refs(end_point, prefix="destination"),
+                )
+            else:
+                result = await client.generate(query)
             if provider == "HIFLEET":
                 result.source = "reference_hifleet"
                 result.provider = "HIFLEET"
@@ -304,11 +316,26 @@ class RouteTrackGenerateServiceMixin:
                 )
             raise
 
+    def _hifleet_cache_endpoint_refs(self, point: ShippingRoutePlanPoint, *, prefix: str) -> dict[str, object | None]:
+        if point.transport_node_id is not None:
+            ref_type = "TRANSPORT_NODE"
+            ref_id = point.transport_node_id
+        elif point.constraint_point_id is not None:
+            ref_type = "CONSTRAINT_POINT"
+            ref_id = point.constraint_point_id
+        else:
+            ref_type = point.point_type_code or "MANUAL_POINT"
+            ref_id = None
+        return {
+            f"{prefix}_ref_type_code": ref_type,
+            f"{prefix}_ref_id": ref_id,
+            f"{prefix}_name": point.display_name or point.manual_name,
+        }
+
     async def _fallback_enabled_for_segment(self, transport_mode_code: str) -> bool:
         if transport_mode_code != "WATER":
             return True
-        mode = await self.runtime_config.get_value(ROUTE_WATER_FALLBACK_MODE_KEY, "disabled")
-        return str(mode or "disabled").strip().lower() in ROUTE_WATER_FALLBACK_ALLOWED_MODES
+        return False
 
     async def _call_navigation_engine(
         self,

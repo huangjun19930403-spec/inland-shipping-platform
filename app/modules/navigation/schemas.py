@@ -61,6 +61,11 @@ class NavigationRouteAlternativeResponse(BaseModel):
     result_id: int
     result_no: int
     result_type_code: str
+    provider_code: str | None = None
+    source_type_code: str | None = None
+    cache_hit: bool | None = None
+    hifleet_cache_id: int | None = None
+    trajectory_cache_id: int | None = None
     quality_code: str
     quality_score: int | None = None
     distance_km: float | None = None
@@ -79,6 +84,11 @@ class NavigationRouteGenerateResponse(BaseModel):
     result_id: int
     graph_version_id: int | None
     status_code: str
+    provider_code: str | None = None
+    source_type_code: str | None = None
+    cache_hit: bool | None = None
+    hifleet_cache_id: int | None = None
+    trajectory_cache_id: int | None = None
     quality_code: str
     quality_score: int | None
     geometry_json: dict[str, Any] | None = None

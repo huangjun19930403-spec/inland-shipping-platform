@@ -9,7 +9,9 @@ from shapely.geometry import shape
 
 import app.models  # noqa: F401
 from app.api.v1 import api_router
+from app.integrations.http.route_geometry_types import RouteGeometryResult
 from app.models import (
+    NavigationChannelCenterline,
     NavigationGraphEdge,
     NavigationGraphNode,
     NavigationGraphVersion,
@@ -17,12 +19,19 @@ from app.models import (
     NavigationRouteRequest,
     NavigationRouteResult,
 )
+from app.models.address import NavigationChannel, NavigationChannelBoundary
 from app.models.base import Base
 from app.modules.navigation.routing_service import NavigationRoutingEngineService
 from app.modules.navigation.engine.path_validator import PathValidator
 from app.modules.navigation.engine.quality_scoring import QualityScorer
 from app.modules.navigation.engine.types import RouteIssue, SearchResult, SnapResult
-from app.modules.navigation.schemas import NavigationEndpointRequest, NavigationRouteGenerateRequest, VesselProfileRequest
+from app.modules.navigation.schemas import (
+    NavigationEndpointRequest,
+    NavigationRouteGenerateRequest,
+    NavigationRouteGenerateResponse,
+    NavigationRouteIssueResponse,
+    VesselProfileRequest,
+)
 
 
 @pytest_asyncio.fixture
@@ -240,8 +249,8 @@ async def _seed_far_active_graph(session: AsyncSession) -> None:
             version_name="Far graph",
             scope_code="OTHER",
             node_count=2,
-            edge_count=1,
-            channel_count=1,
+            edge_count=3,
+            channel_count=2,
             quality_score=95,
             status_code="READY",
             is_active=True,
@@ -259,6 +268,73 @@ async def _seed_far_active_graph(session: AsyncSession) -> None:
                 code="FAR-E1",
                 geometry=_line((132.0, 43.0), (132.2, 43.0)),
                 channel_id=20,
+            ),
+        ]
+    )
+    await session.commit()
+
+
+async def _seed_disconnected_large_active_graph_and_far_fallback(session: AsyncSession) -> None:
+    session.add_all(
+        [
+            NavigationGraphVersion(
+                id=2,
+                version_code="TEST-LARGE-DISCONNECTED-GRAPH",
+                version_name="Large disconnected graph",
+                scope_code="TEST",
+                node_count=4,
+                edge_count=3,
+                channel_count=2,
+                quality_score=80,
+                status_code="READY",
+                is_active=True,
+            ),
+            NavigationGraphVersion(
+                id=3,
+                version_code="TEST-FAR-FALLBACK-GRAPH",
+                version_name="Far fallback graph",
+                scope_code="OTHER",
+                node_count=2,
+                edge_count=1,
+                channel_count=1,
+                quality_score=80,
+                status_code="READY",
+                is_active=True,
+            ),
+        ]
+    )
+    session.add_all(
+        [
+            _node(id=20, graph_version_id=2, lng=120.0, lat=31.0, code="DG-N1"),
+            _node(id=21, graph_version_id=2, lng=120.1, lat=31.0, code="DG-N2"),
+            _node(id=22, graph_version_id=2, lng=120.2, lat=31.0, code="DG-N3"),
+            _node(id=23, graph_version_id=2, lng=120.3, lat=31.0, code="DG-N4"),
+            _edge(
+                id=20,
+                graph_version_id=2,
+                from_node_id=20,
+                to_node_id=21,
+                code="DG-E1",
+                geometry=_line((120.0, 31.0), (120.1, 31.0)),
+            ),
+            _edge(
+                id=21,
+                graph_version_id=2,
+                from_node_id=22,
+                to_node_id=23,
+                code="DG-E2",
+                geometry=_line((120.2, 31.0), (120.3, 31.0)),
+            ),
+            _node(id=30, graph_version_id=3, lng=132.0, lat=43.0, code="FAR2-N1"),
+            _node(id=31, graph_version_id=3, lng=132.2, lat=43.0, code="FAR2-N2"),
+            _edge(
+                id=30,
+                graph_version_id=3,
+                from_node_id=30,
+                to_node_id=31,
+                code="FAR2-E1",
+                geometry=_line((132.0, 43.0), (132.2, 43.0)),
+                channel_id=30,
             ),
         ]
     )
@@ -302,7 +378,7 @@ async def _seed_strategy_graph(
                 from_node_id=1,
                 to_node_id=2,
                 code="E-DIRECT",
-                geometry=_line((120.0, 31.0), (120.2, 31.0)),
+                geometry=_line((120.0, 31.0), (120.1, 31.01), (120.2, 31.0)),
                 length_km=10.0,
                 quality_code=direct_quality,
                 unknown_constraint_flag=direct_unknown,
@@ -396,6 +472,82 @@ def test_path_validator_fails_when_route_leaves_matched_water_body() -> None:
     )
 
     assert "PATH_OUT_OF_WATER" in {issue.issue_type_code for issue in issues}
+
+
+def test_audited_boundary_merge_counts_as_water_context() -> None:
+    service = NavigationRoutingEngineService.__new__(NavigationRoutingEngineService)
+    boundary = NavigationChannelBoundary(
+        channel_id=1,
+        geometry_json={"type": "Polygon", "coordinates": []},
+        coverage_policy_code="AUTO_BOUNDARY_MERGE",
+        source_trace_json={
+            "boundary_integrity_audit": {"trust_code": "READY_WITH_WARNING"},
+            "basemap_verification": {"status_code": "AUTO_VERIFIED_BY_LOCAL_WATER_BODY_AND_HIFLEET_TRAJECTORY_BOUNDARY_MERGE"},
+            "selected_water_bodies": [{"water_body_id": 1, "water_name": "长江"}],
+        },
+    )
+
+    assert service._boundary_counts_as_water_context(boundary)
+
+
+def test_boundary_merge_without_ready_audit_stays_out_of_water_context() -> None:
+    service = NavigationRoutingEngineService.__new__(NavigationRoutingEngineService)
+    boundary = NavigationChannelBoundary(
+        channel_id=1,
+        geometry_json={"type": "Polygon", "coordinates": []},
+        coverage_policy_code="AUTO_BOUNDARY_MERGE",
+        source_trace_json={
+            "boundary_integrity_audit": {"trust_code": "NEEDS_REVIEW"},
+            "basemap_verification": {"status_code": "AUTO_VERIFIED_BY_LOCAL_WATER_BODY_AND_HIFLEET_TRAJECTORY_BOUNDARY_MERGE"},
+            "selected_water_bodies": [{"water_body_id": 1, "water_name": "长江"}],
+        },
+    )
+
+    assert not service._boundary_counts_as_water_context(boundary)
+
+
+def test_osm_waterway_corridor_counts_as_water_context_with_ready_audit() -> None:
+    service = NavigationRoutingEngineService.__new__(NavigationRoutingEngineService)
+    boundary = NavigationChannelBoundary(
+        channel_id=1,
+        geometry_json={"type": "Polygon", "coordinates": []},
+        coverage_policy_code="OSM_WATERWAY_CORRIDOR",
+        source_trace_json={"boundary_integrity_audit": {"trust_code": "READY_WITH_WARNING"}},
+    )
+
+    assert service._boundary_counts_as_water_context(boundary)
+
+
+def test_mixed_osm_corridor_counts_as_water_context_only_after_seed_validation() -> None:
+    service = NavigationRoutingEngineService.__new__(NavigationRoutingEngineService)
+    boundary = NavigationChannelBoundary(
+        channel_id=1,
+        geometry_json={"type": "Polygon", "coordinates": []},
+        coverage_policy_code="MIXED_LOCAL_OSM_WATERWAY_CORRIDOR",
+        source_trace_json={
+            "boundary_integrity_audit": {"trust_code": "NEEDS_REVIEW"},
+            "validation": {
+                "line_is_simple": True,
+                "boundary_coverage_ratio": 1.0,
+                "blockers": [],
+            },
+        },
+    )
+    invalid_boundary = NavigationChannelBoundary(
+        channel_id=1,
+        geometry_json={"type": "Polygon", "coordinates": []},
+        coverage_policy_code="MIXED_LOCAL_OSM_WATERWAY_CORRIDOR",
+        source_trace_json={
+            "validation": {
+                "line_is_simple": False,
+                "boundary_coverage_ratio": 1.0,
+                "blockers": ["CENTERLINE_SELF_INTERSECTION"],
+            },
+        },
+    )
+
+    assert service._boundary_counts_as_water_context(boundary)
+    assert not service._boundary_counts_as_water_context(invalid_boundary)
 
 
 def test_quality_scorer_penalizes_validation_errors() -> None:
@@ -620,7 +772,7 @@ async def test_generate_route_expands_bbox_until_edges_are_loaded(session_maker)
 
 
 @pytest.mark.asyncio
-async def test_generate_route_falls_back_across_active_graph_versions(session_maker) -> None:
+async def test_generate_route_falls_back_from_larger_active_graph_versions(session_maker) -> None:
     async with session_maker() as session:
         await _seed_ready_graph(session)
         await _seed_far_active_graph(session)
@@ -649,6 +801,25 @@ async def test_generate_route_respects_explicit_graph_version_without_fallback(s
 
 
 @pytest.mark.asyncio
+async def test_generate_route_preserves_preferred_graph_failure_after_all_candidates_fail(session_maker) -> None:
+    async with session_maker() as session:
+        await _seed_disconnected_large_active_graph_and_far_fallback(session)
+
+        response = await NavigationRoutingEngineService(session).generate_route(
+            _request(origin=(120.0, 31.0), destination=(120.3, 31.0))
+        )
+        request_row = (await session.execute(select(NavigationRouteRequest))).scalar_one()
+        result = (await session.execute(select(NavigationRouteResult))).scalar_one()
+
+    assert response.status_code == "FAILED"
+    assert response.graph_version_id == 2
+    assert response.error_code == "GRAPH_DISCONNECTED"
+    assert request_row.graph_version_id == 2
+    assert result.quality_summary_json["attempted_graph_version_ids"] == [2, 3]
+    assert "later graph attempt ended with" in response.error_message
+
+
+@pytest.mark.asyncio
 async def test_successful_route_persists_blocked_edge_warning(session_maker) -> None:
     async with session_maker() as session:
         await _seed_ready_graph(session)
@@ -659,7 +830,7 @@ async def test_successful_route_persists_blocked_edge_warning(session_maker) -> 
                 from_node_id=1,
                 to_node_id=3,
                 code="E-BLOCKED-DIRECT",
-                geometry=_line((120.0, 31.0), (120.2, 31.0)),
+                geometry=_line((120.0, 31.0), (120.1, 31.01), (120.2, 31.0)),
                 max_allowed_tonnage=100,
             )
         )
@@ -736,6 +907,236 @@ async def test_generate_route_reports_disconnected_graph(session_maker) -> None:
 
     assert response.status_code == "FAILED"
     assert response.error_code == "GRAPH_DISCONNECTED"
+
+
+@pytest.mark.asyncio
+async def test_hifleet_fallback_rejects_long_jump_reference_geometry(session_maker) -> None:
+    async with session_maker() as session:
+        request_row = NavigationRouteRequest(
+            request_no="HIFLEET-LONG-JUMP",
+            origin_lng=120.0,
+            origin_lat=31.0,
+            destination_lng=120.5,
+            destination_lat=31.2,
+            routing_preference_code="RECOMMENDED",
+            status_code="FAILED",
+            error_code="GRAPH_DISCONNECTED",
+            error_message="local graph disconnected",
+        )
+        session.add(request_row)
+        await session.flush()
+        original_result = NavigationRouteResult(
+            request_id=request_row.id,
+            result_no=1,
+            result_type_code="RECOMMENDED",
+            status_code="FAILED",
+            quality_code="FAILED",
+            quality_score=0,
+            provider_code="NAVIGATION_ENGINE",
+            engine_code="NAVIGATION_ROUTING_ENGINE_V2",
+        )
+        session.add(original_result)
+        await session.flush()
+        original_response = NavigationRouteGenerateResponse(
+            request_id=request_row.id,
+            result_id=original_result.id,
+            graph_version_id=1,
+            status_code="FAILED",
+            provider_code="NAVIGATION_ENGINE",
+            source_type_code="NAVIGATION_ROUTING_ENGINE_V2",
+            quality_code="FAILED",
+            quality_score=0,
+            issues=[
+                NavigationRouteIssueResponse(
+                    issue_type_code="GRAPH_DISCONNECTED",
+                    severity_code="ERROR",
+                    message="local graph disconnected",
+                )
+            ],
+            error_code="GRAPH_DISCONNECTED",
+            error_message="local graph disconnected",
+        )
+        hifleet = RouteGeometryResult(
+            geometry=_line((120.0, 31.0), (120.01, 31.01), (120.5, 31.2)),
+            source="hifleet",
+            provider="HIFLEET",
+            provider_trace_id=None,
+            status="ready",
+            distance_km=80,
+            estimated_duration_hour=8,
+            raw_summary={"cache_hit": True, "hifleet_cache_id": 88, "point_count": 3},
+        )
+
+        response = await NavigationRoutingEngineService(session)._persist_hifleet_fallback(
+            request_row=request_row,
+            original_response=original_response,
+            hifleet=hifleet,
+            planning_mode_code="RECOMMENDED",
+            include_explain=True,
+        )
+        request_row = await session.get(NavigationRouteRequest, request_row.id)
+        fallback_result = (
+            await session.execute(
+                select(NavigationRouteResult).where(NavigationRouteResult.result_type_code == "HIFLEET_REFERENCE_REJECTED")
+            )
+        ).scalar_one()
+        issues = list(
+            (
+                await session.execute(
+                    select(NavigationRouteQualityIssue).where(NavigationRouteQualityIssue.route_result_id == fallback_result.id)
+                )
+            ).scalars()
+        )
+
+    assert response.status_code == "FAILED"
+    assert response.geometry_json is None
+    assert response.error_code == "HIFLEET_REFERENCE_LONG_JUMP"
+    assert request_row is not None
+    assert request_row.status_code == "FAILED"
+    assert fallback_result.provider_code == "HIFLEET"
+    assert fallback_result.quality_code == "FAILED"
+    assert fallback_result.geometry_json is None
+    assert fallback_result.quality_summary_json["hifleet_geometry_returnable"] is False
+    assert fallback_result.quality_summary_json["hifleet_geometry_quality"]["max_segment_km"] >= 15
+    assert "HIFLEET_REFERENCE_LONG_JUMP" in {issue.issue_type_code for issue in issues}
+
+
+@pytest.mark.asyncio
+async def test_centerline_seed_fallback_is_diagnostic_not_user_returnable(session_maker) -> None:
+    async with session_maker() as session:
+        session.add(
+            NavigationChannel(
+                id=1,
+                channel_code="NC-SEED-DIAG",
+                channel_name="Seed diagnostic channel",
+                channel_type_code="RIVER",
+                planning_level_code="LOCAL",
+                source_version="TEST",
+            )
+        )
+        centerline_geometry = _line((120.0, 31.0), (120.1, 31.0), (120.2, 31.0))
+        centerline = NavigationChannelCenterline(
+            id=10,
+            channel_id=1,
+            centerline_code="CL-SEED-DIAG",
+            centerline_name="Seed diagnostic centerline",
+            geometry_json=centerline_geometry,
+            source_type_code="WAYBILL_ROUTE_REFERENCE",
+            direction_code="BIDIRECTIONAL",
+            is_main_line=True,
+            confidence_score=95,
+            quality_code="READY",
+            review_status_code="PUBLISHED",
+            is_current=True,
+            bbox_min_lng=120.0,
+            bbox_min_lat=31.0,
+            bbox_max_lng=120.2,
+            bbox_max_lat=31.0,
+        )
+        session.add(centerline)
+        request_row = NavigationRouteRequest(
+            request_no="CENTERLINE-SEED-DIAG",
+            origin_lng=120.0,
+            origin_lat=31.0,
+            destination_lng=120.2,
+            destination_lat=31.0,
+            routing_preference_code="RECOMMENDED",
+            status_code="FAILED",
+            error_code="GRAPH_DISCONNECTED",
+            error_message="local graph disconnected",
+        )
+        session.add(request_row)
+        await session.flush()
+        original_result = NavigationRouteResult(
+            request_id=request_row.id,
+            result_no=1,
+            result_type_code="RECOMMENDED",
+            status_code="FAILED",
+            quality_code="FAILED",
+            quality_score=0,
+            provider_code="NAVIGATION_ENGINE",
+            engine_code="NAVIGATION_ROUTING_ENGINE_V2",
+        )
+        session.add(original_result)
+        await session.flush()
+        original_response = NavigationRouteGenerateResponse(
+            request_id=request_row.id,
+            result_id=original_result.id,
+            graph_version_id=1,
+            status_code="FAILED",
+            provider_code="NAVIGATION_ENGINE",
+            source_type_code="NAVIGATION_ROUTING_ENGINE_V2",
+            quality_code="FAILED",
+            quality_score=0,
+            issues=[
+                NavigationRouteIssueResponse(
+                    issue_type_code="GRAPH_DISCONNECTED",
+                    severity_code="ERROR",
+                    message="local graph disconnected",
+                )
+            ],
+            error_code="GRAPH_DISCONNECTED",
+            error_message="local graph disconnected",
+        )
+        candidate_geometry = _line((120.0, 31.0), (120.1, 31.0), (120.2, 31.0))
+        candidate = {
+            "centerline": centerline,
+            "geometry_json": candidate_geometry,
+            "distance_km": 22.2,
+            "origin_snap": SnapResult(
+                role="ORIGIN",
+                snap_type="CENTERLINE_SEED",
+                snap_distance_m=0,
+                snap_confidence=95,
+                snap_point=(120.0, 31.0),
+                quality_code="HIGH",
+            ),
+            "destination_snap": SnapResult(
+                role="DESTINATION",
+                snap_type="CENTERLINE_SEED",
+                snap_distance_m=0,
+                snap_confidence=95,
+                snap_point=(120.2, 31.0),
+                quality_code="HIGH",
+            ),
+            "quality_score": 95,
+            "quality_code": "READY",
+            "issues": [],
+        }
+
+        response = await NavigationRoutingEngineService(session)._persist_centerline_seed_fallback(
+            request_row=request_row,
+            original_response=original_response,
+            candidate=candidate,
+            planning_mode_code="RECOMMENDED",
+            include_explain=True,
+        )
+        request_row = await session.get(NavigationRouteRequest, request_row.id)
+        fallback_result = (
+            await session.execute(
+                select(NavigationRouteResult).where(NavigationRouteResult.result_type_code == "CENTERLINE_SEED_FALLBACK")
+            )
+        ).scalar_one()
+        issue = (
+            await session.execute(
+                select(NavigationRouteQualityIssue).where(
+                    NavigationRouteQualityIssue.route_result_id == fallback_result.id,
+                    NavigationRouteQualityIssue.issue_type_code == "CENTERLINE_SEED_NOT_GRAPH_VALIDATED",
+                )
+            )
+        ).scalar_one()
+
+    assert response.status_code == "FAILED"
+    assert response.geometry_json is None
+    assert response.error_code == "CENTERLINE_SEED_NOT_GRAPH_VALIDATED"
+    assert response.explain is not None
+    assert response.explain["centerline_seed_returnable"] is False
+    assert request_row is not None
+    assert request_row.status_code == "FAILED"
+    assert fallback_result.geometry_json is None
+    assert fallback_result.quality_code == "FAILED"
+    assert fallback_result.quality_summary_json["candidate_geometry_json"] == candidate_geometry
+    assert issue.geometry_json == candidate_geometry
 
 
 @pytest.mark.asyncio

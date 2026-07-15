@@ -15,6 +15,7 @@ def build_quality_report(
     edge_count = int(graph_report.get("graph_edge_count") or 0)
     node_count = int(graph_report.get("graph_node_count") or 0)
     remaining_issue_count = int(graph_report.get("annotation_task_count") or 0)
+    boundary_integrity = graph_report.get("boundary_integrity_summary") or {}
     quality_score = 88 if edge_count and node_count else 0
     final_quality_code = "READY_WITH_WARNING" if edge_count and node_count else "FAILED"
     blocking_issues: list[str] = []
@@ -24,6 +25,8 @@ def build_quality_report(
         blocking_issues.append("GRAPH_NODE_EMPTY")
     if not int(source_totals.get("feature_count") or 0):
         blocking_issues.append("REVIER_SOURCE_EMPTY")
+    if int(boundary_integrity.get("failed_count") or 0):
+        blocking_issues.append("CHANNEL_BOUNDARY_INTEGRITY_FAILED")
 
     report = {
         "round_no": round_no,
@@ -60,9 +63,9 @@ def build_quality_report(
             *(es_report.get("issues") or []),
         ],
         "manual_review_tasks": int(graph_report.get("annotation_task_count") or 0),
+        "boundary_integrity_summary": boundary_integrity,
         "source_layers": source_report.get("layers") or [],
         "es_report": es_report,
         "qwen_report": qwen_report or {},
     }
     return report
-

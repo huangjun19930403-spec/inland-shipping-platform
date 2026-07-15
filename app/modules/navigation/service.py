@@ -7,7 +7,13 @@ from app.models import NavigationChannelCenterline
 from app.models.address import NavigationChannel
 
 GRAPH_READY_CENTERLINE_QUALITIES = {"READY", "READY_WITH_WARNING"}
-GRAPH_READY_CENTERLINE_SOURCES = {"MANUAL", "SEED_CENTERLINE", "OSM_WATERWAY", "CENTERLINE_SEGMENT_MERGE"}
+GRAPH_READY_CENTERLINE_SOURCES = {
+    "MANUAL",
+    "SEED_CENTERLINE",
+    "OSM_WATERWAY",
+    "CENTERLINE_SEGMENT_MERGE",
+    "AUTO_WATER_BODY_MEDIAL_AXIS",
+}
 
 
 class NavigationCenterlineService:

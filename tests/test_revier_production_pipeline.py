@@ -12,6 +12,7 @@ from app.modules.navigation.production_pipeline.centerline_builder import (
     validate_centerline_against_boundary,
 )
 from app.modules.navigation.production_pipeline.graph_builder import CenterlineAsset, build_graph_seed_rows
+from app.modules.navigation.production_pipeline.boundary_quality_audit import audit_boundary_integrity, vessel_limit_profile
 from app.modules.navigation.production_pipeline.seed_exporter import _bbox_from_source_report
 from app.modules.navigation.production_pipeline.source_reader import read_revier_zip_to_sink
 from app.modules.navigation.production_pipeline.water_area_normalizer import (
@@ -122,6 +123,42 @@ def test_centerline_validation_rejects_lines_outside_boundary() -> None:
     assert "CENTERLINE_OUTSIDE_BOUNDARY" in validation["blocking_issue_codes"]
 
 
+def test_boundary_integrity_audit_flags_fragmented_unverified_boundary() -> None:
+    boundary = {
+        "geometry_status_code": "AVAILABLE",
+        "coverage_policy_code": "CHANNEL_CORRIDOR_ENVELOPE",
+        "geometry_json": {
+            "type": "MultiPolygon",
+            "coordinates": [
+                _polygon(120.0, 31.0, 120.01, 31.01)["coordinates"],
+                _polygon(120.2, 31.2, 120.21, 31.21)["coordinates"],
+            ],
+        },
+        "source_trace_json": {
+            "revier_boundary_policy": "reuse_current_curated_channel_boundary",
+            "selected_water_areas": [
+                {"water_name": "测试河", "water_level": 4, "water_type_code": "PERENNIAL_DOUBLE_LINE_RIVER"}
+            ],
+        },
+    }
+
+    audit = audit_boundary_integrity(
+        channel={
+            "channel_code": "NC-TEST",
+            "technical_grade_current_code": None,
+            "technical_grade_planned_code": None,
+        },
+        boundary=boundary,
+        require_centerline=True,
+    )
+
+    assert audit["trust_code"] == "NEEDS_REVIEW"
+    assert "SOURCE_GEOMETRY_FRAGMENTED" in audit["issue_codes"]
+    assert "CENTERLINE_MISSING_BOUNDARY_NOT_VERIFIED" in audit["issue_codes"]
+    assert "NAVIGATION_TECHNICAL_GRADE_UNKNOWN" in audit["issue_codes"]
+    assert audit["water_system"]["water_level_min"] == 4
+
+
 def test_build_graph_seed_rows_splits_centerline_with_transport_node_connectors(tmp_path: Path) -> None:
     transport_path = tmp_path / "transport_nodes.json"
     transport_path.write_text(
@@ -154,6 +191,44 @@ def test_build_graph_seed_rows_splits_centerline_with_transport_node_connectors(
     assert len(nodes) >= 4
     assert {edge["source_type_code"] for edge in edges} == {"REVIER_WATER_AREA_CENTERLINE", "TRANSPORT_NODE_CONNECTOR"}
     assert all(edge["length_km"] > 0 for edge in edges)
+
+
+def test_build_graph_seed_rows_includes_navigation_grade_constraints(tmp_path: Path) -> None:
+    transport_path = tmp_path / "transport_nodes.json"
+    transport_path.write_text(
+        json.dumps(
+            [{"code": "TN-A", "name": "A 作业区", "longitude": 120.0, "latitude": 31.001, "status": 1}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    grade_profile = vessel_limit_profile(current_grade_code="IV", planned_grade_code=None)
+    assets = [
+        CenterlineAsset(
+            channel_code="NC-TEST",
+            centerline_code="REVCL-NC-TEST",
+            line=LineString([(120.0, 31.0), (120.1, 31.0)]),
+            channel_name="测试航道",
+            channel_type_code="CANAL",
+            technical_grade_code="IV",
+            vessel_limit_profile=grade_profile,
+            boundary_trust_code="READY",
+        )
+    ]
+
+    _nodes, edges, _report = build_graph_seed_rows(
+        assets=assets,
+        transport_node_seed_path=transport_path,
+        max_transport_snap_m=500.0,
+    )
+    centerline_edge = next(edge for edge in edges if edge["source_type_code"] == "REVIER_WATER_AREA_CENTERLINE")
+    connector_edge = next(edge for edge in edges if edge["source_type_code"] == "TRANSPORT_NODE_CONNECTOR")
+
+    assert centerline_edge["technical_grade_code"] == "IV"
+    assert centerline_edge["max_allowed_tonnage"] == 500.0
+    assert centerline_edge["unknown_constraint_flag"] is False
+    assert centerline_edge["validation_summary_json"]["boundary_trust_code"] == "READY"
+    assert connector_edge["unknown_constraint_flag"] is True
 
 
 def test_bbox_from_source_report_uses_layer_bounds() -> None:

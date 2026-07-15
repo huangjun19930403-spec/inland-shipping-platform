@@ -48,7 +48,12 @@ class NavigationGraphLoader:
                         NavigationGraphVersion.edge_count > 0,
                         NavigationGraphVersion.scope_code.not_like("MVP%"),
                     )
-                    .order_by(NavigationGraphVersion.id.desc())
+                    .order_by(
+                        NavigationGraphVersion.channel_count.desc(),
+                        NavigationGraphVersion.edge_count.desc(),
+                        NavigationGraphVersion.node_count.desc(),
+                        NavigationGraphVersion.id.desc(),
+                    )
                 )
             ).scalars()
         )

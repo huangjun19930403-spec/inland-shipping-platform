@@ -5,6 +5,23 @@ from __future__ import annotations
 from app.modules.vessel.ais.common import *
 
 
+def _geo_point_value(source: dict[str, Any], axis: str) -> Any:
+    location = source.get("location")
+    if isinstance(location, dict):
+        value = location.get(axis)
+        if value not in (None, ""):
+            return value
+    if isinstance(location, str) and "," in location:
+        parts = [part.strip() for part in location.split(",", 1)]
+        if len(parts) == 2:
+            return parts[0] if axis == "lon" else parts[1]
+    return None
+
+
+def _epoch_millis(value: datetime) -> int:
+    return int(value.timestamp() * 1000)
+
+
 class VesselAisRealtimeSearchMixin:
     async def _mmsi_values_for_loaded_profiles(
         self,
@@ -68,6 +85,7 @@ class VesselAisRealtimeSearchMixin:
         time_fields = ["posTime", "updateTime"]
         source_fields = [
             "shipMmsi",
+            "location",
             "lon",
             "lat",
             "speed",
@@ -78,10 +96,13 @@ class VesselAisRealtimeSearchMixin:
             "shipName",
             "shipEnName",
             "shipType",
+            "shipTypeCode",
+            "shipTypeName",
+            "shipEngineTypeCode",
         ]
         filters: list[dict[str, Any]] = [{"terms": {"shipMmsi": terms}}]
         if reported_within_minutes:
-            earliest = (datetime.utcnow() - timedelta(minutes=reported_within_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+            earliest = _epoch_millis(datetime.utcnow() - timedelta(minutes=reported_within_minutes))
             filters.append({"range": {"posTime": {"gte": earliest}}})
         query_body = {
             "size": min(max_hits, 5000),
@@ -121,8 +142,8 @@ class VesselAisRealtimeSearchMixin:
             if mmsi_raw is None:
                 continue
             mmsi = str(mmsi_raw).strip()
-            longitude = _to_decimal(_first_value(source, ["lon", "lng", "longitude", "x", "longitude_gcj02"]))
-            latitude = _to_decimal(_first_value(source, ["lat", "latitude", "y", "latitude_gcj02"]))
+            longitude = _to_decimal(_first_value(source, ["lon", "lng", "longitude", "x", "longitude_gcj02"]) or _geo_point_value(source, "lon"))
+            latitude = _to_decimal(_first_value(source, ["lat", "latitude", "y", "latitude_gcj02"]) or _geo_point_value(source, "lat"))
             position_time = _parse_position_time(
                 _first_value(source, ["posTime", "updateTime", "timestamp", "location_time", "update_time", "position_time", "time", "@timestamp"])
             )
@@ -137,6 +158,8 @@ class VesselAisRealtimeSearchMixin:
                 "speed_kn": _first_value(source, ["speed", "sog", "speed_kn"]),
                 "course_deg": _first_value(source, ["course", "cog", "course_deg"]),
                 "heading_deg": _first_value(source, ["heading", "head", "hdg", "heading_deg"]),
+                "ship_name": _first_value(source, ["shipName", "ship_name", "name", "vessel_name"]),
+                "ship_type": _first_value(source, ["shipType", "shipTypeCode", "shipTypeName", "shipEngineTypeCode", "ship_type"]),
                 "position_time": position_time,
                 "location_text": _first_value(source, ["location_text", "address", "area_name", "city_name"]),
                 "raw_city_code": _first_value(source, ["city_code", "cityCode", "adcode", "city_adcode", "region_code"]),
@@ -147,9 +170,9 @@ class VesselAisRealtimeSearchMixin:
     async def _search_recent_realtime_positions(self, *, reported_within_minutes: int, max_hits: int) -> dict[str, dict[str, Any]]:
         time_fields = ["posTime"]
         source_fields = [
-            "shipMmsi", "lon", "lat", "speed", "cog", "head", "posTime", "updateTime", "shipName", "shipEnName", "shipType",
+            "shipMmsi", "location", "lon", "lat", "speed", "cog", "head", "posTime", "updateTime", "shipName", "shipEnName", "shipType", "shipTypeCode", "shipTypeName", "shipEngineTypeCode",
         ]
-        earliest = (datetime.utcnow() - timedelta(minutes=reported_within_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        earliest = _epoch_millis(datetime.utcnow() - timedelta(minutes=reported_within_minutes))
         query_body = {
             "size": min(max_hits, 10000),
             "track_total_hits": False,
@@ -199,11 +222,13 @@ class VesselAisRealtimeSearchMixin:
             result[mmsi] = {
                 "mmsi": mmsi,
                 "source_index": hit.get("_index") if isinstance(hit, dict) else None,
-                "longitude": _to_decimal(_first_value(source, ["lon", "lng", "longitude", "x", "longitude_gcj02"])),
-                "latitude": _to_decimal(_first_value(source, ["lat", "latitude", "y", "latitude_gcj02"])),
+                "longitude": _to_decimal(_first_value(source, ["lon", "lng", "longitude", "x", "longitude_gcj02"]) or _geo_point_value(source, "lon")),
+                "latitude": _to_decimal(_first_value(source, ["lat", "latitude", "y", "latitude_gcj02"]) or _geo_point_value(source, "lat")),
                 "speed_kn": _first_value(source, ["speed", "sog", "speed_kn"]),
                 "course_deg": _first_value(source, ["course", "cog", "course_deg"]),
                 "heading_deg": _first_value(source, ["heading", "head", "hdg", "heading_deg"]),
+                "ship_name": _first_value(source, ["shipName", "ship_name", "name", "vessel_name"]),
+                "ship_type": _first_value(source, ["shipType", "shipTypeCode", "shipTypeName", "shipEngineTypeCode", "ship_type"]),
                 "position_time": position_time,
                 "location_text": _first_value(source, ["location_text", "address", "area_name", "city_name"]),
                 "raw_city_code": _first_value(source, ["city_code", "cityCode", "adcode", "city_adcode", "region_code"]),

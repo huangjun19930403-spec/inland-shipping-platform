@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from shapely.geometry import LineString, mapping, shape
+from shapely.validation import make_valid
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models import (
     NavigationAnnotationTask,
     NavigationChannelCenterline,
+    NavigationChannelBoundary,
     NavigationGraphEdge,
     NavigationGraphVersion,
     NavigationRouteQualityIssue,
@@ -28,6 +33,29 @@ from app.modules.navigation.services.graph_diagnostics_service import repair_gra
 
 
 OPEN_TASK_STATUSES = {"OPEN", "IN_PROGRESS", "NEED_REVIEW"}
+ROUTE_REPAIR_TASK_ISSUE_CODES = {
+    "UNKNOWN_CONSTRAINT_DATA",
+    "PATH_OUT_OF_WATER",
+    "PATH_WATER_COVERAGE_WARNING",
+    "PATH_OUT_OF_CHANNEL_BOUNDARY",
+    "PATH_CHANNEL_BOUNDARY_WARNING",
+    "ROUTE_STRAIGHT_LINE_FALLBACK",
+    "ROUTE_LONG_STRAIGHT_SEGMENT_REVIEW",
+    "ROUTE_FOLDBACK_REVIEW",
+    "ROUTE_SELF_INTERSECTION_REVIEW",
+    "GRAPH_DISCONNECTED",
+    "NO_ACTIVE_GRAPH_VERSION",
+    "NO_ROUTING_EDGE_IN_BBOX",
+    "NO_ROUTING_EDGE_IN_EXPANDED_BBOX",
+    "NO_PATH_FOUND",
+    "ORIGIN_TOO_FAR_FROM_GRAPH",
+    "DESTINATION_TOO_FAR_FROM_GRAPH",
+    "CHANNEL_BOUNDARY_SOURCE_NOT_VERIFIED",
+    "CHANNEL_BOUNDARY_TRUST_NEEDS_REVIEW",
+    "CHANNEL_BOUNDARY_SOURCE_FRAGMENTED",
+    "CHANNEL_BOUNDARY_BASEMAP_NOT_VERIFIED",
+    "CENTERLINE_SEED_FALLBACK_ROUTE",
+}
 RESOLUTION_TARGET_REQUIRED_TYPES = {
     "BOUNDARY_VERSION_CREATED",
     "CENTERLINE_VERSION_CREATED",
@@ -104,8 +132,25 @@ class NavigationAnnotationTaskService:
         created_count = 0
         existing_count = 0
         for issue in issues:
-            channel_id = await self._channel_id_for_edge(issue.related_edge_id)
+            if not self._should_create_route_issue_task(issue.issue_type_code):
+                continue
+            channel_id = await self._channel_id_for_route_issue(result, issue)
             task_type = self._task_type_for_issue(issue.issue_type_code)
+            task_geometry_json = self._route_issue_task_geometry(result=result, request=request, issue=issue)
+            dedupe_key = self._route_issue_task_dedupe_key(
+                result=result,
+                request=request,
+                issue=issue,
+                task_type_code=task_type,
+                channel_id=channel_id,
+                geometry_json=task_geometry_json,
+            )
+            suggestion = self._route_issue_suggestion(
+                result=result,
+                issue=issue,
+                task_type_code=task_type,
+                fallback_geometry_json=task_geometry_json,
+            )
             task, created = await self._get_or_create_task(
                 task_type_code=task_type,
                 target_type_code="ROUTE_QUALITY_ISSUE",
@@ -113,11 +158,17 @@ class NavigationAnnotationTaskService:
                 issue_code=issue.issue_type_code,
                 issue_summary=issue.message,
                 priority_code=self._priority_for_issue(issue.issue_type_code, issue.severity_code),
-                geometry_json=issue.geometry_json,
+                geometry_json=task_geometry_json,
                 channel_id=channel_id,
                 graph_version_id=request.graph_version_id if request else None,
                 created_by=created_by,
+                dedupe_key=dedupe_key,
             )
+            if suggestion:
+                task.suggestion_json = {
+                    **(task.suggestion_json or {}),
+                    **suggestion,
+                }
             issue.related_annotation_task_id = task.id
             task_ids.append(task.id)
             created_count += 1 if created else 0
@@ -255,6 +306,81 @@ class NavigationAnnotationTaskService:
             source_type_code="CENTERLINE_QUALITY",
         )
 
+    async def create_from_boundary_integrity(
+        self,
+        *,
+        channel_id: int | None = None,
+        created_by: int | None = None,
+    ) -> NavigationAnnotationTaskBatchCreateResponse:
+        stmt = select(NavigationChannelBoundary).where(NavigationChannelBoundary.is_current.is_(True))
+        if channel_id is not None:
+            stmt = stmt.where(NavigationChannelBoundary.channel_id == channel_id)
+        rows = list(
+            (
+                await self.session.execute(
+                    stmt.order_by(NavigationChannelBoundary.channel_id, NavigationChannelBoundary.id)
+                )
+            ).scalars()
+        )
+
+        task_ids: list[int] = []
+        created_count = 0
+        existing_count = 0
+        for boundary in rows:
+            audit = self._boundary_integrity_audit(boundary.source_trace_json)
+            if not self._boundary_needs_integrity_task(boundary, audit):
+                continue
+            issue_codes = [str(item).upper() for item in (audit.get("issue_codes") or []) if item]
+            trust_code = str(audit.get("trust_code") or "SOURCE_NOT_VERIFIED").upper()
+            primary_issue = self._primary_boundary_integrity_issue(trust_code, issue_codes)
+            task, created = await self._get_or_create_task(
+                task_type_code="SEED_BOUNDARY_REPAIR",
+                target_type_code="CHANNEL_BOUNDARY",
+                target_id=boundary.id,
+                issue_code=primary_issue,
+                issue_summary=self._boundary_integrity_summary(boundary, trust_code, issue_codes),
+                priority_code=self._boundary_integrity_priority(trust_code, issue_codes),
+                geometry_json=boundary.geometry_json,
+                channel_id=boundary.channel_id,
+                created_by=created_by,
+                dedupe_key=f"BOUNDARY_INTEGRITY_V1|boundary={boundary.id}",
+            )
+            task.suggestion_json = {
+                **(task.suggestion_json or {}),
+                "repair_strategy_code": "REAL_WATERWAY_BOUNDARY_REPAIR",
+                "candidate_operation_code": "REBUILD_OR_EXPAND_CHANNEL_BOUNDARY",
+                "boundary_id": boundary.id,
+                "channel_id": boundary.channel_id,
+                "trust_code": trust_code,
+                "issue_codes": issue_codes,
+                "boundary_quality_code": boundary.boundary_quality_code,
+                "repair_status_code": boundary.repair_status_code,
+                "boundary_integrity_audit": audit,
+                "publish_allowed": False,
+                "requires_operator_confirmation": True,
+                "guardrails": [
+                    "不能把碎片水系 union 结果直接视为可用航道边界",
+                    "边界必须包住真实水道、当前中心线和抽样轨迹后才能升为 READY",
+                    "技术等级缺失时不能承诺可通行船型或吨级",
+                ],
+                "next_actions": [
+                    "打开边界生成页，用底图、原始水系、HiFleet 轨迹和已发布中心线逐段核对",
+                    "对缺口或过窄段创建边界草稿并扩大/补齐真实水道范围",
+                    "发布边界后重建中心线和 Graph，再重新跑路径矩阵",
+                ],
+            }
+            task_ids.append(task.id)
+            created_count += 1 if created else 0
+            existing_count += 0 if created else 1
+
+        await self.session.commit()
+        return NavigationAnnotationTaskBatchCreateResponse(
+            created_count=created_count,
+            existing_count=existing_count,
+            task_ids=self._dedupe_ids(task_ids),
+            source_type_code="BOUNDARY_INTEGRITY",
+        )
+
     async def generate_suggestion(self, task_id: int) -> NavigationAnnotationSuggestionResponse:
         task = await self._task(task_id)
         suggestion = self._suggestion_for_task(task)
@@ -361,6 +487,7 @@ class NavigationAnnotationTaskService:
         channel_id: int | None = None,
         graph_version_id: int | None = None,
         created_by: int | None = None,
+        dedupe_key: str | None = None,
     ) -> tuple[NavigationAnnotationTask, bool]:
         existing = await self.session.scalar(
             select(NavigationAnnotationTask)
@@ -375,6 +502,20 @@ class NavigationAnnotationTaskService:
         )
         if existing is not None:
             return existing, False
+        existing = await self._find_open_task_by_dedupe_key(
+            task_type_code=task_type_code,
+            target_type_code=target_type_code,
+            issue_code=issue_code,
+            geometry_json=geometry_json,
+            channel_id=channel_id,
+            graph_version_id=graph_version_id,
+            dedupe_key=dedupe_key,
+        )
+        if existing is not None:
+            return existing, False
+        suggestion_json = self._base_suggestion(issue_code=issue_code, task_type_code=task_type_code)
+        if dedupe_key:
+            suggestion_json["dedupe_key"] = dedupe_key
         task = NavigationAnnotationTask(
             task_no=self._task_no(),
             task_type_code=task_type_code,
@@ -386,12 +527,57 @@ class NavigationAnnotationTaskService:
             priority_code=priority_code,
             status_code="OPEN",
             issue_summary=issue_summary[:2000],
-            suggestion_json=self._base_suggestion(issue_code=issue_code, task_type_code=task_type_code),
+            suggestion_json=suggestion_json,
             created_by=created_by,
         )
         self.session.add(task)
         await self.session.flush()
         return task, True
+
+    async def _find_open_task_by_dedupe_key(
+        self,
+        *,
+        task_type_code: str,
+        target_type_code: str,
+        issue_code: str,
+        geometry_json: dict[str, Any] | None,
+        channel_id: int | None,
+        graph_version_id: int | None,
+        dedupe_key: str | None,
+    ) -> NavigationAnnotationTask | None:
+        if not dedupe_key:
+            return None
+        stmt = (
+            select(NavigationAnnotationTask)
+            .where(
+                NavigationAnnotationTask.task_type_code == task_type_code,
+                NavigationAnnotationTask.target_type_code == target_type_code,
+                NavigationAnnotationTask.status_code.in_(OPEN_TASK_STATUSES),
+            )
+            .order_by(NavigationAnnotationTask.id.desc())
+            .limit(200)
+        )
+        if channel_id is not None:
+            stmt = stmt.where(NavigationAnnotationTask.channel_id == channel_id)
+        if graph_version_id is not None:
+            stmt = stmt.where(NavigationAnnotationTask.graph_version_id == graph_version_id)
+        geometry_hash = self._geometry_fingerprint(geometry_json)
+        issue_code = issue_code.upper()
+        rows = list((await self.session.execute(stmt)).scalars())
+        for row in rows:
+            suggestion = row.suggestion_json if isinstance(row.suggestion_json, dict) else {}
+            if suggestion.get("dedupe_key") == dedupe_key:
+                return row
+            if str(suggestion.get("issue_code") or "").upper() != issue_code:
+                continue
+            if geometry_hash and self._geometry_fingerprint(row.geometry_json) == geometry_hash:
+                return row
+            if self._legacy_endpoint_dedupe_key_matches(suggestion.get("dedupe_key"), issue_code, geometry_json):
+                if row.geometry_json is None:
+                    row.geometry_json = geometry_json
+                row.suggestion_json = {**suggestion, "dedupe_key": dedupe_key}
+                return row
+        return None
 
     async def _task(self, task_id: int) -> NavigationAnnotationTask:
         task = await self.session.get(NavigationAnnotationTask, task_id)
@@ -404,6 +590,28 @@ class NavigationAnnotationTaskService:
             return None
         edge = await self.session.get(NavigationGraphEdge, edge_id)
         return edge.channel_id if edge else None
+
+    async def _channel_id_for_route_issue(
+        self,
+        result: NavigationRouteResult,
+        issue: NavigationRouteQualityIssue,
+    ) -> int | None:
+        channel_id = await self._channel_id_for_edge(issue.related_edge_id)
+        if channel_id is not None:
+            return channel_id
+        channel_ids = [int(item) for item in (result.channel_ids or []) if item is not None]
+        if issue.issue_type_code in {
+            "PATH_OUT_OF_WATER",
+            "PATH_WATER_COVERAGE_WARNING",
+            "PATH_OUT_OF_CHANNEL_BOUNDARY",
+            "PATH_CHANNEL_BOUNDARY_WARNING",
+            "CHANNEL_BOUNDARY_SOURCE_NOT_VERIFIED",
+            "CHANNEL_BOUNDARY_TRUST_NEEDS_REVIEW",
+            "CHANNEL_BOUNDARY_SOURCE_FRAGMENTED",
+            "CHANNEL_BOUNDARY_BASEMAP_NOT_VERIFIED",
+        } and channel_ids:
+            return channel_ids[0]
+        return None
 
     def _to_response(self, row: NavigationAnnotationTask) -> NavigationAnnotationTaskResponse:
         return NavigationAnnotationTaskResponse(
@@ -434,13 +642,149 @@ class NavigationAnnotationTaskService:
     def _task_type_for_issue(self, issue_code: str) -> str:
         if issue_code == "UNKNOWN_CONSTRAINT_DATA" or issue_code.startswith("VSL_"):
             return "CONSTRAINT_DATA_REPAIR"
-        if issue_code in {"GRAPH_DISCONNECTED", "NO_ACTIVE_GRAPH_VERSION", "NO_ROUTING_EDGE_IN_BBOX"}:
+        if issue_code in {
+            "GRAPH_DISCONNECTED",
+            "NO_ACTIVE_GRAPH_VERSION",
+            "NO_ROUTING_EDGE_IN_BBOX",
+            "ROUTE_STRAIGHT_LINE_FALLBACK",
+        }:
             return "GRAPH_CONNECTIVITY_REPAIR"
         if "SNAP" in issue_code or "ORIGIN" in issue_code or "DESTINATION" in issue_code:
             return "SNAP_REPAIR"
-        if issue_code in {"LOW_CONFIDENCE_EDGE", "EDGE_NEED_MANUAL_REVIEW", "PATH_OUT_OF_CHANNEL_BOUNDARY"}:
+        if issue_code in {
+            "PATH_OUT_OF_WATER",
+            "PATH_WATER_COVERAGE_WARNING",
+            "PATH_OUT_OF_CHANNEL_BOUNDARY",
+            "PATH_CHANNEL_BOUNDARY_WARNING",
+            "CHANNEL_BOUNDARY_SOURCE_NOT_VERIFIED",
+            "CHANNEL_BOUNDARY_TRUST_NEEDS_REVIEW",
+            "CHANNEL_BOUNDARY_SOURCE_FRAGMENTED",
+            "CHANNEL_BOUNDARY_BASEMAP_NOT_VERIFIED",
+        }:
+            return "SEED_BOUNDARY_REPAIR"
+        if issue_code == "CENTERLINE_SEED_FALLBACK_ROUTE":
+            return "GRAPH_CONNECTIVITY_REPAIR"
+        if issue_code in {
+            "LOW_CONFIDENCE_EDGE",
+            "EDGE_NEED_MANUAL_REVIEW",
+            "ROUTE_LONG_STRAIGHT_SEGMENT_REVIEW",
+            "ROUTE_FOLDBACK_REVIEW",
+            "ROUTE_SELF_INTERSECTION_REVIEW",
+        }:
             return "GRAPH_EDGE_REPAIR"
         return "ROUTE_QUALITY_REPAIR"
+
+    def _should_create_route_issue_task(self, issue_code: str) -> bool:
+        issue_code = issue_code.upper()
+        return issue_code in ROUTE_REPAIR_TASK_ISSUE_CODES or issue_code.startswith("VSL_")
+
+    def _route_issue_task_dedupe_key(
+        self,
+        *,
+        result: NavigationRouteResult,
+        request: NavigationRouteRequest | None,
+        issue: NavigationRouteQualityIssue,
+        task_type_code: str,
+        channel_id: int | None,
+        geometry_json: dict[str, Any] | None,
+    ) -> str | None:
+        issue_code = issue.issue_type_code.upper()
+        graph_version_id = request.graph_version_id if request else None
+        parts = [
+            "ROUTE_REPAIR_TASK_V1",
+            f"type={task_type_code}",
+            f"issue={issue_code}",
+            f"graph={graph_version_id or ''}",
+            f"channel={channel_id or ''}",
+        ]
+        if issue.related_edge_id is not None:
+            parts.append(f"edge={int(issue.related_edge_id)}")
+        elif issue.related_node_id is not None:
+            parts.append(f"node={int(issue.related_node_id)}")
+        else:
+            geometry_hash = self._geometry_fingerprint(geometry_json)
+            if geometry_hash:
+                parts.append(f"geometry={geometry_hash}")
+            elif request is not None and all(
+                value is not None
+                for value in (request.origin_lng, request.origin_lat, request.destination_lng, request.destination_lat)
+            ):
+                parts.append(
+                    "od="
+                    f"{float(request.origin_lng):.7f},{float(request.origin_lat):.7f}->"
+                    f"{float(request.destination_lng):.7f},{float(request.destination_lat):.7f}"
+                )
+            else:
+                return None
+        return "|".join(parts)
+
+    def _route_issue_task_geometry(
+        self,
+        *,
+        result: NavigationRouteResult,
+        request: NavigationRouteRequest | None,
+        issue: NavigationRouteQualityIssue,
+    ) -> dict[str, Any] | None:
+        if issue.geometry_json:
+            return issue.geometry_json
+        if request is not None:
+            if issue.issue_type_code.upper().startswith("ORIGIN_") and request.origin_lng is not None and request.origin_lat is not None:
+                return {
+                    "type": "Point",
+                    "coordinates": [float(request.origin_lng), float(request.origin_lat)],
+                }
+            if (
+                issue.issue_type_code.upper().startswith("DESTINATION_")
+                and request.destination_lng is not None
+                and request.destination_lat is not None
+            ):
+                return {
+                    "type": "Point",
+                    "coordinates": [float(request.destination_lng), float(request.destination_lat)],
+                }
+        return result.geometry_json
+
+    def _geometry_fingerprint(self, geometry_json: dict[str, Any] | None) -> str | None:
+        if not isinstance(geometry_json, dict):
+            return None
+        try:
+            payload = mapping(shape(geometry_json))
+        except Exception:  # noqa: BLE001
+            payload = geometry_json
+        normalized = self._normalize_geometry_payload(payload)
+        digest = hashlib.sha256(
+            json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return digest[:24]
+
+    def _normalize_geometry_payload(self, value: Any) -> Any:
+        if isinstance(value, float):
+            return round(value, 7)
+        if isinstance(value, dict):
+            return {str(key): self._normalize_geometry_payload(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._normalize_geometry_payload(item) for item in value]
+        return value
+
+    def _legacy_endpoint_dedupe_key_matches(
+        self,
+        candidate_key: Any,
+        issue_code: str,
+        geometry_json: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(candidate_key, str) or not isinstance(geometry_json, dict):
+            return False
+        if geometry_json.get("type") != "Point":
+            return False
+        coords = geometry_json.get("coordinates")
+        if not isinstance(coords, (list, tuple)) or len(coords) < 2:
+            return False
+        coord_key = f"{float(coords[0]):.7f},{float(coords[1]):.7f}"
+        if issue_code.startswith("ORIGIN_"):
+            return f"|od={coord_key}->" in candidate_key
+        if issue_code.startswith("DESTINATION_"):
+            return candidate_key.endswith(f"->{coord_key}") or f"->{coord_key}|" in candidate_key
+        return False
 
     def _normalize_task_type(self, task_type_code: str) -> str:
         task_type = task_type_code.upper()
@@ -455,11 +799,150 @@ class NavigationAnnotationTaskService:
         return replacements.get(task_type, task_type)
 
     def _priority_for_issue(self, issue_code: str, severity_code: str) -> str:
-        if severity_code == "ERROR" or issue_code in {"GRAPH_DISCONNECTED", "PATH_OUT_OF_WATER"}:
+        if severity_code == "ERROR" or issue_code in {
+            "GRAPH_DISCONNECTED",
+            "PATH_OUT_OF_WATER",
+            "PATH_OUT_OF_CHANNEL_BOUNDARY",
+            "CHANNEL_BOUNDARY_SOURCE_NOT_VERIFIED",
+            "CHANNEL_BOUNDARY_TRUST_NEEDS_REVIEW",
+        }:
             return "HIGH"
         if issue_code in {"UNKNOWN_CONSTRAINT_DATA", "LOW_CONFIDENCE_EDGE"}:
             return "MEDIUM"
         return "MEDIUM"
+
+    def _route_issue_suggestion(
+        self,
+        *,
+        result: NavigationRouteResult,
+        issue: NavigationRouteQualityIssue,
+        task_type_code: str,
+        fallback_geometry_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if task_type_code == "SNAP_REPAIR":
+            route_geometry = issue.geometry_json or fallback_geometry_json or result.geometry_json
+            return {
+                "repair_strategy_code": "ENDPOINT_SNAP_AND_SEED_ACCESS_REPAIR",
+                "candidate_operation_code": "CREATE_ACCESS_CENTERLINE_AND_REBUILD_GRAPH",
+                "candidate_endpoint_geometry_json": route_geometry,
+                "route_result_id": result.id,
+                "route_result_provider_code": result.provider_code,
+                "route_result_quality_code": result.quality_code,
+                "route_channel_ids": list(result.channel_ids or []),
+                "route_edge_ids": list(result.edge_ids or []),
+                "snap_repair_reason": issue.issue_type_code,
+                "publish_allowed": False,
+                "requires_operator_confirmation": True,
+                "guardrails": [
+                    "不要通过放大吸附阈值直接生成长距离直连",
+                    "优先用 HiFleet 参考轨迹、水域面和现有中心线生成接入段候选",
+                    "接入段必须通过水域、边界、折返、跳点校验后才能参与 Graph 重建",
+                ],
+                "next_actions": [
+                    "查找端点附近真实水域和最近可用 Graph 边",
+                    "用 HiFleet 参考轨迹截取端点到主航道的接入段候选",
+                    "生成中心线或连接点草稿，发布后重建 Graph 并重新跑路径矩阵",
+                ],
+            }
+        if task_type_code != "SEED_BOUNDARY_REPAIR":
+            return None
+        route_geometry = issue.geometry_json or fallback_geometry_json or result.geometry_json
+        patch = self._boundary_expansion_patch(route_geometry)
+        return {
+            "repair_strategy_code": "BOUNDARY_EXPANSION_CANDIDATE",
+            "candidate_operation_code": "UNION_PATCH",
+            "candidate_boundary_patch_geometry_json": patch,
+            "candidate_buffer_m": 350,
+            "route_result_id": result.id,
+            "route_result_provider_code": result.provider_code,
+            "route_result_quality_code": result.quality_code,
+            "route_channel_ids": list(result.channel_ids or []),
+            "route_edge_ids": list(result.edge_ids or []),
+            "boundary_repair_reason": issue.issue_type_code,
+            "publish_allowed": False,
+            "requires_operator_confirmation": True,
+            "guardrails": [
+                "该几何只是扩边候选补丁，不能自动发布为当前边界",
+                "先检查是否真实航道边界缺失或过窄，再以草稿 UNION_PATCH 合入",
+                "发布新边界后必须重新生成中心线区段和 Graph，再重新跑路径验证",
+            ],
+        }
+
+    def _boundary_expansion_patch(self, geometry_json: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(geometry_json, dict):
+            return None
+        try:
+            geometry = shape(geometry_json)
+        except Exception:  # noqa: BLE001
+            return None
+        if not isinstance(geometry, LineString) or geometry.is_empty:
+            return None
+        buffer_degree = 350 / 111_320
+        try:
+            patch = make_valid(geometry.buffer(buffer_degree, cap_style=2, join_style=2))
+        except Exception:  # noqa: BLE001
+            patch = geometry.buffer(buffer_degree)
+        if patch.is_empty:
+            return None
+        return mapping(patch)
+
+    def _boundary_integrity_audit(self, source_trace_json: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(source_trace_json, dict):
+            return {}
+        audit = source_trace_json.get("boundary_integrity_audit")
+        return audit if isinstance(audit, dict) else {}
+
+    def _boundary_needs_integrity_task(self, boundary: NavigationChannelBoundary, audit: dict[str, Any]) -> bool:
+        trust_code = str(audit.get("trust_code") or "").upper()
+        if trust_code in {"FAILED", "NEEDS_REVIEW"}:
+            return True
+        if audit and str(audit.get("trust_code") or "").upper() != "READY":
+            return True
+        if boundary.boundary_quality_code in {"FAILED", "REVIEW", "LOW_CONFIDENCE", "UNKNOWN"}:
+            return True
+        return boundary.repair_status_code not in {"NONE", "REPAIRED", "VERIFIED"}
+
+    def _primary_boundary_integrity_issue(self, trust_code: str, issue_codes: list[str]) -> str:
+        for code in (
+            "CHANNEL_BOUNDARY_MISSING",
+            "CHANNEL_BOUNDARY_GEOMETRY_INVALID",
+            "TRAJECTORY_NOT_ENCLOSED_BY_BOUNDARY",
+            "CENTERLINE_NOT_ENCLOSED_BY_BOUNDARY",
+            "CENTERLINE_MISSING_BOUNDARY_NOT_VERIFIED",
+            "SOURCE_GEOMETRY_FRAGMENTED",
+            "BOUNDARY_NOT_INDEPENDENTLY_BASEMAP_VERIFIED",
+            "NAVIGATION_TECHNICAL_GRADE_UNKNOWN",
+        ):
+            if code in issue_codes:
+                return code
+        if trust_code == "FAILED":
+            return "CHANNEL_BOUNDARY_INTEGRITY_FAILED"
+        return "CHANNEL_BOUNDARY_INTEGRITY_NEEDS_REVIEW"
+
+    def _boundary_integrity_priority(self, trust_code: str, issue_codes: list[str]) -> str:
+        if trust_code == "FAILED" or any(
+            code in issue_codes
+            for code in {
+                "CHANNEL_BOUNDARY_MISSING",
+                "CHANNEL_BOUNDARY_GEOMETRY_INVALID",
+                "TRAJECTORY_NOT_ENCLOSED_BY_BOUNDARY",
+                "CENTERLINE_NOT_ENCLOSED_BY_BOUNDARY",
+            }
+        ):
+            return "HIGH"
+        return "MEDIUM"
+
+    def _boundary_integrity_summary(
+        self,
+        boundary: NavigationChannelBoundary,
+        trust_code: str,
+        issue_codes: list[str],
+    ) -> str:
+        issue_text = ", ".join(issue_codes[:8]) if issue_codes else "SOURCE_NOT_VERIFIED"
+        return (
+            f"航道 {boundary.channel_id} 当前边界 {boundary.id} 完整性为 {trust_code}，"
+            f"不能作为真实路径验收前置边界；问题：{issue_text}"
+        )
 
     def _validation_candidates(self, validation_report: dict[str, Any] | None) -> list[dict[str, Any]]:
         if not isinstance(validation_report, dict):

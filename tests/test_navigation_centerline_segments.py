@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
+from shapely.geometry import LineString, shape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -166,6 +167,40 @@ async def test_generate_centerline_segments_from_boundary_rough_line(session_mak
     assert all(row.source_trace_json["source_centerline_id"] is None for row in rows)
     assert all(row.source_trace_json["source_mode"] == "BOUNDARY_ROUGH_LOCAL" for row in rows)
     assert all(row.source_trace_json["algorithm"] for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_boundary_rough_lines_are_clipped_to_boundary(session_maker) -> None:
+    async with session_maker() as session:
+        service = NavigationCenterlineSegmentService(session)
+        boundary = shape(_polygon())
+        lines, meta = service._clip_rough_lines_to_boundary(
+            [LineString([(120.01, 31.025), (120.25, 31.025)])],
+            boundary,
+        )
+
+    assert meta["boundary_rough_clip_mode"] == "CLIPPED_TO_BOUNDARY"
+    assert lines
+    assert all(boundary.buffer(1e-10).covers(line) for line in lines)
+    assert max(line.bounds[2] for line in lines) <= 120.24
+
+
+@pytest.mark.asyncio
+async def test_boundary_rough_lines_snap_near_boundary_without_fragmenting(session_maker) -> None:
+    async with session_maker() as session:
+        service = NavigationCenterlineSegmentService(session)
+        boundary = shape(_polygon())
+        lines, meta = service._clip_rough_lines_to_boundary(
+            [LineString([(119.9997, 31.025), (120.2403, 31.025)])],
+            boundary,
+        )
+
+    assert meta["boundary_rough_clip_mode"] == "SNAPPED_TO_BOUNDARY"
+    assert meta["boundary_rough_output_line_count"] == 1
+    assert len(lines) == 1
+    assert boundary.buffer(1e-10).covers(lines[0])
+    assert lines[0].coords[0][0] >= 120.00
+    assert lines[0].coords[-1][0] <= 120.24
 
 
 @pytest.mark.asyncio

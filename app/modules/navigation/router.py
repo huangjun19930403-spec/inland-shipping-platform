@@ -892,6 +892,18 @@ async def create_navigation_annotation_tasks_from_centerlines(
     )
 
 
+@router.post("/annotation-tasks/from-boundary-integrity", response_model=NavigationAnnotationTaskBatchCreateResponse)
+async def create_navigation_annotation_tasks_from_boundary_integrity(
+    channel_id: int | None = None,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NavigationAnnotationTaskService(db).create_from_boundary_integrity(
+        channel_id=channel_id,
+        created_by=getattr(current_user, "id", None),
+    )
+
+
 @router.post("/annotation-tasks/from-diagnostics", response_model=NavigationAnnotationTaskBatchCreateResponse)
 async def create_navigation_annotation_tasks_from_diagnostics(
     channel_id: int | None = None,

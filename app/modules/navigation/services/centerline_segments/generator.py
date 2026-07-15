@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import or_, select
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, MultiPoint, Point, shape
-from shapely.ops import voronoi_diagram
+from shapely.ops import nearest_points, voronoi_diagram
 from shapely.validation import make_valid
 
 from app.models import NavigationCenterlineSegment, NavigationChannelCenterline, NavigationChannelSegment
@@ -16,7 +16,7 @@ from app.modules.navigation.schemas import (
     NavigationCenterlineSegmentGenerateResponse,
 )
 from app.modules.navigation.services.centerline_point_sets import NavigationCenterlinePointSetService
-from app.modules.navigation.services.centerline_segments.types import SOURCE_CENTERLINE_TYPES
+from app.modules.navigation.services.centerline_segments.types import BOUNDARY_TOLERANCE_DEGREE, SOURCE_CENTERLINE_TYPES
 
 
 class NavigationCenterlineSegmentGeneratorMixin:
@@ -100,7 +100,15 @@ class NavigationCenterlineSegmentGeneratorMixin:
             source_type = "CHANNEL_GUIDE_WITH_BOUNDARY_CLIP"
             algorithm = "SEED_GUIDE_BOUNDARY_CLIP_V1"
         else:
+            boundary_geometry = self._boundary_geometry(boundary.geometry_json)
+            if boundary_geometry is None:
+                return self._generation_blocked(
+                    channel_id,
+                    "当前发布边界几何无效，不能基于边界抽取局部粗中心线。",
+                    ["PUBLISHED_BOUNDARY_GEOMETRY_INVALID"],
+                )
             lines, algorithm = self._rough_lines_from_boundary(boundary.geometry_json)
+            lines, source_meta = self._clip_rough_lines_to_boundary(lines, boundary_geometry)
             if not lines:
                 return self._generation_blocked(
                     channel_id,
@@ -399,6 +407,88 @@ class NavigationCenterlineSegmentGeneratorMixin:
             return [], None
         algorithm = "BOUNDARY_COMPONENT_MEDIAL_AXIS_V1" if len(algorithms) > 1 or len(lines) > 1 else next(iter(algorithms))
         return lines, algorithm
+
+    def _clip_rough_lines_to_boundary(self, lines: list[LineString], boundary_geometry: Any) -> tuple[list[LineString], dict[str, Any]]:
+        if not lines:
+            return [], {"boundary_rough_clip_mode": "NO_INPUT_LINES"}
+        output: list[LineString] = []
+        input_length_m = sum(self._length_m(line) for line in lines)
+        clipped_input_count = 0
+        snapped_input_count = 0
+        for line in lines:
+            cleaned = self._clean_line(line)
+            if boundary_geometry.covers(cleaned):
+                output.append(cleaned)
+                continue
+            snapped = self._snap_rough_line_to_boundary(cleaned, boundary_geometry)
+            if snapped is not None:
+                output.append(snapped)
+                snapped_input_count += 1
+                continue
+            clipped_input_count += 1
+            clipped_geometry = cleaned.intersection(boundary_geometry)
+            for part in self._flatten_lines(clipped_geometry):
+                clipped = self._clean_line(part)
+                if self._length_m(clipped) >= 20.0 and boundary_geometry.buffer(1e-10).covers(clipped):
+                    output.append(clipped)
+        output.sort(key=lambda item: (-self._length_m(item), item.bounds[0], item.bounds[1]))
+        output_length_m = sum(self._length_m(line) for line in output)
+        if clipped_input_count:
+            clip_mode = "CLIPPED_TO_BOUNDARY"
+        elif snapped_input_count:
+            clip_mode = "SNAPPED_TO_BOUNDARY"
+        else:
+            clip_mode = "INSIDE_BOUNDARY"
+        return output, {
+            "boundary_rough_clip_mode": clip_mode,
+            "boundary_rough_input_line_count": len(lines),
+            "boundary_rough_clipped_input_count": clipped_input_count,
+            "boundary_rough_snapped_input_count": snapped_input_count,
+            "boundary_rough_output_line_count": len(output),
+            "boundary_rough_input_length_m": round(input_length_m, 2),
+            "boundary_rough_output_length_m": round(output_length_m, 2),
+            "boundary_rough_length_retention_ratio": round(output_length_m / input_length_m, 6) if input_length_m > 0 else 0.0,
+        }
+
+    def _snap_rough_line_to_boundary(self, line: LineString, boundary_geometry: Any) -> LineString | None:
+        snap_search_degree = max(BOUNDARY_TOLERANCE_DEGREE * 2.5, 0.0005)
+        if not boundary_geometry.buffer(snap_search_degree).covers(line):
+            return None
+        coords = self._densify_coords([(float(lng), float(lat)) for lng, lat, *_rest in line.coords], max_step_m=80.0)
+        snapped_coords: list[tuple[float, float]] = []
+        for lng, lat in coords:
+            point = Point(lng, lat)
+            if boundary_geometry.covers(point):
+                snapped_coords.append((lng, lat))
+                continue
+            nearest, _point = nearest_points(boundary_geometry, point)
+            snapped_coords.append((float(nearest.x), float(nearest.y)))
+        cleaned = self._clean_coords(snapped_coords)
+        if len(cleaned) < 2:
+            return None
+        snapped = LineString(cleaned)
+        if boundary_geometry.buffer(BOUNDARY_TOLERANCE_DEGREE).covers(snapped):
+            return self._clean_line(snapped)
+        return None
+
+    def _densify_coords(self, coords: list[tuple[float, float]], *, max_step_m: float) -> list[tuple[float, float]]:
+        if len(coords) < 2 or max_step_m <= 0:
+            return coords
+        output: list[tuple[float, float]] = []
+        for start, end in zip(coords, coords[1:]):
+            if not output:
+                output.append(start)
+            distance = self._distance_m(start, end)
+            split_count = max(1, int(math.ceil(distance / max_step_m)))
+            for index in range(1, split_count + 1):
+                ratio = index / split_count
+                output.append(
+                    (
+                        start[0] + (end[0] - start[0]) * ratio,
+                        start[1] + (end[1] - start[1]) * ratio,
+                    )
+                )
+        return output
 
     def _rough_line_from_boundary(self, geometry_json: dict[str, Any]) -> tuple[LineString | None, str | None]:
         lines, algorithm = self._rough_lines_from_boundary(geometry_json)
