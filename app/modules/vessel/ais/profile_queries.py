@@ -202,13 +202,16 @@ class VesselAisProfileQueryMixin:
             unscanned_profile_count=unscanned_profile_count,
         )
         await self._clear_ais_situation_response_caches()
-        await self._store_city_situation_snapshot(
-            merged.items,
-            generated_at=generated_at,
-            partial=merged.partial,
-            error_message=merged.error_message,
-            snapshot_id=snapshot_id,
-        )
+        if snapshot_id == self._FULL_AIS_SNAPSHOT_ID:
+            await self._discard_city_situation_snapshot(snapshot_id)
+        else:
+            await self._store_city_situation_snapshot(
+                merged.items,
+                generated_at=generated_at,
+                partial=merged.partial,
+                error_message=merged.error_message,
+                snapshot_id=snapshot_id,
+            )
         self._last_full_ais_position_items = merged.items
         self._last_full_ais_position_generated_at = generated_at
         return {
@@ -344,6 +347,10 @@ class VesselAisProfileQueryMixin:
                     match_status_code=item.match_status_code or "MATCHED_PROFILE",
                     city_code=item.current_city_code or item.city_code,
                     city_name=item.current_city_name or item.city_name,
+                    current_channel_code=item.current_channel_code,
+                    current_channel_name=item.current_channel_name,
+                    current_channel_source=item.current_channel_source,
+                    channel_match_distance_m=item.channel_match_distance_m,
                     valid_position_flag=True,
                     created_at=now,
                 )

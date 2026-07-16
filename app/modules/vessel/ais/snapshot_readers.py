@@ -35,6 +35,162 @@ class VesselAisSnapshotReaderMixin:
             return False
         return bool(await self._realtime_es_host())
 
+    def _persisted_position_rows_stmt(
+        self,
+        snapshot_id: str,
+        query,
+        *,
+        generated_at: datetime,
+        city_code: str | None = None,
+        city_name: str | None = None,
+        channel_code: str | None = None,
+        channel_name: str | None = None,
+    ):
+        filtered_profile_ids = (
+            self._position_monitor_profile_base_stmt(query)
+            .with_only_columns(VesselProfile.id.label("profile_id"))
+            .group_by(VesselProfile.id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                VesselLatestPositionSnapshot,
+                VesselProfile,
+                VesselProfileSummary,
+                VesselCapacityDimension,
+            )
+            .join(
+                filtered_profile_ids,
+                filtered_profile_ids.c.profile_id == VesselLatestPositionSnapshot.vessel_profile_id,
+            )
+            .join(
+                VesselProfile,
+                VesselProfile.id == VesselLatestPositionSnapshot.vessel_profile_id,
+            )
+            .outerjoin(
+                VesselProfileSummary,
+                VesselProfileSummary.vessel_profile_id == VesselProfile.id,
+            )
+            .outerjoin(
+                VesselCapacityDimension,
+                VesselCapacityDimension.vessel_profile_id == VesselProfile.id,
+            )
+            .where(
+                VesselLatestPositionSnapshot.snapshot_id == snapshot_id,
+                VesselLatestPositionSnapshot.vessel_profile_id.is_not(None),
+                VesselLatestPositionSnapshot.match_status_code.in_(["MATCHED_PROFILE", "MULTI_PROFILE_CONFLICT"]),
+                VesselLatestPositionSnapshot.longitude.is_not(None),
+                VesselLatestPositionSnapshot.latitude.is_not(None),
+                or_(
+                    VesselLatestPositionSnapshot.position_time.is_(None),
+                    VesselLatestPositionSnapshot.position_time
+                    >= generated_at - timedelta(minutes=getattr(query, "reported_within_minutes", None) or 1440),
+                ),
+            )
+        )
+        if city_code:
+            expected = city_code.strip()
+            if expected == UNKNOWN_CITY_CODE:
+                stmt = stmt.where(
+                    or_(
+                        VesselLatestPositionSnapshot.city_code.is_(None),
+                        VesselLatestPositionSnapshot.city_code == "",
+                        VesselLatestPositionSnapshot.city_code == UNKNOWN_CITY_CODE,
+                    )
+                )
+            else:
+                stmt = stmt.where(VesselLatestPositionSnapshot.city_code == expected)
+        elif city_name:
+            expected = city_name.strip()
+            if expected == UNKNOWN_CITY_NAME:
+                stmt = stmt.where(
+                    or_(
+                        VesselLatestPositionSnapshot.city_name.is_(None),
+                        VesselLatestPositionSnapshot.city_name == "",
+                        VesselLatestPositionSnapshot.city_name == UNKNOWN_CITY_NAME,
+                    )
+                )
+            else:
+                stmt = stmt.where(VesselLatestPositionSnapshot.city_name == expected)
+        if channel_code:
+            expected = channel_code.strip()
+            if expected == UNKNOWN_CHANNEL_CODE:
+                stmt = stmt.where(
+                    or_(
+                        VesselLatestPositionSnapshot.current_channel_code.is_(None),
+                        VesselLatestPositionSnapshot.current_channel_code == "",
+                        VesselLatestPositionSnapshot.current_channel_code == UNKNOWN_CHANNEL_CODE,
+                    )
+                )
+            else:
+                stmt = stmt.where(VesselLatestPositionSnapshot.current_channel_code == expected)
+        elif channel_name:
+            expected = channel_name.strip()
+            if expected == UNKNOWN_CHANNEL_NAME:
+                stmt = stmt.where(
+                    or_(
+                        VesselLatestPositionSnapshot.current_channel_code.is_(None),
+                        VesselLatestPositionSnapshot.current_channel_code == "",
+                        VesselLatestPositionSnapshot.current_channel_code == UNKNOWN_CHANNEL_CODE,
+                    )
+                )
+            else:
+                stmt = stmt.where(VesselLatestPositionSnapshot.current_channel_name == expected)
+        if getattr(query, "risk_level", None):
+            stmt = stmt.where(VesselProfileSummary.risk_level == query.risk_level)
+        return stmt.order_by(
+            VesselLatestPositionSnapshot.position_time.desc().nullslast(),
+            VesselLatestPositionSnapshot.id.desc(),
+        )
+
+    async def _persisted_snapshot_has_channel_assignments(self, snapshot_id: str) -> bool:
+        assignment = await self.db.scalar(
+            select(VesselLatestPositionSnapshot.id)
+            .where(
+                VesselLatestPositionSnapshot.snapshot_id == snapshot_id,
+                VesselLatestPositionSnapshot.current_channel_code.is_not(None),
+            )
+            .limit(1)
+        )
+        return assignment is not None
+
+    async def _position_page_from_persisted_snapshot(
+        self,
+        snapshot: VesselAisSnapshot,
+        query,
+        *,
+        city_code: str | None = None,
+        city_name: str | None = None,
+        channel_code: str | None = None,
+        channel_name: str | None = None,
+    ) -> tuple[int, list[VesselPositionMonitorItemResponse]]:
+        stmt = self._persisted_position_rows_stmt(
+            snapshot.snapshot_id,
+            query,
+            generated_at=snapshot.generated_at,
+            city_code=city_code,
+            city_name=city_name,
+            channel_code=channel_code,
+            channel_name=channel_name,
+        )
+        count_subquery = (
+            stmt.with_only_columns(VesselLatestPositionSnapshot.id)
+            .order_by(None)
+            .subquery()
+        )
+        total = int(await self.db.scalar(select(func.count()).select_from(count_subquery)) or 0)
+        rows = (
+            await self.db.execute(
+                stmt.offset((query.page - 1) * query.page_size).limit(query.page_size)
+            )
+        ).all()
+        items = await self._position_items_from_persisted_rows(
+            rows,
+            generated_at=snapshot.generated_at,
+            include_city_center=False,
+        )
+        return total, items
+
     async def _position_items_from_persisted_snapshot(
         self,
         snapshot: VesselAisSnapshot,
@@ -74,6 +230,19 @@ class VesselAisSnapshotReaderMixin:
         if max_rows is not None:
             stmt = stmt.limit(max_rows)
         rows = (await self.db.execute(stmt)).all()
+        return await self._position_items_from_persisted_rows(
+            rows,
+            generated_at=generated_at,
+            include_city_center=include_city_center,
+        )
+
+    async def _position_items_from_persisted_rows(
+        self,
+        rows,
+        *,
+        generated_at: datetime,
+        include_city_center: bool,
+    ) -> list[VesselPositionMonitorItemResponse]:
         if not rows:
             return []
         label_map = await _load_label_map(
@@ -184,6 +353,10 @@ class VesselAisSnapshotReaderMixin:
                         if not row.valid_position_flag
                         else CURRENT_CITY_SOURCE_UNKNOWN
                     ),
+                    current_channel_code=str(row.current_channel_code or "").strip() or None,
+                    current_channel_name=str(row.current_channel_name or "").strip() or None,
+                    current_channel_source=str(row.current_channel_source or "").strip() or None,
+                    channel_match_distance_m=_to_decimal(row.channel_match_distance_m),
                     city_center_longitude=boundary.center_longitude if boundary else None,
                     city_center_latitude=boundary.center_latitude if boundary else None,
                     matched_city_candidates=None,

@@ -2397,6 +2397,238 @@ async def test_vessel_channel_vessels_uses_drilldown_cache_before_snapshot() -> 
 
 
 @pytest.mark.asyncio
+async def test_vessel_city_vessels_uses_persisted_database_page_before_full_snapshot() -> None:
+    service = VesselService.__new__(VesselService)
+    generated_at = datetime.utcnow()
+    persisted = SimpleNamespace(
+        snapshot_id="AIS-PRODUCTION-CURRENT",
+        generated_at=generated_at,
+        expires_at=generated_at + timedelta(hours=1),
+        status_code="PARTIAL",
+        refresh_error="部分批次未完成",
+    )
+    item = VesselPositionMonitorItemResponse.model_construct(
+        id=1,
+        current_city_code="450800",
+        current_city_name="贵港市",
+        position_time=generated_at,
+    )
+
+    async def no_cache(_cache_key):
+        return None
+
+    async def latest_snapshot(snapshot_id):
+        assert snapshot_id == persisted.snapshot_id
+        return persisted
+
+    async def persisted_page(snapshot, query, **kwargs):
+        assert snapshot is persisted
+        assert query.city_code == "450800"
+        assert kwargs == {"city_code": "450800", "city_name": None}
+        return 1, [item]
+
+    async def fail_full_snapshot(_snapshot_id):
+        raise AssertionError("persisted city drilldown must not load the full Redis/database snapshot")
+
+    async def store_cache(*_args, **_kwargs) -> None:
+        return None
+
+    service._get_city_vessels_response_cache = no_cache  # type: ignore[method-assign]
+    service._latest_persisted_ais_snapshot = latest_snapshot  # type: ignore[method-assign]
+    service._position_page_from_persisted_snapshot = persisted_page  # type: ignore[attr-defined]
+    service._get_city_situation_snapshot = fail_full_snapshot  # type: ignore[method-assign]
+    service._store_city_vessels_response_cache = store_cache  # type: ignore[method-assign]
+
+    result = await service.position_city_vessels(
+        SimpleNamespace(
+            query_snapshot_id=persisted.snapshot_id,
+            city_code="450800",
+            city_name=None,
+            page=1,
+            page_size=20,
+            reported_within_minutes=1440,
+        )
+    )
+
+    assert result.total == 1
+    assert result.items == [item]
+    assert result.snapshot_hit is True
+    assert result.snapshot_status_code == "PARTIAL"
+    assert result.error_message == "部分批次未完成"
+
+
+@pytest.mark.asyncio
+async def test_vessel_channel_vessels_uses_persisted_assignment_page_before_full_snapshot() -> None:
+    service = VesselService.__new__(VesselService)
+    generated_at = datetime.utcnow()
+    persisted = SimpleNamespace(
+        snapshot_id="AIS-PRODUCTION-CURRENT",
+        generated_at=generated_at,
+        expires_at=generated_at + timedelta(hours=1),
+        status_code="READY",
+        refresh_error=None,
+    )
+    item = VesselPositionMonitorItemResponse.model_construct(
+        id=1,
+        current_channel_code="NC-YANGTZE",
+        current_channel_name="长江干线",
+        position_time=generated_at,
+    )
+
+    async def no_cache(_cache_key):
+        return None
+
+    async def latest_snapshot(snapshot_id):
+        assert snapshot_id == persisted.snapshot_id
+        return persisted
+
+    async def has_assignments(snapshot_id):
+        assert snapshot_id == persisted.snapshot_id
+        return True
+
+    async def persisted_page(snapshot, query, **kwargs):
+        assert snapshot is persisted
+        assert query.channel_code == "NC-YANGTZE"
+        assert kwargs == {"channel_code": "NC-YANGTZE", "channel_name": None}
+        return 1, [item]
+
+    async def no_risk(_ids):
+        return {}
+
+    async def fail_full_snapshot(_snapshot_id):
+        raise AssertionError("persisted channel drilldown must not load the full Redis/database snapshot")
+
+    async def store_cache(*_args, **_kwargs) -> None:
+        return None
+
+    service._get_channel_vessels_response_cache = no_cache  # type: ignore[method-assign]
+    service._latest_persisted_ais_snapshot = latest_snapshot  # type: ignore[method-assign]
+    service._persisted_snapshot_has_channel_assignments = has_assignments  # type: ignore[attr-defined]
+    service._position_page_from_persisted_snapshot = persisted_page  # type: ignore[attr-defined]
+    service._compliance_risk_by_profile = no_risk  # type: ignore[method-assign]
+    service._summary_risk_level_by_profile = no_risk  # type: ignore[method-assign]
+    service._get_city_situation_snapshot = fail_full_snapshot  # type: ignore[method-assign]
+    service._store_channel_vessels_response_cache = store_cache  # type: ignore[method-assign]
+
+    result = await service.position_channel_vessels(
+        SimpleNamespace(
+            query_snapshot_id=persisted.snapshot_id,
+            channel_code="NC-YANGTZE",
+            channel_name=None,
+            channel_type_codes=None,
+            planning_level_codes=None,
+            risk_level=None,
+            certificate_risk_available=None,
+            page=1,
+            page_size=20,
+            reported_within_minutes=1440,
+        )
+    )
+
+    assert result.total == 1
+    assert result.items[0].id == item.id
+    assert result.items[0].current_channel_code == "NC-YANGTZE"
+    assert result.items[0].current_channel_name == "长江干线"
+    assert result.items[0].certificate_risk_available is False
+    assert result.snapshot_hit is True
+    assert result.snapshot_status_code == "READY"
+
+
+def test_vessel_persisted_position_page_query_pushes_filters_into_sql() -> None:
+    service = VesselService.__new__(VesselService)
+    generated_at = datetime(2026, 7, 16, 2, 0, 0)
+    query = SimpleNamespace(
+        keyword="苏航",
+        ship_type_code="DRY_CARGO",
+        profile_status_code="ACTIVE",
+        deadweight_min=Decimal("1000"),
+        deadweight_max=Decimal("5000"),
+        draft_max=Decimal("4.5"),
+        contact_available=None,
+        risk_level="HIGH",
+        reported_within_minutes=1440,
+    )
+
+    stmt = service._persisted_position_rows_stmt(  # type: ignore[attr-defined]
+        "AIS-PRODUCTION-CURRENT",
+        query,
+        generated_at=generated_at,
+        city_code="450800",
+        channel_code="NC-YANGTZE",
+    ).offset(20).limit(20)
+    sql = str(
+        stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    ).lower()
+
+    assert "vessel_latest_position_snapshot.snapshot_id = 'ais-production-current'" in sql
+    assert "vessel_latest_position_snapshot.city_code = '450800'" in sql
+    assert "vessel_latest_position_snapshot.current_channel_code = 'nc-yangtze'" in sql
+    assert "vessel_latest_position_snapshot.position_time >=" in sql
+    assert "vessel_profile_summary.risk_level = 'high'" in sql
+    assert "limit 20 offset 20" in sql
+
+
+@pytest.mark.asyncio
+async def test_vessel_full_precompute_discards_legacy_redis_snapshot() -> None:
+    service = VesselService.__new__(VesselService)
+    events: list[str] = []
+    generated_at = datetime(2026, 7, 16, 2, 0, 0)
+    merged = SimpleNamespace(
+        items=[],
+        unmatched_positions=[],
+        invalid_positions=[],
+        partial=False,
+        error_message=None,
+        queried_mmsi_count=0,
+        matched_position_count=0,
+        unpositioned_count=0,
+        invalid_position_count=0,
+        unknown_city_count=0,
+        source_indices=["ship_main_data"],
+        failed_batch_count=0,
+        failed_batches=[],
+    )
+
+    async def limits() -> dict[str, int]:
+        return {"profile_limit": 1, "es_batch_size": 1, "es_max_concurrency": 1, "unmatched_scan_limit": 1}
+
+    async def profile_count(_query) -> int:
+        return 0
+
+    async def persist(*_args, **_kwargs) -> None:
+        events.append("persist")
+
+    async def clear_caches() -> None:
+        events.append("clear-caches")
+
+    async def discard(snapshot_id: str) -> None:
+        events.append(f"discard:{snapshot_id}")
+
+    async def fail_store(*_args, **_kwargs) -> str:
+        raise AssertionError("production full snapshot must not be serialized into Redis")
+
+    service._ais_runtime_limits = limits  # type: ignore[method-assign]
+    service._position_monitor_profile_count = profile_count  # type: ignore[method-assign]
+    service._merge_position_build_results = lambda _results: merged  # type: ignore[method-assign]
+    service._persist_ais_position_snapshot = persist  # type: ignore[method-assign]
+    service._clear_ais_situation_response_caches = clear_caches  # type: ignore[method-assign]
+    service._discard_city_situation_snapshot = discard  # type: ignore[method-assign]
+    service._store_city_situation_snapshot = fail_store  # type: ignore[method-assign]
+
+    result = await service.precompute_full_ais_position_snapshot(
+        VesselPositionCitySituationQuery(reported_within_minutes=1440, include_boundary=False)
+    )
+
+    assert result["snapshot_id"] == "AIS-PRODUCTION-CURRENT"
+    assert result["generated_at"] >= generated_at.isoformat()
+    assert events == [
+        "persist",
+        "clear-caches",
+        "discard:AIS-PRODUCTION-CURRENT",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_vessel_situation_snapshot_accepts_persisted_snapshot_id() -> None:
     service = VesselService.__new__(VesselService)
     snapshot_id = "AIS-PRODUCTION-CURRENT"

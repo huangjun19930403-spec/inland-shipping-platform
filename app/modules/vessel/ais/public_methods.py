@@ -523,6 +523,41 @@ class VesselAisPublicMethodsMixin:
                 update={"snapshot_hit": True, "refresh_required": False},
                 deep=True,
             )
+        persisted = await self._latest_persisted_ais_snapshot(query.query_snapshot_id)
+        if persisted is not None:
+            if persisted.expires_at <= datetime.utcnow():
+                return VesselPositionCityVesselsResponse(
+                    total=0,
+                    page=query.page,
+                    page_size=query.page_size,
+                    items=[],
+                    query_snapshot_id=query.query_snapshot_id,
+                    snapshot_hit=False,
+                    refresh_required=True,
+                    snapshot_status_code="EXPIRED",
+                    is_partial=False,
+                    error_message="SNAPSHOT_EXPIRED",
+                )
+            total, page_items = await self._position_page_from_persisted_snapshot(
+                persisted,
+                query,
+                city_code=query.city_code,
+                city_name=query.city_name,
+            )
+            response = VesselPositionCityVesselsResponse(
+                total=total,
+                page=query.page,
+                page_size=query.page_size,
+                items=page_items,
+                query_snapshot_id=persisted.snapshot_id,
+                snapshot_hit=True,
+                refresh_required=False,
+                snapshot_status_code=persisted.status_code,
+                is_partial=persisted.status_code == "PARTIAL",
+                error_message=persisted.refresh_error,
+            )
+            await self._store_city_vessels_response_cache(cache_key, response)
+            return response
         snapshot = await self._get_city_situation_snapshot(query.query_snapshot_id)
         snapshot_hit = snapshot is not None
         if not snapshot or snapshot.refresh_required or snapshot.status_code == "EXPIRED":
@@ -1030,6 +1065,59 @@ class VesselAisPublicMethodsMixin:
                 update={"snapshot_hit": True, "refresh_required": False},
                 deep=True,
             )
+        persisted = await self._latest_persisted_ais_snapshot(query.query_snapshot_id)
+        can_page_persisted = (
+            persisted is not None
+            and getattr(query, "certificate_risk_available", None) is None
+            and await self._persisted_snapshot_has_channel_assignments(persisted.snapshot_id)
+        )
+        if persisted is not None and persisted.expires_at <= datetime.utcnow():
+            return VesselPositionNavigationChannelVesselsResponse(
+                total=0,
+                page=query.page,
+                page_size=query.page_size,
+                items=[],
+                query_snapshot_id=query.query_snapshot_id,
+                snapshot_hit=False,
+                refresh_required=True,
+                snapshot_status_code="EXPIRED",
+                is_partial=False,
+                error_message="SNAPSHOT_EXPIRED",
+            )
+        if can_page_persisted and persisted is not None:
+            total, page_items = await self._position_page_from_persisted_snapshot(
+                persisted,
+                query,
+                channel_code=query.channel_code,
+                channel_name=query.channel_name,
+            )
+            risk_by_profile = await self._compliance_risk_by_profile([item.id for item in page_items])
+            summary_risk_by_profile = await self._summary_risk_level_by_profile([item.id for item in page_items])
+            page_items = [
+                item.model_copy(
+                    update={
+                        "risk_level": summary_risk_by_profile.get(item.id) or item.risk_level,
+                        "certificate_risk_available": bool(
+                            risk_by_profile.get(item.id, {}).get("has_certificate_risk")
+                        ),
+                    }
+                )
+                for item in page_items
+            ]
+            response = VesselPositionNavigationChannelVesselsResponse(
+                total=total,
+                page=query.page,
+                page_size=query.page_size,
+                items=page_items,
+                query_snapshot_id=persisted.snapshot_id,
+                snapshot_hit=True,
+                refresh_required=False,
+                snapshot_status_code=persisted.status_code,
+                is_partial=persisted.status_code == "PARTIAL",
+                error_message=persisted.refresh_error,
+            )
+            await self._store_channel_vessels_response_cache(cache_key, response)
+            return response
         snapshot = await self._get_city_situation_snapshot(query.query_snapshot_id)
         snapshot_hit = snapshot is not None
         if not snapshot or snapshot.refresh_required or snapshot.status_code == "EXPIRED":

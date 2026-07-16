@@ -628,6 +628,10 @@ class VesselLatestPositionSnapshot(Base):
     match_status_code: Mapped[str] = mapped_column(String(32), nullable=False, default="MATCHED_PROFILE", index=True)
     city_code: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
     city_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    current_channel_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    current_channel_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    current_channel_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    channel_match_distance_m: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     valid_position_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
